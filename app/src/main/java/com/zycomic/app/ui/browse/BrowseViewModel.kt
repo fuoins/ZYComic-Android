@@ -48,9 +48,10 @@ class BrowseViewModel {
     val st = MutableStateFlow(2)                // 默认 2 收藏
     val filterExpanded = MutableStateFlow(true)
 
-    // 全部标签（“更多”弹窗）
+    // 全部标签（"更多"弹窗）
     val allTags = MutableStateFlow<List<String>>(emptyList())
     val tagsLoading = MutableStateFlow(false)
+    val tagsError = MutableStateFlow<String?>(null)
 
     // ---- 最近更新 ----
     val newestDate = MutableStateFlow("")       // ""=7天
@@ -109,10 +110,14 @@ class BrowseViewModel {
         if (allTags.value.isNotEmpty() || tagsLoading.value) return
         scope.launch {
             tagsLoading.value = true
+            tagsError.value = null
             try {
                 val groups = MangaRepository.getTags()
                 allTags.value = groups.flatten().flatMap { grp -> grp.list.map { it.name } }.distinct()
-            } catch (_: Exception) {
+                if (allTags.value.isEmpty()) tagsError.value = "暂无标签"
+            } catch (e: Exception) {
+                android.util.Log.e("BrowseViewModel", "loadTagsIfNeeded failed", e)
+                tagsError.value = e.message ?: "加载标签失败"
             } finally {
                 tagsLoading.value = false
             }

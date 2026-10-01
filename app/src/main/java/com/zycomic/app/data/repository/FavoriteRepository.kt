@@ -41,6 +41,7 @@ object FavoriteRepository {
         isFullVersion: Int = -1,
         isEnd: Int = -1,
         showOnlyUpdated: Int = -1,
+        tag: String = "",
     ): List<Manga> {
         checkLoggedIn()
         val resp = api.favorites(
@@ -52,6 +53,7 @@ object FavoriteRepository {
             isFullVersion = isFullVersion,
             isEnd = isEnd,
             showOnlyUpdated = showOnlyUpdated,
+            tag = tag,
         )
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
         return resp.data?.list ?: emptyList()

@@ -72,6 +72,16 @@ fun ProfileScreen(onRequireLogin: () -> Unit) {
             SettingEntry("积分明细") { showPointLogs = true }
             SettingEntry("修改密码") { }
             SettingEntry("我的评论") { }
+
+            // 退出登录
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Button(onClick = { UserRepository.logout() }) {
+                    Text("退出登录")
+                }
+            }
         }
     }
 

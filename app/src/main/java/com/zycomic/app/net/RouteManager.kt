@@ -82,6 +82,11 @@ object RouteManager {
     var customRule: Map<String, List<String>> = emptyMap()
         private set
 
+    // ---- 运行时自定义 SNI（域名 -> SNI值） ----
+    @Volatile
+    var customSni: Map<String, String> = emptyMap()
+        private set
+
     /** 切换线路 */
     fun setLine(index: Int) {
         lineIndex = index.coerceIn(0, LINE_HOSTS.lastIndex)
@@ -96,6 +101,14 @@ object RouteManager {
     fun setCustomRule(rule: Map<String, List<String>>) {
         customRule = rule
     }
+
+    /** 设置自定义 SNI（开发者配置） */
+    fun setCustomSni(sni: Map<String, String>) {
+        customSni = sni
+    }
+
+    /** 获取某 host 的自定义 SNI，无则返回 null */
+    fun resolveSni(host: String): String? = customSni[host]
 
     /**
      * 查找某 host 对应的 IP 列表。

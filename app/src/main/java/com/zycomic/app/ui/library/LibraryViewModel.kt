@@ -5,6 +5,7 @@ import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
+import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +30,11 @@ class LibraryViewModel {
     val showOnlyUpdated = MutableStateFlow(-1)  // -1 全部 / 1 只显示更新
     val order = MutableStateFlow(1)             // 1 更新时间 / 2 收藏时间
     val orderType = MutableStateFlow(0)         // 0 降序 / 1 升序
+
+    // ---- 标签筛选 ----
+    val selectedTags = MutableStateFlow<Set<String>>(emptySet())
+    val allTags = MutableStateFlow<List<String>>(emptyList())
+    val tagsLoading = MutableStateFlow(false)
 
     private val _favMangas = MutableStateFlow<List<Manga>>(emptyList())
     val favMangas: StateFlow<List<Manga>> = _favMangas.asStateFlow()
@@ -80,6 +86,31 @@ class LibraryViewModel {
     fun toggleOrder() { order.value = if (order.value == 1) 2 else 1; refreshFavorites() }
     fun toggleOrderType() { orderType.value = if (orderType.value == 0) 1 else 0; refreshFavorites() }
 
+    // ---------- 标签筛选 ----------
+    fun loadTagsIfNeeded() {
+        if (allTags.value.isNotEmpty() || tagsLoading.value) return
+        scope.launch {
+            tagsLoading.value = true
+            try {
+                val groups = MangaRepository.getTags()
+                allTags.value = groups.flatten().flatMap { grp -> grp.list.map { it.name } }.distinct()
+            } catch (e: Exception) {
+                android.util.Log.e("LibraryViewModel", "loadTagsIfNeeded failed", e)
+            } finally {
+                tagsLoading.value = false
+            }
+        }
+    }
+
+    fun toggleTag(tag: String) {
+        val cur = selectedTags.value.toMutableSet()
+        if (!cur.add(tag)) cur.remove(tag)
+        selectedTags.value = cur
+        refreshFavorites()
+    }
+
+    fun clearTags() { selectedTags.value = emptySet(); refreshFavorites() }
+
     fun refreshFavorites() {
         scope.launch { loadFav(reset = true) }
     }
@@ -105,6 +136,7 @@ class LibraryViewModel {
                 isEnd = isEnd.value,
                 isFullVersion = isFullVersion.value,
                 showOnlyUpdated = showOnlyUpdated.value,
+                tag = selectedTags.value.joinToString(","),
             )
             favPage++
             _favMangas.value = if (reset) list else _favMangas.value + list

@@ -272,6 +272,7 @@ private fun TagSelectDialog(
 ) {
     val allTags by vm.allTags.collectAsState()
     val loading by vm.tagsLoading.collectAsState()
+    val error by vm.tagsError.collectAsState()
     val current by vm.selectedTags.collectAsState()
 
     var keyword by remember { mutableStateOf("") }
@@ -300,6 +301,10 @@ private fun TagSelectDialog(
             if (loading) {
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     androidx.compose.material3.CircularProgressIndicator()
+                }
+            } else if (error != null) {
+                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Text(error ?: "暂无标签", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
                 }
             } else {
                 Column(

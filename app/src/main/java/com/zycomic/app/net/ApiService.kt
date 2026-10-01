@@ -115,6 +115,7 @@ interface ApiService {
         @Query("order_type") orderType: Int = 0,
         @Query("folder_id") folderId: Int = 0,
         @Query("gender") gender: Int = -1,
+        @Query("tag") tag: String = "",
     ): ApiResponse<ListData<Manga>>
 
     // ---------- 收藏操作（单本） ----------

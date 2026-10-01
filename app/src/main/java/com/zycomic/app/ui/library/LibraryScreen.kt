@@ -87,8 +87,10 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit, onRequi
     val hasMore by vm.favHasMore.collectAsState()
     val selectionMode by vm.selectionMode.collectAsState()
     val selectedIds by vm.selectedIds.collectAsState()
+    val selectedTags by vm.selectedTags.collectAsState()
 
     var showMoveDialog by remember { mutableStateOf(false) }
+    var showTagDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -115,6 +117,18 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit, onRequi
                 FilterChip(l, selected = isEnd == v, onClick = { vm.selectIsEnd(v) })
             }
             FilterChip("只显示更新", selected = vm.showOnlyUpdated.collectAsState().value == 1, onClick = { vm.toggleOnlyUpdated() })
+        }
+
+        // 标签筛选行
+        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp)) {
+            FilterChip("全部标签", selected = selectedTags.isEmpty(), onClick = { vm.clearTags() })
+            selectedTags.forEach { tag ->
+                FilterChip(tag, selected = true, onClick = { vm.toggleTag(tag) })
+            }
+            FilterChip("更多", selected = false, onClick = {
+                vm.loadTagsIfNeeded()
+                showTagDialog = true
+            })
         }
 
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -159,6 +173,82 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit, onRequi
                 Text("移出分类", Modifier.fillMaxWidth().clickable { vm.moveSelectedTo(0); showMoveDialog = false }.padding(12.dp))
                 folders.forEach { f ->
                     Text(f.name, Modifier.fillMaxWidth().clickable { vm.moveSelectedTo(f.id); showMoveDialog = false }.padding(12.dp))
+                }
+            }
+        }
+    }
+
+    if (showTagDialog) {
+        LibraryTagDialog(vm = vm, onDismiss = { showTagDialog = false })
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun LibraryTagDialog(vm: LibraryViewModel, onDismiss: () -> Unit) {
+    val allTags by vm.allTags.collectAsState()
+    val loading by vm.tagsLoading.collectAsState()
+    val current by vm.selectedTags.collectAsState()
+
+    var keyword by remember { mutableStateOf("") }
+    var temp by remember { mutableStateOf(current) }
+
+    val filtered = remember(keyword, allTags) {
+        if (keyword.isBlank()) allTags
+        else allTags.filter { it.contains(keyword, ignoreCase = true) }
+    }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(16.dp),
+        ) {
+            Text("选择标签", style = MaterialTheme.typography.titleMedium)
+            androidx.compose.material3.OutlinedTextField(
+                value = keyword,
+                onValueChange = { keyword = it },
+                singleLine = true,
+                placeholder = { Text("搜索标签") },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            )
+            if (loading) {
+                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp),
+                ) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        filtered.forEach { tag ->
+                            FilterChip(
+                                text = tag,
+                                selected = temp.contains(tag),
+                                onClick = {
+                                    temp = if (temp.contains(tag)) temp - tag else temp + tag
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                androidx.compose.material3.TextButton(onClick = { temp = emptySet() }) {
+                    Text("重置")
+                }
+                androidx.compose.material3.TextButton(onClick = {
+                    vm.selectedTags.value = temp
+                    vm.refreshFavorites()
+                    onDismiss()
+                }) {
+                    Text("确定")
                 }
             }
         }

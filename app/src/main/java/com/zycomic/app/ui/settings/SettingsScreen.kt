@@ -44,6 +44,10 @@ fun SettingsScreen() {
     val blockedTags by vm.blockedTags.collectAsState()
     val testResults by vm.testResults.collectAsState()
     val testing by vm.testing.collectAsState()
+    val currentLineIdx by vm.currentLineIndex.collectAsState()
+    val currentImgIdx by vm.currentImgIndex.collectAsState()
+    val updateTime by vm.configUpdateTime.collectAsState()
+    val devJson by vm.devConfigJson.collectAsState()
 
     LaunchedEffect(Unit) {
         vm.loadAllTags()
@@ -86,7 +90,7 @@ fun SettingsScreen() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("gay 标签一键屏蔽", style = MaterialTheme.typography.titleMedium)
-                    Text("自动屏蔽所有含 gay 的标签", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Text("自动屏蔽所有女性向/gay标签", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
                 Button(onClick = { vm.blockGayTags() }) { Text("一键屏蔽") }
             }
@@ -110,14 +114,52 @@ fun SettingsScreen() {
         // ===== 测速日志 =====
         SectionTitle("测速日志")
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text("当前线路：${RouteManager.baseUrl}", style = MaterialTheme.typography.bodyMedium)
-            Text("当前图源：${RouteManager.imgHost}", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-            Text("网络配置更新时间：${vm.configUpdateTime.collectAsState().value}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-            Button(onClick = { vm.runSpeedTest() }, enabled = !testing) {
+            Text("网络配置更新时间：$updateTime", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+
+            // 线路列表
+            Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            RouteManager.LINE_HOSTS.forEachIndexed { index, url ->
+                val host = url.removePrefix("https://").removePrefix("http://")
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { vm.selectLine(index) }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${index + 1}. $host" + if (index == currentLineIdx) "  ← 当前" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (index == currentLineIdx) com.zycomic.app.ui.theme.BluePrimary else Color.Black,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            // 图源列表
+            Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            RouteManager.IMG_DOMAINS.forEachIndexed { index, domain ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { vm.selectImgHost(index) }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${index + 1}. $domain" + if (index == currentImgIdx) "  ← 当前" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (index == currentImgIdx) com.zycomic.app.ui.theme.BluePrimary else Color.Black,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            Button(onClick = { vm.runSpeedTest() }, enabled = !testing, modifier = Modifier.padding(top = 8.dp)) {
                 Text(if (testing) "测速中..." else "开始测速")
             }
+
             testResults.forEach { r ->
-                Text(r, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                val isHeader = r.startsWith("──")
+                Text(
+                    r,
+                    style = if (isHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = if (isHeader) 8.dp else 2.dp),
+                )
             }
         }
 
@@ -129,24 +171,25 @@ fun SettingsScreen() {
 
         // 开发者设置
         SectionTitle("开发者设置")
-        var ruleJson by remember { mutableStateOf("{}") }
-        OutlinedTextField(
-            value = ruleJson,
-            onValueChange = { ruleJson = it },
-            label = { Text("rule (JSON: 域名->IP列表)") },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        )
-        var sni by remember { mutableStateOf("") }
-        OutlinedTextField(
-            value = sni,
-            onValueChange = { sni = it },
-            label = { Text("sni") },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        Button(
-            onClick = { Toast.makeText(context, "已保存开发者配置", Toast.LENGTH_SHORT).show() },
-            modifier = Modifier.padding(16.dp),
-        ) { Text("保存开发者配置") }
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+            Text(
+                "格式: {\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":{\"域名\":\"sni值\"}}",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+            )
+            OutlinedTextField(
+                value = devJson,
+                onValueChange = { vm.devConfigJson.value = it },
+                label = { Text("开发者配置 (JSON)") },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                minLines = 8,
+                maxLines = 15,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.loadPresetConfig() }) { Text("填充预设") }
+                Button(onClick = { vm.saveDevConfig(devJson) }) { Text("保存配置") }
+            }
+        }
     }
 }
 
@@ -163,7 +206,7 @@ private fun SectionTitle(text: String) {
 private fun TagMultiSelect(
     title: String,
     tags: List<String>,
-    allowSelectAll: Boolean = false,
+    allowSelectAll: Boolean = true,
     onSubmit: (List<String>) -> Unit,
 ) {
     var keyword by remember { mutableStateOf("") }
@@ -192,14 +235,22 @@ private fun TagMultiSelect(
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (allowSelectAll) {
                 Button(onClick = { selected = filtered.toSet() }) { Text("全选") }
             }
-            Button(onClick = {
-                onSubmit(selected.toList())
-                selected = emptySet()
-            }) { Text("提交 (${selected.size})") }
+            Button(onClick = { selected = emptySet() }) { Text("重置") }
+            Button(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onSubmit(selected.toList())
+                    selected = emptySet()
+                },
+            ) { Text("提交 (${selected.size})") }
         }
     }
 }
