@@ -1,5 +1,29 @@
 -dontobfuscate
 
+# ZYComic app package
+-keep,allowoptimization class com.zycomic.app.** { *; }
+-keep,includedescriptorclasses class com.zycomic.app.**$$serializer { *; }
+-keepclassmembers class com.zycomic.app.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.zycomic.app.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Retrofit
+-keepattributes Signature, InnerClasses, EnclosingMethod
+-keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
+-keepclassmembers,allowshrinking,allowobfuscation interface * {
+    @retrofit2.http.* <methods>;
+}
+-dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
+-dontwarn javax.annotation.**
+-dontwarn kotlin.Unit
+-dontwarn retrofit2.KotlinExtensions
+-dontwarn retrofit2.KotlinExtensions$*
+-if interface * { @retrofit2.http.* <methods>; }
+-keep,allowobfuscation interface <1>
+
 -keep,allowoptimization class eu.kanade.**
 -keep,allowoptimization class tachiyomi.**
 -keep,allowoptimization class mihon.**
