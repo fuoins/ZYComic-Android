@@ -63,7 +63,7 @@
         android:theme="@style/Theme.Tachiyomi">
 
         <activity
-            android:name=".ui.main.MainActivity"
+            android:name="com.zycomic.app.ui.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.Tachiyomi.SplashScreen">

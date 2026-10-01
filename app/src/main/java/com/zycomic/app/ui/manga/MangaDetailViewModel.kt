@@ -1,0 +1,123 @@
+package com.zycomic.app.ui.manga
+
+import com.zycomic.app.data.dto.Folder
+import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.data.repository.FavoriteRepository
+import com.zycomic.app.data.repository.MangaRepository
+import com.zycomic.app.data.repository.NotLoggedInException
+import com.zycomic.app.data.repository.UserRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+class MangaDetailViewModel(private val bookId: Int) {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    private val _detail = MutableStateFlow<Manga?>(null)
+    val detail: StateFlow<Manga?> = _detail.asStateFlow()
+
+    private val _loading = MutableStateFlow(true)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    val activeTab = MutableStateFlow(0)            // 0 章节 / 1 相关推荐
+    val chapterAsc = MutableStateFlow(false)       // 默认降序
+    val folders = MutableStateFlow<List<Folder>>(emptyList())
+    val favBusy = MutableStateFlow(false)
+
+    /** 未登录事件：UI 层收到后跳转登录页。 */
+    val needLogin = MutableStateFlow(false)
+
+    val user = UserRepository.userFlow
+
+    init { load() }
+
+    fun load() {
+        scope.launch {
+            _loading.value = true
+            _error.value = null
+            try {
+                _detail.value = MangaRepository.getDetail(bookId)
+            } catch (e: Exception) {
+                _error.value = e.message ?: "加载失败"
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    fun selectTab(tab: Int) { activeTab.value = tab }
+    fun toggleChapterSort() { chapterAsc.value = !chapterAsc.value }
+
+    /** 已收藏状态：以 detail.fav 为准。 */
+    val isFavorited: Boolean get() = _detail.value?.fav == 1
+
+    /** 快速收藏/取消收藏。 */
+    fun toggleFavorite() {
+        scope.launch {
+            favBusy.value = true
+            try {
+                val d = _detail.value ?: return@launch
+                if (d.fav == 1) FavoriteRepository.removeFavorite(bookId)
+                else FavoriteRepository.addFavorite(bookId, 0)
+                _detail.value = d.copy(fav = if (d.fav == 1) 0 else 1)
+                UserRepository.refreshUserInfo()
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {
+            } finally {
+                favBusy.value = false
+            }
+        }
+    }
+
+    /** 打开收藏夹选择：拉取分类列表。 */
+    fun openFolderPicker() {
+        scope.launch {
+            try {
+                folders.value = FavoriteRepository.getFolderList()
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** 收藏到指定分类。 */
+    fun addToFolder(folderId: Int) {
+        scope.launch {
+            favBusy.value = true
+            try {
+                FavoriteRepository.addFavorite(bookId, folderId)
+                _detail.value = _detail.value?.copy(fav = 1)
+                UserRepository.refreshUserInfo()
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {
+            } finally {
+                favBusy.value = false
+            }
+        }
+    }
+
+    /** 章节列表（按排序）。 */
+    fun sortedChapters(): List<com.zycomic.app.data.dto.Chapter> {
+        val list = _detail.value?.chapterList ?: return emptyList()
+        return if (chapterAsc.value) list.sortedBy { it.sort.let { s -> if (s == 0) it.id else s } }
+        else list.sortedByDescending { it.sort.let { s -> if (s == 0) it.id else s } }
+    }
+
+    /** 继续阅读章节：detail.start 优先，否则第一章。 */
+    fun defaultChapterId(): Int {
+        val d = _detail.value ?: return 0
+        if (d.start > 0) return d.start
+        return d.chapterList.maxByOrNull { it.id }?.id ?: d.chapterList.firstOrNull()?.id ?: 0
+    }
+}
