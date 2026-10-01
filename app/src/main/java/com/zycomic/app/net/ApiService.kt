@@ -9,6 +9,7 @@ import com.zycomic.app.data.dto.FavoriteFolderRequest
 import com.zycomic.app.data.dto.FavoriteRequest
 import com.zycomic.app.data.dto.FolderListResponse
 import com.zycomic.app.data.dto.HistoryItem
+import com.zycomic.app.data.dto.ListData
 import com.zycomic.app.data.dto.LoginRequest
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.NewestResponse
@@ -114,7 +115,7 @@ interface ApiService {
         @Query("order_type") orderType: Int = 0,
         @Query("folder_id") folderId: Int = 0,
         @Query("gender") gender: Int = -1,
-    ): ApiResponse<List<Manga>>
+    ): ApiResponse<ListData<Manga>>
 
     // ---------- 收藏操作（单本） ----------
     // val=1 收藏, val=0 取消收藏
@@ -134,7 +135,7 @@ interface ApiService {
 
     // ---------- 阅读历史 ----------
     @GET("api/users/history")
-    suspend fun history(@Query("page") page: Int): ApiResponse<List<HistoryItem>>
+    suspend fun history(@Query("page") page: Int): ApiResponse<ListData<HistoryItem>>
 
     // ---------- 删除历史 ----------
     // ids 在 URL query，逗号 %2C 编码，body 为空

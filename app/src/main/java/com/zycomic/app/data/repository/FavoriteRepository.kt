@@ -54,7 +54,7 @@ object FavoriteRepository {
             showOnlyUpdated = showOnlyUpdated,
         )
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
-        return resp.data ?: emptyList()
+        return resp.data?.list ?: emptyList()
     }
 
     // ==================== 单本收藏操作 ====================

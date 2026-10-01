@@ -21,7 +21,7 @@ object HistoryRepository {
     suspend fun getHistory(page: Int): Pair<List<HistoryItem>, Boolean> {
         val resp = api.history(page)
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取历史失败" })
-        val list = resp.data ?: emptyList()
+        val list = resp.data?.list ?: emptyList()
         // 某页返回空数组 = 没有更多页
         val hasMore = list.isNotEmpty()
         return Pair(list, hasMore)

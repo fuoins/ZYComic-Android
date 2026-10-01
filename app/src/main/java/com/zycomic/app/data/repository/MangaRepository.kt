@@ -38,7 +38,7 @@ object MangaRepository {
     suspend fun getRank(type: Int, page: Int): List<Manga> {
         val resp = api.rank(type, page)
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取排行失败" })
-        return resp.data ?: emptyList()
+        return resp.data?.list ?: emptyList()
     }
 
     // ==================== 最近更新 ====================
@@ -50,7 +50,7 @@ object MangaRepository {
     suspend fun getNewest(page: Int, date: String, size: Int = 30): Pair<List<Manga>, Int> {
         val resp = api.newest(page = page, size = size, date = date)
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取最近更新失败" })
-        val list = resp.data ?: emptyList()
+        val list = resp.data?.list ?: emptyList()
         val nums = resp.nums ?: list.size
         return Pair(list, nums)
     }
@@ -70,7 +70,7 @@ object MangaRepository {
     suspend fun search(keyword: String, page: Int): List<Manga> {
         val resp = api.search(keyword, page)
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "搜索失败" })
-        return resp.data ?: emptyList()
+        return resp.data?.list ?: emptyList()
     }
 
     // ==================== 分类 ====================
@@ -96,7 +96,7 @@ object MangaRepository {
             st = st,
         )
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取分类失败" })
-        return resp.data ?: emptyList()
+        return resp.data?.list ?: emptyList()
     }
 
     // ==================== 标签列表 ====================
