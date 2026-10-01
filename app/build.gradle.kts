@@ -175,6 +175,8 @@ dependencies {
     implementation(libs.bundles.okhttp)
     implementation(libs.okio)
     implementation(libs.conscrypt.android) // TLS 1.3 support for Android < 10
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
 
     // Data serialization (JSON, protobuf, xml)
     implementation(kotlinx.bundles.serialization)

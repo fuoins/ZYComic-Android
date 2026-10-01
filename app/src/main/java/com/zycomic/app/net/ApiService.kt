@@ -1,10 +1,15 @@
 package com.zycomic.app.net
 
 import com.zycomic.app.data.dto.ApiResponse
+import com.zycomic.app.data.dto.BatchFavoriteRequest
+import com.zycomic.app.data.dto.BlackTagRequest
 import com.zycomic.app.data.dto.ChapterContent
 import com.zycomic.app.data.dto.ClassResponse
+import com.zycomic.app.data.dto.FavoriteFolderRequest
+import com.zycomic.app.data.dto.FavoriteRequest
 import com.zycomic.app.data.dto.FolderListResponse
 import com.zycomic.app.data.dto.HistoryItem
+import com.zycomic.app.data.dto.LoginRequest
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.NewestResponse
 import com.zycomic.app.data.dto.PointLogResponse
@@ -13,7 +18,6 @@ import com.zycomic.app.data.dto.SearchResponse
 import com.zycomic.app.data.dto.TagListResponse
 import com.zycomic.app.data.dto.User
 import com.zycomic.app.data.dto.WelfareResponse
-import kotlinx.serialization.Serializable
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -155,46 +159,3 @@ interface ApiService {
     @POST("api/users/black_tag")
     suspend fun setBlackTag(@Body body: BlackTagRequest): ApiResponse<Unit>
 }
-
-// ==================== 请求体 ====================
-
-@Serializable
-data class LoginRequest(
-    val username: String,
-    val password: String,
-)
-
-@Serializable
-data class FavoriteRequest(
-    /** 1=收藏, 0=取消收藏 */
-    val `val`: Int,
-    @kotlinx.serialization.SerialName("book_id")
-    val bookId: Int,
-    @kotlinx.serialization.SerialName("folder_id")
-    val folderId: Int = 0,
-)
-
-@Serializable
-data class BatchFavoriteRequest(
-    /** 逗号分隔的 id 字符串，如 "1,2,3" */
-    val ids: String,
-    val action: String = "del",
-)
-
-@Serializable
-data class FavoriteFolderRequest(
-    /** moveToFolder / renameFolder / delFolder / moveOutFolder */
-    val action: String,
-    @kotlinx.serialization.SerialName("folder_id")
-    val folderId: Int = 0,
-    @kotlinx.serialization.SerialName("book_id")
-    val bookId: Int = 0,
-    @kotlinx.serialization.SerialName("new_name")
-    val newName: String = "",
-)
-
-@Serializable
-data class BlackTagRequest(
-    val selectedTags: List<String>? = null,
-    val removeTags: List<String>? = null,
-)
