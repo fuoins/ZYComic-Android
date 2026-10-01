@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <item>
+        <color android:color="@color/cover_placeholder" />
+    </item>
+
+    <item
+        android:top="48dp"
+        android:bottom="48dp"
+        android:left="48dp"
+        android:right="48dp"
+        android:drawable="@drawable/cover_error_vector"
+        />
+
+</layer-list>
