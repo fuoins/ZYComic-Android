@@ -32,7 +32,6 @@ import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.library.LibraryScreen
 import com.zycomic.app.ui.login.LoginScreen
 import com.zycomic.app.ui.manga.MangaDetailScreen
-import com.zycomic.app.ui.manga.ReaderScreen
 import com.zycomic.app.ui.profile.ProfileScreen
 import com.zycomic.app.ui.search.SearchScreen
 import com.zycomic.app.ui.settings.SettingsScreen
@@ -72,9 +71,10 @@ class MainActivity : ComponentActivity() {
  *
  * 覆盖层（full-screen Dialog）：
  * - detailOverlay：漫画详情
- * - readerOverlay：阅读器（盖在详情之上）
  * - searchOverlay：搜索页
  * - loginOverlay：登录页
+ *
+ * 阅读器已改为 komikku 原生 ReaderActivity（独立 Activity，不再是 Dialog 覆盖层）。
  *
  * 覆盖层打开时底层页面不销毁，返回时状态完全保留。
  */
@@ -86,7 +86,6 @@ fun AppContent() {
 
     // 覆盖层状态
     var detailBookId by remember { mutableStateOf<Int?>(null) }
-    var readerChapterId by remember { mutableStateOf<Int?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     var loginOpen by remember { mutableStateOf(false) }
 
@@ -151,7 +150,7 @@ fun AppContent() {
         MangaDetailOverlay(
             bookId = bookId,
             onClose = { detailBookId = null },
-            onPlayChapter = { readerChapterId = it },
+            onPlayChapter = { /* 章节点击已在 MangaDetailScreen 内直接启动 komikku 阅读器 Activity */ },
             onSearchKeyword = { kw ->
                 searchKeyword = kw
                 detailBookId = null
@@ -163,14 +162,6 @@ fun AppContent() {
                 pendingTag = tag
             },
             onRequireLogin = { loginOpen = true },
-        )
-    }
-
-    // ---- 阅读器覆盖层（盖在详情之上） ----
-    readerChapterId?.let { chapterId ->
-        ReaderOverlay(
-            chapterId = chapterId,
-            onClose = { readerChapterId = null },
         )
     }
 

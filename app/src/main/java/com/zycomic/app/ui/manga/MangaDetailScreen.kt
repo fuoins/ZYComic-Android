@@ -37,16 +37,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import coil3.compose.AsyncImage
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.reader.ReaderLauncher
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.MangaCard
 import com.zycomic.app.ui.theme.BluePrimary
 import com.zycomic.app.ui.theme.OffWhite
 import com.zycomic.app.ui.theme.TextSecondary
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 @Composable
 fun MangaDetailScreen(
@@ -65,6 +70,22 @@ fun MangaDetailScreen(
     val chapterAsc by vm.chapterAsc.collectAsState()
     val folders by vm.folders.collectAsState()
     val needLogin by vm.needLogin.collectAsState()
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    /** 通过 komikku 原生阅读器打开指定章节。 */
+    fun openReader(chapterId: Int) {
+        val d = detail ?: return
+        if (chapterId <= 0) return
+        scope.launch {
+            try {
+                ReaderLauncher.launch(context, d, chapterId.toString())
+            } catch (e: Exception) {
+                Toast.makeText(context, "打开阅读器失败: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     var showFolderDialog by remember { mutableStateOf(false) }
 
@@ -232,7 +253,7 @@ fun MangaDetailScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onPlayChapter(ch.id) }
+                                .clickable { openReader(ch.id) }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
                             Text(ch.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
@@ -267,7 +288,7 @@ fun MangaDetailScreen(
         // 悬浮播放按钮
         if (detail != null && !loading) {
             FloatingActionButton(
-                onClick = { onPlayChapter(vm.defaultChapterId()) },
+                onClick = { openReader(vm.defaultChapterId()) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(20.dp),

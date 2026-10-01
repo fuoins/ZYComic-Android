@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.source.online.all.NHentai
 import eu.kanade.tachiyomi.source.online.all.Pururin
 import eu.kanade.tachiyomi.source.online.english.EightMuses
+import com.zycomic.app.reader.ManwaSource
 import exh.log.xLogD
 import exh.source.BlacklistedSources
 import exh.source.DelegatedHttpSource
@@ -115,6 +116,8 @@ class AndroidSourceManager(
                         // SY -->
                         put(MERGED_SOURCE_ID, MergedSource())
                         // SY <--
+                        // ZYComic: 内置 Manwa 图源（供 komikku 阅读器按 sourceId 查找）
+                        put(ManwaSource.id, ManwaSource)
                     }
                     extensions.forEach { extension ->
                         extension.sources.mapNotNull { it.toInternalSource(/* KMK --> */isHentaiEnabled/* KMK <-- */) }.forEach {
