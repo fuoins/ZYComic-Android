@@ -1,8 +1,14 @@
+import mihon.buildlogic.Config
+import mihon.buildlogic.getBuildTime
+import mihon.buildlogic.getCommitCount
+import mihon.buildlogic.getGitSha
+
 plugins {
     id("mihon.android.application")
     id("mihon.android.application.compose")
     kotlin("plugin.parcelize")
     kotlin("plugin.serialization")
+    alias(libs.plugins.aboutLibraries)
 }
 
 android {
@@ -14,12 +20,19 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
+        buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
+        buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
+        buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
+        buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
+        buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         val debug by getting {
             applicationIdSuffix = ".dev"
+            versionNameSuffix = "-${getCommitCount()}"
             isPseudoLocalesEnabled = true
         }
         val release by getting {
@@ -29,6 +42,8 @@ android {
             isShrinkResources = !minifyOff
 
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
+
+            buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = true)}\"")
         }
     }
 
@@ -176,7 +191,7 @@ dependencies {
     implementation(libs.okio)
     implementation(libs.conscrypt.android) // TLS 1.3 support for Android < 10
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
+    implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.11.0")
 
     // Data serialization (JSON, protobuf, xml)
     implementation(kotlinx.bundles.serialization)

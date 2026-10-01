@@ -111,7 +111,7 @@ class BrowseViewModel {
             tagsLoading.value = true
             try {
                 val groups = MangaRepository.getTags()
-                allTags.value = groups.flatMap { grp -> grp.list.map { it.name } }.distinct()
+                allTags.value = groups.flatten().flatMap { grp -> grp.list.map { it.name } }.distinct()
             } catch (_: Exception) {
             } finally {
                 tagsLoading.value = false

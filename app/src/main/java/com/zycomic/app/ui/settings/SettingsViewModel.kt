@@ -46,7 +46,7 @@ class SettingsViewModel {
         scope.launch {
             try {
                 val groups = MangaRepository.getTags()
-                allTags.value = groups.flatMap { it.list.map { t -> t.name } }.distinct()
+                allTags.value = groups.flatten().flatMap { it.list.map { t -> t.name } }.distinct()
             } catch (_: Exception) {}
         }
     }

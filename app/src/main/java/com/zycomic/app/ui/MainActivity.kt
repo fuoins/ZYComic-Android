@@ -31,9 +31,12 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.library.LibraryScreen
 import com.zycomic.app.ui.login.LoginScreen
+import com.zycomic.app.ui.login.LoginOverlay
 import com.zycomic.app.ui.manga.MangaDetailScreen
+import com.zycomic.app.ui.manga.MangaDetailOverlay
 import com.zycomic.app.ui.profile.ProfileScreen
 import com.zycomic.app.ui.search.SearchScreen
+import com.zycomic.app.ui.search.SearchOverlay
 import com.zycomic.app.ui.settings.SettingsScreen
 import com.zycomic.app.ui.theme.ZYComicTheme
 import kotlinx.coroutines.launch
