@@ -92,8 +92,8 @@ class LibraryViewModel {
         scope.launch {
             tagsLoading.value = true
             try {
-                val groups = MangaRepository.getTags()
-                allTags.value = groups.flatten().flatMap { grp -> grp.list.map { it.name } }.distinct()
+                val tags = MangaRepository.getTags()
+                allTags.value = tags.map { it.name }.distinct()
             } catch (e: Exception) {
                 android.util.Log.e("LibraryViewModel", "loadTagsIfNeeded failed", e)
             } finally {

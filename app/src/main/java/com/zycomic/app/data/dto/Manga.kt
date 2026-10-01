@@ -50,4 +50,5 @@ data class Chapter(
 @Serializable
 data class TagItem(
     val name: String = "",
+    val id: Int = 0,
 )

@@ -2,7 +2,9 @@ package com.zycomic.app.ui.settings
 
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.TagRepository
+import com.zycomic.app.net.ManwaDns
 import com.zycomic.app.net.RouteManager
+import com.zycomic.app.net.SniBypassSSLSocketFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,12 +18,18 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class SettingsViewModel {
 
@@ -43,7 +51,7 @@ class SettingsViewModel {
     val configUpdateTime = MutableStateFlow("未更新")
 
     // 开发者配置 JSON
-    val devConfigJson = MutableStateFlow("{}")
+    val devConfigJson = MutableStateFlow(RouteManager.DEFAULT_CONFIG_JSON)
 
     /** 提交后 toast 消息。 */
     val toast = MutableStateFlow<String?>(null)
@@ -57,8 +65,8 @@ class SettingsViewModel {
         if (allTags.value.isNotEmpty()) return
         scope.launch {
             try {
-                val groups = MangaRepository.getTags()
-                allTags.value = groups.flatten().flatMap { it.list.map { t -> t.name } }.distinct()
+                val tags = MangaRepository.getTags()
+                allTags.value = tags.map { it.name }.distinct()
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "loadAllTags failed", e)
                 toast.value = "加载标签失败: ${e.message}"
@@ -124,14 +132,14 @@ class SettingsViewModel {
         toast.value = "已切换到图源 ${index + 1}"
     }
 
-    /** 测速：遍历所有7条线路，每条线路的每个IP单独测速（2秒超时），结果按线路分组。 */
+    /** 测速：遍历所有7条线路，每条线路的每个IP单独测速（5秒超时），结果按线路分组。固定用 HTTP。 */
     fun runSpeedTest() {
         scope.launch {
             testing.value = true
             testResults.value = emptyList()
             val client = OkHttpClient.Builder()
-                .connectTimeout(2, TimeUnit.SECONDS)
-                .readTimeout(2, TimeUnit.SECONDS)
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
                 .hostnameVerifier { _, _ -> true }
                 .build()
             val results = mutableListOf<String>()
@@ -141,8 +149,8 @@ class SettingsViewModel {
                 val marker = if (index == RouteManager.lineIndex) " ← 当前" else ""
                 results.add("── 线路${index + 1}: $host$marker ──")
                 ips.forEach { ip ->
-                    val scheme = if (lineUrl.startsWith("https")) "https" else "http"
-                    val url = "$scheme://$ip/"
+                    // 固定用 HTTP，不管原线路是 http 还是 https
+                    val url = "http://$ip/"
                     val start = System.nanoTime()
                     try {
                         val req = Request.Builder().url(url).header("Host", host).head().build()
@@ -160,53 +168,114 @@ class SettingsViewModel {
         }
     }
 
+    /**
+     * DoH 自动更新 IP：遍历当前 customRule 中所有域名，通过 dns.google 查询 A 记录，
+     * 如果 IP 列表有变化则更新。
+     */
     fun updateNetworkConfig() {
         scope.launch {
-            val count = RouteManager.STATIC_IP.size
-            toast.value = "已更新网络配置，共 $count 个域名"
-            configUpdateTime.value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+            try {
+                // 构建独立的 DoH OkHttpClient（2秒超时，trust-all + ManwaDns + SniBypass）
+                val trustAll = object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                }
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
+
+                val dohClient = OkHttpClient.Builder()
+                    .connectTimeout(2, TimeUnit.SECONDS)
+                    .readTimeout(2, TimeUnit.SECONDS)
+                    .dns(ManwaDns)
+                    .sslSocketFactory(SniBypassSSLSocketFactory(sslContext.socketFactory), trustAll)
+                    .hostnameVerifier { _, _ -> true }
+                    .build()
+
+                val jsonParser = Json { ignoreUnknownKeys = true }
+                val currentRule = RouteManager.customRule
+                val newRuleMap = mutableMapOf<String, List<String>>()
+                var successCount = 0
+                var failCount = 0
+
+                // 遍历当前 customRule 中的所有域名（跳过 dns.google 本身）
+                for ((domain, oldIps) in currentRule) {
+                    if (domain == "dns.google") {
+                        newRuleMap[domain] = oldIps
+                        continue
+                    }
+                    try {
+                        val url = "https://dns.google/resolve?name=$domain&type=A"
+                        val req = Request.Builder().url(url).build()
+                        val resp = dohClient.newCall(req).execute()
+                        val body = resp.body?.string() ?: ""
+                        resp.close()
+
+                        val root = jsonParser.parseToJsonElement(body).jsonObject
+                        val answerArr = root["Answer"]?.jsonArray ?: JsonArray(emptyList())
+                        val newIps = answerArr
+                            .filter { it.jsonObject["type"]?.jsonPrimitive?.intOrNull == 1 }
+                            .map { it.jsonObject["data"]?.jsonPrimitive?.content ?: "" }
+                            .filter { it.isNotEmpty() }
+
+                        if (newIps.isNotEmpty()) {
+                            newRuleMap[domain] = newIps
+                            // 只有 IP 列表有变化才算成功更新
+                            if (newIps != oldIps) {
+                                successCount++
+                            }
+                        } else {
+                            // 没查到，保留旧 IP
+                            newRuleMap[domain] = oldIps
+                            failCount++
+                        }
+                    } catch (e: Exception) {
+                        // 失败的域名保留旧 IP，不中断
+                        newRuleMap[domain] = oldIps
+                        failCount++
+                        android.util.Log.e("SettingsViewModel", "DoH query failed: $domain", e)
+                    }
+                }
+
+                // 应用新 rule
+                RouteManager.setCustomRule(newRuleMap)
+
+                toast.value = "更新完成，成功${successCount}个，失败${failCount}个"
+                configUpdateTime.value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "updateNetworkConfig failed", e)
+                toast.value = "更新网络配置失败: ${e.message}"
+            }
         }
     }
 
     // ==================== 开发者配置 ====================
 
-    /** 从 RouteManager.STATIC_IP 生成预设 JSON。 */
-    fun loadPresetConfig() {
-        val json = Json { prettyPrint = true }
-        val ruleObj = buildJsonObject {
-            RouteManager.STATIC_IP.forEach { (domain, ips) ->
-                put(domain, JsonArray(ips.map { JsonPrimitive(it) }))
-            }
-        }
-        val root = JsonObject(mapOf(
-            "rule" to ruleObj,
-            "sni" to JsonObject(emptyMap()),
-        ))
-        devConfigJson.value = json.encodeToString(JsonObject.serializer(), root)
-    }
-
-    /** 解析开发者配置 JSON 并应用。 */
+    /** 解析开发者配置 JSON 并应用。新格式：{"port":7891,"rule":{"domain":["ip1"]},"sni":["domain1"]} */
     fun saveDevConfig(jsonStr: String) {
         scope.launch {
             try {
                 val json = Json { ignoreUnknownKeys = true }
                 val root = json.parseToJsonElement(jsonStr).jsonObject
-                // 解析 rule
+
+                // 解析 rule: {"domain": ["ip1", "ip2"]}
                 val ruleObj = root["rule"]?.jsonObject ?: emptyMap()
                 val ruleMap = mutableMapOf<String, List<String>>()
                 ruleObj.forEach { (domain, arr) ->
                     val ips = arr.jsonArray.map { it.jsonPrimitive.contentOrNull ?: "" }.filter { it.isNotEmpty() }
                     ruleMap[domain] = ips
                 }
+
+                // 解析 sni: ["domain1", "domain2"]
+                val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
+                val sniSet = sniArr.map { it.jsonPrimitive.contentOrNull ?: "" }.filter { it.isNotEmpty() }.toSet()
+
+                // port 暂存但不使用
+                // val port = root["port"]?.jsonPrimitive?.intOrNull ?: 7891
+
                 RouteManager.setCustomRule(ruleMap)
-                // 解析 sni
-                val sniObj = root["sni"]?.jsonObject ?: emptyMap()
-                val sniMap = mutableMapOf<String, String>()
-                sniObj.forEach { (domain, value) ->
-                    sniMap[domain] = value.jsonPrimitive.contentOrNull ?: ""
-                }
-                RouteManager.setCustomSni(sniMap)
-                toast.value = "开发者配置已保存（${ruleMap.size}条rule, ${sniMap.size}条sni）"
+                RouteManager.setSniDomains(sniSet)
+                toast.value = "配置已保存（${ruleMap.size}条rule, ${sniSet.size}条sni）"
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "saveDevConfig failed", e)
                 toast.value = "配置解析失败: ${e.message}"

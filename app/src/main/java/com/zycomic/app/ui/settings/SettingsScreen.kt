@@ -173,7 +173,7 @@ fun SettingsScreen() {
         SectionTitle("开发者设置")
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             Text(
-                "格式: {\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":{\"域名\":\"sni值\"}}",
+                "格式: {\"port\":7891,\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":[\"域名1\",\"域名2\"]}",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
             )
@@ -186,7 +186,6 @@ fun SettingsScreen() {
                 maxLines = 15,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.loadPresetConfig() }) { Text("填充预设") }
                 Button(onClick = { vm.saveDevConfig(devJson) }) { Text("保存配置") }
             }
         }

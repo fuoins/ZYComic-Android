@@ -17,10 +17,11 @@ import okhttp3.MediaType.Companion.toMediaType
 /**
  * 网络模块：构建 OkHttpClient 与 Retrofit，整合所有拦截器。
  *
+ * 方案B：DNS 覆盖通过 [ManwaDns]（自定义 Dns 接口）实现，SNI 绕过通过 [SniBypassSSLSocketFactory] 实现。
+ *
  * 拦截器链顺序（application interceptors）：
- * 1. [DnsOverrideInterceptor] —— 根据 rule 把域名替换为 IP 直连
- * 2. [ManwaInterceptor]       —— 追加通用 query + 鉴权头 + 响应 AES 解密
- * 3. [ImageInterceptor]        —— 图片请求加头 + CipherSource 流式解密
+ * 1. [ManwaInterceptor]       —— 追加通用 query + 鉴权头 + 响应 AES 解密
+ * 2. [ImageInterceptor]        —— 图片请求加头 + CipherSource 流式解密
  *
  * 切换线路后需调用 [rebuild] 重建 Retrofit（baseUrl 变化）。
  */
@@ -53,9 +54,8 @@ object NetworkModule {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .cookieJar(cookieJar)
+            .dns(ManwaDns)
             .enableTrustAll()
-            // 顺序很重要：DNS 覆盖最先，然后接口鉴权/解密，最后图片处理
-            .addInterceptor(DnsOverrideInterceptor())
             .addInterceptor(ManwaInterceptor())
             .addInterceptor(ImageInterceptor())
             .build()
@@ -91,7 +91,7 @@ object NetworkModule {
         }
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
-        sslSocketFactory(sslContext.socketFactory, trustAll)
+        sslSocketFactory(SniBypassSSLSocketFactory(sslContext.socketFactory), trustAll)
         hostnameVerifier(HostnameVerifier { _, _ -> true })
         return this
     }

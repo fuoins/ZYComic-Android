@@ -1,11 +1,18 @@
 package com.zycomic.app.net
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
 /**
  * 线路与图源管理。
  *
  * - 7 条控制面线路（接口域名），可切换。
  * - 6 个数据面图源（图片 CDN 域名），可切换。
- * - 预设 IP 映射表（2026-09-30 通过 dns.google 查询），供 [DnsOverrideInterceptor] 做 IP 直连。
+ * - 预设 IP 映射表，供 [ManwaDns] 做 IP 直连。
+ * - SNI 绕过域名列表，供 [SniBypassSSLSocketFactory] 清除 SNI。
  */
 object RouteManager {
 
@@ -82,9 +89,9 @@ object RouteManager {
     var customRule: Map<String, List<String>> = emptyMap()
         private set
 
-    // ---- 运行时自定义 SNI（域名 -> SNI值） ----
+    // ---- 运行时 SNI 绕过域名列表 ----
     @Volatile
-    var customSni: Map<String, String> = emptyMap()
+    var sniDomains: Set<String> = emptySet()
         private set
 
     /** 切换线路 */
@@ -102,13 +109,13 @@ object RouteManager {
         customRule = rule
     }
 
-    /** 设置自定义 SNI（开发者配置） */
-    fun setCustomSni(sni: Map<String, String>) {
-        customSni = sni
+    /** 设置 SNI 绕过域名列表 */
+    fun setSniDomains(domains: Set<String>) {
+        sniDomains = domains
     }
 
-    /** 获取某 host 的自定义 SNI，无则返回 null */
-    fun resolveSni(host: String): String? = customSni[host]
+    /** 判断某 host 是否需要 SNI 绕过 */
+    fun isSniBypass(host: String): Boolean = sniDomains.contains(host)
 
     /**
      * 查找某 host 对应的 IP 列表。
@@ -118,5 +125,58 @@ object RouteManager {
     fun resolveIp(host: String): List<String> {
         customRule[host]?.let { if (it.isNotEmpty()) return it }
         return STATIC_IP[host].orEmpty()
+    }
+
+    // ==================== 默认配置 ====================
+
+    /** 默认配置 JSON（应用启动时加载）。 */
+    const val DEFAULT_CONFIG_JSON = """
+{
+  "port": 7891,
+  "rule": {
+    "mseeowpm.online": ["207.57.165.251","207.57.165.154","207.57.165.208","207.57.165.198","207.57.165.187"],
+    "mseeowpm.pro": ["207.57.165.154","207.57.165.187","207.57.165.208","207.57.165.251","207.57.165.198"],
+    "mseeowpm.cc": ["207.57.165.198","207.57.165.154","207.57.165.208","207.57.165.187","207.57.165.251"],
+    "mseeowpm2.cc": ["207.57.165.187","207.57.165.198","207.57.165.154","207.57.165.208","207.57.165.251"],
+    "mseeowpma.cc": ["207.57.165.208","207.57.165.154","207.57.165.198","207.57.165.251","207.57.165.187"],
+    "mseeowpm1.xyz": ["207.57.165.251","207.57.165.198","207.57.165.208","207.57.165.154","207.57.165.187"],
+    "newmwimserv5.cc": ["172.96.161.195","172.96.141.5","104.238.220.203","172.93.103.134"],
+    "mwappimgs.cc": ["207.32.217.51","207.32.217.75","204.77.223.249"],
+    "mwfimsvfast31.cc": ["172.96.161.195","172.93.103.134"],
+    "mwfimsvfast40.cc": ["172.93.103.134","172.96.161.195","104.238.220.203","172.96.141.5","104.238.221.230"],
+    "newmwimserv4.cc": ["104.238.220.203","172.93.103.134","172.96.141.5","172.96.161.195"],
+    "newmwimserv6.cc": ["104.238.220.203","172.96.161.195","172.96.141.5","172.93.103.134"],
+    "dns.google": ["8.8.8.8","8.8.4.4"]
+  },
+  "sni": ["mseeowpm.online","mseeowpm.pro","mseeowpm.cc","mseeowpm2.cc","mseeowpma.cc","mseeowpm1.xyz","newmwimserv5.cc","mwappimgs.cc","mwfimsvfast31.cc","mwfimsvfast40.cc","newmwimserv4.cc","newmwimserv6.cc","dns.google"]
+}
+    """
+
+    /**
+     * 应用默认配置：解析 DEFAULT_CONFIG_JSON，提取 rule 和 sni。
+     * 必须在 NetworkModule 构建 client 之前调用。
+     */
+    fun applyDefaultConfig() {
+        try {
+            val json = Json { ignoreUnknownKeys = true }
+            val root = json.parseToJsonElement(DEFAULT_CONFIG_JSON).jsonObject
+
+            // 解析 rule
+            val ruleObj = root["rule"]?.jsonObject ?: emptyMap()
+            val ruleMap = mutableMapOf<String, List<String>>()
+            ruleObj.forEach { (domain, arr) ->
+                val ips = arr.jsonArray.map { it.jsonPrimitive.content }
+                ruleMap[domain] = ips
+            }
+
+            // 解析 sni
+            val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
+            val sniSet = sniArr.map { it.jsonPrimitive.content }.toSet()
+
+            setCustomRule(ruleMap)
+            setSniDomains(sniSet)
+        } catch (e: Exception) {
+            android.util.Log.e("RouteManager", "applyDefaultConfig failed", e)
+        }
     }
 }

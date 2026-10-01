@@ -68,11 +68,17 @@ object UserRepository {
 
     /**
      * 启动时校验登录态：调 /users/info，成功则更新 userFlow，失败则自动登出。
+     * 如果返回的用户 uid == 0，视为未登录，自动登出。
      * @return true=登录有效，false=已登出
      */
     suspend fun verifyLogin(): Boolean {
         return try {
             val info = getUserInfo()
+            if (info.uid <= 0) {
+                // uid == 0 视为未登录
+                logout()
+                return false
+            }
             _userFlow.value = info
             true
         } catch (e: Exception) {

@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 在构建网络 client 之前应用默认配置（rule + sni）
+        com.zycomic.app.net.RouteManager.applyDefaultConfig()
         setContent {
             ZYComicTheme {
                 AppContent()

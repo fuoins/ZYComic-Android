@@ -27,17 +27,16 @@ typealias SearchResponse = ApiResponse<ListData<Manga>>
 /** 分类响应：data={list:[...]}，tag 为标签名字符串 */
 typealias ClassResponse = ApiResponse<ListData<Manga>>
 
+/** 标签列表 data：data={list:[{id,name},...]}，扁平列表 */
+@Serializable
+data class TagListData(
+    val list: List<TagItem> = emptyList(),
+)
+
 /** 标签列表响应 */
 @Serializable
 data class TagListResponse(
     val code: Int = 0,
     val msg: String = "",
-    val data: List<List<TagGroup>> = emptyList(),
-)
-
-/** 标签分组（分类页标签按组展示） */
-@Serializable
-data class TagGroup(
-    val name: String = "",
-    val list: List<TagItem> = emptyList(),
+    val data: TagListData? = null,
 )

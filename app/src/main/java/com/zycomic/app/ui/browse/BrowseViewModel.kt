@@ -112,8 +112,8 @@ class BrowseViewModel {
             tagsLoading.value = true
             tagsError.value = null
             try {
-                val groups = MangaRepository.getTags()
-                allTags.value = groups.flatten().flatMap { grp -> grp.list.map { it.name } }.distinct()
+                val tags = MangaRepository.getTags()
+                allTags.value = tags.map { it.name }.distinct()
                 if (allTags.value.isEmpty()) tagsError.value = "暂无标签"
             } catch (e: Exception) {
                 android.util.Log.e("BrowseViewModel", "loadTagsIfNeeded failed", e)

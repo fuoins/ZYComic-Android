@@ -1,7 +1,7 @@
 package com.zycomic.app.data.repository
 
 import com.zycomic.app.data.dto.Manga
-import com.zycomic.app.data.dto.TagGroup
+import com.zycomic.app.data.dto.TagItem
 import com.zycomic.app.net.NetworkModule
 import java.io.IOException
 
@@ -101,11 +101,11 @@ object MangaRepository {
 
     // ==================== 标签列表 ====================
 
-    /** 标签列表（500+，按分组返回）。 */
-    suspend fun getTags(): List<List<TagGroup>> {
+    /** 标签列表（扁平列表，500+）。 */
+    suspend fun getTags(): List<TagItem> {
         val resp = api.tags()
         if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取标签失败" })
-        return resp.data
+        return resp.data?.list ?: emptyList()
     }
 
     // ==================== 屏蔽标签过滤 ====================
