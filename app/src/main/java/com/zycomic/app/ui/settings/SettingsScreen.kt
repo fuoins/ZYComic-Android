@@ -167,7 +167,7 @@ private fun TagMultiSelect(
     onSubmit: (List<String>) -> Unit,
 ) {
     var keyword by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         OutlinedTextField(
