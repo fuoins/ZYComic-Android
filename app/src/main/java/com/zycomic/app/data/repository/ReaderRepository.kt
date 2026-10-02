@@ -60,7 +60,7 @@ object ReaderRepository {
     /** 获取章节内容（piclist + img_domains）。 */
     suspend fun getChapterContent(chapterId: Int): ChapterContent {
         val resp = api.chapters(chapterId)
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取章节内容失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取章节内容失败" })
         return resp.data ?: throw IOException("章节内容为空")
     }
 

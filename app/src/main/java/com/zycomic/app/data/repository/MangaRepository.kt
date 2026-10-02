@@ -26,7 +26,7 @@ object MangaRepository {
     /** 首页数据（data 为 Manga 对象，内含 love_list 推荐列表等）。 */
     suspend fun getIndex(): Manga {
         val resp = api.index()
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取首页失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取首页失败" })
         return resp.data ?: throw IOException("首页数据为空")
     }
 
@@ -38,7 +38,7 @@ object MangaRepository {
      */
     suspend fun getRank(type: Int, page: Int): List<Manga> {
         val resp = api.rank(type, page)
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取排行失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取排行失败" })
         return resp.data?.list ?: emptyList()
     }
 
@@ -50,7 +50,7 @@ object MangaRepository {
      */
     suspend fun getNewest(page: Int, date: String, size: Int = 30): Pair<List<Manga>, Int> {
         val resp = api.newest(page = page, size = size, date = date)
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取最近更新失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取最近更新失败" })
         val list = resp.data?.list ?: emptyList()
         val nums = resp.nums ?: list.size
         return Pair(list, nums)
@@ -61,7 +61,7 @@ object MangaRepository {
     /** 漫画详情（data 直接是漫画对象）。 */
     suspend fun getDetail(bookId: Int): Manga {
         val resp = api.detail(bookId)
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取详情失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取详情失败" })
         return resp.data ?: throw IOException("详情数据为空")
     }
 
@@ -70,7 +70,7 @@ object MangaRepository {
     /** 搜索（API 参数名是 k，不是 keyword）。 */
     suspend fun search(keyword: String, page: Int): List<Manga> {
         val resp = api.search(keyword, page)
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "搜索失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "搜索失败" })
         return resp.data?.list ?: emptyList()
     }
 
@@ -96,7 +96,7 @@ object MangaRepository {
             end = end,
             st = st,
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取分类失败" })
         return resp.data?.list ?: emptyList()
     }
 

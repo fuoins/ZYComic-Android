@@ -42,7 +42,7 @@ object TagRepository {
     suspend fun addBlackTags(tags: List<String>) {
         if (tags.isEmpty()) return
         val resp = api.addBlacklist(AddBlacklistRequest(selectedTags = tags))
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "添加屏蔽标签失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "添加屏蔽标签失败" })
     }
 
     /**
@@ -52,7 +52,7 @@ object TagRepository {
     suspend fun removeBlackTags(tags: List<String>) {
         if (tags.isEmpty()) return
         val resp = api.removeBlacklist(RemoveBlacklistRequest(removeTags = tags))
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "删除屏蔽标签失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "删除屏蔽标签失败" })
     }
 
     // ==================== 过滤开关 ====================

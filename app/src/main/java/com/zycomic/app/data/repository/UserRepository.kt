@@ -36,7 +36,7 @@ object UserRepository {
      */
     suspend fun login(username: String, password: String, captcha: String = ""): User {
         val loginResp = api.login(LoginRequest(username, password, captcha))
-        if (loginResp.code != 0) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
+        if (loginResp.code != 1) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
 
         // 登录成功后拉取完整用户信息
         val info = getUserInfo()
@@ -50,7 +50,7 @@ object UserRepository {
     suspend fun register(username: String, password: String, email: String): User {
         // 注册接口当前 DTO 仅支持 username/password；email 参数保留以兼容未来扩展
         val resp = api.register(LoginRequest(username, password))
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "注册失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "注册失败" })
 
         // 注册成功后拉取用户信息
         val info = getUserInfo()
@@ -98,7 +98,7 @@ object UserRepository {
     /** 拉取当前用户信息（/users/info），不更新 userFlow。 */
     suspend fun getUserInfo(): User {
         val resp = api.userInfo()
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取用户信息失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取用户信息失败" })
         return resp.data ?: throw IOException("用户信息为空")
     }
 
@@ -112,7 +112,7 @@ object UserRepository {
     /** 获取签到福利信息（同时触发签到）。 */
     suspend fun getWelfare(): WelfareData? {
         val resp = api.welfare()
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取福利失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取福利失败" })
         return resp.data
     }
 
@@ -124,7 +124,7 @@ object UserRepository {
     /** 积分明细分页。 */
     suspend fun getPointLogs(page: Int): List<PointLog> {
         val resp = api.pointLogs(page)
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取积分明细失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取积分明细失败" })
         return resp.data
     }
 }

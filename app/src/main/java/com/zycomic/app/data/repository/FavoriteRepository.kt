@@ -55,7 +55,7 @@ object FavoriteRepository {
             showOnlyUpdated = showOnlyUpdated,
             tag = tag,
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
         return resp.data?.list ?: emptyList()
     }
 
@@ -65,14 +65,14 @@ object FavoriteRepository {
     suspend fun addFavorite(bookId: Int, folderId: Int = 0) {
         checkLoggedIn()
         val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId, folderId = folderId))
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "收藏失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "收藏失败" })
     }
 
     /** 取消收藏。 */
     suspend fun removeFavorite(bookId: Int) {
         checkLoggedIn()
         val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookId))
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "取消收藏失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "取消收藏失败" })
     }
 
     // ==================== 批量操作 ====================
@@ -81,7 +81,7 @@ object FavoriteRepository {
     suspend fun batchRemove(ids: String) {
         checkLoggedIn()
         val resp = api.batchFavorite(BatchFavoriteRequest(ids = ids, action = "del"))
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "批量取消收藏失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "批量取消收藏失败" })
     }
 
     // ==================== 收藏分类文件夹 ====================
@@ -90,7 +90,7 @@ object FavoriteRepository {
     suspend fun getFolderList(): List<Folder> {
         checkLoggedIn()
         val resp = api.folderList()
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "获取分类列表失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取分类列表失败" })
         return resp.data
     }
 
@@ -100,7 +100,7 @@ object FavoriteRepository {
         val resp = api.favoriteFolder(
             FavoriteFolderRequest(action = "addFolder", newName = name)
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "创建分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "创建分类失败" })
     }
 
     /** 重命名收藏分类。 */
@@ -109,7 +109,7 @@ object FavoriteRepository {
         val resp = api.favoriteFolder(
             FavoriteFolderRequest(action = "renameFolder", folderId = folderId, newName = name)
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "重命名分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "重命名分类失败" })
     }
 
     /** 删除收藏分类。 */
@@ -118,7 +118,7 @@ object FavoriteRepository {
         val resp = api.favoriteFolder(
             FavoriteFolderRequest(action = "delFolder", folderId = folderId)
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "删除分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "删除分类失败" })
     }
 
     /** 移动漫画到指定分类。ids 为逗号分隔的 ID 字符串。 */
@@ -127,7 +127,7 @@ object FavoriteRepository {
         val resp = api.favoriteFolder(
             FavoriteFolderRequest(action = "moveToFolder", folderId = folderId)
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "移动到分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移动到分类失败" })
     }
 
     /** 移动漫画到全部收藏夹（移出当前分类）。ids 为逗号分隔的 ID 字符串。 */
@@ -136,7 +136,7 @@ object FavoriteRepository {
         val resp = api.favoriteFolder(
             FavoriteFolderRequest(action = "moveOutFolder")
         )
-        if (resp.code != 0) throw IOException(resp.msg.ifEmpty { "移出分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移出分类失败" })
     }
 
     // ==================== 内部检查 ====================
