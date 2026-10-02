@@ -12,7 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
-import com.zycomic.app.BuildConfig
+import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn

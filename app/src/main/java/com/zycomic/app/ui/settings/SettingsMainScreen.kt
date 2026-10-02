@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
@@ -66,7 +67,7 @@ fun SettingsMainScreen(
                 TextPreferenceWidget(
                     title = "标签屏蔽",
                     subtitle = "管理屏蔽的标签",
-                    icon = Icons.AutoMirrored.Outlined.Label,
+                    icon = Icons.Outlined.Bookmark,
                     onPreferenceClick = onOpenTagBlock,
                 )
             }
