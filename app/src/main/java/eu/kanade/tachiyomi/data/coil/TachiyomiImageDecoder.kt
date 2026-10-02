@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.coil
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import coil3.ImageLoader
 import coil3.asImage
 import coil3.decode.DecodeResult
@@ -16,6 +17,7 @@ import mihon.core.archive.CbzCrypto
 import mihon.core.archive.CbzCrypto.getCoverStream
 import mihon.core.archive.archiveReader
 import okio.BufferedSource
+import okio.buffer
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.decoder.ImageDecoder
 import uy.kohesive.injekt.Injekt
@@ -45,7 +47,10 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         }
         // SY <--
 
-        check(decoder != null && decoder.width > 0 && decoder.height > 0) { "Failed to initialize decoder" }
+        // 原生解码器失败时回退到系统 BitmapFactory（部分图片格式/尺寸原生解码器不支持）
+        if (decoder == null || decoder.width <= 0 || decoder.height <= 0) {
+            return decodeWithSystemFallback()
+        }
 
         val srcWidth = decoder.width
         val srcHeight = decoder.height
@@ -111,6 +116,36 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         override fun equals(other: Any?) = other is Factory
 
         override fun hashCode() = javaClass.hashCode()
+    }
+
+    /**
+     * 系统解码器回退：原生 ImageDecoder 初始化失败时使用。
+     * 用 Android BitmapFactory 解码，支持 JPG/PNG/WebP/GIF 等系统原生格式。
+     */
+    private fun decodeWithSystemFallback(): DecodeResult {
+        val bitmap = resources.sourceOrNull()?.use { source ->
+            source.inputStream().buffered().use { stream ->
+                BitmapFactory.decodeStream(stream)
+            }
+        }
+        check(bitmap != null && bitmap.width > 0 && bitmap.height > 0) {
+            "Failed to initialize decoder (both native and system fallback failed)"
+        }
+        var finalBitmap = bitmap
+        if (
+            options.bitmapConfig == Bitmap.Config.HARDWARE &&
+            ImageUtil.canUseHardwareBitmap(bitmap)
+        ) {
+            val hwBitmap = bitmap.copy(Bitmap.Config.HARDWARE, false)
+            if (hwBitmap != null) {
+                bitmap.recycle()
+                finalBitmap = hwBitmap
+            }
+        }
+        return DecodeResult(
+            image = finalBitmap.asImage(),
+            isSampled = false,
+        )
     }
 
     companion object {
