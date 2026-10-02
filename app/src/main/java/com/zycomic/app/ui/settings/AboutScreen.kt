@@ -45,9 +45,9 @@ fun AboutScreen(
             item {
                 TextPreferenceWidget(
                     title = "版本",
-                    subtitle = com.zycomic.app.BuildConfig.VERSION_NAME,
+                    subtitle = BuildConfig.VERSION_NAME,
                     onPreferenceClick = {
-                        Toast.makeText(context, "ZYComic v${com.zycomic.app.BuildConfig.VERSION_NAME}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "ZYComic v${BuildConfig.VERSION_NAME}", Toast.LENGTH_SHORT).show()
                     },
                 )
             }
