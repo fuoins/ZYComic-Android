@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 /** 用户信息 */
 @Serializable
 data class User(
-    val uid: Int = 0,
+    val uid: String = "",
     val point: Int = 0,
     val level: Int = 0,
     @kotlinx.serialization.SerialName("favorite_count")

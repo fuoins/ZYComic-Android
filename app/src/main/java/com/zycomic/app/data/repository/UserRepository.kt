@@ -5,6 +5,7 @@ import com.zycomic.app.data.dto.PointLog
 import com.zycomic.app.data.dto.User
 import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.net.NetworkModule
+import com.zycomic.app.net.RouteManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,8 +39,18 @@ object UserRepository {
         val loginResp = api.login(LoginRequest(username, password, captcha))
         if (loginResp.code != 1) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
 
+        // 登录后手动写入 uid cookie（服务端可能不自动设置，后续请求必须携带）
+        val loginUid = loginResp.data?.uid?.takeIf { it.isNotEmpty() && it != "0" }
+        if (loginUid != null) {
+            NetworkModule.cookieJar.add("uid", loginUid, RouteManager.lineHost)
+        }
+
         // 登录成功后拉取完整用户信息
         val info = getUserInfo()
+        // 再次确保 uid cookie 存在（用 getUserInfo 返回的 uid）
+        if (info.uid.isNotEmpty() && info.uid != "0") {
+            NetworkModule.cookieJar.add("uid", info.uid, RouteManager.currentHost)
+        }
         _userFlow.value = info
         return info
     }
@@ -80,7 +91,7 @@ object UserRepository {
     suspend fun verifyLogin(): Boolean {
         return try {
             val info = getUserInfo()
-            if (info.uid <= 0) {
+            if (info.uid.isEmpty() || info.uid == "0") {
                 // uid == 0 视为未登录
                 logout()
                 return false

@@ -25,7 +25,7 @@ data class Manga(
     val end: Int = 0,
     val fav: Int = 0,            // 0 未收藏 / 1 已收藏
     val start: Int = 0,          // 继续阅读章节 ID
-    @SerialName("book_area") val bookArea: Int = 0,
+    @SerialName("book_area") val bookArea: String = "",
     @SerialName("category_name") val categoryName: String = "",
     val tags: List<TagItem> = emptyList(),
     @SerialName("chapter_list") val chapterList: List<Chapter> = emptyList(),

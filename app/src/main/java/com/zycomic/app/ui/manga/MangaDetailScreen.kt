@@ -311,10 +311,7 @@ fun MangaDetailScreen(
     }
 }
 
-private fun areaText(area: Int): String = when (area) {
-    1 -> "韩国"; 2 -> "日漫"; 3 -> "国漫"; 4 -> "台漫"; 5 -> "其他"; 6 -> "未分类"
-    else -> "全部"
-}
+private fun areaText(area: String): String = area.ifEmpty { "未知" }
 
 @Composable
 private fun FolderPickDialog(
