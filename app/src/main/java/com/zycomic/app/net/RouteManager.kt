@@ -43,6 +43,31 @@ object RouteManager {
     @Volatile var imgIndex: Int = 0
         private set
 
+    // ---- 测速结果持久化（切换页面后不丢失）----
+    /** 最近一次线路测速结果：index -> 毫秒，失败为 Long.MAX_VALUE */
+    @Volatile
+    var lastLineDelays: Map<Int, Long> = emptyMap()
+        private set
+
+    /** 最近一次图源测速结果：index -> 毫秒，失败为 Long.MAX_VALUE */
+    @Volatile
+    var lastImgDelays: Map<Int, Long> = emptyMap()
+        private set
+
+    /** 每个域名测速选出的最快 IP（host -> ip），供代理优先使用 */
+    val fastestIp: MutableMap<String, String> = mutableMapOf()
+
+    /** 写入最近一次测速结果（SettingsViewModel 测速完成后调用）。 */
+    fun setLastDelays(line: Map<Int, Long>, img: Map<Int, Long>) {
+        lastLineDelays = line
+        lastImgDelays = img
+    }
+
+    /** 记录某域名的最快 IP（测速完成后调用）。 */
+    fun setFastestIp(host: String, ip: String) {
+        fastestIp[host] = ip
+    }
+
     /** 当前接口 baseUrl */
     val baseUrl: String get() = LINE_HOSTS[lineIndex.coerceIn(0, LINE_HOSTS.lastIndex)]
 

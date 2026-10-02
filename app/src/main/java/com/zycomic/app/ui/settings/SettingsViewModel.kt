@@ -25,6 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -51,10 +52,10 @@ class SettingsViewModel {
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
     val autoSelecting = MutableStateFlow(false)
-    /** 线路延迟：index -> 毫秒，失败为 Long.MAX_VALUE */
-    val lineDelays = MutableStateFlow<Map<Int, Long>>(emptyMap())
-    /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE */
-    val imgDelays = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    /** 线路延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
+    val lineDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastLineDelays)
+    /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
+    val imgDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastImgDelays)
     val configUpdateTime = MutableStateFlow("未更新")
 
     // 屏蔽标签弹窗提交状态
@@ -154,12 +155,17 @@ class SettingsViewModel {
         toast.value = "已切换到线路 ${index + 1}"
     }
 
-    /** 切换图源 */
+    /** 切换图源：更新 imgHost 并清除 Coil 缓存，避免旧图源图片/封面被缓存命中。 */
     fun selectImgHost(index: Int) {
         RouteManager.setImgHost(index)
         currentImgIndex.value = index
+        // 清除内存 + 磁盘缓存，强制用新图源重新加载图片
+        DevConfig.clearImageCaches()
         toast.value = "已切换到图源 ${index + 1}"
     }
+
+    /** setImgHost 别名（语义化命名）：切换图源并清缓存。 */
+    fun setImgHost(index: Int) = selectImgHost(index)
 
     // ==================== HTTP 测速 ====================
 
@@ -201,14 +207,67 @@ class SettingsViewModel {
         }
     }
 
-    /** 并行测速：7 线路 + 6 图源。返回 Pair(lineDelays, imgDelays)。 */
+    /**
+     * 对单个 IP 做原始 Socket TCP 连通测速（直连 IP:port，不走代理）。
+     * 成功=连接耗时毫秒，失败=Long.MAX_VALUE。
+     */
+    private fun measureTcp(ip: String, port: Int): Long {
+        val socket = Socket()
+        return try {
+            val start = System.nanoTime()
+            socket.connect(InetSocketAddress(ip, port), 2000)
+            (System.nanoTime() - start) / 1_000_000
+        } catch (e: Exception) {
+            Long.MAX_VALUE
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 对某域名测速：从 DevConfig.getRule() 取该域名的 IP 列表，
+     * 对每个 IP 做 TCP 连通测试，取最快 IP 的延迟作为该域名延迟，
+     * 并把最快 IP 写入 [RouteManager.fastestIp] 供代理优先使用。
+     * 无 IP 列表时返回 Long.MAX_VALUE（由调用方回退 HTTP 测速）。
+     */
+    private suspend fun measureHostByIp(host: String, port: Int): Long = withContext(Dispatchers.IO) {
+        val ips = DevConfig.getRule()[host]
+        if (ips.isNullOrEmpty()) return@withContext Long.MAX_VALUE
+        var bestDelay = Long.MAX_VALUE
+        var bestIp: String? = null
+        for (ip in ips) {
+            val d = measureTcp(ip, port)
+            if (d < bestDelay) {
+                bestDelay = d
+                bestIp = ip
+            }
+        }
+        if (bestIp != null) {
+            RouteManager.setFastestIp(host, bestIp)
+        }
+        bestDelay
+    }
+
+    /** 并行测速：7 线路 + 6 图源，按域名下每个 IP 测 TCP 延迟取最优；无 IP 列表回退 HTTP。 */
     private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
         val client = shortTimeoutClient()
+        // 线路：从 URL 提取 host，https->443 / http->80
         val lineResults = RouteManager.LINE_HOSTS.mapIndexed { index, url ->
-            async { index to measureLine(client, url) }
+            async {
+                val host = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
+                val port = if (url.startsWith("http://")) 80 else 443
+                var delay = measureHostByIp(host, port)
+                if (delay == Long.MAX_VALUE) delay = measureLine(client, url)
+                index to delay
+            }
         }.awaitAll().associate { it }
+        // 图源：固定 443
         val imgResults = RouteManager.IMG_DOMAINS.mapIndexed { index, domain ->
-            async { index to measureImg(client, domain) }
+            async {
+                var delay = measureHostByIp(domain, 443)
+                if (delay == Long.MAX_VALUE) delay = measureImg(client, domain)
+                index to delay
+            }
         }.awaitAll().associate { it }
         lineResults to imgResults
     }
@@ -221,6 +280,8 @@ class SettingsViewModel {
                 val (lines, imgs) = runMeasure()
                 lineDelays.value = lines
                 imgDelays.value = imgs
+                // 持久化到 RouteManager，切换页面后不丢失
+                RouteManager.setLastDelays(lines, imgs)
             } finally {
                 testing.value = false
             }
@@ -238,6 +299,7 @@ class SettingsViewModel {
             val (lines, imgs) = runMeasure()
             lineDelays.value = lines
             imgDelays.value = imgs
+            RouteManager.setLastDelays(lines, imgs)
 
             val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
             val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key

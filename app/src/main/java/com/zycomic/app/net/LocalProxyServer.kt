@@ -23,7 +23,6 @@ import java.security.cert.X509Certificate
 import java.util.Date
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
@@ -59,8 +58,11 @@ class LocalProxyServer(
     private val trustAllSSLContext: SSLContext
 
     companion object {
-        private const val TAG = "LocalProxyServer"
+        private const val TAG = "LocalProxy"
     }
+
+    /** 多 IP 轮询索引（resolveHostIp 用）。 */
+    private val ipPollIndex = java.util.concurrent.atomic.AtomicInteger(0)
 
     init {
         Security.addProvider(BouncyCastleProvider())
@@ -139,11 +141,20 @@ class LocalProxyServer(
         val method = parts[0]
         val target = parts[1]
 
+        Log.d(TAG, "request: $method $target")
+
         if (method.equals("CONNECT", ignoreCase = true)) {
-            // target 格式: host:port
-            val colonIdx = target.lastIndexOf(':')
-            val host = if (colonIdx > 0) target.substring(0, colonIdx) else target
-            val portNum = if (colonIdx > 0) target.substring(colonIdx + 1).toIntOrNull() ?: 443 else 443
+            // target 格式: host:port，兼容带 scheme 的写法，例如 CONNECT https://newmwimserv6.cc HTTP/1.1
+            var t = target
+            // 去掉 scheme 前缀（如有）
+            if (t.startsWith("http://", ignoreCase = true)) {
+                t = t.substring("http://".length)
+            } else if (t.startsWith("https://", ignoreCase = true)) {
+                t = t.substring("https://".length)
+            }
+            val colonIdx = t.lastIndexOf(':')
+            val host = if (colonIdx > 0) t.substring(0, colonIdx) else t
+            val portNum = if (colonIdx > 0) t.substring(colonIdx + 1).toIntOrNull() ?: 443 else 443
             handleConnect(clientSocket, host, portNum)
         } else {
             // 普通 HTTP 请求（完整 URL: http://host/path）
@@ -154,7 +165,9 @@ class LocalProxyServer(
     // ==================== CONNECT 处理 ====================
 
     private fun handleConnect(clientSocket: Socket, host: String, port: Int) {
-        if (sniDomains.contains(host)) {
+        val mitm = sniDomains.contains(host)
+        Log.d(TAG, "CONNECT $host:$port -> ${if (mitm) "MITM" else "TUNNEL"}")
+        if (mitm) {
             handleConnectMitm(clientSocket, host, port)
         } else {
             handleConnectTunnel(clientSocket, host, port)
@@ -175,16 +188,17 @@ class LocalProxyServer(
         try {
             // 1. 建立到上游服务器的 TLS 连接（IP 直连，不发 SNI）
             val ip = resolveHostIp(host) ?: host
+            Log.d(TAG, "MITM $host resolved ip=$ip")
             val sslFactory = trustAllSSLContext.socketFactory as SSLSocketFactory
             upstreamSocket = sslFactory.createSocket() as SSLSocket
 
-            // 移除 SNI
-            val sslParams = upstreamSSLParams(upstreamSocket)
-            upstreamSocket.sslParameters = sslParams
+            // 必须在 connect() 之前移除 SNI，connect 之后设置无效
+            removeSni(upstreamSocket)
 
             upstreamSocket.connect(InetSocketAddress(ip, port), 5000)
+            Log.d(TAG, "MITM upstream tcp connected: $ip:$port")
             upstreamSocket.startHandshake()
-            Log.d(TAG, "MITM upstream connected: $host -> $ip:$port")
+            Log.d(TAG, "MITM upstream TLS handshake done: $host -> $ip:$port")
 
             // 2. 回复客户端
             clientSocket.getOutputStream().apply {
@@ -205,13 +219,14 @@ class LocalProxyServer(
             val in2 = upstreamSocket.inputStream
             val out2 = clientSSL.outputStream
 
-            val t1 = Thread { pipe(in1, out1) }
-            val t2 = Thread { pipe(in2, out2) }
+            val t1 = Thread { pipe(in1, out1, "$host client->upstream") }
+            val t2 = Thread { pipe(in2, out2, "$host upstream->client") }
             t1.start()
             t2.start()
             t1.join()
             t2.join()
         } catch (e: Exception) {
+            // MITM 握手失败用 Log.w
             Log.w(TAG, "handleConnectMitm error for $host: ${e.message}")
         } finally {
             try { clientSSL?.close() } catch (_: Exception) {}
@@ -227,16 +242,18 @@ class LocalProxyServer(
         var upstream: Socket? = null
         try {
             val ip = resolveHostIp(host) ?: host
+            Log.d(TAG, "TUNNEL $host resolved ip=$ip")
             upstream = Socket()
             upstream.connect(InetSocketAddress(ip, port), 5000)
+            Log.d(TAG, "TUNNEL upstream connected: $ip:$port")
 
             clientSocket.getOutputStream().apply {
                 write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
                 flush()
             }
 
-            val t1 = Thread { pipe(clientSocket.inputStream, upstream.outputStream) }
-            val t2 = Thread { pipe(upstream.inputStream, clientSocket.outputStream) }
+            val t1 = Thread { pipe(clientSocket.inputStream, upstream.outputStream, "$host client->upstream") }
+            val t2 = Thread { pipe(upstream.inputStream, clientSocket.outputStream, "$host upstream->client") }
             t1.start()
             t2.start()
             t1.join()
@@ -301,13 +318,30 @@ class LocalProxyServer(
 
     // ==================== 工具方法 ====================
 
-    /** 从 rule 中取第一个 IP，没有则返回 null。 */
+    /**
+     * 解析 host -> 上游 IP。
+     * 优先级：
+     * 1. [RouteManager.fastestIp] 测速选出的最快 IP。
+     * 2. 否则从 rule[host] 列表中轮询取一个（不用固定第一个）。
+     * 都没有则返回 null（调用方回退为直连 host 本身）。
+     */
     private fun resolveHostIp(host: String): String? {
-        return rule[host]?.firstOrNull()
+        // 1. 测速选出的最快 IP
+        RouteManager.fastestIp[host]?.let {
+            Log.d(TAG, "resolveHostIp $host -> $it (fastest)")
+            return it
+        }
+        // 2. rule 列表轮询
+        val ips = rule[host] ?: return null
+        if (ips.isEmpty()) return null
+        val idx = ipPollIndex.getAndIncrement() % ips.size
+        val ip = ips[idx]
+        Log.d(TAG, "resolveHostIp $host -> $ip (round-robin idx=$idx/${ips.size})")
+        return ip
     }
 
-    /** 8KB 缓冲区双向转发。 */
-    private fun pipe(input: InputStream, output: OutputStream) {
+    /** 8KB 缓冲区双向转发。tag 用于日志标识方向。 */
+    private fun pipe(input: InputStream, output: OutputStream, tag: String = "") {
         val buf = ByteArray(8192)
         try {
             while (true) {
@@ -319,7 +353,29 @@ class LocalProxyServer(
         } catch (_: IOException) {
             // 连接断开，正常结束
         } catch (e: Exception) {
-            Log.d(TAG, "pipe ended: ${e.message}")
+            Log.d(TAG, "pipe ended [$tag]: ${e.message}")
+        }
+    }
+
+    /**
+     * 移除上游 SSLSocket 的 SNI（Server Name Indication）。
+     * 必须在 [SSLSocket.connect] 之前调用，connect 之后设置无效。
+     * 用 null 比 emptyList() 更可靠；失败时反射兜底。
+     */
+    private fun removeSni(socket: SSLSocket) {
+        try {
+            val params = socket.sslParameters
+            params.serverNames = null
+            socket.sslParameters = params
+        } catch (e: Exception) {
+            Log.d(TAG, "removeSni set sslParameters failed: ${e.message}, fallback reflection")
+            // 兜底：反射设置
+            try {
+                val field = socket.javaClass.getDeclaredField("serverNames")
+                field.isAccessible = true
+                field.set(socket, null)
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -375,12 +431,5 @@ class LocalProxyServer(
         return SSLContext.getInstance("TLS").apply {
             init(null, trustAll, SecureRandom())
         }
-    }
-
-    /** 获取上游 SSLSocket 的 SSLParameters，清空 serverNames（移除 SNI）。 */
-    private fun upstreamSSLParams(socket: SSLSocket): SSLParameters {
-        val params = socket.sslParameters
-        params.serverNames = emptyList()
-        return params
     }
 }

@@ -7,6 +7,7 @@ import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +65,12 @@ class BrowseViewModel {
 
     private var currentPage = 1
 
+    /** 请求序号：每次自增，用于丢弃过期请求的结果（竞态防护）。 */
+    private val requestSeq = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** 当前加载任务：启动新请求前取消旧的，避免旧页面残留。 */
+    private var currentJob: Job? = null
+
     /** 日期选项：7天 + 今天 + 前6天。 */
     val dateOptions: List<Pair<String, String>> = buildDateOptions()
 
@@ -72,6 +79,10 @@ class BrowseViewModel {
     fun selectMainTab(tab: Int) {
         if (mainTab.value == tab) return
         mainTab.value = tab
+        // 立即清空旧列表 + 置加载态，避免残留旧页面/空白闪烁
+        _mangas.value = emptyList()
+        _error.value = null
+        _loading.value = true
         refresh()
     }
 
@@ -112,20 +123,27 @@ class BrowseViewModel {
     }
 
     fun refresh() {
-        scope.launch { doLoad(reset = true) }
+        // 取消旧任务，启动新请求前确保只有一个加载任务
+        currentJob?.cancel()
+        currentJob = scope.launch { doLoad(reset = true) }
     }
 
     fun loadMore() {
         if (_loading.value || _appending.value || !_hasMore.value) return
-        scope.launch { doLoad(reset = false) }
+        currentJob?.cancel()
+        currentJob = scope.launch { doLoad(reset = false) }
     }
 
     private suspend fun doLoad(reset: Boolean) {
+        // 自增请求序号；用于判断本次结果是否已被更新的请求取代
+        val reqId = requestSeq.incrementAndGet()
         if (reset) {
             currentPage = 1
             _hasMore.value = true
             _loading.value = true
             _error.value = null
+            // 重置时先清空列表，避免旧数据残留
+            _mangas.value = emptyList()
         } else {
             _appending.value = true
         }
@@ -154,6 +172,9 @@ class BrowseViewModel {
             } else {
                 rawLoader(currentPage)
             }
+
+            // 竞态防护：期间若有更新的请求，丢弃本次结果
+            if (reqId != requestSeq.get()) return
             currentPage = lastInvoked + 1
 
             if (mainTab.value == 1 && reset) {
@@ -163,10 +184,15 @@ class BrowseViewModel {
             _mangas.value = if (reset) result else _mangas.value + result
             if (result.isEmpty()) _hasMore.value = false
         } catch (e: Exception) {
+            // 过期请求的异常不更新 UI
+            if (reqId != requestSeq.get()) return
             if (reset) _error.value = e.message ?: "加载失败"
         } finally {
-            _loading.value = false
-            _appending.value = false
+            // 仅当仍是最新请求时才复位加载态，避免旧任务覆盖新任务的状态
+            if (reqId == requestSeq.get()) {
+                _loading.value = false
+                _appending.value = false
+            }
         }
     }
 

@@ -151,4 +151,23 @@ object DevConfig {
         ).also { it.start() }
         Log.i(TAG, "Proxy started on port ${getPort()}")
     }
+
+    /**
+     * 清除 Coil 图片加载器的内存缓存 + 磁盘缓存。
+     * 切换图源后调用，避免旧图源的封面/图片被缓存命中导致仍请求旧域名。
+     */
+    fun clearImageCaches() {
+        try {
+            val ctx = context ?: run {
+                Log.w(TAG, "clearImageCaches: context is null")
+                return
+            }
+            val loader = coil3.SingletonImageLoader.get(ctx)
+            loader.memoryCache?.clear()
+            loader.diskCache?.clear()
+            Log.i(TAG, "Coil image caches cleared (memory + disk)")
+        } catch (e: Exception) {
+            Log.w(TAG, "clearImageCaches failed: ${e.message}")
+        }
+    }
 }
