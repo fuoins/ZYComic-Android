@@ -51,7 +51,7 @@ fun LibraryScreen(
     onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
-    val vm = remember { LibraryViewModel() }
+    val vm = remember { LibraryViewModel(mode = 0) }
     val user by vm.user.collectAsState()
 
     LaunchedEffect(vm.needLogin) {
@@ -80,7 +80,7 @@ fun HistoryScreen(
     onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
-    val vm = remember { LibraryViewModel() }
+    val vm = remember { LibraryViewModel(mode = 1) }
     val user by vm.user.collectAsState()
 
     LaunchedEffect(vm.needLogin) {

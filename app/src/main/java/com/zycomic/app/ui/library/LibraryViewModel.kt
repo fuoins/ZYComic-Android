@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.library
 
+import android.util.Log
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.HistoryItem
@@ -18,13 +19,12 @@ import kotlinx.coroutines.launch
 /**
  * 书架（收藏 + 阅读历史）ViewModel。
  *
- * - 收藏列表用 [FavoriteItem]，历史列表用 [HistoryItem]。
- * - 收藏多选以 bookId 为 key；历史多选以历史记录 id 为 key。
- * - 收藏与历史分别独立分页。
+ * @param mode 0=只加载收藏, 1=只加载历史, 2=都加载（兼容旧用法）
  */
-class LibraryViewModel {
+class LibraryViewModel(val mode: Int = 2) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val TAG = "LibraryVM"
 
     val mainTab = MutableStateFlow(0)   // 0 收藏 / 1 阅读历史
 
@@ -68,17 +68,25 @@ class LibraryViewModel {
     private var historyPage = 1
 
     init {
-        loadFolders()
-        refreshFavorites()
-        refreshHistory()
-        // 监听登录态变化：登录成功后自动重新加载收藏/历史，登出后清空
+        if (mode == 0 || mode == 2) {
+            loadFolders()
+            refreshFavorites()
+        }
+        if (mode == 1 || mode == 2) {
+            refreshHistory()
+        }
+        // 监听登录态变化：登录成功后自动重新加载，登出后清空
         scope.launch {
             UserRepository.userFlow.collect { user ->
                 if (user != null) {
                     needLogin.value = false
-                    loadFolders()
-                    refreshFavorites()
-                    refreshHistory()
+                    if (mode == 0 || mode == 2) {
+                        loadFolders()
+                        refreshFavorites()
+                    }
+                    if (mode == 1 || mode == 2) {
+                        refreshHistory()
+                    }
                 } else {
                     _favItems.value = emptyList()
                     _history.value = emptyList()
@@ -95,7 +103,7 @@ class LibraryViewModel {
         scope.launch {
             try { folders.value = FavoriteRepository.getFolderList() }
             catch (_: NotLoggedInException) { /* 未登录不提示，UI 层已处理 */ }
-            catch (_: Exception) {}
+            catch (e: Exception) { Log.e(TAG, "加载收藏夹失败", e) }
         }
     }
 
@@ -143,7 +151,8 @@ class LibraryViewModel {
             if (list.isEmpty()) _favHasMore.value = false
         } catch (_: NotLoggedInException) {
             needLogin.value = true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "加载收藏失败", e)
         } finally {
             _favLoading.value = false
             _favAppending.value = false
@@ -249,7 +258,8 @@ class LibraryViewModel {
             historyPage++
             _history.value = if (reset) list else _history.value + list
             _historyHasMore.value = hasMore
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "加载历史失败", e)
         } finally {
             _historyLoading.value = false
         }
