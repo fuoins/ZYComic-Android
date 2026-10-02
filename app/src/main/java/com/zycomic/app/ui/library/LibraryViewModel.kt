@@ -5,7 +5,6 @@ import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
-import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
@@ -88,18 +87,8 @@ class LibraryViewModel {
 
     // ---------- 标签筛选 ----------
     fun loadTagsIfNeeded() {
-        if (allTags.value.isNotEmpty() || tagsLoading.value) return
-        scope.launch {
-            tagsLoading.value = true
-            try {
-                val tags = MangaRepository.getTags()
-                allTags.value = tags.map { it.name }.distinct()
-            } catch (e: Exception) {
-                android.util.Log.e("LibraryViewModel", "loadTagsIfNeeded failed", e)
-            } finally {
-                tagsLoading.value = false
-            }
-        }
+        if (allTags.value.isNotEmpty()) return
+        allTags.value = com.zycomic.app.data.AllTags.LIST
     }
 
     fun toggleTag(tag: String) {

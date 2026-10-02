@@ -14,7 +14,7 @@ data class Manga(
     val nickname: String = "",
     val picx: String = "",
     val pic: String = "",
-    val author: List<String> = emptyList(),
+    val author: String = "",
     val state: Int = 0,          // 0 连载中 / 1 完结
     val score: String = "",
     val hits: Int = 0,

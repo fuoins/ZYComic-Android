@@ -8,7 +8,7 @@ data class FavoriteItem(
     val id: Int = 0,
     val name: String = "",
     val picx: String = "",
-    val author: List<String> = emptyList(),
+    val author: String = "",
     val state: Int = 0,
     val score: String = "",
     val fav: Int = 0,
@@ -23,7 +23,7 @@ data class HistoryItem(
     val id: Int = 0,
     val name: String = "",
     val picx: String = "",
-    val author: List<String> = emptyList(),
+    val author: String = "",
     val chapterId: Int = 0,        // 上次阅读章节 ID
     val chapterName: String = "",
     val addtime: String = "",

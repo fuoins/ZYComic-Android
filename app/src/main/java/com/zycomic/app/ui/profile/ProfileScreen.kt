@@ -33,11 +33,13 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.theme.BluePrimary
 import com.zycomic.app.ui.theme.OffWhite
 import com.zycomic.app.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 @Composable
 fun ProfileScreen(onRequireLogin: () -> Unit) {
     val user by UserRepository.userFlow.collectAsState()
     var showPointLogs by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Text("我的", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
@@ -78,7 +80,7 @@ fun ProfileScreen(onRequireLogin: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                Button(onClick = { UserRepository.logout() }) {
+                Button(onClick = { scope.launch { UserRepository.logout() } }) {
                     Text("退出登录")
                 }
             }

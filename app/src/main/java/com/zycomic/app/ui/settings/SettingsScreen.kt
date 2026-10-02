@@ -49,6 +49,8 @@ fun SettingsScreen() {
     val updateTime by vm.configUpdateTime.collectAsState()
     val devJson by vm.devConfigJson.collectAsState()
 
+    var showGayConfirm by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         vm.loadAllTags()
         vm.loadBlockedTags()
@@ -70,7 +72,7 @@ fun SettingsScreen() {
             Column(modifier = Modifier.weight(1f)) {
                 Text("过滤屏蔽标签", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "开启后，分类/最近更新/排行/搜索会自动隐藏命中屏蔽标签的漫画，并自动多页加载凑满目标条数；关闭则原样显示。开启会略微增加请求次数。",
+                    "对屏蔽的标签漫画进行隐藏(正常会显示404)。建议登录后配合gay标签一键屏蔽使用。开启后部分分类会有大量屏蔽内容，为凑够布局会多获取几页，加载变慢属正常现象。建议选择[一般向]或[禁漫]或[搜索]，[排行]基本都是gay标签内容。如果你点击[BL向]只有两本属于正常，因为获取十页全屏蔽了。",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                 )
@@ -90,9 +92,9 @@ fun SettingsScreen() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("gay 标签一键屏蔽", style = MaterialTheme.typography.titleMedium)
-                    Text("自动屏蔽所有女性向/gay标签", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Text("自动屏蔽所有女性向/gay标签（${SettingsViewModel.GAY_TAGS.size}个）", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
-                Button(onClick = { vm.blockGayTags() }) { Text("一键屏蔽") }
+                Button(onClick = { showGayConfirm = true }) { Text("一键屏蔽") }
             }
         }
 
@@ -150,7 +152,7 @@ fun SettingsScreen() {
             }
 
             Button(onClick = { vm.runSpeedTest() }, enabled = !testing, modifier = Modifier.padding(top = 8.dp)) {
-                Text(if (testing) "测速中..." else "开始测速")
+                Text(if (testing) "测速中..." else "开始测速 (TCP 443)")
             }
 
             testResults.forEach { r ->
@@ -187,6 +189,36 @@ fun SettingsScreen() {
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { vm.saveDevConfig(devJson) }) { Text("保存配置") }
+            }
+        }
+    }
+
+    // gay 标签一键屏蔽确认对话框
+    if (showGayConfirm) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showGayConfirm = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, RoundedCornerShape(12.dp))
+                    .padding(24.dp),
+            ) {
+                Text("确认屏蔽", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "确认将 ${SettingsViewModel.GAY_TAGS.size} 个gay相关标签加入屏蔽列表？",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.TextButton(onClick = { showGayConfirm = false }) {
+                        Text("取消")
+                    }
+                    androidx.compose.material3.TextButton(onClick = {
+                        showGayConfirm = false
+                        vm.blockGayTags()
+                    }) {
+                        Text("确认")
+                    }
+                }
             }
         }
     }
@@ -249,7 +281,7 @@ private fun TagMultiSelect(
                     onSubmit(selected.toList())
                     selected = emptySet()
                 },
-            ) { Text("提交 (${selected.size})") }
+            ) { Text("确认添加 (${selected.size})") }
         }
     }
 }

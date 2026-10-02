@@ -33,11 +33,3 @@ data class PointLogResponse(
     val msg: String = "",
     val data: List<PointLog> = emptyList(),
 )
-
-/** 已屏蔽标签响应 */
-@Serializable
-data class BlackTagResponse(
-    val code: Int = 0,
-    val msg: String = "",
-    val data: List<String> = emptyList(),
-)

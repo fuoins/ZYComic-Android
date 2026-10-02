@@ -148,7 +148,7 @@ fun MangaDetailScreen(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
-                        val author = detail!!.author.joinToString(" / ")
+                        val author = detail!!.author
                         if (author.isNotBlank()) {
                             Text(
                                 "作者：$author",

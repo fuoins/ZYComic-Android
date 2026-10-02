@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.browse
 
+import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.TagRepository
@@ -48,10 +49,8 @@ class BrowseViewModel {
     val st = MutableStateFlow(2)                // 默认 2 收藏
     val filterExpanded = MutableStateFlow(true)
 
-    // 全部标签（"更多"弹窗）
-    val allTags = MutableStateFlow<List<String>>(emptyList())
-    val tagsLoading = MutableStateFlow(false)
-    val tagsError = MutableStateFlow<String?>(null)
+    // 全部标签（内置，"更多"弹窗）
+    val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
 
     // ---- 最近更新 ----
     val newestDate = MutableStateFlow("")       // ""=7天
@@ -97,6 +96,12 @@ class BrowseViewModel {
 
     fun clearTags() { selectedTags.value = emptySet(); refresh() }
 
+    /** 从"更多"弹窗直接设置完整选择集合。 */
+    fun setSelectedTags(tags: Set<String>) {
+        selectedTags.value = tags
+        refresh()
+    }
+
     fun selectDate(date: String) { newestDate.value = date; refresh() }
 
     /** 从详情页标签点击返回：选中该标签并切到分类 Tab。 */
@@ -104,24 +109,6 @@ class BrowseViewModel {
         mainTab.value = 0
         selectedTags.value = setOf(tag)
         refresh()
-    }
-
-    fun loadTagsIfNeeded() {
-        if (allTags.value.isNotEmpty() || tagsLoading.value) return
-        scope.launch {
-            tagsLoading.value = true
-            tagsError.value = null
-            try {
-                val tags = MangaRepository.getTags()
-                allTags.value = tags.map { it.name }.distinct()
-                if (allTags.value.isEmpty()) tagsError.value = "暂无标签"
-            } catch (e: Exception) {
-                android.util.Log.e("BrowseViewModel", "loadTagsIfNeeded failed", e)
-                tagsError.value = e.message ?: "加载标签失败"
-            } finally {
-                tagsLoading.value = false
-            }
-        }
     }
 
     fun refresh() {
@@ -207,6 +194,5 @@ class BrowseViewModel {
         val AREAS = listOf(0 to "全部", 1 to "韩国", 2 to "日漫", 3 to "国漫", 4 to "台漫", 5 to "其他", 6 to "未分类")
         val ENDS = listOf(0 to "全部", 1 to "连载", 2 to "完结")
         val STS = listOf(2 to "收藏", 0 to "最新", 1 to "最旧", 3 to "新漫")
-        val QUICK_TAGS = listOf("中文", "巨乳", "中出", "口交")
     }
 }

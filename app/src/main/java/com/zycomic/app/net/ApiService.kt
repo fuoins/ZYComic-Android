@@ -1,8 +1,9 @@
 package com.zycomic.app.net
 
+import com.zycomic.app.data.dto.AddBlacklistRequest
 import com.zycomic.app.data.dto.ApiResponse
 import com.zycomic.app.data.dto.BatchFavoriteRequest
-import com.zycomic.app.data.dto.BlackTagRequest
+import com.zycomic.app.data.dto.BlacklistResponse
 import com.zycomic.app.data.dto.ChapterContent
 import com.zycomic.app.data.dto.ClassResponse
 import com.zycomic.app.data.dto.FavoriteFolderRequest
@@ -15,8 +16,8 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.NewestResponse
 import com.zycomic.app.data.dto.PointLogResponse
 import com.zycomic.app.data.dto.RankResponse
+import com.zycomic.app.data.dto.RemoveBlacklistRequest
 import com.zycomic.app.data.dto.SearchResponse
-import com.zycomic.app.data.dto.TagListResponse
 import com.zycomic.app.data.dto.User
 import com.zycomic.app.data.dto.WelfareResponse
 import retrofit2.http.Body
@@ -85,20 +86,19 @@ interface ApiService {
         @Query("orderBy") orderBy: Int = 0,
     ): ClassResponse
 
-    // ---------- 标签列表 ----------
-    @GET("api/classes/tags")
-    suspend fun tags(): TagListResponse
-
     // ---------- 章节内容（响应解密后为 ChapterContent） ----------
     @GET("api/chapters/index")
     suspend fun chapters(@Query("id") chapterId: Int): ApiResponse<ChapterContent>
 
-    // ---------- 用户：登录/注册 ----------
-    @POST("api/users/login")
+    // ---------- 用户：登录/注册/登出 ----------
+    @POST("api/account/login")
     suspend fun login(@Body body: LoginRequest): ApiResponse<User>
 
-    @POST("api/users/register")
+    @POST("api/account/register")
     suspend fun register(@Body body: LoginRequest): ApiResponse<User>
+
+    @POST("api/account/logout")
+    suspend fun logout(): ApiResponse<Unit>
 
     @GET("api/users/info")
     suspend fun userInfo(): ApiResponse<User>
@@ -155,9 +155,15 @@ interface ApiService {
     suspend fun pointLogs(@Query("page") page: Int): PointLogResponse
 
     // ---------- 屏蔽标签 ----------
-    @GET("api/users/black_tag")
-    suspend fun blackTag(): ApiResponse<List<String>>
+    /** 获取已屏蔽标签列表：响应为双层 data {"data":{"data":{"blacklisted_tags":[...]}}} */
+    @GET("api/users/getBlacklist")
+    suspend fun getBlacklist(): BlacklistResponse
 
-    @POST("api/users/black_tag")
-    suspend fun setBlackTag(@Body body: BlackTagRequest): ApiResponse<Unit>
+    /** 添加屏蔽标签：body={"selectedTags":["tag1","tag2"]} */
+    @POST("api/classes/addBlacklist")
+    suspend fun addBlacklist(@Body body: AddBlacklistRequest): ApiResponse<Unit>
+
+    /** 移除屏蔽标签：body={"removeTags":["tag1","tag2"]} */
+    @POST("api/classes/removeBlacklist")
+    suspend fun removeBlacklist(@Body body: RemoveBlacklistRequest): ApiResponse<Unit>
 }

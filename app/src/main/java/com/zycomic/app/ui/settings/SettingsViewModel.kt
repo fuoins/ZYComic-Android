@@ -1,6 +1,6 @@
 package com.zycomic.app.ui.settings
 
-import com.zycomic.app.data.repository.MangaRepository
+import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.net.ManwaDns
 import com.zycomic.app.net.RouteManager
@@ -12,10 +12,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -24,6 +24,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -38,8 +40,8 @@ class SettingsViewModel {
     // 过滤开关
     val filterEnabled = MutableStateFlow(TagRepository.isFilterEnabled())
 
-    // 全部标签（添加屏蔽用）
-    val allTags = MutableStateFlow<List<String>>(emptyList())
+    // 全部标签（内置，添加屏蔽用）
+    val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
     // 已屏蔽标签（删除用）
     val blockedTags = MutableStateFlow<List<String>>(emptyList())
 
@@ -61,17 +63,9 @@ class SettingsViewModel {
         filterEnabled.value = v
     }
 
+    /** 加载全部标签：直接使用内置 AllTags.LIST，不调用 API。 */
     fun loadAllTags() {
-        if (allTags.value.isNotEmpty()) return
-        scope.launch {
-            try {
-                val tags = MangaRepository.getTags()
-                allTags.value = tags.map { it.name }.distinct()
-            } catch (e: Exception) {
-                android.util.Log.e("SettingsViewModel", "loadAllTags failed", e)
-                toast.value = "加载标签失败: ${e.message}"
-            }
-        }
+        allTags.value = AllTags.LIST
     }
 
     fun loadBlockedTags() {
@@ -83,12 +77,12 @@ class SettingsViewModel {
         }
     }
 
-    /** gay 标签一键屏蔽：直接用硬编码的 GAY_TAGS 列表调用 addBlackTags。 */
+    /** gay 标签一键屏蔽：调用 addBlackTags 提交129个标签。 */
     fun blockGayTags() {
         scope.launch {
             try {
                 TagRepository.addBlackTags(GAY_TAGS)
-                toast.value = "已屏蔽 ${GAY_TAGS.size} 个女性向标签"
+                toast.value = "已屏蔽 ${GAY_TAGS.size} 个gay相关标签"
                 loadBlockedTags()
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "blockGayTags failed", e)
@@ -132,34 +126,38 @@ class SettingsViewModel {
         toast.value = "已切换到图源 ${index + 1}"
     }
 
-    /** 测速：遍历所有7条线路，每条线路的每个IP单独测速（5秒超时），结果按线路分组。固定用 HTTP。 */
+    /**
+     * 测速：遍历所有7条线路，每条线路的每个IP单独做 TCP 443 连通性测试（2秒超时）。
+     * 不使用 HTTP 请求，仅测 TCP 连接延迟。结果按线路分组。
+     */
     fun runSpeedTest() {
         scope.launch {
             testing.value = true
             testResults.value = emptyList()
-            val client = OkHttpClient.Builder()
-                .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(5, TimeUnit.SECONDS)
-                .hostnameVerifier { _, _ -> true }
-                .build()
             val results = mutableListOf<String>()
+
             RouteManager.LINE_HOSTS.forEachIndexed { index, lineUrl ->
                 val host = lineUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
                 val ips = RouteManager.resolveIp(host).ifEmpty { listOf(host) }
                 val marker = if (index == RouteManager.lineIndex) " ← 当前" else ""
                 results.add("── 线路${index + 1}: $host$marker ──")
                 ips.forEach { ip ->
-                    // 固定用 HTTP，不管原线路是 http 还是 https
-                    val url = "http://$ip/"
-                    val start = System.nanoTime()
-                    try {
-                        val req = Request.Builder().url(url).header("Host", host).head().build()
-                        client.newCall(req).execute().use { resp ->
-                            val ms = (System.nanoTime() - start) / 1_000_000
-                            results.add("  $ip -> ${ms}ms (HTTP ${resp.code})")
+                    val ms = withContext(Dispatchers.IO) {
+                        val socket = Socket()
+                        val start = System.nanoTime()
+                        try {
+                            socket.connect(InetSocketAddress(ip, 443), 2000)
+                            (System.nanoTime() - start) / 1_000_000
+                        } catch (e: Exception) {
+                            -1L
+                        } finally {
+                            try { socket.close() } catch (_: Exception) {}
                         }
-                    } catch (e: Exception) {
-                        results.add("  $ip -> 失败: ${e.message}")
+                    }
+                    if (ms >= 0) {
+                        results.add("  $ip:443 -> ${ms}ms (TCP OK)")
+                    } else {
+                        results.add("  $ip:443 -> 失败 (TCP超时)")
                     }
                 }
                 testResults.value = results.toList()

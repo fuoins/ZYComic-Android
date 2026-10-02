@@ -32,10 +32,10 @@ object UserRepository {
     // ==================== 登录 / 注册 ====================
 
     /**
-     * 登录：先调 /users/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow。
+     * 登录：先调 /account/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow。
      */
-    suspend fun login(username: String, password: String): User {
-        val loginResp = api.login(LoginRequest(username, password))
+    suspend fun login(username: String, password: String, captcha: String = ""): User {
+        val loginResp = api.login(LoginRequest(username, password, captcha))
         if (loginResp.code != 0) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
 
         // 登录成功后拉取完整用户信息
@@ -45,7 +45,7 @@ object UserRepository {
     }
 
     /**
-     * 注册：调用 /users/register。成功后自动登录态由 cookie 维持。
+     * 注册：调用 /account/register。成功后自动登录态由 cookie 维持。
      */
     suspend fun register(username: String, password: String, email: String): User {
         // 注册接口当前 DTO 仅支持 username/password；email 参数保留以兼容未来扩展
@@ -59,9 +59,15 @@ object UserRepository {
     }
 
     /**
-     * 登出：清除全局 cookie，userFlow 置 null。
+     * 登出：先调用服务端登出 API，再清除全局 cookie，userFlow 置 null。
+     * 即使登出 API 调用失败也会清 cookie（本地登出）。
      */
-    fun logout() {
+    suspend fun logout() {
+        try {
+            api.logout()
+        } catch (_: Exception) {
+            // 登出 API 失败不阻塞本地登出
+        }
         NetworkModule.cookieJar.clear()
         _userFlow.value = null
     }

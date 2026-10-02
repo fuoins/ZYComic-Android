@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
+import com.zycomic.app.data.AllTags
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.ErrorView
 import com.zycomic.app.ui.components.FilterChip
@@ -195,16 +196,24 @@ private fun FilterArea(vm: BrowseViewModel) {
                     FilterChip(text = label, selected = gender == v, onClick = { vm.selectGender(v) })
                 }
             }
-            // 第2行 标签
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+            // 第2行 标签：[全部] [4个固定] [已选非固定最多3个] [更多]
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                // 全部
                 FilterChip(text = "全部", selected = selectedTags.isEmpty(), onClick = { vm.clearTags() })
-                BrowseViewModel.QUICK_TAGS.forEach { tag ->
+                // 4个固定标签
+                AllTags.PINNED_TAGS.forEach { tag ->
                     FilterChip(text = tag, selected = selectedTags.contains(tag), onClick = { vm.toggleTag(tag) })
                 }
-                FilterChip(text = "更多", selected = false, onClick = {
-                    vm.loadTagsIfNeeded()
-                    showTagDialog = true
-                })
+                // 已选的非固定标签（最多显示3个）
+                selectedTags.filter { it !in AllTags.PINNED_TAGS }.take(3).forEach { tag ->
+                    FilterChip(text = tag, selected = true, onClick = { vm.toggleTag(tag) })
+                }
+                // 更多按钮（加粗）
+                FilterChip(text = "更多", selected = false, bold = true, onClick = { showTagDialog = true })
             }
             // 第3行 地区
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
@@ -264,15 +273,17 @@ private fun RankArea(vm: BrowseViewModel) {
     }
 }
 
+/**
+ * 全屏标签选择弹窗。
+ * 顶部搜索框实时筛选，中间 FlowRow 全标签多选，底部重置/确定按钮。
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagSelectDialog(
     vm: BrowseViewModel,
     onDismiss: () -> Unit,
 ) {
-    val allTags by vm.allTags.collectAsState()
-    val loading by vm.tagsLoading.collectAsState()
-    val error by vm.tagsError.collectAsState()
+    val allTags = AllTags.LIST
     val current by vm.selectedTags.collectAsState()
 
     var keyword by remember { mutableStateOf("") }
@@ -283,59 +294,66 @@ private fun TagSelectDialog(
         else allTags.filter { it.contains(keyword, ignoreCase = true) }
     }
 
+    // 全屏 Dialog
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .background(androidx.compose.ui.graphics.Color.White)
-                .padding(16.dp),
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color.White),
         ) {
-            Text("选择标签", style = MaterialTheme.typography.titleMedium)
+            // 顶部标题栏
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("选择标签", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            }
+            // 搜索框
             androidx.compose.material3.OutlinedTextField(
                 value = keyword,
                 onValueChange = { keyword = it },
                 singleLine = true,
                 placeholder = { Text("搜索标签") },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             )
-            if (loading) {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    androidx.compose.material3.CircularProgressIndicator()
-                }
-            } else if (error != null) {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(error ?: "暂无标签", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
-                }
-            } else {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState())
+            // 标签列表（可滚动）
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        filtered.forEach { tag ->
-                            FilterChip(
-                                text = tag,
-                                selected = temp.contains(tag),
-                                onClick = {
-                                    temp = if (temp.contains(tag)) temp - tag else temp + tag
-                                },
-                            )
-                        }
+                    filtered.forEach { tag ->
+                        FilterChip(
+                            text = tag,
+                            selected = temp.contains(tag),
+                            onClick = {
+                                temp = if (temp.contains(tag)) temp - tag else temp + tag
+                            },
+                        )
                     }
                 }
             }
+            // 底部按钮栏
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 androidx.compose.material3.TextButton(onClick = { temp = emptySet() }) {
                     Text("重置")
                 }
-                androidx.compose.material3.TextButton(onClick = {
-                    // 应用选择
-                    vm.selectedTags.value = temp
-                    vm.refresh()
-                    onDismiss()
-                }) {
+                Box(modifier = Modifier.weight(1f))
+                androidx.compose.material3.Button(
+                    onClick = {
+                        vm.setSelectedTags(temp)
+                        onDismiss()
+                    },
+                ) {
                     Text("确定")
                 }
             }

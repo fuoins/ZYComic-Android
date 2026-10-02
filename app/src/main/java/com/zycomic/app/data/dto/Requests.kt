@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class LoginRequest(
     val username: String,
     val password: String,
+    val captcha: String = "",
 )
 
 @Serializable
@@ -37,8 +38,14 @@ data class FavoriteFolderRequest(
     val newName: String = "",
 )
 
+/** 添加屏蔽标签请求体：{"selectedTags": ["tag1", "tag2"]} */
 @Serializable
-data class BlackTagRequest(
-    val selectedTags: List<String>? = null,
-    val removeTags: List<String>? = null,
+data class AddBlacklistRequest(
+    val selectedTags: List<String> = emptyList(),
+)
+
+/** 删除屏蔽标签请求体：{"removeTags": ["tag1", "tag2"]} */
+@Serializable
+data class RemoveBlacklistRequest(
+    val removeTags: List<String> = emptyList(),
 )

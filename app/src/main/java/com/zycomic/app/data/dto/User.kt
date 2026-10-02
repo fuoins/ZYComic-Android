@@ -12,3 +12,26 @@ data class User(
     val favoriteCount: Int = 0,
     val nickname: String = "",
 )
+
+/**
+ * 已屏蔽标签响应。
+ * 服务端格式：{"code":1,"data":{"data":{"blacklisted_tags":["标签1","标签2"]}}}
+ * 双层 data 嵌套。
+ */
+@Serializable
+data class BlacklistResponse(
+    val code: Int = 0,
+    val msg: String = "",
+    val data: BlacklistOuterData? = null,
+)
+
+@Serializable
+data class BlacklistOuterData(
+    val data: BlacklistInnerData? = null,
+)
+
+@Serializable
+data class BlacklistInnerData(
+    @kotlinx.serialization.SerialName("blacklisted_tags")
+    val blacklistedTags: List<String> = emptyList(),
+)

@@ -40,7 +40,7 @@ object ReaderLauncher {
             source = ManwaSource.id,
             url = "/manga/${mangaDto.id}",
             ogTitle = mangaDto.name,
-            ogAuthor = mangaDto.author.joinToString(", "),
+            ogAuthor = mangaDto.author,
             ogThumbnailUrl = ManwaSource.coverUrl(mangaDto).ifBlank { null },
             ogDescription = mangaDto.text.ifBlank { null },
             ogGenre = mangaDto.tags.map { it.name },

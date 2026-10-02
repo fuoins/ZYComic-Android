@@ -84,7 +84,7 @@ object ManwaSource : HttpSource() {
             url = "/manga/${dto.id}"
             title = dto.name
             thumbnail_url = coverUrl(dto).ifBlank { null }
-            author = dto.author.joinToString(", ")
+            author = dto.author,
             description = dto.text
             genre = dto.tags.joinToString(", ") { it.name }
             status = if (dto.end == 1) SManga.COMPLETED else SManga.ONGOING
