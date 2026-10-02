@@ -15,7 +15,8 @@ import java.io.IOException
  * - order=1 实际是更新时间排序，order=2 实际是收藏时间排序（反直觉）。
  * - order_type: 0=降序, 1=升序。
  * - addFavorite 传 val=0，removeFavorite 传 val=1（不要写反）。
- * - book_id / folder_id 均为字符串。
+ * - book_id / folder_id 均为数字。
+ * - 移动收藏夹用 POST api/detail/favorite（val=0, book_id, folder_id），循环调用，不是 favorite_folder。
  * - 创建收藏夹 action=moveToFolder（不是 addFolder），只传 folder_name。
  * - 所有收藏操作前必须检查 [UserRepository.isLoggedIn]。
  */
@@ -60,14 +61,14 @@ object FavoriteRepository {
     // ==================== 单本收藏操作 ====================
 
     /** 添加收藏：val=0。 */
-    suspend fun addFavorite(bookId: String, folderId: Int = 0) {
+    suspend fun addFavorite(bookId: Int, folderId: Int = 0) {
         checkLoggedIn()
         val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookId, folderId = folderId))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "收藏失败" })
     }
 
     /** 取消收藏：val=1。 */
-    suspend fun removeFavorite(bookId: String) {
+    suspend fun removeFavorite(bookId: Int) {
         checkLoggedIn()
         val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "取消收藏失败" })
@@ -119,22 +120,29 @@ object FavoriteRepository {
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "删除收藏夹失败" })
     }
 
-    /** 移入收藏夹：action=moveToFolder，ids + folder_id。ids 为逗号分隔的 book_id。 */
-    suspend fun moveToFolder(ids: String, folderId: String) {
+    /**
+     * 移入收藏夹：循环调用 POST api/detail/favorite（val=0, book_id, folder_id），每次一本。
+     * 抓包确认移动收藏夹用此接口，不是 api/users/favorite_folder。
+     */
+    suspend fun moveToFolder(bookIds: List<String>, folderId: Int) {
         checkLoggedIn()
-        val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "moveToFolder", ids = ids, folderId = folderId),
-        )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移动到收藏夹失败" })
+        bookIds.forEach { id ->
+            val bookIdInt = id.toIntOrNull() ?: return@forEach
+            val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookIdInt, folderId = folderId))
+            if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移动到收藏夹失败" })
+        }
     }
 
-    /** 移出收藏夹（移到全部收藏）：action=moveOutFolder，ids。ids 为逗号分隔的 book_id。 */
-    suspend fun moveOutFolder(ids: String) {
+    /**
+     * 移出收藏夹（移到全部收藏）：循环调用 POST api/detail/favorite（val=0, book_id, folder_id=0），每次一本。
+     */
+    suspend fun moveOutFolder(bookIds: List<String>) {
         checkLoggedIn()
-        val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "moveOutFolder", ids = ids),
-        )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移出收藏夹失败" })
+        bookIds.forEach { id ->
+            val bookIdInt = id.toIntOrNull() ?: return@forEach
+            val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookIdInt, folderId = 0))
+            if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移出收藏夹失败" })
+        }
     }
 
     // ==================== 内部检查 ====================

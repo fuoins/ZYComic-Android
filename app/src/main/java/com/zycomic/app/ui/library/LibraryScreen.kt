@@ -246,7 +246,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                 }.padding(12.dp))
                 folders.forEach { f ->
                     Text(f.name, Modifier.fillMaxWidth().clickableNoRipple {
-                        vm.moveSelectedTo(f.id.toString()); showMoveDialog = false
+                        vm.moveSelectedTo(f.id); showMoveDialog = false
                     }.padding(12.dp))
                 }
             }

@@ -189,12 +189,12 @@ class LibraryViewModel(val mode: Int = 2) {
     }
 
     /** 移动所选收藏到收藏夹；folderId 为 null 表示移出收藏夹（全部收藏）。 */
-    fun moveSelectedTo(folderId: String?) {
-        val ids = selectedIds.value.joinToString(",")
+    fun moveSelectedTo(folderId: Int?) {
+        val ids = selectedIds.value.toList()
         if (ids.isEmpty()) return
         scope.launch {
             try {
-                if (folderId.isNullOrBlank()) FavoriteRepository.moveOutFolder(ids)
+                if (folderId == null) FavoriteRepository.moveOutFolder(ids)
                 else FavoriteRepository.moveToFolder(ids, folderId)
                 exitSelection()
                 refreshFavorites()
