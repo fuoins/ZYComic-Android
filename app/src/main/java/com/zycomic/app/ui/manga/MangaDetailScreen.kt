@@ -55,9 +55,9 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun MangaDetailScreen(
-    bookId: Int,
+    bookId: String,
     onClose: () -> Unit,
-    onPlayChapter: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
     onSearchKeyword: (String) -> Unit,
     onTagClick: (String) -> Unit,
     onRequireLogin: () -> Unit,
@@ -74,13 +74,13 @@ fun MangaDetailScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    /** 通过 komikku 原生阅读器打开指定章节。 */
-    fun openReader(chapterId: Int) {
+    /** 通过 komikku 原生阅读器打开指定章节。chapterId 为字符串数字。 */
+    fun openReader(chapterId: String) {
         val d = detail ?: return
-        if (chapterId <= 0) return
+        if (chapterId.isBlank()) return
         scope.launch {
             try {
-                ReaderLauncher.launch(context, d, chapterId.toString())
+                ReaderLauncher.launch(context, d, chapterId)
             } catch (e: Exception) {
                 Toast.makeText(context, "打开阅读器失败: ${e.message}", Toast.LENGTH_LONG).show()
             }
@@ -172,7 +172,7 @@ fun MangaDetailScreen(
                             modifier = Modifier.padding(top = 4.dp),
                         )
                         Text(
-                            "状态：${if (detail!!.state == 1) "完结" else "连载中"}",
+                            "状态：${detail!!.state.ifBlank { "未知" }}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary,
                             modifier = Modifier.padding(top = 4.dp),
@@ -268,7 +268,7 @@ fun MangaDetailScreen(
                         EmptyView("暂无相关推荐", modifier = Modifier.padding(32.dp))
                     } else {
                         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -276,8 +276,8 @@ fun MangaDetailScreen(
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp),
                         ) {
-                            items(related.take(10).size) { i ->
-                                MangaCard(manga = related[i], onClick = { onPlayChapter(0) })
+                            items(related.size) { i ->
+                                MangaCard(manga = related[i], onClick = { onOpenManga(related[i].id) })
                             }
                         }
                     }
@@ -347,9 +347,9 @@ private fun FolderPickDialog(
 /** 详情覆盖层（full-screen Dialog）。 */
 @Composable
 fun MangaDetailOverlay(
-    bookId: Int,
+    bookId: String,
     onClose: () -> Unit,
-    onPlayChapter: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
     onSearchKeyword: (String) -> Unit,
     onTagClick: (String) -> Unit,
     onRequireLogin: () -> Unit,
@@ -358,7 +358,7 @@ fun MangaDetailOverlay(
         MangaDetailScreen(
             bookId = bookId,
             onClose = onClose,
-            onPlayChapter = onPlayChapter,
+            onOpenManga = onOpenManga,
             onSearchKeyword = onSearchKeyword,
             onTagClick = onTagClick,
             onRequireLogin = onRequireLogin,

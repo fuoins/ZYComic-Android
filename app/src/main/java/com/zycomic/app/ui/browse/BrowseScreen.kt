@@ -53,7 +53,7 @@ import com.zycomic.app.ui.theme.TextSecondary
 fun BrowseScreen(
     pendingTag: String?,
     onPendingTagConsumed: () -> Unit,
-    onOpenManga: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onRequireLogin: () -> Unit,
 ) {
@@ -139,7 +139,7 @@ private fun MangaGrid(
     gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
     appending: Boolean,
     hasMore: Boolean,
-    onOpenManga: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -149,7 +149,7 @@ private fun MangaGrid(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        items(mangas.size, key = { mangas[it].id * 100 + it }) { i ->
+        items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
             val m = mangas[i]
             MangaCard(manga = m, onClick = { onOpenManga(m.id) })
         }

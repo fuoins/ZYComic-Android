@@ -63,7 +63,7 @@ interface ApiService {
     // ---------- 详情 ----------
     // data 直接是漫画对象
     @GET("api/detail/index")
-    suspend fun detail(@Query("id") bookId: Int): ApiResponse<Manga>
+    suspend fun detail(@Query("id") bookId: String): ApiResponse<Manga>
 
     // ---------- 搜索（参数是 k，不是 keyword） ----------
     @GET("api/search/index")
@@ -89,7 +89,7 @@ interface ApiService {
 
     // ---------- 章节内容（响应解密后为 ChapterContent） ----------
     @GET("api/chapters/index")
-    suspend fun chapters(@Query("id") chapterId: Int): ApiResponse<ChapterContent>
+    suspend fun chapters(@Query("id") chapterId: String): ApiResponse<ChapterContent>
 
     // ---------- 用户：登录/注册/登出 ----------
     @POST("api/account/login")

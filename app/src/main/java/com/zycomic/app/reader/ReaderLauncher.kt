@@ -44,7 +44,7 @@ object ReaderLauncher {
             ogThumbnailUrl = ManwaSource.coverUrl(mangaDto).ifBlank { null },
             ogDescription = mangaDto.text.ifBlank { null },
             ogGenre = mangaDto.tags.map { it.name },
-            ogStatus = if (mangaDto.end == 1) SManga.COMPLETED.toLong() else SManga.ONGOING.toLong(),
+            ogStatus = if (mangaDto.end.contains("完")) SManga.COMPLETED.toLong() else SManga.ONGOING.toLong(),
             initialized = true,
             // 强制 Webtoon 模式
             viewerFlags = ReadingMode.WEBTOON.flagValue.toLong(),

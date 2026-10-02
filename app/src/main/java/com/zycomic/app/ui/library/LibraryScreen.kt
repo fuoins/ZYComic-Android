@@ -48,7 +48,7 @@ import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun LibraryScreen(
-    onOpenManga: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
     val vm = remember { LibraryViewModel() }
@@ -81,7 +81,7 @@ fun LibraryScreen(
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun FavContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit) {
+private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
     val folders by vm.folders.collectAsState()
     val selectedFolder by vm.selectedFolderId.collectAsState()
     val isEnd by vm.isEnd.collectAsState()
@@ -178,7 +178,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit) {
                             selectionMode = selectionMode,
                             onClick = {
                                 if (selectionMode) vm.toggleSelect(item.bookId)
-                                else onOpenManga(item.bookId.toIntOrNull() ?: 0)
+                                else onOpenManga(item.bookId)
                             },
                             onLongClick = { if (!selectionMode) vm.enterSelection() },
                         )
@@ -331,7 +331,7 @@ private fun FavRow(
 // ==================== 阅读历史 ====================
 
 @Composable
-private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit) {
+private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
     val history by vm.history.collectAsState()
     val loading by vm.historyLoading.collectAsState()
     val hasMore by vm.historyHasMore.collectAsState()
@@ -378,7 +378,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (Int) -> Unit) {
                         selectionMode = selMode,
                         onClick = {
                             if (selMode) vm.toggleHistorySelect(h.id)
-                            else onOpenManga(h.bookId.toIntOrNull() ?: 0)
+                            else onOpenManga(h.bookId)
                         },
                     )
                 }

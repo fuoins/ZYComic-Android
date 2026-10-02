@@ -87,7 +87,7 @@ object ManwaSource : HttpSource() {
             author = dto.author
             description = dto.text
             genre = dto.tags.joinToString(", ") { it.name }
-            status = if (dto.end == 1) SManga.COMPLETED else SManga.ONGOING
+            status = if (dto.end.contains("完")) SManga.COMPLETED else SManga.ONGOING
             initialized = true
         }
         val schapters = dto.chapterList.map { ch ->
@@ -119,11 +119,11 @@ object ManwaSource : HttpSource() {
         return if (sec < 10_000_000_000L) sec * 1000L else sec
     }
 
-    /** "/chapter/123" -> 123 */
-    private fun String.toChapterId(): Int? =
-        trim('/').substringAfterLast('/').substringBefore('?').toIntOrNull()
+    /** "/chapter/123" -> "123" */
+    private fun String.toChapterId(): String? =
+        trim('/').substringAfterLast('/').substringBefore('?').ifBlank { null }
 
-    /** "/manga/123" -> 123 */
-    private fun String.toMangaId(): Int? =
-        trim('/').substringAfterLast('/').substringBefore('?').toIntOrNull()
+    /** "/manga/123" -> "123" */
+    private fun String.toMangaId(): String? =
+        trim('/').substringAfterLast('/').substringBefore('?').ifBlank { null }
 }

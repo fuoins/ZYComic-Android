@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.manga
 
+import com.zycomic.app.data.dto.Chapter
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
@@ -14,7 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class MangaDetailViewModel(private val bookId: Int) {
+class MangaDetailViewModel(private val bookId: String) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -65,8 +66,8 @@ class MangaDetailViewModel(private val bookId: Int) {
             favBusy.value = true
             try {
                 val d = _detail.value ?: return@launch
-                if (d.fav == 1) FavoriteRepository.removeFavorite(bookId.toString())
-                else FavoriteRepository.addFavorite(bookId.toString(), 0)
+                if (d.fav == 1) FavoriteRepository.removeFavorite(bookId)
+                else FavoriteRepository.addFavorite(bookId, 0)
                 _detail.value = d.copy(fav = if (d.fav == 1) 0 else 1)
                 UserRepository.refreshUserInfo()
             } catch (e: NotLoggedInException) {
@@ -95,7 +96,7 @@ class MangaDetailViewModel(private val bookId: Int) {
         scope.launch {
             favBusy.value = true
             try {
-                FavoriteRepository.addFavorite(bookId.toString(), folderId)
+                FavoriteRepository.addFavorite(bookId, folderId)
                 _detail.value = _detail.value?.copy(fav = 1)
                 UserRepository.refreshUserInfo()
             } catch (e: NotLoggedInException) {
@@ -107,17 +108,26 @@ class MangaDetailViewModel(private val bookId: Int) {
         }
     }
 
+    /** 章节排序 key：sort 优先，sort 为 0 时回退到章节 id。 */
+    private fun chapterSortKey(ch: Chapter): Long =
+        if (ch.sort == 0) ch.id.toLongOrNull() ?: 0L else ch.sort.toLong()
+
     /** 章节列表（按排序）。 */
-    fun sortedChapters(): List<com.zycomic.app.data.dto.Chapter> {
+    fun sortedChapters(): List<Chapter> {
         val list = _detail.value?.chapterList ?: return emptyList()
-        return if (chapterAsc.value) list.sortedBy { it.sort.let { s -> if (s == 0) it.id else s } }
-        else list.sortedByDescending { it.sort.let { s -> if (s == 0) it.id else s } }
+        return if (chapterAsc.value) list.sortedBy { chapterSortKey(it) }
+        else list.sortedByDescending { chapterSortKey(it) }
     }
 
-    /** 继续阅读章节：detail.start 优先，否则第一章。 */
-    fun defaultChapterId(): Int {
-        val d = _detail.value ?: return 0
-        if (d.start > 0) return d.start
-        return d.chapterList.maxByOrNull { it.id }?.id ?: d.chapterList.firstOrNull()?.id ?: 0
+    /**
+     * 继续阅读章节 ID（字符串）。
+     * 规则：detail.start 非空且不为 "0" 时直接用（上次阅读章节）；
+     * 否则返回第一章（sort/id 最小的章节）。
+     */
+    fun defaultChapterId(): String {
+        val list = _detail.value?.chapterList ?: return ""
+        val d = _detail.value!!
+        if (d.start.isNotBlank() && d.start != "0") return d.start
+        return list.minByOrNull { chapterSortKey(it) }.let { it?.id ?: "" }
     }
 }

@@ -38,7 +38,7 @@ import com.zycomic.app.ui.theme.TextSecondary
 fun SearchScreen(
     initialKeyword: String,
     onClose: () -> Unit,
-    onOpenManga: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
 ) {
     val vm = remember { SearchViewModel() }
     val keyword by vm.keyword.collectAsState()
@@ -96,7 +96,7 @@ fun SearchScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(mangas.size, key = { mangas[it].id * 100 + it }) { i ->
+                    items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
                         val m = mangas[i]
                         MangaCard(manga = m, onClick = { onOpenManga(m.id) })
                     }
@@ -115,7 +115,7 @@ fun SearchScreen(
 fun SearchOverlay(
     initialKeyword: String,
     onClose: () -> Unit,
-    onOpenManga: (Int) -> Unit,
+    onOpenManga: (String) -> Unit,
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
         androidx.compose.foundation.layout.Box(

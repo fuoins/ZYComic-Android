@@ -99,7 +99,7 @@ fun AppContent() {
     var bottomTab by remember { mutableIntStateOf(0) } // 0分类 1书架 2我的 3设置
 
     // 覆盖层状态
-    var detailBookId by remember { mutableStateOf<Int?>(null) }
+    var detailBookId by remember { mutableStateOf<String?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     var loginOpen by remember { mutableStateOf(false) }
 
@@ -178,7 +178,7 @@ fun AppContent() {
         MangaDetailOverlay(
             bookId = bookId,
             onClose = { detailBookId = null },
-            onPlayChapter = { /* 章节点击已在 MangaDetailScreen 内直接启动 komikku 阅读器 Activity */ },
+            onOpenManga = { detailBookId = it },
             onSearchKeyword = { kw ->
                 searchKeyword = kw
                 detailBookId = null

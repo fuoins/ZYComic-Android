@@ -27,7 +27,7 @@ import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun ReaderScreen(
-    chapterId: Int,
+    chapterId: String,
     onClose: () -> Unit,
 ) {
     val vm = remember { ReaderViewModel(chapterId) }
@@ -69,7 +69,7 @@ fun ReaderScreen(
 /** 阅读器覆盖层（full-screen Dialog，盖在详情之上）。 */
 @Composable
 fun ReaderOverlay(
-    chapterId: Int,
+    chapterId: String,
     onClose: () -> Unit,
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {

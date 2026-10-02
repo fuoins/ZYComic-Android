@@ -38,6 +38,8 @@ object NetworkModule {
         ignoreUnknownKeys = true
         coerceInputValues = true
         encodeDefaults = false
+        // 开启后 @JsonNames 别名（book_id/title/serialize/desc/chapters 等）才会被识别
+        useAlternativeNames = true
     }
 
     @Volatile private var _client: OkHttpClient? = null

@@ -59,7 +59,7 @@ object MangaRepository {
     // ==================== 详情 ====================
 
     /** 漫画详情（data 直接是漫画对象）。 */
-    suspend fun getDetail(bookId: Int): Manga {
+    suspend fun getDetail(bookId: String): Manga {
         val resp = api.detail(bookId)
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取详情失败" })
         return resp.data ?: throw IOException("详情数据为空")
