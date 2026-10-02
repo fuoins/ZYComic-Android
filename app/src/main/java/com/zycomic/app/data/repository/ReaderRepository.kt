@@ -1,5 +1,6 @@
 package com.zycomic.app.data.repository
 
+import android.util.Log
 import com.zycomic.app.data.dto.ChapterContent
 import com.zycomic.app.net.NetworkModule
 import java.io.IOException
