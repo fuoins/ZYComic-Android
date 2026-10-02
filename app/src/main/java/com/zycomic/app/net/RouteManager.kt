@@ -54,6 +54,11 @@ object RouteManager {
     var lastImgDelays: Map<Int, Long> = emptyMap()
         private set
 
+    /** 最近一次每 IP 的 TCP 延迟：域名 -> (IP -> 毫秒)，失败为 Long.MAX_VALUE */
+    @Volatile
+    var lastIpDelays: Map<String, Map<String, Long>> = emptyMap()
+        private set
+
     /** 每个域名测速选出的最快 IP（host -> ip），供代理优先使用 */
     val fastestIp: MutableMap<String, String> = mutableMapOf()
 
@@ -61,6 +66,11 @@ object RouteManager {
     fun setLastDelays(line: Map<Int, Long>, img: Map<Int, Long>) {
         lastLineDelays = line
         lastImgDelays = img
+    }
+
+    /** 写入最近一次每 IP 的 TCP 延迟（SettingsViewModel 测速完成后调用）。 */
+    fun setLastIpDelays(ipDelays: Map<String, Map<String, Long>>) {
+        lastIpDelays = ipDelays
     }
 
     /** 记录某域名的最快 IP（测速完成后调用）。 */

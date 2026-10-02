@@ -53,6 +53,7 @@ fun SettingsScreen() {
     val testing by vm.testing.collectAsState()
     val lineDelays by vm.lineDelays.collectAsState()
     val imgDelays by vm.imgDelays.collectAsState()
+    val ipDelays by vm.ipDelays.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
@@ -126,33 +127,80 @@ fun SettingsScreen() {
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             Text("网络配置更新时间：$updateTime", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
 
+            // 展开状态：key = "line_0" / "img_0"
+            var expandedHosts by remember { mutableStateOf<Set<String>>(emptySet()) }
+
             // 线路列表
             Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             RouteManager.LINE_HOSTS.forEachIndexed { index, url ->
-                val host = url.removePrefix("https://").removePrefix("http://")
+                val host = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
                 val delay = lineDelays[index]
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { vm.selectLine(index) }.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "${index + 1}. $host",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (index == currentLineIdx) BluePrimary else Color.Black,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = formatDelay(delay),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when {
-                            delay == null -> TextSecondary
-                            delay == Long.MAX_VALUE -> Color.Red
-                            delay < 300 -> BluePrimary
-                            else -> TextSecondary
-                        },
-                    )
-                    if (index == currentLineIdx) {
-                        Text("  ← 当前", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                val hostIpMap = ipDelays[host]
+                val fastest = hostIpMap?.filterValues { it < Long.MAX_VALUE }?.minByOrNull { it.value }
+                val expandKey = "line_$index"
+                val isExpanded = expandedHosts.contains(expandKey)
+
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { vm.selectLine(index) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "${index + 1}. $host",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (index == currentLineIdx) BluePrimary else Color.Black,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        // HTTP/域名延迟
+                        Text(
+                            text = " HTTP:${formatDelay(delay)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when {
+                                delay == null -> TextSecondary
+                                delay == Long.MAX_VALUE -> Color.Red
+                                delay < 300 -> BluePrimary
+                                else -> TextSecondary
+                            },
+                        )
+                        // 最快IP + TCP延迟
+                        if (fastest != null) {
+                            Text(
+                                text = " 最快IP:${fastest.key}(${fastest.value}ms)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                            )
+                        }
+                        if (index == currentLineIdx) {
+                            Text(" ←", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                        }
+                        // 展开/收起箭头
+                        if (!hostIpMap.isNullOrEmpty()) {
+                            Text(
+                                text = if (isExpanded) " ▲" else " ▼",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                modifier = Modifier.clickable {
+                                    expandedHosts = if (isExpanded) expandedHosts - expandKey else expandedHosts + expandKey
+                                },
+                            )
+                        }
+                    }
+                    // 展开：所有IP的TCP延迟
+                    if (isExpanded && !hostIpMap.isNullOrEmpty()) {
+                        hostIpMap.forEach { (ip, tcpDelay) ->
+                            Text(
+                                text = "  $ip: ${formatDelay(tcpDelay)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = when {
+                                    tcpDelay == Long.MAX_VALUE -> Color.Red
+                                    tcpDelay < 300 -> BluePrimary
+                                    else -> TextSecondary
+                                },
+                                modifier = Modifier.padding(start = 24.dp, top = 1.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -161,28 +209,68 @@ fun SettingsScreen() {
             Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             RouteManager.IMG_DOMAINS.forEachIndexed { index, domain ->
                 val delay = imgDelays[index]
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { vm.selectImgHost(index) }.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "${index + 1}. $domain",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (index == currentImgIdx) BluePrimary else Color.Black,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = formatDelay(delay),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when {
-                            delay == null -> TextSecondary
-                            delay == Long.MAX_VALUE -> Color.Red
-                            delay < 300 -> BluePrimary
-                            else -> TextSecondary
-                        },
-                    )
-                    if (index == currentImgIdx) {
-                        Text("  ← 当前", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                val hostIpMap = ipDelays[domain]
+                val fastest = hostIpMap?.filterValues { it < Long.MAX_VALUE }?.minByOrNull { it.value }
+                val expandKey = "img_$index"
+                val isExpanded = expandedHosts.contains(expandKey)
+
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { vm.selectImgHost(index) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "${index + 1}. $domain",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (index == currentImgIdx) BluePrimary else Color.Black,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Text(
+                            text = " HTTP:${formatDelay(delay)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when {
+                                delay == null -> TextSecondary
+                                delay == Long.MAX_VALUE -> Color.Red
+                                delay < 300 -> BluePrimary
+                                else -> TextSecondary
+                            },
+                        )
+                        if (fastest != null) {
+                            Text(
+                                text = " 最快IP:${fastest.key}(${fastest.value}ms)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                            )
+                        }
+                        if (index == currentImgIdx) {
+                            Text(" ←", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                        }
+                        if (!hostIpMap.isNullOrEmpty()) {
+                            Text(
+                                text = if (isExpanded) " ▲" else " ▼",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                modifier = Modifier.clickable {
+                                    expandedHosts = if (isExpanded) expandedHosts - expandKey else expandedHosts + expandKey
+                                },
+                            )
+                        }
+                    }
+                    if (isExpanded && !hostIpMap.isNullOrEmpty()) {
+                        hostIpMap.forEach { (ip, tcpDelay) ->
+                            Text(
+                                text = "  $ip: ${formatDelay(tcpDelay)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = when {
+                                    tcpDelay == Long.MAX_VALUE -> Color.Red
+                                    tcpDelay < 300 -> BluePrimary
+                                    else -> TextSecondary
+                                },
+                                modifier = Modifier.padding(start = 24.dp, top = 1.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -267,10 +355,10 @@ fun SettingsScreen() {
     }
 }
 
-/** 延迟显示：未测="--"，失败="失败"，否则="123ms" */
+/** 延迟显示：未测="--"，失败="超时"，否则="123ms" */
 private fun formatDelay(delay: Long?): String = when {
     delay == null -> "--"
-    delay == Long.MAX_VALUE -> "失败"
+    delay == Long.MAX_VALUE -> "超时"
     else -> "${delay}ms"
 }
 

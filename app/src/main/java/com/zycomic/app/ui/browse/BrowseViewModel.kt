@@ -77,12 +77,9 @@ class BrowseViewModel {
     init { refresh() }
 
     fun selectMainTab(tab: Int) {
-        if (mainTab.value == tab) return
+        // 移除 if 判断：点击当前 tab 也强制刷新
         mainTab.value = tab
-        // 立即清空旧列表 + 置加载态，避免残留旧页面/空白闪烁
-        _mangas.value = emptyList()
-        _error.value = null
-        _loading.value = true
+        // 直接调 refresh，让 doLoad 自己设置加载状态/清空列表
         refresh()
     }
 
@@ -129,14 +126,15 @@ class BrowseViewModel {
     }
 
     fun loadMore() {
+        // 如果正在加载则直接 return，不 cancel 当前 job
         if (_loading.value || _appending.value || !_hasMore.value) return
-        currentJob?.cancel()
         currentJob = scope.launch { doLoad(reset = false) }
     }
 
     private suspend fun doLoad(reset: Boolean) {
         // 自增请求序号；用于判断本次结果是否已被更新的请求取代
         val reqId = requestSeq.incrementAndGet()
+        android.util.Log.d("BrowseVM", "doLoad start: tab=${mainTab.value}, page=$currentPage, reset=$reset, reqId=$reqId")
         if (reset) {
             currentPage = 1
             _hasMore.value = true
@@ -182,8 +180,10 @@ class BrowseViewModel {
             }
 
             _mangas.value = if (reset) result else _mangas.value + result
+            android.util.Log.d("BrowseVM", "doLoad done: reqId=$reqId, got ${result.size} items")
             if (result.isEmpty()) _hasMore.value = false
         } catch (e: Exception) {
+            android.util.Log.w("BrowseVM", "doLoad error: ${e.message}")
             // 过期请求的异常不更新 UI
             if (reqId != requestSeq.get()) return
             if (reset) _error.value = e.message ?: "加载失败"

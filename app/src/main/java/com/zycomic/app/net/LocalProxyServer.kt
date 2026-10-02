@@ -81,7 +81,7 @@ class LocalProxyServer(
                     reuseAddress = true
                     bind(InetSocketAddress("127.0.0.1", port))
                 }
-                Log.i(TAG, "Proxy server started on 127.0.0.1:$port")
+                Log.d(TAG, "Proxy server started on 127.0.0.1:$port")
 
                 while (running) {
                     try {
@@ -141,7 +141,7 @@ class LocalProxyServer(
         val method = parts[0]
         val target = parts[1]
 
-        Log.d(TAG, "request: $method $target")
+        Log.d(TAG, "Request: $method $target")
 
         if (method.equals("CONNECT", ignoreCase = true)) {
             // target 格式: host:port，兼容带 scheme 的写法，例如 CONNECT https://newmwimserv6.cc HTTP/1.1
@@ -166,7 +166,7 @@ class LocalProxyServer(
 
     private fun handleConnect(clientSocket: Socket, host: String, port: Int) {
         val mitm = sniDomains.contains(host)
-        Log.d(TAG, "CONNECT $host:$port -> ${if (mitm) "MITM" else "TUNNEL"}")
+        Log.d(TAG, "CONNECT $host:$port, mitm=$mitm")
         if (mitm) {
             handleConnectMitm(clientSocket, host, port)
         } else {
@@ -184,21 +184,23 @@ class LocalProxyServer(
     private fun handleConnectMitm(clientSocket: Socket, host: String, port: Int) {
         var upstreamSocket: SSLSocket? = null
         var clientSSL: SSLSocket? = null
+        var stage = "upstream"
 
         try {
             // 1. 建立到上游服务器的 TLS 连接（IP 直连，不发 SNI）
             val ip = resolveHostIp(host) ?: host
-            Log.d(TAG, "MITM $host resolved ip=$ip")
+            Log.d(TAG, "Resolved IP: $ip for $host")
             val sslFactory = trustAllSSLContext.socketFactory as SSLSocketFactory
             upstreamSocket = sslFactory.createSocket() as SSLSocket
 
             // 必须在 connect() 之前移除 SNI，connect 之后设置无效
             removeSni(upstreamSocket)
 
+            val upStart = System.nanoTime()
             upstreamSocket.connect(InetSocketAddress(ip, port), 5000)
-            Log.d(TAG, "MITM upstream tcp connected: $ip:$port")
             upstreamSocket.startHandshake()
-            Log.d(TAG, "MITM upstream TLS handshake done: $host -> $ip:$port")
+            val upElapsed = (System.nanoTime() - upStart) / 1_000_000
+            Log.d(TAG, "Upstream connected: $ip:$port in ${upElapsed}ms")
 
             // 2. 回复客户端
             clientSocket.getOutputStream().apply {
@@ -207,13 +209,16 @@ class LocalProxyServer(
             }
 
             // 3. 用自签名证书包装客户端 socket，做服务端 TLS 握手
+            stage = "client_handshake"
+            Log.d(TAG, "Client handshake started: $host")
             clientSSL = serverSSLContext.socketFactory
                 .createSocket(clientSocket, null, clientSocket.port, true) as SSLSocket
             clientSSL.useClientMode = false
             clientSSL.startHandshake()
-            Log.d(TAG, "MITM client TLS handshake done: $host")
+            Log.d(TAG, "Client handshake completed: $host")
 
             // 4. 双向转发
+            stage = "pipe"
             val in1 = clientSSL.inputStream
             val out1 = upstreamSocket.outputStream
             val in2 = upstreamSocket.inputStream
@@ -226,8 +231,11 @@ class LocalProxyServer(
             t1.join()
             t2.join()
         } catch (e: Exception) {
-            // MITM 握手失败用 Log.w
-            Log.w(TAG, "handleConnectMitm error for $host: ${e.message}")
+            when (stage) {
+                "upstream" -> Log.w(TAG, "Upstream error: ${e.message}")
+                "client_handshake" -> Log.w(TAG, "Client handshake error: ${e.message}")
+                else -> Log.w(TAG, "pipe error: ${e.message}")
+            }
         } finally {
             try { clientSSL?.close() } catch (_: Exception) {}
             try { upstreamSocket?.close() } catch (_: Exception) {}
@@ -242,10 +250,9 @@ class LocalProxyServer(
         var upstream: Socket? = null
         try {
             val ip = resolveHostIp(host) ?: host
-            Log.d(TAG, "TUNNEL $host resolved ip=$ip")
             upstream = Socket()
             upstream.connect(InetSocketAddress(ip, port), 5000)
-            Log.d(TAG, "TUNNEL upstream connected: $ip:$port")
+            Log.d(TAG, "Tunnel connected: $host:$port via $ip")
 
             clientSocket.getOutputStream().apply {
                 write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
@@ -328,7 +335,7 @@ class LocalProxyServer(
     private fun resolveHostIp(host: String): String? {
         // 1. 测速选出的最快 IP
         RouteManager.fastestIp[host]?.let {
-            Log.d(TAG, "resolveHostIp $host -> $it (fastest)")
+            Log.d(TAG, "resolveHostIp: $host -> $it (source: fastestIp)")
             return it
         }
         // 2. rule 列表轮询
@@ -336,7 +343,7 @@ class LocalProxyServer(
         if (ips.isEmpty()) return null
         val idx = ipPollIndex.getAndIncrement() % ips.size
         val ip = ips[idx]
-        Log.d(TAG, "resolveHostIp $host -> $ip (round-robin idx=$idx/${ips.size})")
+        Log.d(TAG, "resolveHostIp: $host -> $ip (source: rule/poll idx=$idx/${ips.size})")
         return ip
     }
 
@@ -353,7 +360,7 @@ class LocalProxyServer(
         } catch (_: IOException) {
             // 连接断开，正常结束
         } catch (e: Exception) {
-            Log.d(TAG, "pipe ended [$tag]: ${e.message}")
+            Log.w(TAG, "pipe error ($tag): ${e.message}")
         }
     }
 
