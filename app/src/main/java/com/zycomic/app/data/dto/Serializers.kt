@@ -109,3 +109,40 @@ object TagsSerializer : KSerializer<List<TagItem>> {
         encoder.encodeString(value.joinToString("|") { it.name })
     }
 }
+
+/**
+ * 兼容字符串和对象的图片路径列表序列化器。
+ * 服务端 piclist 每个元素可能是字符串（"path.jpg"）或对象（{"pic":"path.jpg"} / {"url":"path.jpg"}）。
+ * 对象时取 pic 或 url 字段。
+ */
+object PicListSerializer : KSerializer<List<String>> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("PicListSerializer", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): List<String> {
+        return if (decoder is JsonDecoder) {
+            when (val element = decoder.decodeJsonElement()) {
+                is JsonArray -> {
+                    element.jsonArray.mapNotNull { item ->
+                        when (item) {
+                            is JsonPrimitive -> item.content
+                            is kotlinx.serialization.json.JsonObject -> {
+                                item["pic"]?.jsonPrimitive?.content
+                                    ?: item["url"]?.jsonPrimitive?.content
+                                    ?: ""
+                            }
+                            else -> null
+                        }
+                    }.filter { it.isNotEmpty() }
+                }
+                else -> emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: List<String>) {
+        encoder.encodeString(value.joinToString(","))
+    }
+}

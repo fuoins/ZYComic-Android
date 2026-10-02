@@ -12,6 +12,7 @@ data class ChapterContent(
     @Serializable(with = StringOrIntSerializer::class)
     val id: String = "",
     val name: String = "",
+    @Serializable(with = PicListSerializer::class)
     val piclist: List<String> = emptyList(),
     @kotlinx.serialization.SerialName("img_domains")
     val imgDomains: List<String> = emptyList(),

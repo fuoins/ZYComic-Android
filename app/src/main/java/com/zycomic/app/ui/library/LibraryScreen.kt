@@ -52,7 +52,6 @@ fun LibraryScreen(
     onRequireLogin: () -> Unit,
 ) {
     val vm = remember { LibraryViewModel() }
-    val mainTab by vm.mainTab.collectAsState()
     val user by vm.user.collectAsState()
 
     LaunchedEffect(vm.needLogin) {
@@ -61,11 +60,7 @@ fun LibraryScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("书架", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        }
-        TabRow(selectedTabIndex = mainTab) {
-            Tab(selected = mainTab == 0, onClick = { vm.selectMainTab(0) }, text = { Text("收藏", color = Color.Black) })
-            Tab(selected = mainTab == 1, onClick = { vm.selectMainTab(1) }, text = { Text("阅读历史", color = Color.Black) })
+            Text("收藏", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
         }
 
         if (user == null) {
@@ -73,7 +68,36 @@ fun LibraryScreen(
             return@Column
         }
 
-        if (mainTab == 0) FavContent(vm, onOpenManga) else HistoryContent(vm, onOpenManga)
+        FavContent(vm, onOpenManga)
+    }
+}
+
+/**
+ * 独立的阅读历史页面（底部导航"历史"tab）。
+ */
+@Composable
+fun HistoryScreen(
+    onOpenManga: (String) -> Unit,
+    onRequireLogin: () -> Unit,
+) {
+    val vm = remember { LibraryViewModel() }
+    val user by vm.user.collectAsState()
+
+    LaunchedEffect(vm.needLogin) {
+        vm.needLogin.collect { if (it) onRequireLogin() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("阅读历史", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        }
+
+        if (user == null) {
+            EmptyView("请先登录", modifier = Modifier.fillMaxSize())
+            return@Column
+        }
+
+        HistoryContent(vm, onOpenManga)
     }
 }
 
@@ -166,7 +190,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
         }
 
         // 列表
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
             when {
                 loading && favs.isEmpty() -> LoadingFooter()
                 favs.isEmpty() -> EmptyView("暂无收藏")
@@ -369,7 +393,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
             }
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 items(history, key = { it.id }) { h ->
                     HistoryRow(

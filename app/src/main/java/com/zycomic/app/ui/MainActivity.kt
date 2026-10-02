@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -37,6 +38,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.lifecycleScope
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
+import com.zycomic.app.ui.library.HistoryScreen
 import com.zycomic.app.ui.library.LibraryScreen
 import com.zycomic.app.ui.login.LoginScreen
 import com.zycomic.app.ui.login.LoginOverlay
@@ -142,12 +144,18 @@ fun AppContent() {
                 NavigationBarItem(
                     selected = bottomTab == 2,
                     onClick = { bottomTab = 2 },
-                    icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
-                    label = { Text("我的") },
+                    icon = { Icon(Icons.Default.History, contentDescription = "历史") },
+                    label = { Text("历史") },
                 )
                 NavigationBarItem(
                     selected = bottomTab == 3,
                     onClick = { bottomTab = 3 },
+                    icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
+                    label = { Text("我的") },
+                )
+                NavigationBarItem(
+                    selected = bottomTab == 4,
+                    onClick = { bottomTab = 4 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
                     label = { Text("设置") },
                 )
@@ -167,10 +175,14 @@ fun AppContent() {
                     onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
                 )
-                2 -> ProfileScreen(
+                2 -> HistoryScreen(
+                    onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
                 )
-                3 -> SettingsScreen()
+                3 -> ProfileScreen(
+                    onRequireLogin = { loginOpen = true },
+                )
+                4 -> SettingsScreen()
             }
         }
     }
