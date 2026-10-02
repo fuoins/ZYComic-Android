@@ -205,7 +205,7 @@ private fun SpeedLineRow(
 }
 
 /** 延迟显示：未测="--"，失败="超时"，否则="123ms" */
-internal fun formatDelay(delay: Long?): String = when {
+private fun formatDelay(delay: Long?): String = when {
     delay == null -> "--"
     delay == Long.MAX_VALUE -> "超时"
     else -> "${delay}ms"

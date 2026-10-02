@@ -193,17 +193,12 @@ fun MangaDetailScreen(
                         Text("已收藏", style = MaterialTheme.typography.bodyMedium, color = BluePrimary, modifier = Modifier.padding(end = 8.dp))
                     }
                     IconButton(onClick = { vm.toggleFavorite() }) {
-                        androidx.compose.animation.AnimatedContent(
-                            targetState = isFav,
-                            transitionSpec = { androidx.compose.animation.core.tween(200) },
-                        ) { fav ->
-                            Icon(
-                                if (fav) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                contentDescription = "收藏",
-                                tint = if (fav) BluePrimary else TextSecondary,
-                                modifier = Modifier.size(28.dp),
-                            )
-                        }
+                        Icon(
+                            if (isFav) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = "收藏",
+                            tint = if (isFav) BluePrimary else TextSecondary,
+                            modifier = Modifier.size(28.dp),
+                        )
                     }
                 }
 
