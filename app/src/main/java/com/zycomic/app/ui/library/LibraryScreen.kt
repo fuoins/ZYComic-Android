@@ -215,24 +215,24 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                 }
             }
         }
-    }
 
-    // 多选底部栏
-    if (selectionMode) {
-        Row(
-            modifier = Modifier.fillMaxWidth().background(Color(0xFFF0F2F5)),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier.weight(1f).clickableNoRipple {
-                    if (selectedIds.isNotEmpty()) showRemoveConfirm = true
-                }.padding(vertical = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) { Text("取消收藏", color = ErrorRed) }
-            Box(
-                modifier = Modifier.weight(1f).clickableNoRipple { showMoveDialog = true }.padding(vertical = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) { Text("移动收藏夹", color = BluePrimary) }
+        // 多选底部栏
+        if (selectionMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(Color(0xFFF0F2F5)),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier.weight(1f).clickableNoRipple {
+                        if (selectedIds.isNotEmpty()) showRemoveConfirm = true
+                    }.padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("取消收藏", color = ErrorRed) }
+                Box(
+                    modifier = Modifier.weight(1f).clickableNoRipple { showMoveDialog = true }.padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("移动收藏夹", color = BluePrimary) }
+            }
         }
     }
 

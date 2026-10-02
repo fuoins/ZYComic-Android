@@ -51,7 +51,7 @@ data class HistoryItem(
 @Serializable
 data class Folder(
     val id: Int = 0,
-    val name: String = "",
+    @SerialName("title") val name: String = "",
     val count: Int = 0,
 )
 

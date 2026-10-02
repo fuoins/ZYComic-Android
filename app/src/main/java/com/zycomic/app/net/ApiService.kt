@@ -13,6 +13,7 @@ import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.ListData
 import com.zycomic.app.data.dto.LoginRequest
+import kotlinx.serialization.json.JsonElement
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.NewestResponse
 import com.zycomic.app.data.dto.PointLogResponse
@@ -99,7 +100,7 @@ interface ApiService {
     suspend fun register(@Body body: LoginRequest): ApiResponse<User>
 
     @POST("api/account/logout")
-    suspend fun logout(): ApiResponse<Unit>
+    suspend fun logout(): ApiResponse<JsonElement>
 
     @GET("api/users/info")
     suspend fun userInfo(): ApiResponse<User>
@@ -121,19 +122,19 @@ interface ApiService {
     // ---------- 收藏操作（单本） ----------
     // val=0 收藏(add), val=1 取消收藏(remove)
     @POST("api/detail/favorite")
-    suspend fun favorite(@Body body: FavoriteRequest): ApiResponse<Unit>
+    suspend fun favorite(@Body body: FavoriteRequest): ApiResponse<JsonElement>
 
     // ---------- 批量取消收藏 ----------
     // body={"ids":"id1,id2","action":"del"}
     @POST("api/users/favorite")
-    suspend fun batchFavorite(@Body body: BatchFavoriteRequest): ApiResponse<Unit>
+    suspend fun batchFavorite(@Body body: BatchFavoriteRequest): ApiResponse<JsonElement>
 
     // ---------- 收藏分类 ----------
     @GET("api/users/folder_list")
     suspend fun folderList(): ApiResponse<ListData<Folder>>
 
     @POST("api/users/favorite_folder")
-    suspend fun favoriteFolder(@Body body: FavoriteFolderRequest): ApiResponse<Unit>
+    suspend fun favoriteFolder(@Body body: FavoriteFolderRequest): ApiResponse<JsonElement>
 
     // ---------- 阅读历史 ----------
     @GET("api/users/history")
@@ -145,7 +146,7 @@ interface ApiService {
     suspend fun deleteHistory(
         @Query("ids") ids: String,
         @Query("action") action: String = "del",
-    ): ApiResponse<Unit>
+    ): ApiResponse<JsonElement>
 
     // ---------- 签到福利 ----------
     @GET("api/users/welfare")
@@ -162,9 +163,9 @@ interface ApiService {
 
     /** 添加屏蔽标签：body={"selectedTags":["tag1","tag2"]} */
     @POST("api/classes/addBlacklist")
-    suspend fun addBlacklist(@Body body: AddBlacklistRequest): ApiResponse<Unit>
+    suspend fun addBlacklist(@Body body: AddBlacklistRequest): ApiResponse<JsonElement>
 
     /** 移除屏蔽标签：body={"removeTags":["tag1","tag2"]} */
     @POST("api/classes/removeBlacklist")
-    suspend fun removeBlacklist(@Body body: RemoveBlacklistRequest): ApiResponse<Unit>
+    suspend fun removeBlacklist(@Body body: RemoveBlacklistRequest): ApiResponse<JsonElement>
 }
