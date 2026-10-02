@@ -84,22 +84,24 @@ object UserRepository {
     }
 
     /**
-     * 启动时校验登录态：调 /users/info，成功则更新 userFlow，失败则自动登出。
-     * 如果返回的用户 uid == 0，视为未登录，自动登出。
-     * @return true=登录有效，false=已登出
+     * 启动时校验登录态：调 /users/info，成功则更新 userFlow。
+     * - 服务端明确返回 uid 无效（空或 "0"）→ 调用 logout() 登出并清除 cookie。
+     * - 网络异常 → 不清除 cookie，只返回 false，保留登录态下次启动再试。
+     *   （避免首次连接超时/线路抖动导致有效 cookie 被误清除）
+     * @return true=登录有效，false=未登录或校验失败
      */
     suspend fun verifyLogin(): Boolean {
         return try {
             val info = getUserInfo()
             if (info.uid.isEmpty() || info.uid == "0") {
-                // uid == 0 视为未登录
+                // 服务端明确返回 uid 无效，视为未登录
                 logout()
                 return false
             }
             _userFlow.value = info
             true
         } catch (e: Exception) {
-            logout()
+            // 网络异常：保留 cookie，不登出，下次启动再试
             false
         }
     }
