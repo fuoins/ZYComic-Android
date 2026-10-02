@@ -30,9 +30,9 @@ data class Manga(
     val author: String = "",
     @JsonNames("serialize", "status")
     val state: String = "",          // "连载" / "完结"
-    val score: String = "",
+    val score: Int = 0,
     val hits: Int = 0,
-    val shits: Int = 0,
+    val shits: String = "",
     @JsonNames("desc", "content")
     val text: String = "",
     val nums: Int = 0,
