@@ -3,20 +3,20 @@ package com.zycomic.app.ui.settings
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.net.ManwaDns
+import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SniBypassSSLSocketFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -24,8 +24,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -48,9 +46,19 @@ class SettingsViewModel {
     // 测速
     val currentLineIndex = MutableStateFlow(RouteManager.lineIndex)
     val currentImgIndex = MutableStateFlow(RouteManager.imgIndex)
-    val testResults = MutableStateFlow<List<String>>(emptyList())
+    /** 手动测速进行中（设置页"重新测速"按钮） */
     val testing = MutableStateFlow(false)
+    /** 启动时自动测速进行中（全屏加载层） */
+    val autoSelecting = MutableStateFlow(false)
+    /** 线路延迟：index -> 毫秒，失败为 Long.MAX_VALUE */
+    val lineDelays = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE */
+    val imgDelays = MutableStateFlow<Map<Int, Long>>(emptyMap())
     val configUpdateTime = MutableStateFlow("未更新")
+
+    // 屏蔽标签弹窗提交状态
+    val addingBlacklist = MutableStateFlow(false)
+    val removingBlacklist = MutableStateFlow(false)
 
     // 开发者配置 JSON
     val devConfigJson = MutableStateFlow(RouteManager.DEFAULT_CONFIG_JSON)
@@ -91,23 +99,49 @@ class SettingsViewModel {
         }
     }
 
-    fun submitAddBlock(tags: List<String>) {
+    // ==================== 屏蔽标签添加 / 删除弹窗提交 ====================
+
+    /**
+     * 提交添加屏蔽标签。UI 已做空选中校验。
+     * 成功：toast + 刷新已屏蔽列表 + onSuccess（关闭弹窗）。
+     * 失败：toast，弹窗保留。
+     */
+    fun submitAddBlacklist(tags: List<String>, onSuccess: () -> Unit) {
         scope.launch {
+            addingBlacklist.value = true
             try {
                 TagRepository.addBlackTags(tags)
-                toast.value = "已添加屏蔽 ${tags.size} 个标签"
+                toast.value = "已添加 ${tags.size} 个标签到屏蔽列表"
                 loadBlockedTags()
-            } catch (e: Exception) { toast.value = e.message }
+                onSuccess()
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "submitAddBlacklist failed", e)
+                toast.value = "添加失败，请重试"
+            } finally {
+                addingBlacklist.value = false
+            }
         }
     }
 
-    fun submitRemoveBlock(tags: List<String>) {
+    /**
+     * 提交删除屏蔽标签。UI 已做空选中校验。
+     * 成功：toast + 刷新已屏蔽列表 + onSuccess（关闭弹窗）。
+     * 失败：toast，弹窗保留。
+     */
+    fun submitRemoveBlacklist(tags: List<String>, onSuccess: () -> Unit) {
         scope.launch {
+            removingBlacklist.value = true
             try {
                 TagRepository.removeBlackTags(tags)
-                toast.value = "已删除屏蔽 ${tags.size} 个标签"
+                toast.value = "已删除 ${tags.size} 个屏蔽标签"
                 loadBlockedTags()
-            } catch (e: Exception) { toast.value = e.message }
+                onSuccess()
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "submitRemoveBlacklist failed", e)
+                toast.value = "删除失败，请重试"
+            } finally {
+                removingBlacklist.value = false
+            }
         }
     }
 
@@ -126,43 +160,103 @@ class SettingsViewModel {
         toast.value = "已切换到图源 ${index + 1}"
     }
 
+    // ==================== HTTP 测速 ====================
+
     /**
-     * 测速：遍历所有7条线路，每条线路的每个IP单独做 TCP 443 连通性测试（2秒超时）。
-     * 不使用 HTTP 请求，仅测 TCP 连接延迟。结果按线路分组。
+     * 基于全局 client 构建 2 秒短超时副本（保留 cookie/拦截器/DNS/SNI）。
      */
+    private fun shortTimeoutClient(): OkHttpClient =
+        NetworkModule.client.newBuilder()
+            .connectTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS)
+            .build()
+
+    /** 测单条线路：GET 完整域名 URL。成功=延迟毫秒，失败=Long.MAX_VALUE。 */
+    private suspend fun measureLine(client: OkHttpClient, lineUrl: String): Long = withContext(Dispatchers.IO) {
+        val url = "$lineUrl/api/index/index?facility=android&deviceid=speedtest&timestamp=${System.currentTimeMillis()}"
+        val req = Request.Builder().url(url).get().build()
+        val start = System.nanoTime()
+        try {
+            client.newCall(req).execute().use { resp ->
+                resp.body?.bytes()
+            }
+            (System.nanoTime() - start) / 1_000_000
+        } catch (e: Exception) {
+            Long.MAX_VALUE
+        }
+    }
+
+    /** 测单个图源：GET https://host/。成功=延迟毫秒，失败=Long.MAX_VALUE。 */
+    private suspend fun measureImg(client: OkHttpClient, domain: String): Long = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("https://$domain/").get().build()
+        val start = System.nanoTime()
+        try {
+            client.newCall(req).execute().use { resp ->
+                resp.body?.bytes()
+            }
+            (System.nanoTime() - start) / 1_000_000
+        } catch (e: Exception) {
+            Long.MAX_VALUE
+        }
+    }
+
+    /** 并行测速：7 线路 + 6 图源。返回 Pair(lineDelays, imgDelays)。 */
+    private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
+        val client = shortTimeoutClient()
+        val lineResults = RouteManager.LINE_HOSTS.mapIndexed { index, url ->
+            async { index to measureLine(client, url) }
+        }.awaitAll().associate { it }
+        val imgResults = RouteManager.IMG_DOMAINS.mapIndexed { index, domain ->
+            async { index to measureImg(client, domain) }
+        }.awaitAll().associate { it }
+        lineResults to imgResults
+    }
+
+    /** 设置页"重新测速"按钮：仅测速展示，不自动切换线路。 */
     fun runSpeedTest() {
         scope.launch {
             testing.value = true
-            testResults.value = emptyList()
-            val results = mutableListOf<String>()
-
-            RouteManager.LINE_HOSTS.forEachIndexed { index, lineUrl ->
-                val host = lineUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
-                val ips = RouteManager.resolveIp(host).ifEmpty { listOf(host) }
-                val marker = if (index == RouteManager.lineIndex) " ← 当前" else ""
-                results.add("── 线路${index + 1}: $host$marker ──")
-                ips.forEach { ip ->
-                    val ms = withContext(Dispatchers.IO) {
-                        val socket = Socket()
-                        val start = System.nanoTime()
-                        try {
-                            socket.connect(InetSocketAddress(ip, 443), 2000)
-                            (System.nanoTime() - start) / 1_000_000
-                        } catch (e: Exception) {
-                            -1L
-                        } finally {
-                            try { socket.close() } catch (_: Exception) {}
-                        }
-                    }
-                    if (ms >= 0) {
-                        results.add("  $ip:443 -> ${ms}ms (TCP OK)")
-                    } else {
-                        results.add("  $ip:443 -> 失败 (TCP超时)")
-                    }
-                }
-                testResults.value = results.toList()
+            try {
+                val (lines, imgs) = runMeasure()
+                lineDelays.value = lines
+                imgDelays.value = imgs
+            } finally {
+                testing.value = false
             }
-            testing.value = false
+        }
+    }
+
+    /**
+     * App 启动自动测速 + 自动选择最快线路/图源。
+     * 成功：调用 RouteManager.setLine/setImgHost 并重建网络，返回 (最快线路索引, 最快图源索引)。
+     * 全部失败：保持当前线路，返回 (-1, -1)。
+     */
+    suspend fun autoSelectFastest(): Pair<Int, Int> {
+        autoSelecting.value = true
+        return try {
+            val (lines, imgs) = runMeasure()
+            lineDelays.value = lines
+            imgDelays.value = imgs
+
+            val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+            val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+
+            if (bestLine == null && bestImg == null) {
+                -1 to -1
+            } else {
+                if (bestLine != null) {
+                    RouteManager.setLine(bestLine)
+                    currentLineIndex.value = bestLine
+                    NetworkModule.rebuild()
+                }
+                if (bestImg != null) {
+                    RouteManager.setImgHost(bestImg)
+                    currentImgIndex.value = bestImg
+                }
+                (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
+            }
+        } finally {
+            autoSelecting.value = false
         }
     }
 
@@ -267,9 +361,6 @@ class SettingsViewModel {
                 // 解析 sni: ["domain1", "domain2"]
                 val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
                 val sniSet = sniArr.map { it.jsonPrimitive.contentOrNull ?: "" }.filter { it.isNotEmpty() }.toSet()
-
-                // port 暂存但不使用
-                // val port = root["port"]?.jsonPrimitive?.intOrNull ?: 7891
 
                 RouteManager.setCustomRule(ruleMap)
                 RouteManager.setSniDomains(sniSet)

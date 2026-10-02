@@ -4,7 +4,9 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -12,6 +14,7 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -24,8 +27,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.lifecycleScope
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
@@ -38,6 +46,7 @@ import com.zycomic.app.ui.profile.ProfileScreen
 import com.zycomic.app.ui.search.SearchScreen
 import com.zycomic.app.ui.search.SearchOverlay
 import com.zycomic.app.ui.settings.SettingsScreen
+import com.zycomic.app.ui.settings.SettingsViewModel
 import com.zycomic.app.ui.theme.ZYComicTheme
 import kotlinx.coroutines.launch
 
@@ -97,6 +106,20 @@ fun AppContent() {
     // 从详情带关键词跳到搜索 / 从详情带标签回到分类页
     var searchKeyword by remember { mutableStateOf("") }
     var pendingTag by remember { mutableStateOf<String?>(null) }
+
+    // 启动自动测速：测速期间全屏加载层覆盖
+    val speedTestVm = remember { SettingsViewModel() }
+    var speedTesting by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        val (li, ii) = speedTestVm.autoSelectFastest()
+        speedTesting = false
+        if (li == -1 && ii == -1) {
+            Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "已选择线路${li + 1} + 图源${ii + 1}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -187,5 +210,26 @@ fun AppContent() {
         LoginOverlay(
             onClose = { loginOpen = false },
         )
+    }
+
+    // ---- 启动测速全屏加载层 ----
+    if (speedTesting) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.White)
+                    androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
+                    Text("正在测速选择最快线路...", color = Color.White)
+                }
+            }
+        }
     }
 }

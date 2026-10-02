@@ -6,13 +6,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -30,9 +35,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.theme.BlueContainer
+import com.zycomic.app.ui.theme.BluePrimary
 import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
@@ -42,14 +50,17 @@ fun SettingsScreen() {
     val filterEnabled by vm.filterEnabled.collectAsState()
     val allTags by vm.allTags.collectAsState()
     val blockedTags by vm.blockedTags.collectAsState()
-    val testResults by vm.testResults.collectAsState()
     val testing by vm.testing.collectAsState()
+    val lineDelays by vm.lineDelays.collectAsState()
+    val imgDelays by vm.imgDelays.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
     val devJson by vm.devConfigJson.collectAsState()
 
     var showGayConfirm by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showRemoveDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         vm.loadAllTags()
@@ -98,20 +109,17 @@ fun SettingsScreen() {
             }
         }
 
-        TagMultiSelect(
-            title = "全部标签（搜索后多选提交）",
-            tags = allTags,
-            onSubmit = { selected -> vm.submitAddBlock(selected) },
-        )
+        Button(
+            onClick = { showAddDialog = true },
+            modifier = Modifier.padding(horizontal = 16.dp),
+        ) { Text("添加屏蔽标签（搜索后多选）") }
 
         // ===== 标签屏蔽删除 =====
         SectionTitle("删除屏蔽标签")
-        TagMultiSelect(
-            title = "已屏蔽标签",
-            tags = blockedTags,
-            allowSelectAll = true,
-            onSubmit = { selected -> vm.submitRemoveBlock(selected) },
-        )
+        Button(
+            onClick = { showRemoveDialog = true },
+            modifier = Modifier.padding(horizontal = 16.dp),
+        ) { Text("管理已屏蔽标签") }
 
         // ===== 测速日志 =====
         SectionTitle("测速日志")
@@ -122,46 +130,65 @@ fun SettingsScreen() {
             Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             RouteManager.LINE_HOSTS.forEachIndexed { index, url ->
                 val host = url.removePrefix("https://").removePrefix("http://")
+                val delay = lineDelays[index]
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable { vm.selectLine(index) }.padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "${index + 1}. $host" + if (index == currentLineIdx) "  ← 当前" else "",
+                        text = "${index + 1}. $host",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (index == currentLineIdx) com.zycomic.app.ui.theme.BluePrimary else Color.Black,
+                        color = if (index == currentLineIdx) BluePrimary else Color.Black,
                         modifier = Modifier.weight(1f),
                     )
+                    Text(
+                        text = formatDelay(delay),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            delay == null -> TextSecondary
+                            delay == Long.MAX_VALUE -> Color.Red
+                            delay < 300 -> BluePrimary
+                            else -> TextSecondary
+                        },
+                    )
+                    if (index == currentLineIdx) {
+                        Text("  ← 当前", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                    }
                 }
             }
 
             // 图源列表
             Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             RouteManager.IMG_DOMAINS.forEachIndexed { index, domain ->
+                val delay = imgDelays[index]
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable { vm.selectImgHost(index) }.padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "${index + 1}. $domain" + if (index == currentImgIdx) "  ← 当前" else "",
+                        text = "${index + 1}. $domain",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (index == currentImgIdx) com.zycomic.app.ui.theme.BluePrimary else Color.Black,
+                        color = if (index == currentImgIdx) BluePrimary else Color.Black,
                         modifier = Modifier.weight(1f),
                     )
+                    Text(
+                        text = formatDelay(delay),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            delay == null -> TextSecondary
+                            delay == Long.MAX_VALUE -> Color.Red
+                            delay < 300 -> BluePrimary
+                            else -> TextSecondary
+                        },
+                    )
+                    if (index == currentImgIdx) {
+                        Text("  ← 当前", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                    }
                 }
             }
 
             Button(onClick = { vm.runSpeedTest() }, enabled = !testing, modifier = Modifier.padding(top = 8.dp)) {
-                Text(if (testing) "测速中..." else "开始测速 (TCP 443)")
-            }
-
-            testResults.forEach { r ->
-                val isHeader = r.startsWith("──")
-                Text(
-                    r,
-                    style = if (isHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = if (isHeader) 8.dp else 2.dp),
-                )
+                Text(if (testing) "测速中..." else "重新测速")
             }
         }
 
@@ -195,7 +222,7 @@ fun SettingsScreen() {
 
     // gay 标签一键屏蔽确认对话框
     if (showGayConfirm) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { showGayConfirm = false }) {
+        Dialog(onDismissRequest = { showGayConfirm = false }) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -222,6 +249,29 @@ fun SettingsScreen() {
             }
         }
     }
+
+    // 添加屏蔽标签弹窗
+    if (showAddDialog) {
+        AddBlacklistDialog(
+            vm = vm,
+            onDismiss = { showAddDialog = false },
+        )
+    }
+
+    // 删除屏蔽标签弹窗
+    if (showRemoveDialog) {
+        RemoveBlacklistDialog(
+            vm = vm,
+            onDismiss = { showRemoveDialog = false },
+        )
+    }
+}
+
+/** 延迟显示：未测="--"，失败="失败"，否则="123ms" */
+private fun formatDelay(delay: Long?): String = when {
+    delay == null -> "--"
+    delay == Long.MAX_VALUE -> "失败"
+    else -> "${delay}ms"
 }
 
 @Composable
@@ -233,55 +283,221 @@ private fun SectionTitle(text: String) {
     )
 }
 
-@Composable
-private fun TagMultiSelect(
-    title: String,
-    tags: List<String>,
-    allowSelectAll: Boolean = true,
-    onSubmit: (List<String>) -> Unit,
-) {
-    var keyword by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+// ==================== 添加屏蔽标签弹窗 ====================
 
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        OutlinedTextField(
-            value = keyword,
-            onValueChange = { keyword = it },
-            placeholder = { Text("搜索标签") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        val filtered = if (keyword.isBlank()) tags else tags.filter { it.contains(keyword, ignoreCase = true) }
-        androidx.compose.foundation.layout.FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(vertical = 8.dp),
+@Composable
+private fun AddBlacklistDialog(
+    vm: SettingsViewModel,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val allTags by vm.allTags.collectAsState()
+    val adding by vm.addingBlacklist.collectAsState()
+
+    var keyword by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White)
+                .verticalScroll(rememberScrollState()),
         ) {
-            filtered.forEach { tag ->
-                FilterChip(
-                    text = tag,
-                    selected = selected.contains(tag),
-                    onClick = {
-                        selected = if (selected.contains(tag)) selected - tag else selected + tag
-                    },
+            // 顶部栏：标题 + 关闭
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "添加屏蔽标签（已选 ${selected.size}）",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).padding(16.dp),
                 )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                }
+            }
+
+            // 搜索框
+            OutlinedTextField(
+                value = keyword,
+                onValueChange = { keyword = it },
+                placeholder = { Text("搜索标签") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            )
+
+            // 标签流
+            val filtered = if (keyword.isBlank()) allTags
+            else allTags.filter { it.contains(keyword, ignoreCase = true) }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                filtered.forEach { tag ->
+                    FilterChip(
+                        text = tag,
+                        selected = selected.contains(tag),
+                        onClick = {
+                            selected = if (selected.contains(tag)) selected - tag else selected + tag
+                        },
+                    )
+                }
+            }
+
+            // 底部按钮
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(onClick = {
+                    selected = emptySet()
+                    keyword = ""
+                }) { Text("重置") }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = !adding,
+                    onClick = {
+                        if (selected.isEmpty()) {
+                            Toast.makeText(context, "请先选择标签", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        vm.submitAddBlacklist(selected.toList()) {
+                            onDismiss()
+                        }
+                    },
+                ) { Text(if (adding) "添加中..." else "确认添加 (${selected.size})") }
             }
         }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    }
+}
+
+// ==================== 删除屏蔽标签弹窗 ====================
+
+@Composable
+private fun RemoveBlacklistDialog(
+    vm: SettingsViewModel,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val blockedTags by vm.blockedTags.collectAsState()
+    val removing by vm.removingBlacklist.collectAsState()
+
+    var loading by remember { mutableStateOf(true) }
+    var keyword by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet) }
+    var allSelected by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        vm.loadBlockedTags()
+        loading = false
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White)
+                .verticalScroll(rememberScrollState()),
         ) {
-            if (allowSelectAll) {
-                Button(onClick = { selected = filtered.toSet() }) { Text("全选") }
+            // 顶部栏：标题 + 关闭
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "删除屏蔽标签（已选 ${selected.size}）",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).padding(16.dp),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                }
             }
-            Button(onClick = { selected = emptySet() }) { Text("重置") }
-            Button(
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    onSubmit(selected.toList())
-                    selected = emptySet()
-                },
-            ) { Text("确认添加 (${selected.size})") }
+
+            // 搜索框
+            OutlinedTextField(
+                value = keyword,
+                onValueChange = { keyword = it },
+                placeholder = { Text("搜索已屏蔽标签") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            )
+
+            val filtered = if (keyword.isBlank()) blockedTags
+            else blockedTags.filter { it.contains(keyword, ignoreCase = true) }
+
+            // 全选按钮（搜索框下方）
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        allSelected = !allSelected
+                        selected = if (allSelected) filtered.toSet()
+                        else selected - filtered.toSet()
+                    },
+                ) { Text(if (allSelected) "取消全选" else "全选(已加载出的)") }
+            }
+
+            when {
+                loading -> Text(
+                    "加载中...",
+                    modifier = Modifier.padding(16.dp),
+                    color = TextSecondary,
+                )
+                blockedTags.isEmpty() -> Text(
+                    "暂无屏蔽标签",
+                    modifier = Modifier.padding(16.dp),
+                    color = TextSecondary,
+                )
+                else -> FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    filtered.forEach { tag ->
+                        FilterChip(
+                            text = tag,
+                            selected = selected.contains(tag),
+                            onClick = {
+                                selected = if (selected.contains(tag)) selected - tag else selected + tag
+                                allSelected = false
+                            },
+                        )
+                    }
+                }
+            }
+
+            // 底部按钮
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(onClick = onDismiss) { Text("取消") }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = !removing && blockedTags.isNotEmpty(),
+                    onClick = {
+                        if (selected.isEmpty()) {
+                            Toast.makeText(context, "请先选择要删除的标签", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        vm.submitRemoveBlacklist(selected.toList()) {
+                            onDismiss()
+                        }
+                    },
+                ) { Text(if (removing) "删除中..." else "删除选中 (${selected.size})") }
+            }
         }
     }
 }
