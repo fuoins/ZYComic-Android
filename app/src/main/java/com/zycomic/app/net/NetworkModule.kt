@@ -31,8 +31,18 @@ import okhttp3.MediaType.Companion.toMediaType
  */
 object NetworkModule {
 
-    /** 全局 CookieJar 实例（所有线路共享） */
-    val cookieJar: GlobalCookieJar = GlobalCookieJar()
+    /** Application context，需在 App 启动时调用 [init] 设置 */
+    @Volatile private var appContext: android.content.Context? = null
+
+    /** 初始化网络模块（必须在首次使用前调用，传入 Application context） */
+    fun init(context: android.content.Context) {
+        appContext = context.applicationContext
+    }
+
+    /** 全局 CookieJar 实例（所有线路共享，持久化到 SharedPreferences） */
+    val cookieJar: GlobalCookieJar by lazy {
+        GlobalCookieJar(appContext ?: throw IllegalStateException("NetworkModule.init() 未调用"))
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true

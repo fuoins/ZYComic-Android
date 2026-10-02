@@ -67,7 +67,26 @@ class LibraryViewModel {
     private var favPage = 1
     private var historyPage = 1
 
-    init { loadFolders(); refreshFavorites(); refreshHistory() }
+    init {
+        loadFolders()
+        refreshFavorites()
+        refreshHistory()
+        // 监听登录态变化：登录成功后自动重新加载收藏/历史，登出后清空
+        scope.launch {
+            UserRepository.userFlow.collect { user ->
+                if (user != null) {
+                    needLogin.value = false
+                    loadFolders()
+                    refreshFavorites()
+                    refreshHistory()
+                } else {
+                    _favItems.value = emptyList()
+                    _history.value = emptyList()
+                    folders.value = emptyList()
+                }
+            }
+        }
+    }
 
     fun selectMainTab(t: Int) { mainTab.value = t }
 
@@ -75,7 +94,7 @@ class LibraryViewModel {
     fun loadFolders() {
         scope.launch {
             try { folders.value = FavoriteRepository.getFolderList() }
-            catch (_: NotLoggedInException) { needLogin.value = true }
+            catch (_: NotLoggedInException) { /* 未登录不提示，UI 层已处理 */ }
             catch (_: Exception) {}
         }
     }
@@ -103,7 +122,7 @@ class LibraryViewModel {
     }
 
     private suspend fun loadFav(reset: Boolean) {
-        if (!UserRepository.isLoggedIn) { needLogin.value = true; return }
+        if (!UserRepository.isLoggedIn) return  // 未登录不加载，UI 层用 user==null 显示"请先登录"
         if (reset) {
             favPage = 1
             _favHasMore.value = true

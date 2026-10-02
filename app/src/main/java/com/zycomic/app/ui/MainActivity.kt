@@ -56,6 +56,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // 在构建网络 client 之前应用默认配置（rule + sni）
         com.zycomic.app.net.RouteManager.applyDefaultConfig()
+        // 初始化网络模块（传入 Application context，用于 cookie 持久化）
+        com.zycomic.app.net.NetworkModule.init(this)
         setContent {
             ZYComicTheme {
                 AppContent()
