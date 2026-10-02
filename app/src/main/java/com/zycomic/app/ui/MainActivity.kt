@@ -22,6 +22,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -36,29 +37,33 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.lifecycleScope
+import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.library.HistoryScreen
 import com.zycomic.app.ui.library.LibraryScreen
-import com.zycomic.app.ui.login.LoginScreen
 import com.zycomic.app.ui.login.LoginOverlay
-import com.zycomic.app.ui.manga.MangaDetailScreen
 import com.zycomic.app.ui.manga.MangaDetailOverlay
 import com.zycomic.app.ui.profile.ProfileScreen
-import com.zycomic.app.ui.search.SearchScreen
 import com.zycomic.app.ui.search.SearchOverlay
-import com.zycomic.app.ui.settings.SettingsScreen
+import com.zycomic.app.ui.settings.AboutScreen
+import com.zycomic.app.ui.settings.AdvancedSettingsScreen
+import com.zycomic.app.ui.settings.DataStorageScreen
+import com.zycomic.app.ui.settings.SettingsMainScreen
 import com.zycomic.app.ui.settings.SettingsViewModel
+import com.zycomic.app.ui.settings.SpeedTestScreen
+import com.zycomic.app.ui.settings.TagBlockScreen
+import com.zycomic.app.ui.settings.ZYSettingsAppearanceScreen
 import com.zycomic.app.ui.theme.ZYComicTheme
+import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
+import eu.kanade.presentation.util.LocalBackPress
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // 在构建网络 client 之前应用默认配置（rule + sni）
         com.zycomic.app.net.RouteManager.applyDefaultConfig()
-        // 初始化网络模块（传入 Application context，用于 cookie 持久化）
         com.zycomic.app.net.NetworkModule.init(this)
         setContent {
             ZYComicTheme {
@@ -66,7 +71,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 启动时校验登录态；未登录则提示首次进入建议注册登录
         lifecycleScope.launch {
             val loggedIn = try {
                 UserRepository.verifyLogin()
@@ -84,39 +88,35 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/**
- * 应用根内容：底部导航 + 覆盖层状态管理。
- *
- * 覆盖层（full-screen Dialog）：
- * - detailOverlay：漫画详情
- * - searchOverlay：搜索页
- * - loginOverlay：登录页
- *
- * 阅读器已改为 komikku 原生 ReaderActivity（独立 Activity，不再是 Dialog 覆盖层）。
- *
- * 覆盖层打开时底层页面不销毁，返回时状态完全保留。
- */
+/** 设置子页面 Dialog 标识 */
+private enum class SettingsDialog {
+    Appearance, Reader, TagBlock, SpeedTest, DataStorage, Advanced, About
+}
+
 @Composable
 fun AppContent() {
     val context = LocalContext.current
 
-    var bottomTab by remember { mutableIntStateOf(0) } // 0分类 1书架 2我的 3设置
+    var bottomTab by remember { mutableIntStateOf(0) } // 0分类 1书架 2历史 3我的 4设置
 
     // 覆盖层状态
     var detailBookId by remember { mutableStateOf<String?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     var loginOpen by remember { mutableStateOf(false) }
 
-    // 从详情带关键词跳到搜索 / 从详情带标签回到分类页
     var searchKeyword by remember { mutableStateOf("") }
     var pendingTag by remember { mutableStateOf<String?>(null) }
 
-    // 启动自动测速：测速期间全屏加载层覆盖
-    val speedTestVm = remember { SettingsViewModel() }
+    // 共享的设置 ViewModel（启动测速 + 设置页共用）
+    val settingsVm = remember { SettingsViewModel() }
     var speedTesting by remember { mutableStateOf(true) }
 
+    // 设置子页面 Dialog 状态
+    var settingsDialog by remember { mutableStateOf<SettingsDialog?>(null) }
+    var showGayConfirm by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
-        val (li, ii) = speedTestVm.autoSelectFastest()
+        val (li, ii) = settingsVm.autoSelectFastest()
         speedTesting = false
         if (li == -1 && ii == -1) {
             Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
@@ -124,6 +124,26 @@ fun AppContent() {
             Toast.makeText(context, "已选择线路${li + 1} + 图源${ii + 1}", Toast.LENGTH_SHORT).show()
         }
     }
+
+    // 收集 toast 消息
+    LaunchedEffect(Unit) {
+        settingsVm.toast.collect { msg ->
+            if (msg != null) {
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                settingsVm.toast.value = null
+            }
+        }
+    }
+
+    // 统一的打开回调
+    val openAppearance = { settingsDialog = SettingsDialog.Appearance }
+    val openReader = { settingsDialog = SettingsDialog.Reader }
+    val openTagBlock = { settingsDialog = SettingsDialog.TagBlock }
+    val openSpeedTest = { settingsDialog = SettingsDialog.SpeedTest }
+    val openDataStorage = { settingsDialog = SettingsDialog.DataStorage }
+    val openAdvanced = { settingsDialog = SettingsDialog.Advanced }
+    val openAbout = { settingsDialog = SettingsDialog.About }
+    val blockGayTags = { showGayConfirm = true }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -181,8 +201,26 @@ fun AppContent() {
                 )
                 3 -> ProfileScreen(
                     onRequireLogin = { loginOpen = true },
+                    onNavigateToTab = { bottomTab = it },
+                    onOpenAppearance = openAppearance,
+                    onOpenReader = openReader,
+                    onOpenTagBlock = openTagBlock,
+                    onBlockGayTags = blockGayTags,
+                    onOpenSpeedTest = openSpeedTest,
+                    onOpenDataStorage = openDataStorage,
+                    onOpenAdvanced = openAdvanced,
+                    onOpenAbout = openAbout,
                 )
-                4 -> SettingsScreen()
+                4 -> SettingsMainScreen(
+                    onOpenAppearance = openAppearance,
+                    onOpenReader = openReader,
+                    onOpenTagBlock = openTagBlock,
+                    onBlockGayTags = blockGayTags,
+                    onOpenSpeedTest = openSpeedTest,
+                    onOpenDataStorage = openDataStorage,
+                    onOpenAdvanced = openAdvanced,
+                    onOpenAbout = openAbout,
+                )
             }
         }
     }
@@ -226,6 +264,87 @@ fun AppContent() {
         )
     }
 
+    // ---- 设置子页面全屏 Dialog ----
+    when (settingsDialog) {
+        SettingsDialog.Appearance -> {
+            KomikkuSettingsDialog(
+                screen = ZYSettingsAppearanceScreen,
+                onClose = { settingsDialog = null },
+            )
+        }
+        SettingsDialog.Reader -> {
+            KomikkuSettingsDialog(
+                screen = SettingsReaderScreen,
+                onClose = { settingsDialog = null },
+            )
+        }
+        SettingsDialog.TagBlock -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                TagBlockScreen(vm = settingsVm, onClose = { settingsDialog = null })
+            }
+        }
+        SettingsDialog.SpeedTest -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                SpeedTestScreen(vm = settingsVm, onClose = { settingsDialog = null })
+            }
+        }
+        SettingsDialog.DataStorage -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                DataStorageScreen(onClose = { settingsDialog = null })
+            }
+        }
+        SettingsDialog.Advanced -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                AdvancedSettingsScreen(
+                    vm = settingsVm,
+                    onClose = { settingsDialog = null },
+                    onOpenSpeedTest = { settingsDialog = SettingsDialog.SpeedTest },
+                )
+            }
+        }
+        SettingsDialog.About -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                AboutScreen(onClose = { settingsDialog = null })
+            }
+        }
+        null -> {}
+    }
+
+    // ---- gay 标签一键屏蔽确认对话框 ----
+    if (showGayConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showGayConfirm = false },
+            title = { Text("确认屏蔽") },
+            text = { Text("确认将 ${SettingsViewModel.GAY_TAGS.size} 个gay相关标签加入屏蔽列表？") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showGayConfirm = false
+                    settingsVm.blockGayTags()
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showGayConfirm = false }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
     // ---- 启动测速全屏加载层 ----
     if (speedTesting) {
         Dialog(
@@ -243,6 +362,33 @@ fun AppContent() {
                     androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
                     Text("正在测速选择最快线路...", color = Color.White)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 用 Voyager Navigator 包装 komikku 原生 Settings Screen，使其能在 Dialog 中运行。
+ *
+ * - Navigator 自动提供 LocalNavigator（子页面 push/pop 需要）。
+ * - LocalBackPress 提供返回按钮行为：能 pop 就 pop，否则关闭 Dialog。
+ */
+@Composable
+private fun KomikkuSettingsDialog(
+    screen: cafe.adriel.voyager.core.screen.Screen,
+    onClose: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Navigator(screen = screen) { navigator ->
+            CompositionLocalProvider(
+                LocalBackPress provides {
+                    if (navigator.canPop) navigator.pop() else onClose()
+                },
+            ) {
+                navigator.lastItem.Content()
             }
         }
     }
