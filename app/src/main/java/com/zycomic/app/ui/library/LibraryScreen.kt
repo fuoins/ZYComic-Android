@@ -126,6 +126,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var actionFolder by remember { mutableStateOf<Folder?>(null) }
     var renameTarget by remember { mutableStateOf<Folder?>(null) }
+    var showRemoveConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState.canScrollForward, favs.size) {
         val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -223,7 +224,9 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.weight(1f).clickableNoRipple { vm.batchRemove() }.padding(vertical = 14.dp),
+                modifier = Modifier.weight(1f).clickableNoRipple {
+                    if (selectedIds.isNotEmpty()) showRemoveConfirm = true
+                }.padding(vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("取消收藏", color = ErrorRed) }
             Box(
@@ -282,6 +285,28 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
             initial = f.name,
             onDismiss = { renameTarget = null },
             onConfirm = { name -> vm.renameFolder(f.id.toString(), name); renameTarget = null },
+        )
+    }
+
+    // 取消收藏确认对话框
+    if (showRemoveConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRemoveConfirm = false },
+            title = { Text("取消收藏确认") },
+            text = { Text("确定取消选中的 ${selectedIds.size} 本漫画的收藏？") },
+            confirmButton = {
+                Text("确定取消", color = ErrorRed, modifier = Modifier
+                    .clickableNoRipple {
+                        showRemoveConfirm = false
+                        vm.batchRemove()
+                    }
+                    .padding(8.dp))
+            },
+            dismissButton = {
+                Text("取消", color = TextSecondary, modifier = Modifier
+                    .clickableNoRipple { showRemoveConfirm = false }
+                    .padding(8.dp))
+            },
         )
     }
 }
@@ -362,6 +387,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
     val selMode by vm.historySelectionMode.collectAsState()
     val selIds by vm.historySelectedIds.collectAsState()
     val listState = rememberLazyListState()
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState.canScrollForward, history.size) {
         val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -420,11 +446,35 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
-                    modifier = Modifier.weight(1f).clickableNoRipple { vm.deleteSelectedHistory() }.padding(vertical = 14.dp),
+                    modifier = Modifier.weight(1f).clickableNoRipple {
+                        if (selIds.isNotEmpty()) showDeleteConfirm = true
+                    }.padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) { Text("删除", color = ErrorRed) }
             }
         }
+    }
+
+    // 删除确认对话框
+    if (showDeleteConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除确认") },
+            text = { Text("确定删除选中的 ${selIds.size} 条阅读历史？") },
+            confirmButton = {
+                Text("确定删除", color = ErrorRed, modifier = Modifier
+                    .clickableNoRipple {
+                        showDeleteConfirm = false
+                        vm.deleteSelectedHistory()
+                    }
+                    .padding(8.dp))
+            },
+            dismissButton = {
+                Text("取消", color = TextSecondary, modifier = Modifier
+                    .clickableNoRipple { showDeleteConfirm = false }
+                    .padding(8.dp))
+            },
+        )
     }
 }
 
