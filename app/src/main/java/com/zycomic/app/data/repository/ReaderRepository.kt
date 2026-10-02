@@ -58,17 +58,26 @@ object ReaderRepository {
 
     /** 获取章节内容（piclist + img_domains）。 */
     suspend fun getChapterContent(chapterId: String): ChapterContent {
-        val resp = api.chapters(chapterId)
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取章节内容失败" })
-        return resp.data ?: throw IOException("章节内容为空")
+        try {
+            val resp = api.chapters(chapterId)
+            if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取章节内容失败" })
+            val data = resp.data ?: throw IOException("章节内容为空")
+            Log.d("ReaderRepo", "章节$chapterId: piclist=${data.piclist.size}, imgDomains=${data.imgDomains}, current=${data.currentImgDomain}")
+            return data
+        } catch (e: Exception) {
+            Log.e("ReaderRepo", "获取章节内容失败 chapterId=$chapterId", e)
+            throw e
+        }
     }
 
     /**
-     * 拼接完整图片 URL：img_domains[0] + piclist[i]。
+     * 拼接完整图片 URL：优先用 _CURRENT_IMG_DOMAIN，否则用 img_domains[0]。
      * @return 完整图片 URL 列表
      */
     fun getImageUrls(chapterContent: ChapterContent): List<String> {
-        val domain = chapterContent.imgDomains.firstOrNull() ?: return emptyList()
+        val domain = chapterContent.currentImgDomain.ifBlank {
+            chapterContent.imgDomains.firstOrNull() ?: return emptyList()
+        }
         return chapterContent.piclist.map { path ->
             // 兼容路径是否已带斜杠
             val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"

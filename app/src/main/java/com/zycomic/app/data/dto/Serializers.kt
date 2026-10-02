@@ -146,3 +146,37 @@ object PicListSerializer : KSerializer<List<String>> {
         encoder.encodeString(value.joinToString(","))
     }
 }
+
+/**
+ * 兼容字符串和数组的图片域名列表序列化器。
+ * 服务端 img_domains / _ALL_IMG_DOMAINS 可能是数组（["domain1","domain2"]）或单个字符串。
+ */
+object ImgDomainsSerializer : KSerializer<List<String>> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("ImgDomainsSerializer", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): List<String> {
+        return if (decoder is JsonDecoder) {
+            when (val element = decoder.decodeJsonElement()) {
+                is JsonArray -> {
+                    element.jsonArray.mapNotNull { item ->
+                        when (item) {
+                            is JsonPrimitive -> item.content
+                            else -> null
+                        }
+                    }.filter { it.isNotEmpty() }
+                }
+                is JsonPrimitive -> {
+                    if (element.content.isNotEmpty()) listOf(element.content) else emptyList()
+                }
+                else -> emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: List<String>) {
+        encoder.encodeString(value.joinToString(","))
+    }
+}
