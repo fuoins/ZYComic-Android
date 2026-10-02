@@ -66,6 +66,15 @@ class SettingsViewModel {
     // 开发者配置 JSON
     val devConfigJson = MutableStateFlow(DevConfig.getConfigJson())
 
+    // 本地代理（SNI绕过）开关
+    val proxyEnabled = MutableStateFlow(DevConfig.isProxyEnabled())
+
+    fun setProxyEnabled(v: Boolean) {
+        DevConfig.setProxyEnabled(v)
+        proxyEnabled.value = v
+        toast.value = if (v) "已开启本地代理，重启App生效" else "已关闭本地代理（抓包模式），重启App生效"
+    }
+
     /** 提交后 toast 消息。 */
     val toast = MutableStateFlow<String?>(null)
 

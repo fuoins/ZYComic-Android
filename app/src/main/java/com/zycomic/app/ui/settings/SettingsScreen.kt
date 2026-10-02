@@ -286,6 +286,23 @@ fun SettingsScreen() {
             modifier = Modifier.padding(16.dp),
         ) { Text("更新网络配置") }
 
+        // 本地代理（SNI绕过）开关
+        val proxyEnabled by vm.proxyEnabled.collectAsState()
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("本地代理（SNI绕过）", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "开启=本地代理MITM（稳定），关闭=自定义DNS+SSLSocketFactory（抓包时用）。切换后需重启App生效。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
+            Switch(checked = proxyEnabled, onCheckedChange = { vm.setProxyEnabled(it) })
+        }
+
         // 开发者设置
         SectionTitle("开发者设置")
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {

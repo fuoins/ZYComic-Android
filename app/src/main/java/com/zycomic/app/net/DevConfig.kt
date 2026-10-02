@@ -21,6 +21,7 @@ object DevConfig {
     private const val TAG = "DevConfig"
     private const val PREFS_NAME = "zycomic_dev_config"
     private const val KEY_CONFIG_JSON = "config_json"
+    private const val KEY_PROXY_ENABLED = "proxy_enabled"
 
     private var context: Context? = null
     private var cachedJson: String? = null
@@ -40,6 +41,20 @@ object DevConfig {
     }
 
     fun getConfigJson(): String = cachedJson ?: RouteManager.DEFAULT_CONFIG_JSON
+
+    /** 本地代理（SNI绕过）开关，默认开启。 */
+    fun isProxyEnabled(): Boolean {
+        return context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            ?.getBoolean(KEY_PROXY_ENABLED, true) ?: true
+    }
+
+    /** 设置本地代理开关（需重启 App 生效）。 */
+    fun setProxyEnabled(enabled: Boolean) {
+        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putBoolean(KEY_PROXY_ENABLED, enabled)
+            ?.apply()
+    }
 
     /** 代理端口，默认 7891。 */
     fun getPort(): Int {

@@ -114,9 +114,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     override fun onCreate() {
         super<Application>.onCreate()
 
-        // 方案A：初始化本地 HTTP 代理（必须在 NetworkModule.client 首次构建之前）
+        // 初始化开发者配置
         DevConfig.init(this)
-        DevConfig.startProxy()
+        // 本地代理（SNI绕过）开关：开启时启动代理，关闭时用方案B（自定义DNS+SSLSocketFactory）
+        if (DevConfig.isProxyEnabled()) {
+            DevConfig.startProxy()
+        }
 
         patchInjekt()
         TelemetryConfig.init(
