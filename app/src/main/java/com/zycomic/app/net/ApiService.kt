@@ -9,7 +9,6 @@ import com.zycomic.app.data.dto.ClassResponse
 import com.zycomic.app.data.dto.FavoriteFolderRequest
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.FavoriteRequest
-import com.zycomic.app.data.dto.FolderListResponse
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.ListData
 import com.zycomic.app.data.dto.LoginRequest
@@ -130,7 +129,7 @@ interface ApiService {
 
     // ---------- 收藏分类 ----------
     @GET("api/users/folder_list")
-    suspend fun folderList(): FolderListResponse
+    suspend fun folderList(): ApiResponse<ListData<Folder>>
 
     @POST("api/users/favorite_folder")
     suspend fun favoriteFolder(@Body body: FavoriteFolderRequest): ApiResponse<Unit>

@@ -38,6 +38,38 @@ object StringOrIntSerializer : KSerializer<String> {
 }
 
 /**
+ * 兼容数字 0/1 和布尔值的 Boolean 序列化器。
+ * 服务端 is_new 等字段有时返回数字（0/1），有时返回布尔（true/false）。
+ * 数字非 0 视为 true，0 视为 false。
+ */
+object BooleanOrIntSerializer : KSerializer<Boolean> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("BooleanOrInt", PrimitiveKind.BOOLEAN)
+
+    override fun deserialize(decoder: Decoder): Boolean {
+        return if (decoder is JsonDecoder) {
+            when (val element = decoder.decodeJsonElement()) {
+                is JsonPrimitive -> {
+                    if (element.isString) {
+                        element.content.equals("true", ignoreCase = true) ||
+                            element.content == "1"
+                    } else {
+                        element.booleanOrNull ?: (element.intOrNull != 0)
+                    }
+                }
+                else -> false
+            }
+        } else {
+            decoder.decodeBoolean()
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Boolean) {
+        encoder.encodeBoolean(value)
+    }
+}
+
+/**
  * 兼容字符串和字符串数组的 String 序列化器。
  * 服务端 author 有时返回字符串（"作者名"），有时返回数组（["作者名"]）。
  * 数组时取第一个元素，空数组返回空字符串。

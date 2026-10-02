@@ -13,15 +13,20 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class FavoriteItem(
+    @Serializable(with = StringOrIntSerializer::class)
     val id: String = "",
-    @SerialName("book_id") val bookId: String = "",
+    @SerialName("book_id")
+    @Serializable(with = StringOrIntSerializer::class)
+    val bookId: String = "",
     @SerialName("book_name") val bookName: String = "",
     @SerialName("book_img") val bookImg: String = "",
     val end: String = "",
     @SerialName("chapter_name") val chapterName: String = "",
     @SerialName("read_last") val readLast: String = "",
     @SerialName("last_time") val lastTime: String = "",
-    @SerialName("is_new") val isNew: Boolean = false,
+    @SerialName("is_new")
+    @Serializable(with = BooleanOrIntSerializer::class)
+    val isNew: Boolean = false,
 )
 
 /**
@@ -30,8 +35,11 @@ data class FavoriteItem(
  */
 @Serializable
 data class HistoryItem(
+    @Serializable(with = StringOrIntSerializer::class)
     val id: String = "",
-    @SerialName("book_id") val bookId: String = "",
+    @SerialName("book_id")
+    @Serializable(with = StringOrIntSerializer::class)
+    val bookId: String = "",
     @SerialName("book_name") val bookName: String = "",
     @SerialName("book_img") val bookImg: String = "",
     val end: String = "",

@@ -89,7 +89,7 @@ object FavoriteRepository {
         checkLoggedIn()
         val resp = api.folderList()
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取收藏夹列表失败" })
-        return resp.data
+        return resp.data?.list ?: emptyList()
     }
 
     /** 创建收藏夹：action=moveToFolder，只传 folder_name。 */
