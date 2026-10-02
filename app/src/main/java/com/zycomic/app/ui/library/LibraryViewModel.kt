@@ -142,7 +142,7 @@ class LibraryViewModel {
 
     /** 全选已加载出的收藏；若已全选则取消全选 */
     fun toggleSelectAllLoadedFavorites() {
-        val all = _favItems.map { it.bookId }.toSet()
+        val all = _favItems.value.map { it.bookId }.toSet()
         selectedIds.value = if (selectedIds.value == all) emptySet() else all
     }
 

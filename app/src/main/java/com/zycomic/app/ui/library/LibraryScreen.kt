@@ -244,9 +244,9 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                 Text("重命名", Modifier.fillMaxWidth().clickableNoRipple {
                     renameTarget = f; actionFolder = null
                 }.padding(12.dp))
-                Text("删除", color = ErrorRed, Modifier.fillMaxWidth().clickableNoRipple {
+                Text("删除", Modifier.fillMaxWidth().clickableNoRipple {
                     vm.deleteFolder(f.id.toString()); actionFolder = null
-                }.padding(12.dp))
+                }.padding(12.dp), color = ErrorRed)
             }
         }
     }
