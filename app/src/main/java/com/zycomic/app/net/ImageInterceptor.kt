@@ -103,7 +103,7 @@ class ImageInterceptor : Interceptor {
      */
     private fun isEncryptedByMagicNumber(body: ResponseBody): Boolean {
         return try {
-            val peeked = body.peek().readByteArray(12)
+            val peeked: ByteArray = body.source().peek().readByteArray(12)
             // WebP 检测：RIFF....WEBP
             if (peeked.size >= 12 &&
                 peeked[0] == 0x52.toByte() && peeked[1] == 0x49.toByte() &&
