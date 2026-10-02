@@ -50,12 +50,8 @@ object BooleanOrIntSerializer : KSerializer<Boolean> {
         return if (decoder is JsonDecoder) {
             when (val element = decoder.decodeJsonElement()) {
                 is JsonPrimitive -> {
-                    if (element.isString) {
-                        element.content.equals("true", ignoreCase = true) ||
-                            element.content == "1"
-                    } else {
-                        element.booleanOrNull ?: (element.intOrNull != 0)
-                    }
+                    val c = element.content
+                    c.equals("true", ignoreCase = true) || c == "1"
                 }
                 else -> false
             }

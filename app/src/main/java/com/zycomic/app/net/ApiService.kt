@@ -9,6 +9,7 @@ import com.zycomic.app.data.dto.ClassResponse
 import com.zycomic.app.data.dto.FavoriteFolderRequest
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.FavoriteRequest
+import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.ListData
 import com.zycomic.app.data.dto.LoginRequest
