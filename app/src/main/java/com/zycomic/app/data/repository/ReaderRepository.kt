@@ -80,9 +80,13 @@ object ReaderRepository {
             chapterContent.imgDomains.firstOrNull() ?: return emptyList()
         }
         return chapterContent.piclist.map { path ->
-            // 兼容路径是否已带斜杠
-            val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"
-            "https://$domain$sep$path"
+            // piclist 可能已经是完整 URL（https://domain/...），直接使用；否则拼接域名
+            if (path.startsWith("http://") || path.startsWith("https://")) {
+                path
+            } else {
+                val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"
+                "https://$domain$sep$path"
+            }
         }
     }
 
