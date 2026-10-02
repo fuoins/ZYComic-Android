@@ -295,7 +295,7 @@ private fun AddBlacklistDialog(
     val adding by vm.addingBlacklist.collectAsState()
 
     var keyword by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -390,7 +390,7 @@ private fun RemoveBlacklistDialog(
 
     var loading by remember { mutableStateOf(true) }
     var keyword by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var allSelected by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {

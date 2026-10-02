@@ -49,7 +49,7 @@ object UserRepository {
         val info = getUserInfo()
         // 再次确保 uid cookie 存在（用 getUserInfo 返回的 uid）
         if (info.uid.isNotEmpty() && info.uid != "0") {
-            NetworkModule.cookieJar.add("uid", info.uid, RouteManager.currentHost)
+            NetworkModule.cookieJar.add("uid", info.uid, RouteManager.lineHost)
         }
         _userFlow.value = info
         return info

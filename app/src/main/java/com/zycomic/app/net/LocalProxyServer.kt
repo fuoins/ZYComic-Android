@@ -4,6 +4,7 @@ import android.util.Log
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import java.io.BufferedReader
 import java.io.IOException
@@ -345,7 +346,10 @@ class LocalProxyServer(
         val contentSigner = JcaContentSignerBuilder("SHA256WithRSA")
             .setProvider(BouncyCastleProvider())
             .build(keyPair.private)
-        val cert = certBuilder.build(contentSigner)
+        val certHolder = certBuilder.build(contentSigner)
+        val cert = JcaX509CertificateConverter()
+            .setProvider(BouncyCastleProvider())
+            .getCertificate(certHolder)
 
         val keyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
             load(null, null)
