@@ -2,9 +2,9 @@ package com.zycomic.app.data.repository
 
 import com.zycomic.app.data.dto.BatchFavoriteRequest
 import com.zycomic.app.data.dto.FavoriteFolderRequest
+import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.FavoriteRequest
 import com.zycomic.app.data.dto.Folder
-import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.net.NetworkModule
 import java.io.IOException
 
@@ -14,6 +14,9 @@ import java.io.IOException
  * 注意：
  * - order=1 实际是更新时间排序，order=2 实际是收藏时间排序（反直觉）。
  * - order_type: 0=降序, 1=升序。
+ * - addFavorite 传 val=0，removeFavorite 传 val=1（不要写反）。
+ * - book_id / folder_id 均为字符串。
+ * - 创建收藏夹 action=moveToFolder（不是 addFolder），只传 folder_name。
  * - 所有收藏操作前必须检查 [UserRepository.isLoggedIn]。
  */
 object FavoriteRepository {
@@ -24,36 +27,31 @@ object FavoriteRepository {
 
     /**
      * 收藏列表。
-     * @param order 1=更新时间, 2=收藏时间（反直觉）
+     * @param order 1=更新时间, 2=收藏时间（反直觉）；默认 2=收藏时间
      * @param orderType 0=降序, 1=升序
      * @param folderId 分类文件夹 ID，0=全部
-     * @param gender 性别筛选，-1=全部
-     * @param isFullVersion 0=否, 1=是, -1=全部
-     * @param isEnd 0=连载, 1=完结, -1=全部
-     * @param showOnlyUpdated 0=否, 1=是, -1=全部
+     * @param isEnd -1=全部, 0=连载, 1=完结
+     * @param isFullVersion -1=全部, 1=高清, 2=清水版, 3=未删减, 4=完整版
+     * @param showOnlyUpdated -1=全部, 1=只显示更新
      */
     suspend fun getFavorites(
         page: Int,
-        order: Int = 1,
+        order: Int = 2,
         orderType: Int = 0,
         folderId: Int = 0,
-        gender: Int = -1,
-        isFullVersion: Int = -1,
         isEnd: Int = -1,
+        isFullVersion: Int = -1,
         showOnlyUpdated: Int = -1,
-        tag: String = "",
-    ): List<Manga> {
+    ): List<FavoriteItem> {
         checkLoggedIn()
         val resp = api.favorites(
             page = page,
             order = order,
             orderType = orderType,
             folderId = folderId,
-            gender = gender,
-            isFullVersion = isFullVersion,
             isEnd = isEnd,
+            isFullVersion = isFullVersion,
             showOnlyUpdated = showOnlyUpdated,
-            tag = tag,
         )
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
         return resp.data?.list ?: emptyList()
@@ -61,23 +59,23 @@ object FavoriteRepository {
 
     // ==================== 单本收藏操作 ====================
 
-    /** 添加收藏。 */
-    suspend fun addFavorite(bookId: Int, folderId: Int = 0) {
+    /** 添加收藏：val=0。 */
+    suspend fun addFavorite(bookId: String, folderId: Int = 0) {
         checkLoggedIn()
-        val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId, folderId = folderId))
+        val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookId, folderId = folderId))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "收藏失败" })
     }
 
-    /** 取消收藏。 */
-    suspend fun removeFavorite(bookId: Int) {
+    /** 取消收藏：val=1。 */
+    suspend fun removeFavorite(bookId: String) {
         checkLoggedIn()
-        val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookId))
+        val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "取消收藏失败" })
     }
 
     // ==================== 批量操作 ====================
 
-    /** 批量取消收藏。ids 为逗号分隔的 ID 字符串。 */
+    /** 批量取消收藏。ids 为逗号分隔的 book_id 字符串。 */
     suspend fun batchRemove(ids: String) {
         checkLoggedIn()
         val resp = api.batchFavorite(BatchFavoriteRequest(ids = ids, action = "del"))
@@ -86,57 +84,57 @@ object FavoriteRepository {
 
     // ==================== 收藏分类文件夹 ====================
 
-    /** 收藏分类列表。 */
+    /** 收藏夹列表。 */
     suspend fun getFolderList(): List<Folder> {
         checkLoggedIn()
         val resp = api.folderList()
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取分类列表失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取收藏夹列表失败" })
         return resp.data
     }
 
-    /** 创建收藏分类。 */
+    /** 创建收藏夹：action=moveToFolder，只传 folder_name。 */
     suspend fun createFolder(name: String) {
         checkLoggedIn()
         val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "addFolder", newName = name)
+            FavoriteFolderRequest(action = "moveToFolder", folderName = name),
         )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "创建分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "创建收藏夹失败" })
     }
 
-    /** 重命名收藏分类。 */
-    suspend fun renameFolder(folderId: Int, name: String) {
+    /** 重命名收藏夹：action=renameFolder，folder_id + folder_name。 */
+    suspend fun renameFolder(folderId: String, name: String) {
         checkLoggedIn()
         val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "renameFolder", folderId = folderId, newName = name)
+            FavoriteFolderRequest(action = "renameFolder", folderId = folderId, folderName = name),
         )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "重命名分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "重命名收藏夹失败" })
     }
 
-    /** 删除收藏分类。 */
-    suspend fun deleteFolder(folderId: Int) {
+    /** 删除收藏夹：action=delFolder，folder_id。 */
+    suspend fun deleteFolder(folderId: String) {
         checkLoggedIn()
         val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "delFolder", folderId = folderId)
+            FavoriteFolderRequest(action = "delFolder", folderId = folderId),
         )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "删除分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "删除收藏夹失败" })
     }
 
-    /** 移动漫画到指定分类。ids 为逗号分隔的 ID 字符串。 */
-    suspend fun moveToFolder(ids: String, folderId: Int) {
+    /** 移入收藏夹：action=moveToFolder，ids + folder_id。ids 为逗号分隔的 book_id。 */
+    suspend fun moveToFolder(ids: String, folderId: String) {
         checkLoggedIn()
         val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "moveToFolder", folderId = folderId)
+            FavoriteFolderRequest(action = "moveToFolder", ids = ids, folderId = folderId),
         )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移动到分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移动到收藏夹失败" })
     }
 
-    /** 移动漫画到全部收藏夹（移出当前分类）。ids 为逗号分隔的 ID 字符串。 */
+    /** 移出收藏夹（移到全部收藏）：action=moveOutFolder，ids。ids 为逗号分隔的 book_id。 */
     suspend fun moveOutFolder(ids: String) {
         checkLoggedIn()
         val resp = api.favoriteFolder(
-            FavoriteFolderRequest(action = "moveOutFolder")
+            FavoriteFolderRequest(action = "moveOutFolder", ids = ids),
         )
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移出分类失败" })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "移出收藏夹失败" })
     }
 
     // ==================== 内部检查 ====================

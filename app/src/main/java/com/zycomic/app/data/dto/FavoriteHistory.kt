@@ -1,32 +1,42 @@
 package com.zycomic.app.data.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** 收藏项（与 Manga 结构基本一致，可能附带收藏元信息） */
+/**
+ * 收藏列表项。
+ *
+ * 注意：
+ * - book_id / book_name / book_img 均为字符串字段（snake_case）。
+ * - end 为连载状态文本（可能为空），isNew 标记是否有更新。
+ * - readLast 为“读到”章节名，chapterName 为“最新”章节名。
+ */
 @Serializable
 data class FavoriteItem(
-    val id: Int = 0,
-    val name: String = "",
-    val picx: String = "",
-    val author: String = "",
-    val state: Int = 0,
-    val score: String = "",
-    val fav: Int = 0,
-    val start: Int = 0,           // 继续阅读章节 ID
-    @kotlinx.serialization.SerialName("category_name")
-    val categoryName: String = "",
+    val id: String = "",
+    @SerialName("book_id") val bookId: String = "",
+    @SerialName("book_name") val bookName: String = "",
+    @SerialName("book_img") val bookImg: String = "",
+    val end: String = "",
+    @SerialName("chapter_name") val chapterName: String = "",
+    @SerialName("read_last") val readLast: String = "",
+    @SerialName("last_time") val lastTime: String = "",
+    @SerialName("is_new") val isNew: Boolean = false,
 )
 
-/** 阅读历史项 */
+/**
+ * 阅读历史项。
+ * 字段：id（历史记录 id）/ book_id / book_name / book_img / end / chapter_name / last_time。
+ */
 @Serializable
 data class HistoryItem(
-    val id: Int = 0,
-    val name: String = "",
-    val picx: String = "",
-    val author: String = "",
-    val chapterId: Int = 0,        // 上次阅读章节 ID
-    val chapterName: String = "",
-    val addtime: String = "",
+    val id: String = "",
+    @SerialName("book_id") val bookId: String = "",
+    @SerialName("book_name") val bookName: String = "",
+    @SerialName("book_img") val bookImg: String = "",
+    val end: String = "",
+    @SerialName("chapter_name") val chapterName: String = "",
+    @SerialName("last_time") val lastTime: String = "",
 )
 
 /** 收藏分类文件夹 */

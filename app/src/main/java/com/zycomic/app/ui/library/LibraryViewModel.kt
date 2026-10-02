@@ -1,8 +1,8 @@
 package com.zycomic.app.ui.library
 
+import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.HistoryItem
-import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.NotLoggedInException
@@ -15,28 +15,31 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/**
+ * 书架（收藏 + 阅读历史）ViewModel。
+ *
+ * - 收藏列表用 [FavoriteItem]，历史列表用 [HistoryItem]。
+ * - 收藏多选以 bookId 为 key；历史多选以历史记录 id 为 key。
+ * - 收藏与历史分别独立分页。
+ */
 class LibraryViewModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     val mainTab = MutableStateFlow(0)   // 0 收藏 / 1 阅读历史
 
-    // ---- 收藏 ----
+    // ---- 收藏夹 ----
     val folders = MutableStateFlow<List<Folder>>(emptyList())
-    val selectedFolderId = MutableStateFlow(0)
-    val isEnd = MutableStateFlow(-1)            // -1 全部 / 0 连载 / 1 完结
-    val isFullVersion = MutableStateFlow(-1)    // -1 全部 / 0 高清清水 / 1 未删减完整版
-    val showOnlyUpdated = MutableStateFlow(-1)  // -1 全部 / 1 只显示更新
-    val order = MutableStateFlow(1)             // 1 更新时间 / 2 收藏时间
-    val orderType = MutableStateFlow(0)         // 0 降序 / 1 升序
+    val selectedFolderId = MutableStateFlow(0)        // 0 = 全部收藏夹
+    val isEnd = MutableStateFlow(-1)                  // -1 全部 / 0 连载 / 1 完结
+    val isFullVersion = MutableStateFlow(-1)           // -1 全部 / 1 高清 / 2 清水 / 3 未删减 / 4 完整
+    val showOnlyUpdated = MutableStateFlow(-1)        // -1 全部 / 1 只显示更新
+    val order = MutableStateFlow(2)                   // 1 更新时间 / 2 收藏时间（默认收藏时间）
+    val orderType = MutableStateFlow(0)               // 0 降序 / 1 升序
 
-    // ---- 标签筛选 ----
-    val selectedTags = MutableStateFlow<Set<String>>(emptySet())
-    val allTags = MutableStateFlow<List<String>>(emptyList())
-    val tagsLoading = MutableStateFlow(false)
-
-    private val _favMangas = MutableStateFlow<List<Manga>>(emptyList())
-    val favMangas: StateFlow<List<Manga>> = _favMangas.asStateFlow()
+    // ---- 收藏列表 ----
+    private val _favItems = MutableStateFlow<List<FavoriteItem>>(emptyList())
+    val favItems: StateFlow<List<FavoriteItem>> = _favItems.asStateFlow()
     private val _favLoading = MutableStateFlow(false)
     val favLoading: StateFlow<Boolean> = _favLoading.asStateFlow()
     private val _favAppending = MutableStateFlow(false)
@@ -44,8 +47,9 @@ class LibraryViewModel {
     private val _favHasMore = MutableStateFlow(true)
     val favHasMore: StateFlow<Boolean> = _favHasMore.asStateFlow()
 
+    // ---- 收藏多选 ----
     val selectionMode = MutableStateFlow(false)
-    val selectedIds = MutableStateFlow<Set<Int>>(emptySet())
+    val selectedIds = MutableStateFlow<Set<String>>(emptySet())   // bookId 集合
 
     // ---- 历史 ----
     private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
@@ -55,7 +59,7 @@ class LibraryViewModel {
     private val _historyHasMore = MutableStateFlow(true)
     val historyHasMore: StateFlow<Boolean> = _historyHasMore.asStateFlow()
     val historySelectionMode = MutableStateFlow(false)
-    val historySelectedIds = MutableStateFlow<Set<Int>>(emptySet())
+    val historySelectedIds = MutableStateFlow<Set<String>>(emptySet())   // 历史记录 id 集合
 
     val needLogin = MutableStateFlow(false)
     val user = UserRepository.userFlow
@@ -67,7 +71,7 @@ class LibraryViewModel {
 
     fun selectMainTab(t: Int) { mainTab.value = t }
 
-    // ---------- 收藏 ----------
+    // ---------- 收藏夹 ----------
     fun loadFolders() {
         scope.launch {
             try { folders.value = FavoriteRepository.getFolderList() }
@@ -79,27 +83,16 @@ class LibraryViewModel {
     fun selectFolder(id: Int) { selectedFolderId.value = id; refreshFavorites() }
     fun selectIsEnd(v: Int) { isEnd.value = v; refreshFavorites() }
     fun selectIsFull(v: Int) { isFullVersion.value = v; refreshFavorites() }
-    fun toggleOnlyUpdated() {
-        showOnlyUpdated.value = if (showOnlyUpdated.value == 1) -1 else 1; refreshFavorites()
-    }
-    fun toggleOrder() { order.value = if (order.value == 1) 2 else 1; refreshFavorites() }
-    fun toggleOrderType() { orderType.value = if (orderType.value == 0) 1 else 0; refreshFavorites() }
+    fun selectShowOnlyUpdated(v: Int) { showOnlyUpdated.value = v; refreshFavorites() }
 
-    // ---------- 标签筛选 ----------
-    fun loadTagsIfNeeded() {
-        if (allTags.value.isNotEmpty()) return
-        allTags.value = com.zycomic.app.data.AllTags.LIST
-    }
-
-    fun toggleTag(tag: String) {
-        val cur = selectedTags.value.toMutableSet()
-        if (!cur.add(tag)) cur.remove(tag)
-        selectedTags.value = cur
+    /** 排序：order=1 更新时间 / 2 收藏时间；orderType=0 降序 / 1 升序 */
+    fun selectSort(order: Int, orderType: Int) {
+        this.order.value = order
+        this.orderType.value = orderType
         refreshFavorites()
     }
 
-    fun clearTags() { selectedTags.value = emptySet(); refreshFavorites() }
-
+    // ---------- 收藏列表 ----------
     fun refreshFavorites() {
         scope.launch { loadFav(reset = true) }
     }
@@ -125,10 +118,9 @@ class LibraryViewModel {
                 isEnd = isEnd.value,
                 isFullVersion = isFullVersion.value,
                 showOnlyUpdated = showOnlyUpdated.value,
-                tag = selectedTags.value.joinToString(","),
             )
             favPage++
-            _favMangas.value = if (reset) list else _favMangas.value + list
+            _favItems.value = if (reset) list else _favItems.value + list
             if (list.isEmpty()) _favHasMore.value = false
         } catch (_: NotLoggedInException) {
             needLogin.value = true
@@ -139,12 +131,19 @@ class LibraryViewModel {
         }
     }
 
+    // ---------- 收藏多选 ----------
     fun enterSelection() { selectionMode.value = true; selectedIds.value = emptySet() }
     fun exitSelection() { selectionMode.value = false; selectedIds.value = emptySet() }
-    fun toggleSelect(id: Int) {
+    fun toggleSelect(bookId: String) {
         val s = selectedIds.value.toMutableSet()
-        if (!s.add(id)) s.remove(id)
+        if (!s.add(bookId)) s.remove(bookId)
         selectedIds.value = s
+    }
+
+    /** 全选已加载出的收藏；若已全选则取消全选 */
+    fun toggleSelectAllLoadedFavorites() {
+        val all = _favItems.map { it.bookId }.toSet()
+        selectedIds.value = if (selectedIds.value == all) emptySet() else all
     }
 
     fun batchRemove() {
@@ -161,13 +160,51 @@ class LibraryViewModel {
         }
     }
 
-    fun moveSelectedTo(folderId: Int) {
+    /** 移动所选收藏到收藏夹；folderId 为 null 表示移出收藏夹（全部收藏）。 */
+    fun moveSelectedTo(folderId: String?) {
         val ids = selectedIds.value.joinToString(",")
         if (ids.isEmpty()) return
         scope.launch {
             try {
-                FavoriteRepository.moveToFolder(ids, folderId)
+                if (folderId.isNullOrBlank()) FavoriteRepository.moveOutFolder(ids)
+                else FavoriteRepository.moveToFolder(ids, folderId)
                 exitSelection()
+                refreshFavorites()
+                loadFolders()
+            } catch (_: NotLoggedInException) { needLogin.value = true }
+            catch (_: Exception) {}
+        }
+    }
+
+    // ---------- 收藏夹操作 ----------
+    fun createFolder(name: String) {
+        if (name.isBlank()) return
+        scope.launch {
+            try {
+                FavoriteRepository.createFolder(name)
+                loadFolders()
+            } catch (_: NotLoggedInException) { needLogin.value = true }
+            catch (_: Exception) {}
+        }
+    }
+
+    fun renameFolder(folderId: String, name: String) {
+        if (name.isBlank()) return
+        scope.launch {
+            try {
+                FavoriteRepository.renameFolder(folderId, name)
+                loadFolders()
+            } catch (_: NotLoggedInException) { needLogin.value = true }
+            catch (_: Exception) {}
+        }
+    }
+
+    fun deleteFolder(folderId: String) {
+        scope.launch {
+            try {
+                FavoriteRepository.deleteFolder(folderId)
+                if (selectedFolderId.value.toString() == folderId) selectedFolderId.value = 0
+                loadFolders()
                 refreshFavorites()
             } catch (_: NotLoggedInException) { needLogin.value = true }
             catch (_: Exception) {}
@@ -201,23 +238,27 @@ class LibraryViewModel {
 
     fun enterHistorySelection() { historySelectionMode.value = true; historySelectedIds.value = emptySet() }
     fun exitHistorySelection() { historySelectionMode.value = false; historySelectedIds.value = emptySet() }
-    fun toggleHistorySelect(id: Int) {
+    fun toggleHistorySelect(id: String) {
         val s = historySelectedIds.value.toMutableSet()
         if (!s.add(id)) s.remove(id)
         historySelectedIds.value = s
     }
-    fun selectAllLoadedHistory() {
-        historySelectedIds.value = _history.value.map { it.id }.toSet()
+
+    /** 全选已加载出的历史；若已全选则取消全选 */
+    fun toggleSelectAllLoadedHistory() {
+        val all = _history.value.map { it.id }.toSet()
+        historySelectedIds.value = if (historySelectedIds.value == all) emptySet() else all
     }
 
     fun deleteSelectedHistory() {
-        val ids = historySelectedIds.value.joinToString(",")
+        val ids = historySelectedIds.value
         if (ids.isEmpty()) return
         scope.launch {
             try {
-                HistoryRepository.deleteHistory(ids)
+                HistoryRepository.deleteHistory(ids.joinToString(","))
+                // 删除后从列表移除
+                _history.value = _history.value.filterNot { it.id in ids }
                 exitHistorySelection()
-                refreshHistory()
             } catch (_: Exception) {}
         }
     }

@@ -7,6 +7,7 @@ import com.zycomic.app.data.dto.BlacklistResponse
 import com.zycomic.app.data.dto.ChapterContent
 import com.zycomic.app.data.dto.ClassResponse
 import com.zycomic.app.data.dto.FavoriteFolderRequest
+import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.FavoriteRequest
 import com.zycomic.app.data.dto.FolderListResponse
 import com.zycomic.app.data.dto.HistoryItem
@@ -104,26 +105,26 @@ interface ApiService {
     suspend fun userInfo(): ApiResponse<User>
 
     // ---------- 收藏列表 ----------
-    // order=1 更新时间, order=2 收藏时间（反直觉）
+    // order=1 更新时间, order=2 收藏时间（反直觉）; order_type 0=降序 1=升序
+    // data={list:[...], limit:N}，由 ListData 包装
     @GET("api/users/favorite")
     suspend fun favorites(
         @Query("page") page: Int,
-        @Query("isFullVersion") isFullVersion: Int = -1,
-        @Query("isEnd") isEnd: Int = -1,
-        @Query("showOnlyUpdated") showOnlyUpdated: Int = -1,
-        @Query("order") order: Int = 1,
+        @Query("order") order: Int = 2,
         @Query("order_type") orderType: Int = 0,
         @Query("folder_id") folderId: Int = 0,
-        @Query("gender") gender: Int = -1,
-        @Query("tag") tag: String = "",
-    ): ApiResponse<ListData<Manga>>
+        @Query("isEnd") isEnd: Int = -1,
+        @Query("isFullVersion") isFullVersion: Int = -1,
+        @Query("showOnlyUpdated") showOnlyUpdated: Int = -1,
+    ): ApiResponse<ListData<FavoriteItem>>
 
     // ---------- 收藏操作（单本） ----------
-    // val=1 收藏, val=0 取消收藏
+    // val=0 收藏(add), val=1 取消收藏(remove)
     @POST("api/detail/favorite")
     suspend fun favorite(@Body body: FavoriteRequest): ApiResponse<Unit>
 
     // ---------- 批量取消收藏 ----------
+    // body={"ids":"id1,id2","action":"del"}
     @POST("api/users/favorite")
     suspend fun batchFavorite(@Body body: BatchFavoriteRequest): ApiResponse<Unit>
 

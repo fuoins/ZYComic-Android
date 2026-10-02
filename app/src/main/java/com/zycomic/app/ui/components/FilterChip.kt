@@ -1,8 +1,10 @@
 package com.zycomic.app.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -30,6 +32,7 @@ import com.zycomic.app.ui.theme.TextPrimary
  * - 选中：主色背景 + 白字；未选中：灰背景 + 黑字
  * - 圆角 50% 胶囊
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FilterChip(
     text: String,
@@ -37,6 +40,7 @@ fun FilterChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     bold: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(percent = 50)
     val bg = if (selected) BluePrimary else GrayChip
@@ -47,7 +51,12 @@ fun FilterChip(
         modifier = modifier
             .clip(shape)
             .background(bg)
-            .clickable(interaction, indication = null) { onClick() }
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 8.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {

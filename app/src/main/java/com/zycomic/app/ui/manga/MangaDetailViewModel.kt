@@ -65,8 +65,8 @@ class MangaDetailViewModel(private val bookId: Int) {
             favBusy.value = true
             try {
                 val d = _detail.value ?: return@launch
-                if (d.fav == 1) FavoriteRepository.removeFavorite(bookId)
-                else FavoriteRepository.addFavorite(bookId, 0)
+                if (d.fav == 1) FavoriteRepository.removeFavorite(bookId.toString())
+                else FavoriteRepository.addFavorite(bookId.toString(), 0)
                 _detail.value = d.copy(fav = if (d.fav == 1) 0 else 1)
                 UserRepository.refreshUserInfo()
             } catch (e: NotLoggedInException) {
@@ -95,7 +95,7 @@ class MangaDetailViewModel(private val bookId: Int) {
         scope.launch {
             favBusy.value = true
             try {
-                FavoriteRepository.addFavorite(bookId, folderId)
+                FavoriteRepository.addFavorite(bookId.toString(), folderId)
                 _detail.value = _detail.value?.copy(fav = 1)
                 UserRepository.refreshUserInfo()
             } catch (e: NotLoggedInException) {

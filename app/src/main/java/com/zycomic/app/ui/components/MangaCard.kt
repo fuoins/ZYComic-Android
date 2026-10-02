@@ -28,6 +28,15 @@ import com.zycomic.app.ui.theme.OffWhite
  */
 fun coverUrl(manga: Manga): String {
     val raw = manga.picx.ifBlank { manga.pic }
+    return coverUrl(raw)
+}
+
+/**
+ * 把封面原始字段拼成可加载 URL（book_img / picx / pic 通用）。
+ * 可能是完整 URL，也可能是图源相对路径；相对路径用 [RouteManager.imgHost] 补全。
+ * 封面请求会走 Coil 共享的 OkHttpClient（含 ImageInterceptor 解密）。
+ */
+fun coverUrl(raw: String): String {
     if (raw.isBlank()) return ""
     if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
     val host = RouteManager.imgHost
