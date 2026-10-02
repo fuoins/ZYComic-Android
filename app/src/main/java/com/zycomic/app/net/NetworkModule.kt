@@ -1,5 +1,7 @@
 package com.zycomic.app.net
 
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -17,7 +19,9 @@ import okhttp3.MediaType.Companion.toMediaType
 /**
  * 网络模块：构建 OkHttpClient 与 Retrofit，整合所有拦截器。
  *
- * 方案B：DNS 覆盖通过 [ManwaDns]（自定义 Dns 接口）实现，SNI 绕过通过 [SniBypassSSLSocketFactory] 实现。
+ * 方案A：所有流量走本地 HTTP 代理 [LocalProxyServer]（127.0.0.1:port）。
+ * - 代理负责 IP 直连（rule 配置）和 SNI 绕过（MITM 模式）。
+ * - 客户端→代理的 TLS 使用自签名证书，因此需要 trust-all + hostnameVerifier 信任所有。
  *
  * 拦截器链顺序（application interceptors）：
  * 1. [ManwaInterceptor]       —— 追加通用 query + 鉴权头 + 响应 AES 解密
@@ -54,7 +58,7 @@ object NetworkModule {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .cookieJar(cookieJar)
-            .dns(ManwaDns)
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
             .enableTrustAll()
             .addInterceptor(ManwaInterceptor())
             .addInterceptor(ImageInterceptor())
@@ -82,7 +86,7 @@ object NetworkModule {
         buildRetrofit()
     }
 
-    // ---- trust-all SSL（IP 直连时绕过证书校验与主机名校验） ----
+    // ---- trust-all SSL（信任代理自签名证书 + MITM 场景） ----
     private fun OkHttpClient.Builder.enableTrustAll(): OkHttpClient.Builder {
         val trustAll = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -91,7 +95,7 @@ object NetworkModule {
         }
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
-        sslSocketFactory(SniBypassSSLSocketFactory(sslContext.socketFactory), trustAll)
+        sslSocketFactory(sslContext.socketFactory, trustAll)
         hostnameVerifier(HostnameVerifier { _, _ -> true })
         return this
     }

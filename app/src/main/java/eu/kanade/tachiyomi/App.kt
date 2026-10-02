@@ -34,6 +34,7 @@ import com.elvishew.xlog.printer.AndroidPrinter
 import com.elvishew.xlog.printer.Printer
 import com.elvishew.xlog.printer.file.backup.NeverBackupStrategy
 import com.elvishew.xlog.printer.file.naming.DateFileNameGenerator
+import com.zycomic.app.net.DevConfig
 import dev.mihon.injekt.patchInjekt
 import eu.kanade.domain.DomainModule
 import eu.kanade.domain.KMKDomainModule
@@ -112,6 +113,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     @SuppressLint("LaunchActivityFromNotification")
     override fun onCreate() {
         super<Application>.onCreate()
+
+        // 方案A：初始化本地 HTTP 代理（必须在 NetworkModule.client 首次构建之前）
+        DevConfig.init(this)
+        DevConfig.startProxy()
+
         patchInjekt()
         TelemetryConfig.init(
             applicationContext,

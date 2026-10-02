@@ -11,8 +11,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * - 7 条控制面线路（接口域名），可切换。
  * - 6 个数据面图源（图片 CDN 域名），可切换。
- * - 预设 IP 映射表，供 [ManwaDns] 做 IP 直连。
- * - SNI 绕过域名列表，供 [SniBypassSSLSocketFactory] 清除 SNI。
+ * - 预设 IP 映射表，供 [LocalProxyServer] 做 IP 直连。
+ * - SNI 绕过域名列表，供 [LocalProxyServer] 做 MITM（不发 SNI）。
  */
 object RouteManager {
 

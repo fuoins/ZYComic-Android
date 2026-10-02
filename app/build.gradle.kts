@@ -193,6 +193,9 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.11.0")
 
+    // BouncyCastle for runtime self-signed certificate generation (LocalProxyServer MITM)
+    implementation("org.bouncycastle:bcpkix-jdk15on:1.70")
+
     // Data serialization (JSON, protobuf, xml)
     implementation(kotlinx.bundles.serialization)
 

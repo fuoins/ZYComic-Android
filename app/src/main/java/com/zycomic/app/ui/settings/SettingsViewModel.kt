@@ -2,10 +2,9 @@ package com.zycomic.app.ui.settings
 
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.repository.TagRepository
-import com.zycomic.app.net.ManwaDns
+import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
-import com.zycomic.app.net.SniBypassSSLSocketFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +23,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -61,7 +62,7 @@ class SettingsViewModel {
     val removingBlacklist = MutableStateFlow(false)
 
     // 开发者配置 JSON
-    val devConfigJson = MutableStateFlow(RouteManager.DEFAULT_CONFIG_JSON)
+    val devConfigJson = MutableStateFlow(DevConfig.getConfigJson())
 
     /** 提交后 toast 消息。 */
     val toast = MutableStateFlow<String?>(null)
@@ -267,7 +268,7 @@ class SettingsViewModel {
     fun updateNetworkConfig() {
         scope.launch {
             try {
-                // 构建独立的 DoH OkHttpClient（2秒超时，trust-all + ManwaDns + SniBypass）
+                // 构建独立的 DoH OkHttpClient（2秒超时，走本地代理 + trust-all）
                 val trustAll = object : X509TrustManager {
                     override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
                     override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -279,8 +280,8 @@ class SettingsViewModel {
                 val dohClient = OkHttpClient.Builder()
                     .connectTimeout(2, TimeUnit.SECONDS)
                     .readTimeout(2, TimeUnit.SECONDS)
-                    .dns(ManwaDns)
-                    .sslSocketFactory(SniBypassSSLSocketFactory(sslContext.socketFactory), trustAll)
+                    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
+                    .sslSocketFactory(sslContext.socketFactory, trustAll)
                     .hostnameVerifier { _, _ -> true }
                     .build()
 
@@ -329,10 +330,32 @@ class SettingsViewModel {
                     }
                 }
 
-                // 应用新 rule
+                // 应用新 rule 并重启代理
                 RouteManager.setCustomRule(newRuleMap)
+                // 保存到 DevConfig（保持配置一致），然后重启代理使新 IP 生效
+                val currentSni = RouteManager.sniDomains
+                val configJson = buildString {
+                    append("{\"port\":${DevConfig.getPort()},\"rule\":{")
+                    newRuleMap.entries.forEachIndexed { i, (domain, ips) ->
+                        if (i > 0) append(",")
+                        append("\"$domain\":[")
+                        ips.forEachIndexed { j, ip ->
+                            if (j > 0) append(",")
+                            append("\"$ip\"")
+                        }
+                        append("]")
+                    }
+                    append("},\"sni\":[")
+                    currentSni.forEachIndexed { i, d ->
+                        if (i > 0) append(",")
+                        append("\"$d\"")
+                    }
+                    append("]}")
+                }
+                DevConfig.saveConfig(configJson)
+                DevConfig.restartProxy()
 
-                toast.value = "更新完成，成功${successCount}个，失败${failCount}个"
+                toast.value = "更新完成，成功${successCount}个，失败${failCount}个（代理已重启）"
                 configUpdateTime.value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "updateNetworkConfig failed", e)
@@ -347,24 +370,12 @@ class SettingsViewModel {
     fun saveDevConfig(jsonStr: String) {
         scope.launch {
             try {
-                val json = Json { ignoreUnknownKeys = true }
-                val root = json.parseToJsonElement(jsonStr).jsonObject
-
-                // 解析 rule: {"domain": ["ip1", "ip2"]}
-                val ruleObj = root["rule"]?.jsonObject ?: emptyMap()
-                val ruleMap = mutableMapOf<String, List<String>>()
-                ruleObj.forEach { (domain, arr) ->
-                    val ips = arr.jsonArray.map { it.jsonPrimitive.contentOrNull ?: "" }.filter { it.isNotEmpty() }
-                    ruleMap[domain] = ips
-                }
-
-                // 解析 sni: ["domain1", "domain2"]
-                val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
-                val sniSet = sniArr.map { it.jsonPrimitive.contentOrNull ?: "" }.filter { it.isNotEmpty() }.toSet()
-
-                RouteManager.setCustomRule(ruleMap)
-                RouteManager.setSniDomains(sniSet)
-                toast.value = "配置已保存（${ruleMap.size}条rule, ${sniSet.size}条sni）"
+                DevConfig.applyConfig(jsonStr)
+                // 重启代理使新配置生效
+                DevConfig.restartProxy()
+                val ruleCount = DevConfig.getRule().size
+                val sniCount = DevConfig.getSniDomains().size
+                toast.value = "配置已保存并重启代理（${ruleCount}条rule, ${sniCount}条sni, port=${DevConfig.getPort()}）"
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "saveDevConfig failed", e)
                 toast.value = "配置解析失败: ${e.message}"
