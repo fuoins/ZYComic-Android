@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 /** 用户信息 */
 @Serializable
 data class User(
+    @Serializable(with = StringOrIntSerializer::class)
     val uid: String = "",
     val point: Int = 0,
     val level: Int = 0,

@@ -14,6 +14,7 @@ data class Manga(
     val nickname: String = "",
     val picx: String = "",
     val pic: String = "",
+    @Serializable(with = StringOrListSerializer::class)
     val author: String = "",
     val state: Int = 0,          // 0 连载中 / 1 完结
     val score: String = "",
@@ -27,6 +28,7 @@ data class Manga(
     val start: Int = 0,          // 继续阅读章节 ID
     @SerialName("book_area") val bookArea: String = "",
     @SerialName("category_name") val categoryName: String = "",
+    @Serializable(with = TagsSerializer::class)
     val tags: List<TagItem> = emptyList(),
     @SerialName("chapter_list") val chapterList: List<Chapter> = emptyList(),
     @SerialName("love_list") val loveList: List<Manga> = emptyList(),
