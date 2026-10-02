@@ -180,27 +180,30 @@ fun MangaDetailScreen(
                     }
                 }
 
-                // 收藏区域
+                // 收藏按钮（点击切换收藏/取消收藏，带状态动画）
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = if (detail!!.fav == 1) "已收藏" else "未收藏",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { vm.openFolderPicker(); showFolderDialog = true }) {
-                        Icon(Icons.Default.BookmarkBorder, contentDescription = "选择收藏夹")
+                    val isFav = detail!!.fav == 1
+                    androidx.compose.animation.AnimatedVisibility(visible = isFav) {
+                        Text("已收藏", style = MaterialTheme.typography.bodyMedium, color = BluePrimary, modifier = Modifier.padding(end = 8.dp))
                     }
                     IconButton(onClick = { vm.toggleFavorite() }) {
-                        Icon(
-                            if (detail!!.fav == 1) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = "快速收藏",
-                            tint = if (detail!!.fav == 1) BluePrimary else TextSecondary,
-                        )
+                        androidx.compose.animation.AnimatedContent(
+                            targetState = isFav,
+                            transitionSpec = { androidx.compose.animation.core.tween(200) },
+                        ) { fav ->
+                            Icon(
+                                if (fav) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = "收藏",
+                                tint = if (fav) BluePrimary else TextSecondary,
+                                modifier = Modifier.size(28.dp),
+                            )
+                        }
                     }
                 }
 
