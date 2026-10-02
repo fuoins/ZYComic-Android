@@ -25,7 +25,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetSocketAddress
 import java.net.Proxy
-import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -210,101 +209,24 @@ class SettingsViewModel {
     }
 
     /**
-     * 对单个 IP 做原始 Socket TCP 连通测速（直连 IP:port，不走代理）。
-     * 成功=连接耗时毫秒，失败=Long.MAX_VALUE。
-     */
-    private fun measureTcp(ip: String, port: Int): Long {
-        val socket = Socket()
-        return try {
-            val start = System.nanoTime()
-            socket.connect(InetSocketAddress(ip, port), 2000)
-            (System.nanoTime() - start) / 1_000_000
-        } catch (e: Exception) {
-            Long.MAX_VALUE
-        } finally {
-            try { socket.close() } catch (_: Exception) {}
-        }
-    }
-
-    /**
-     * 对某域名测速：从 DevConfig.getRule() 取该域名的 IP 列表，
-     * 对每个 IP 做 TCP 连通测试，取最快 IP 的延迟作为该域名 TCP 延迟，
-     * 并把最快 IP 写入 [RouteManager.fastestIp] 供代理优先使用。
-     * @return Pair(最快TCP延迟, 所有IP的TCP延迟map)，无IP列表时返回(Long.MAX_VALUE, emptyMap)
-     */
-    private suspend fun measureHostByIp(host: String, port: Int): Pair<Long, Map<String, Long>> = withContext(Dispatchers.IO) {
-        val ips = DevConfig.getRule()[host]
-        if (ips.isNullOrEmpty()) return@withContext Long.MAX_VALUE to emptyMap()
-        val ipDelayMap = mutableMapOf<String, Long>()
-        var bestDelay = Long.MAX_VALUE
-        var bestIp: String? = null
-        for (ip in ips) {
-            val d = measureTcp(ip, port)
-            ipDelayMap[ip] = d
-            if (d < bestDelay) {
-                bestDelay = d
-                bestIp = ip
-            }
-        }
-        if (bestIp != null && bestDelay < Long.MAX_VALUE) {
-            RouteManager.setFastestIp(host, bestIp)
-        }
-        bestDelay to ipDelayMap
-    }
-
-    /**
-     * 并行测速：先并行测所有域名的TCP（每个域名内部串行测IP，用于选最快IP+记录每IP延迟），
-     * 再并行测所有域名的HTTP（走代理，抓包可见）。
-     * 域名最终延迟 = HTTP延迟（成功时），否则 = TCP最快延迟。
+     * 纯 HTTP 并行测速：所有线路/图源并行发 HTTP GET，延迟毫秒为结果，失败=Long.MAX_VALUE。
+     * 走本地代理（抓包可见）。
      */
     private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
         val client = shortTimeoutClient()
 
-        // ---- Step 1: TCP 测速（所有域名并行，每个域名内部串行测IP）----
-        // 线路: List<Pair<host, Pair<tcpBest, ipMap>>>
-        val lineTcp = RouteManager.LINE_HOSTS.map { url ->
-            async {
-                val host = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
-                val port = if (url.startsWith("http://")) 80 else 443
-                host to measureHostByIp(host, port)
-            }
-        }.awaitAll()
-
-        // 图源: List<Pair<domain, Pair<tcpBest, ipMap>>>
-        val imgTcp = RouteManager.IMG_DOMAINS.map { domain ->
-            async {
-                domain to measureHostByIp(domain, 443)
-            }
-        }.awaitAll()
-
-        // ---- Step 2: HTTP 测速（走代理，抓包可见，所有域名并行）----
+        // 线路 HTTP 测速（并行）
         val lineHttp = RouteManager.LINE_HOSTS.map { url ->
             async { measureLine(client, url) }
         }.awaitAll()
 
+        // 图源 HTTP 测速（并行）
         val imgHttp = RouteManager.IMG_DOMAINS.map { domain ->
             async { measureImg(client, domain) }
         }.awaitAll()
 
-        // ---- Step 3: 合并结果（域名延迟 = HTTP成功用HTTP，否则用TCP最快）----
-        val lineResults = lineHttp.mapIndexed { index, httpDelay ->
-            val tcpBest = lineTcp[index].second.first
-            val finalDelay = if (httpDelay < Long.MAX_VALUE) httpDelay else tcpBest
-            index to finalDelay
-        }.toMap()
-
-        val imgResults = imgHttp.mapIndexed { index, httpDelay ->
-            val tcpBest = imgTcp[index].second.first
-            val finalDelay = if (httpDelay < Long.MAX_VALUE) httpDelay else tcpBest
-            index to finalDelay
-        }.toMap()
-
-        // ---- Step 4: 汇总每IP延迟并持久化 ----
-        val allIpDelays = mutableMapOf<String, Map<String, Long>>()
-        lineTcp.forEach { (host, pair) -> if (pair.second.isNotEmpty()) allIpDelays[host] = pair.second }
-        imgTcp.forEach { (domain, pair) -> if (pair.second.isNotEmpty()) allIpDelays[domain] = pair.second }
-        ipDelays.value = allIpDelays
-        RouteManager.setLastIpDelays(allIpDelays)
+        val lineResults = lineHttp.mapIndexed { index, delay -> index to delay }.toMap()
+        val imgResults = imgHttp.mapIndexed { index, delay -> index to delay }.toMap()
 
         lineResults to imgResults
     }
