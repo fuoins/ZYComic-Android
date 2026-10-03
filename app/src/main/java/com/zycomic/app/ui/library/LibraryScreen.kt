@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -19,6 +20,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,11 +81,9 @@ import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
+import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
-import tachiyomi.core.common.preference.TriState
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
-import tachiyomi.presentation.core.components.SortItem
-import tachiyomi.presentation.core.components.TriStateItem
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
@@ -259,7 +262,52 @@ fun LibraryScreen(
                 message = if (!searchQuery.isNullOrBlank()) "没有搜索结果" else "暂无收藏",
                 modifier = Modifier.padding(contentPadding),
             )
-            else -> FastScrollLazyColumn(
+            else if (displayMode <= 2) {
+                // 网格模式：0=紧凑 1=舒适 2=仅封面
+                val columns = if (displayMode == 1) 2 else 3
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (!searchQuery.isNullOrBlank()) {
+                        item(key = "global-search", contentType = "global-search", span = { GridItemSpan(columns) }) {
+                            TextButton(
+                                onClick = onOpenSearch,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            ) {
+                                Text(text = "全局搜索：${searchQuery}", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                    gridItems(filtered, key = { it.bookId }, contentType = { "grid" }) { item ->
+                        FavGridItem(
+                            item = item,
+                            displayMode = displayMode,
+                            selected = selectedIds.contains(item.bookId),
+                            selectionMode = selectionMode,
+                            showUnreadBadge = showUnreadBadge,
+                            showUpdateBadge = showUpdateBadge,
+                            onClick = {
+                                if (selectionMode) vm.toggleSelect(item.bookId)
+                                else onOpenManga(item.bookId)
+                            },
+                            onLongClick = { if (!selectionMode) vm.enterSelectionAndSelect(item.bookId) },
+                        )
+                    }
+                    if (appending) {
+                        item(key = "loading-footer", contentType = "footer", span = { GridItemSpan(columns) }) { LoadingFooter() }
+                    } else if (!hasMore) {
+                        item(key = "no-more", contentType = "footer", span = { GridItemSpan(columns) }) {
+                            Text(text = "没有更多了", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(16.dp))
+                        }
+                    }
+                }
+            } else FastScrollLazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
@@ -432,6 +480,83 @@ fun LibraryScreen(
 private fun FavoriteItem.isUnread(): Boolean =
     chapterName.isNotBlank() && readLast != chapterName
 
+/** 网格项：封面+漫画名（仅封面网格只有封面）。 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FavGridItem(
+    item: FavoriteItem,
+    displayMode: Int,
+    selected: Boolean,
+    selectionMode: Boolean,
+    showUnreadBadge: Boolean,
+    showUpdateBadge: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    Column(
+        modifier = Modifier
+            .selectedBackground(selected)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            )
+            .padding(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // 封面用 AspectRatio 保持 3:4 比例
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .clip(RoundedCornerShape(8.dp)),
+        ) {
+            AsyncImage(
+                model = coverUrl(item.bookImg),
+                contentDescription = item.bookName,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+            // 未读完标记（左上角）
+            if (showUnreadBadge && item.isUnread()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text("未读", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            // 更新标记（右下角 NEW）
+            if (showUpdateBadge && item.isNew) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .background(MaterialTheme.colorScheme.error)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text("NEW", color = MaterialTheme.colorScheme.onError, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        // 仅封面网格不显示标题
+        if (displayMode != 2) {
+            Text(
+                text = item.bookName,
+                style = if (displayMode == 1) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FavItemRow(
@@ -445,7 +570,7 @@ private fun FavItemRow(
     onLongClick: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
-    if (displayMode == 1) {
+    if (displayMode == 4) {
         // 列表2（历史页样式）
         Row(
             modifier = Modifier
@@ -498,8 +623,40 @@ private fun FavItemRow(
                 )
             }
         }
+    } else if (displayMode == 3) {
+        // 列表1（只有封面+标题）
+        Row(
+            modifier = Modifier
+                .selectedBackground(selected)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick()
+                    },
+                )
+                .fillMaxWidth()
+                .height(56.dp)
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CoverWithBadges(
+                item = item,
+                coverWidth = 40.dp,
+                coverHeight = 48.dp,
+                showUnreadBadge = showUnreadBadge,
+                showUpdateBadge = showUpdateBadge,
+            )
+            Text(
+                text = item.bookName,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
     } else {
-        // 默认列表（komikku LibraryList 风格）
+        // 列表3（当前详细样式）
         Row(
             modifier = Modifier
                 .selectedBackground(selected)
@@ -616,8 +773,6 @@ private fun FilterDialog(
     onNewFolder: () -> Unit,
     onRenameFolder: (Folder) -> Unit,
 ) {
-    var tab by remember { mutableIntStateOf(0) }
-
     val folders by vm.folders.collectAsState()
     val selectedFolder by vm.selectedFolderId.collectAsState()
     val isFull by vm.isFullVersion.collectAsState()
@@ -631,163 +786,168 @@ private fun FilterDialog(
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
 
-    Dialog(onDismissRequest = onDismiss) {
+    TabbedDialog(
+        onDismissRequest = onDismiss,
+        tabTitles = persistentListOf("筛选", "排序", "显示", "管理"),
+    ) { page ->
         Column(
             modifier = Modifier
-                .background(MaterialTheme.colorScheme.surface)
-                .fillMaxWidth(0.95f),
+                .verticalScroll(rememberScrollState()),
         ) {
-            TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("筛选") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("排序") })
-                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("显示") })
-                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("管理") })
-            }
-
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 440.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                when (tab) {
-                    0 -> {
-                        // 三态筛选：未读完 / 阅读过 / 完结
-                        TriStateItem(
-                            label = "未读完",
-                            state = when (isUnread) {
-                                1 -> TriState.ENABLED_IS
-                                0 -> TriState.DISABLED
-                                else -> TriState.DISABLED
-                            },
-                            onClick = { vm.selectIsUnread(toggleTriState(isUnread)) },
-                        )
-                        TriStateItem(
-                            label = "阅读过",
-                            state = when (isRead) {
-                                1 -> TriState.ENABLED_IS
-                                0 -> TriState.DISABLED
-                                else -> TriState.DISABLED
-                            },
-                            onClick = { vm.selectIsRead(toggleTriState(isRead)) },
-                        )
-                        TriStateItem(
-                            label = "完结",
-                            state = when (isEnd) {
-                                1 -> TriState.ENABLED_IS
-                                0 -> TriState.DISABLED
-                                else -> TriState.DISABLED
-                            },
-                            onClick = { vm.selectIsEnd(toggleTriState(isEnd)) },
-                        )
-                        HorizontalDivider()
-                        // 收藏夹（单选，服务端筛选）
-                        SingleChoiceChipRow(
-                            options = buildList {
-                                add(0 to "全部收藏夹")
-                                folders.forEach { add(it.id to it.name) }
-                            },
-                            selected = selectedFolder,
-                            onSelect = { vm.selectFolder(it) },
-                        )
-                        HorizontalDivider()
-                        // 画质（单选，服务端筛选）
-                        SingleChoiceChipRow(
-                            options = listOf(-1 to "全部", 1 to "高清", 2 to "清水版", 3 to "未删减", 4 to "完整版"),
-                            selected = isFull,
-                            onSelect = { vm.selectIsFull(it) },
-                        )
-                        HorizontalDivider()
-                        // 只显示更新（单选，客户端筛选）
-                        SingleChoiceChipRow(
-                            options = listOf(0 to "关闭只显示更新", 1 to "只显示更新"),
-                            selected = if (onlyUpdated) 1 else 0,
-                            onSelect = { vm.selectOnlyUpdated(it == 1) },
-                        )
-                    }
-                    1 -> {
-                        SortItem(
-                            label = "收藏日期",
-                            sortDescending = if (order == 2) orderType == 0 else null,
-                            onClick = {
-                                if (order == 2) vm.selectSort(2, if (orderType == 0) 1 else 0)
-                                else vm.selectSort(2, 0)
-                            },
-                        )
-                        SortItem(
-                            label = "更新日期",
-                            sortDescending = if (order == 1) orderType == 0 else null,
-                            onClick = {
-                                if (order == 1) vm.selectSort(1, if (orderType == 0) 1 else 0)
-                                else vm.selectSort(1, 0)
-                            },
-                        )
-                    }
-                    2 -> {
-                        SwitchRow(
-                            title = "列表2",
-                            checked = displayMode == 1,
-                            onChange = { vm.selectDisplayMode(if (it) 1 else 0) },
-                        )
-                        SwitchRow(
-                            title = "未读完标记",
-                            checked = showUnreadBadge,
-                            onChange = { vm.toggleShowUnreadBadge() },
-                        )
-                        SwitchRow(
-                            title = "更新标记",
-                            checked = showUpdateBadge,
-                            onChange = { vm.toggleShowUpdateBadge() },
-                        )
-                    }
-                    3 -> {
+            when (page) {
+                0 -> {
+                    // 未读完（客户端筛选）
+                    SingleChoiceChipRow(
+                        title = "未读完",
+                        options = listOf(-1 to "全部", 1 to "未读完", 0 to "已读完"),
+                        selected = isUnread,
+                        onSelect = { vm.selectIsUnread(it) },
+                    )
+                    HorizontalDivider()
+                    // 阅读过（客户端筛选）
+                    SingleChoiceChipRow(
+                        title = "阅读过",
+                        options = listOf(-1 to "全部", 1 to "阅读过", 0 to "未读过"),
+                        selected = isRead,
+                        onSelect = { vm.selectIsRead(it) },
+                    )
+                    HorizontalDivider()
+                    // 完结（客户端筛选）
+                    SingleChoiceChipRow(
+                        title = "完结",
+                        options = listOf(-1 to "全部", 1 to "完结", 0 to "连载"),
+                        selected = isEnd,
+                        onSelect = { vm.selectIsEnd(it) },
+                    )
+                    HorizontalDivider()
+                    // 收藏夹（服务端筛选）
+                    SingleChoiceChipRow(
+                        title = "收藏夹",
+                        options = buildList {
+                            add(0 to "全部收藏夹")
+                            folders.forEach { add(it.id to it.name) }
+                        },
+                        selected = selectedFolder,
+                        onSelect = { vm.selectFolder(it) },
+                    )
+                    HorizontalDivider()
+                    // 画质（服务端筛选）
+                    SingleChoiceChipRow(
+                        title = "画质",
+                        options = listOf(-1 to "全部", 1 to "高清", 2 to "清水版", 3 to "未删减", 4 to "完整版"),
+                        selected = isFull,
+                        onSelect = { vm.selectIsFull(it) },
+                    )
+                    HorizontalDivider()
+                    // 只显示更新（客户端筛选）
+                    SingleChoiceChipRow(
+                        title = "只显示更新",
+                        options = listOf(0 to "全部", 1 to "只显示更新"),
+                        selected = if (onlyUpdated) 1 else 0,
+                        onSelect = { vm.selectOnlyUpdated(it == 1) },
+                    )
+                }
+                1 -> {
+                    // 排序（客户端本地排序，请求时也带参数）
+                    SingleChoiceChipRow(
+                        title = "排序",
+                        options = listOf(
+                            0 to "收藏降序",
+                            1 to "收藏升序",
+                            2 to "更新降序",
+                            3 to "更新升序",
+                        ),
+                        selected = when {
+                            order == 2 && orderType == 0 -> 0
+                            order == 2 && orderType == 1 -> 1
+                            order == 1 && orderType == 0 -> 2
+                            else -> 3
+                        },
+                        onSelect = {
+                            when (it) {
+                                0 -> vm.selectSort(2, 0)
+                                1 -> vm.selectSort(2, 1)
+                                2 -> vm.selectSort(1, 0)
+                                else -> vm.selectSort(1, 1)
+                            }
+                        },
+                    )
+                }
+                2 -> {
+                    // 显示模式
+                    SingleChoiceChipRow(
+                        title = "显示模式",
+                        options = listOf(
+                            0 to "紧凑网格",
+                            1 to "舒适网格",
+                            2 to "仅封面网格",
+                            3 to "列表1",
+                            4 to "列表2",
+                            5 to "列表3",
+                        ),
+                        selected = displayMode,
+                        onSelect = { vm.selectDisplayMode(it) },
+                    )
+                    HorizontalDivider()
+                    SwitchRow(
+                        title = "未读完标记",
+                        checked = showUnreadBadge,
+                        onChange = { vm.toggleShowUnreadBadge() },
+                    )
+                    SwitchRow(
+                        title = "更新标记",
+                        checked = showUpdateBadge,
+                        onChange = { vm.toggleShowUpdateBadge() },
+                    )
+                }
+                3 -> {
+                    Text(
+                        "＋ 新建收藏夹",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickableNoRipple(onNewFolder)
+                            .padding(16.dp),
+                    )
+                    if (folders.isEmpty()) {
                         Text(
-                            "＋ 新建收藏夹",
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.bodyLarge,
+                            "暂无收藏夹",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                    folders.forEach { f ->
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickableNoRipple(onNewFolder)
-                                .padding(16.dp),
-                        )
-                        if (folders.isEmpty()) {
-                            Text(
-                                "暂无收藏夹",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(16.dp),
-                            )
-                        }
-                        folders.forEach { f ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(f.name, style = MaterialTheme.typography.bodyLarge)
-                                    Text(
-                                        "${f.count} 本",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(f.name, style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    "重命名",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier
-                                        .clickableNoRipple { onRenameFolder(f) }
-                                        .padding(8.dp),
-                                )
-                                Text(
-                                    "删除",
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier
-                                        .clickableNoRipple { vm.deleteFolder(f.id.toString()) }
-                                        .padding(8.dp),
+                                    "${f.count} 本",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Text(
+                                "重命名",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .clickableNoRipple { onRenameFolder(f) }
+                                    .padding(8.dp),
+                            )
+                            Text(
+                                "删除",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .clickableNoRipple { vm.deleteFolder(f.id.toString()) }
+                                    .padding(8.dp),
+                            )
                         }
                     }
                 }
@@ -796,34 +956,33 @@ private fun FilterDialog(
     }
 }
 
-/** 三态值循环切换：IGNORE(-1) -> ENABLED_IS(1) -> DISABLED(0) -> IGNORE(-1)。 */
-private fun toggleTriState(current: Int): Int = when (current) {
-    -1 -> 1
-    1 -> 0
-    else -> -1
-}
-
-/** 单选芯片行：FlowRow 自动换行，选中态高亮，只能选一个。 */
+/** 单选芯片行：标题 + FlowRow 自动换行，选中态高亮，只能选一个。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SingleChoiceChipRow(
+    title: String,
     options: List<Pair<Int, String>>,
     selected: Int,
     onSelect: (Int) -> Unit,
 ) {
-    FlowRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        options.forEach { (value, label) ->
-            FilterChip(
-                text = label,
-                selected = selected == value,
-                onClick = { onSelect(value) },
-            )
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            options.forEach { (value, label) ->
+                FilterChip(
+                    text = label,
+                    selected = selected == value,
+                    onClick = { onSelect(value) },
+                )
+            }
         }
     }
 }

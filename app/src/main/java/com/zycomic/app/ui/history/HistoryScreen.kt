@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -311,14 +312,15 @@ private fun HistoryItemRow(
             )
             .fillMaxWidth()
             .height(96.dp)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = coverUrl(item.bookImg),
             contentDescription = item.bookName,
             modifier = Modifier
-                .size(width = 48.dp, height = 64.dp)
+                .fillMaxHeight()
+                .aspectRatio(3f / 4f)
                 .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .combinedClickable(

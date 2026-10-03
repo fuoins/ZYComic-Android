@@ -60,7 +60,8 @@ class LibraryViewModel(val mode: Int = 2) {
     val isReadFilter = MutableStateFlow(-1)     // -1 全部 / 0 未阅读过 / 1 阅读过
     val isEndFilter = MutableStateFlow(-1)      // -1 全部 / 0 连载中 / 1 已完结（客户端筛选）
     val onlyUpdatedFilter = MutableStateFlow(false) // false=关闭只显示更新 / true=只显示更新（客户端筛选）
-    val displayMode = MutableStateFlow(0)       // 0 默认列表 / 1 列表2(历史样式)
+    // 显示模式：0=紧凑网格 1=舒适网格 2=仅封面网格 3=列表1(封面+标题) 4=列表2(历史样式) 5=列表3(当前样式,默认)
+    val displayMode = MutableStateFlow(5)
     val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
     val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
 
