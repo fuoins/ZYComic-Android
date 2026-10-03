@@ -110,26 +110,21 @@ class MangaDetailViewModel(private val bookId: String) {
         }
     }
 
-    /** 章节排序 key：sort 优先，sort 为 0 时回退到章节 id。 */
-    private fun chapterSortKey(ch: Chapter): Long =
-        if (ch.sort == 0) ch.id.toLongOrNull() ?: 0L else ch.sort.toLong()
-
-    /** 章节列表（按排序）。 */
+    /** 章节列表：服务端返回顺序即降序（最新在前），升序时反转。 */
     fun sortedChapters(): List<Chapter> {
         val list = _detail.value?.chapterList ?: return emptyList()
-        return if (chapterAsc.value) list.sortedBy { chapterSortKey(it) }
-        else list.sortedByDescending { chapterSortKey(it) }
+        return if (chapterAsc.value) list.reversed() else list.toList()
     }
 
     /**
      * 继续阅读章节 ID（字符串）。
      * 规则：detail.start 非空且不为 "0" 时直接用（上次阅读章节）；
-     * 否则返回第一章（sort/id 最小的章节）。
+     * 否则返回第一章（服务端降序返回，第一章在列表末尾）。
      */
     fun defaultChapterId(): String {
         val list = _detail.value?.chapterList ?: return ""
         val d = _detail.value!!
         if (d.start.isNotBlank() && d.start != "0") return d.start
-        return list.minByOrNull { chapterSortKey(it) }.let { it?.id ?: "" }
+        return list.lastOrNull()?.id ?: ""
     }
 }
