@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -56,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
-import coil.compose.AsyncImage
+import io.coil.compose.AsyncImage
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Manga
 import eu.kanade.presentation.components.AppBar
@@ -634,7 +636,7 @@ private fun FolderSelectDialog(
                                     .background(if (selectedFolder == folder.id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
                                     .padding(4.dp),
                             )
-                            Text(folder.title, style = MaterialTheme.typography.bodyMedium)
+                            Text(folder.name, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
