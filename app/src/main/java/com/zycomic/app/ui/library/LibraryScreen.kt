@@ -63,6 +63,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -527,23 +530,50 @@ private fun FavGridItem(
                     Text("未读", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
                 }
             }
-            // 更新标记（右下角 NEW）
+            // 更新标记（紧凑网格放右上角，避免和底部标题重合；其他网格放右下角）
             if (showUpdateBadge && item.isNew) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
+                        .align(if (displayMode == 0) Alignment.TopEnd else Alignment.BottomEnd)
                         .background(MaterialTheme.colorScheme.error)
                         .padding(horizontal = 4.dp, vertical = 1.dp),
                 ) {
                     Text("NEW", color = MaterialTheme.colorScheme.onError, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
             }
+            // 紧凑网格：标题叠加在封面底部，带渐变背景
+            if (displayMode == 0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.35f)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                1f to Color(0xAA000000),
+                            ),
+                        ),
+                )
+                Text(
+                    text = item.bookName,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        shadow = Shadow(color = Color.Black, blurRadius = 4f),
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(8.dp),
+                )
+            }
         }
-        // 仅封面网格不显示标题
-        if (displayMode != 2) {
+        // 舒适网格显示标题在封面下方；紧凑网格标题已叠加在封面里；仅封面网格不显示标题
+        if (displayMode == 1) {
             Text(
                 text = item.bookName,
-                style = if (displayMode == 1) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
