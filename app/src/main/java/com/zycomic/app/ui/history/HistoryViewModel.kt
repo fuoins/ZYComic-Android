@@ -157,12 +157,12 @@ class HistoryViewModel {
     }
 
     // ---------- 删除 ----------
-    /** 删除单条历史（id 为历史记录 id）。 */
+    /** 删除单条历史（id 为历史记录 id）。成功后重新加载确保与服务端一致。 */
     fun deleteSingle(id: String) {
         scope.launch {
             try {
                 HistoryRepository.deleteHistory(id)
-                _history.value = _history.value.filterNot { it.id == id }
+                refreshHistory()
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
@@ -171,15 +171,15 @@ class HistoryViewModel {
         }
     }
 
-    /** 批量删除选中的历史，成功后退出多选模式。 */
+    /** 批量删除选中的历史，成功后重新加载确保与服务端一致。 */
     fun deleteSelected() {
         val ids = _selectedIds.value
         if (ids.isEmpty()) return
         scope.launch {
             try {
                 HistoryRepository.deleteHistory(ids.joinToString(","))
-                _history.value = _history.value.filterNot { it.id in ids }
                 exitSelection()
+                refreshHistory()
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {

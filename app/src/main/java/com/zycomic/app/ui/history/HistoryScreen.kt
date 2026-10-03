@@ -55,12 +55,10 @@ import eu.kanade.presentation.components.SearchToolbar
 import eu.kanade.presentation.util.animateItemFastScroll
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
-import tachiyomi.presentation.core.components.ListGroupHeader
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
-import java.time.LocalDate
 
 @Composable
 fun HistoryScreen(
@@ -176,21 +174,7 @@ fun HistoryScreen(
                 contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                var lastGroup: String? = null
                 filtered.forEach { item ->
-                    val groupTitle = dateGroupTitle(item.lastTime)
-                    if (groupTitle != lastGroup) {
-                        item(
-                            key = "header-$groupTitle",
-                            contentType = "header",
-                        ) {
-                            ListGroupHeader(
-                                text = groupTitle,
-                                modifier = Modifier.animateItemFastScroll(),
-                            )
-                        }
-                        lastGroup = groupTitle
-                    }
                     item(
                         key = "history-${item.id}",
                         contentType = "item",
@@ -390,27 +374,3 @@ private fun HistoryItemRow(
     }
 }
 
-/**
- * 根据 lastTime（如 "2024-01-15" / "2024/01/15"）算出分组标题：
- * 今天 / 昨天 / yyyy-MM-dd / 更早（解析失败或为空）。
- */
-private fun dateGroupTitle(lastTime: String): String {
-    if (lastTime.isBlank()) return "更早"
-    val m = Regex("(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})").find(lastTime)
-        ?: return "更早"
-    return try {
-        val date = LocalDate.of(
-            m.groupValues[1].toInt(),
-            m.groupValues[2].toInt(),
-            m.groupValues[3].toInt(),
-        )
-        val today = LocalDate.now()
-        when (date) {
-            today -> "今天"
-            today.minusDays(1) -> "昨天"
-            else -> date.toString()
-        }
-    } catch (_: Exception) {
-        "更早"
-    }
-}
