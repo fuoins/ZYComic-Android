@@ -3,6 +3,7 @@ package com.zycomic.app.ui.settings
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -54,6 +55,7 @@ fun SettingsMainScreen(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("设置") },
