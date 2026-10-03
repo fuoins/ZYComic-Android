@@ -2,6 +2,7 @@ package com.zycomic.app.ui.history
 
 import android.util.Log
 import com.zycomic.app.data.dto.HistoryItem
+import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
@@ -185,6 +186,39 @@ class HistoryViewModel {
                 needLogin.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "批量删除历史失败", e)
+            }
+        }
+    }
+
+    // ---------- 收藏 ----------
+    /** 收藏单条（bookId 为漫画 ID）。 */
+    fun favoriteSingle(bookId: String) {
+        scope.launch {
+            try {
+                FavoriteRepository.addFavorite(bookId.toInt())
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (e: Exception) {
+                Log.e(TAG, "收藏失败", e)
+            }
+        }
+    }
+
+    /** 批量收藏选中的历史记录（按 bookId 去重）。 */
+    fun favoriteSelected() {
+        val ids = _selectedIds.value
+        if (ids.isEmpty()) return
+        scope.launch {
+            try {
+                val bookIds = _history.value
+                    .filter { it.id in ids }
+                    .map { it.bookId }
+                    .distinct()
+                bookIds.forEach { FavoriteRepository.addFavorite(it.toInt()) }
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (e: Exception) {
+                Log.e(TAG, "批量收藏失败", e)
             }
         }
     }

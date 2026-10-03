@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -119,6 +120,12 @@ fun HistoryScreen(
                                     onClick = { vm.invertSelection() },
                                 ),
                                 AppBar.Action(
+                                    title = "收藏",
+                                    icon = Icons.Outlined.BookmarkAdd,
+                                    onClick = { vm.favoriteSelected() },
+                                    enabled = selectedIds.isNotEmpty(),
+                                ),
+                                AppBar.Action(
                                     title = "删除",
                                     icon = Icons.Outlined.DeleteSweep,
                                     onClick = { showBatchDelete = true },
@@ -197,9 +204,7 @@ fun HistoryScreen(
                                 else vm.enterSelectionAndSelect(item.id)
                             },
                             onClickCover = { onOpenManga(item.bookId) },
-                            onClickFavorite = {
-                                Toast.makeText(context, "收藏功能即将上线", Toast.LENGTH_SHORT).show()
-                            },
+                            onClickFavorite = { vm.favoriteSingle(item.bookId) },
                             onClickDelete = { singleDeleteTarget = item },
                         )
                     }
@@ -363,13 +368,15 @@ private fun HistoryItemRow(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        IconButton(onClick = onClickFavorite) {
-            Icon(
-                imageVector = Icons.Outlined.FavoriteBorder,
-                contentDescription = "收藏",
-                tint = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+        Text(
+            text = "收藏",
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .combinedClickable(onClick = onClickFavorite)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        )
         IconButton(onClick = onClickDelete) {
             Icon(
                 imageVector = Icons.Outlined.Delete,
