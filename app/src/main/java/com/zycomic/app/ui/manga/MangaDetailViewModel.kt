@@ -4,6 +4,7 @@ import com.zycomic.app.data.dto.Chapter
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
+import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
@@ -106,6 +107,39 @@ class MangaDetailViewModel(private val bookId: String) {
             } catch (_: Exception) {
             } finally {
                 favBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * 添加到全部收藏夹（folderId=0）。
+     * 逻辑同 [addToFolder](0)，但作为独立语义的操作入口。
+     */
+    fun addToAllFolders() {
+        scope.launch {
+            favBusy.value = true
+            try {
+                val bookIdInt = bookId.toIntOrNull() ?: return@launch
+                FavoriteRepository.addFavorite(bookIdInt, 0)
+                _detail.value = _detail.value?.copy(fav = 1)
+                UserRepository.refreshUserInfo()
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {
+            } finally {
+                favBusy.value = false
+            }
+        }
+    }
+
+    /** 删除当前漫画的阅读历史。bookId 为字符串，单本直接传入。 */
+    fun deleteHistory() {
+        scope.launch {
+            try {
+                HistoryRepository.deleteHistory(bookId)
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {
             }
         }
     }

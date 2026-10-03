@@ -1,54 +1,86 @@
 package com.zycomic.app.ui.manga
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import android.widget.Toast
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.reader.ReaderLauncher
 import com.zycomic.app.ui.components.EmptyView
+import com.zycomic.app.ui.components.ErrorView
 import com.zycomic.app.ui.components.LoadingFooter
-import com.zycomic.app.ui.components.MangaCard
-import androidx.compose.runtime.rememberCoroutineScope
+import com.zycomic.app.ui.components.coverUrl
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MangaDetailScreen(
     bookId: String,
@@ -62,7 +94,6 @@ fun MangaDetailScreen(
     val detail by vm.detail.collectAsState()
     val loading by vm.loading.collectAsState()
     val error by vm.error.collectAsState()
-    val activeTab by vm.activeTab.collectAsState()
     val chapterAsc by vm.chapterAsc.collectAsState()
     val folders by vm.folders.collectAsState()
     val needLogin by vm.needLogin.collectAsState()
@@ -84,8 +115,10 @@ fun MangaDetailScreen(
     }
 
     var showFolderDialog by remember { mutableStateOf(false) }
+    var showCoverMenu by remember { mutableStateOf(false) }
+    var showTopMenu by remember { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(needLogin) {
+    LaunchedEffect(needLogin) {
         if (needLogin) {
             onRequireLogin()
             vm.needLogin.value = false
@@ -95,191 +128,338 @@ fun MangaDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-            .statusBarsPadding(),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         when {
             loading -> LoadingFooter()
-            error != null -> com.zycomic.app.ui.components.ErrorView(
-                message = error ?: "", onRetry = { vm.load() },
-            )
+            error != null -> ErrorView(message = error ?: "", onRetry = { vm.load() })
             detail == null -> EmptyView()
-            else -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                // 顶部栏
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
-                    }
-                    Text(
-                        text = detail!!.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onSearchKeyword(detail!!.name) },
-                    )
-                }
+            else -> {
+                val d = detail!!
 
-                // 封面 + 基本信息
-                Row(modifier = Modifier.padding(16.dp)) {
-                    val url = com.zycomic.app.ui.components.coverUrl(detail!!)
+                // 1. 模糊封面背景
+                Box(Modifier.matchParentSize()) {
                     AsyncImage(
-                        model = url,
-                        contentDescription = detail!!.name,
+                        model = coverUrl(d),
+                        contentDescription = null,
                         modifier = Modifier
-                            .size(width = 100.dp, height = 140.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                            .matchParentSize()
+                            .blur(7.dp)
+                            .alpha(0.2f),
+                        contentScale = ContentScale.Crop,
                     )
-                    Column(modifier = Modifier.padding(start = 16.dp)) {
-                        Text(
-                            detail!!.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        val author = detail!!.author
-                        if (author.isNotBlank()) {
-                            Text(
-                                "作者：$author",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .padding(top = 6.dp)
-                                    .clickable { onSearchKeyword(author) },
-                            )
-                        }
-                        Text(
-                            "类别：${detail!!.categoryName}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        Text(
-                            "地区：${areaText(detail!!.bookArea)}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        Text(
-                            "状态：${detail!!.state.ifBlank { "未知" }}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0.5f to Color.Transparent,
+                                    1f to MaterialTheme.colorScheme.background,
+                                ),
+                            ),
+                    )
                 }
 
-                // 收藏按钮（点击切换收藏/取消收藏，带状态动画）
-                Row(
+                // 内容主体
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
                 ) {
-                    val isFav = detail!!.fav == 1
-                    androidx.compose.animation.AnimatedVisibility(visible = isFav) {
-                        Text("已收藏", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
-                    }
-                    IconButton(onClick = { vm.toggleFavorite() }) {
-                        Icon(
-                            if (isFav) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = "收藏",
-                            tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(28.dp),
+                    // 头部：封面 + 信息（顶部预留状态栏 + 顶栏高度）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(top = 56.dp, start = 16.dp, end = 16.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        AsyncImage(
+                            model = coverUrl(d),
+                            contentDescription = d.name,
+                            modifier = Modifier
+                                .width(100.dp)
+                                .aspectRatio(2f / 3f)
+                                .clip(MaterialTheme.shapes.extraSmall)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { showCoverMenu = true },
+                            contentScale = ContentScale.Crop,
                         )
-                    }
-                }
-
-                // 简介
-                if (detail!!.text.isNotBlank()) {
-                    Text(
-                        detail!!.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-
-                // 标签
-                if (detail!!.tags.isNotEmpty()) {
-                    com.zycomic.app.ui.components.FlowChipRow {
-                        detail!!.tags.forEach { tag ->
-                            com.zycomic.app.ui.components.FilterChip(
-                                text = tag.name,
-                                selected = false,
-                                onClick = { onTagClick(tag.name) },
+                        Column(modifier = Modifier.padding(start = 16.dp)) {
+                            Text(
+                                text = d.name,
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clickable { onSearchKeyword(d.name) },
                             )
+                            Spacer(Modifier.height(8.dp))
+                            val author = d.author
+                            if (author.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .alpha(0.6f)
+                                        .clickable { onSearchKeyword(author) },
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.PersonOutline,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(author, style = MaterialTheme.typography.titleSmall)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            }
+                            // 状态行：连载/完结 · 类别·地区
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (d.state == "完结") Icons.Filled.DoneAll else Icons.Outlined.Schedule,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    d.state.ifBlank { "未知" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "·",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                val src = listOf(d.categoryName, areaText(d.bookArea))
+                                    .filter { it.isNotBlank() }
+                                    .joinToString("·")
+                                Text(
+                                    src.ifBlank { "未知" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
-                }
 
-                // Tab
-                TabRow(selectedTabIndex = activeTab) {
-                    Tab(selected = activeTab == 0, onClick = { vm.selectTab(0) }, text = { Text("章节") })
-                    Tab(selected = activeTab == 1, onClick = { vm.selectTab(1) }, text = { Text("相关推荐") })
-                }
-
-                if (activeTab == 0) {
+                    // 2. 操作按钮行
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val isFav = d.fav == 1
+                        // 收藏状态（纯展示，不可点击）
+                        ActionItem(
+                            modifier = Modifier.weight(1f),
+                            icon = if (isFav) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            label = if (isFav) "已收藏" else "未收藏",
+                            tint = if (isFav) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // 添加到全部收藏夹
+                        ActionItem(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Filled.BookmarkAdd,
+                            label = "全部收藏夹",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            onClick = { vm.addToAllFolders() },
+                        )
+                        // 添加到其他收藏夹
+                        ActionItem(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Outlined.CreateNewFolder,
+                            label = "其他收藏夹",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            onClick = {
+                                vm.openFolderPicker()
+                                showFolderDialog = true
+                            },
+                        )
+                    }
+
+                    // 3. 可展开简介
+                    if (d.text.isNotBlank()) {
+                        ExpandableSummary(text = d.text)
+                    }
+
+                    // 4. 标签行
+                    if (d.tags.isNotEmpty()) {
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            d.tags.forEach { tag ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .clickable {
+                                            onTagClick(tag.name)
+                                            Toast.makeText(
+                                                context,
+                                                "已根据${tag.name}标签进行搜索",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Text(
+                                        tag.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. 章节列表头
+                    val chapters = vm.sortedChapters()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            if (chapterAsc) "升序" else "降序",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "共 ${chapters.size} 章",
+                            style = MaterialTheme.typography.bodyMedium,
                         )
-                        IconButton(onClick = { vm.toggleChapterSort() }) {
-                            Icon(Icons.Default.SwapVert, contentDescription = "切换排序")
+                        Row(
+                            modifier = Modifier.clickable { vm.toggleChapterSort() },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.SwapVert,
+                                contentDescription = "切换排序",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                if (chapterAsc) "升序" else "降序",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
-                    val chapters = vm.sortedChapters()
+
+                    // 章节项
                     chapters.forEach { ch ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { openReader(ch.id) }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(ch.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                            if (ch.readed == 1) {
-                                Text("已读", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            if (ch.readed != 1) {
+                                Icon(
+                                    Icons.Filled.Circle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(8.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                text = ch.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                                color = if (ch.readed == 1) {
+                                    LocalContentColor.current.copy(alpha = 0.38f)
+                                } else {
+                                    Color.Unspecified
+                                },
+                            )
+                        }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            thickness = 0.5.dp,
+                        )
+                    }
+
+                    // 6. 相关推荐
+                    Text(
+                        "相关推荐",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                    )
+                    if (d.loveList.isEmpty()) {
+                        Text(
+                            "暂无相关推荐",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    } else {
+                        LazyRow(
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 16.dp,
+                                vertical = 8.dp,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(d.loveList) { m ->
+                                RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
                             }
                         }
                     }
-                } else {
-                    val related = detail!!.loveList
-                    if (related.isEmpty()) {
-                        EmptyView("暂无相关推荐", modifier = Modifier.padding(32.dp))
-                    } else {
-                        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
+
+                    // 底部留白，避免被 FAB 遮挡
+                    Spacer(Modifier.height(96.dp))
+                }
+
+                // 7. 顶部栏（叠加）
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .statusBarsPadding(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Box {
+                        IconButton(onClick = { showTopMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "菜单")
+                        }
+                        DropdownMenu(
+                            expanded = showTopMenu,
+                            onDismissRequest = { showTopMenu = false },
                         ) {
-                            items(related.size) { i ->
-                                MangaCard(manga = related[i], onClick = { onOpenManga(related[i].id) })
-                            }
+                            DropdownMenuItem(
+                                text = { Text("删除") },
+                                onClick = {
+                                    showTopMenu = false
+                                    vm.deleteHistory()
+                                    Toast.makeText(
+                                        context,
+                                        "已删除历史记录",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                },
+                            )
                         }
                     }
                 }
             }
         }
 
-        // 悬浮播放按钮
+        // 9. FAB 继续阅读
         if (detail != null && !loading) {
             FloatingActionButton(
                 onClick = { openReader(vm.defaultChapterId()) },
@@ -288,7 +468,11 @@ fun MangaDetailScreen(
                     .padding(20.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "开始阅读", tint = MaterialTheme.colorScheme.onPrimary)
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = "开始阅读",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                )
             }
         }
     }
@@ -303,13 +487,155 @@ fun MangaDetailScreen(
             },
         )
     }
+
+    // 8. 封面点击选项
+    if (showCoverMenu) {
+        CoverActionDialog(
+            onDismiss = { showCoverMenu = false },
+            onSave = {
+                showCoverMenu = false
+                Toast.makeText(context, "保存功能开发中", Toast.LENGTH_SHORT).show()
+            },
+            onShare = {
+                showCoverMenu = false
+                Toast.makeText(context, "分享功能开发中", Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
 }
 
 private fun areaText(area: String): String = area.ifEmpty { "未知" }
 
+/** 操作按钮行中的单个条目（图标 + 文字，weight(1f)）。 */
+@Composable
+private fun ActionItem(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    Column(
+        modifier = modifier
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(
+            label,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            color = tint,
+        )
+    }
+}
+
+/** 可展开简介：收起 3 行 + 向下箭头，展开全文 + 向上箭头。 */
+@Composable
+private fun ExpandableSummary(text: String) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clickable { expanded = !expanded },
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/** 相关推荐单项：封面 96dp + 标题最多 2 行。 */
+@Composable
+private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(96.dp)
+            .clickable(onClick = onClick),
+    ) {
+        AsyncImage(
+            model = coverUrl(manga),
+            contentDescription = manga.name,
+            modifier = Modifier
+                .width(96.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Crop,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            manga.name,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 封面点击弹出的简化操作 Dialog。 */
+@Composable
+private fun CoverActionDialog(
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(vertical = 8.dp),
+        ) {
+            Text(
+                "保存封面",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onSave)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+            Text(
+                "分享",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onShare)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+            Text(
+                "取消",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun FolderPickDialog(
-    folders: List<com.zycomic.app.data.dto.Folder>,
+    folders: List<Folder>,
     onDismiss: () -> Unit,
     onPick: (Int) -> Unit,
 ) {
@@ -325,13 +651,19 @@ private fun FolderPickDialog(
             Text(
                 "默认收藏夹",
                 style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.fillMaxWidth().clickable { onPick(0) }.padding(vertical = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPick(0) }
+                    .padding(vertical = 12.dp),
             )
             folders.forEach { f ->
                 Text(
                     "${f.name} (${f.count})",
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().clickable { onPick(f.id) }.padding(vertical = 12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(f.id) }
+                        .padding(vertical = 12.dp),
                 )
             }
         }
