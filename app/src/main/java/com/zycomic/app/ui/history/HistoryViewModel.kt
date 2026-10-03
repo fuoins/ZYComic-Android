@@ -85,6 +85,7 @@ class HistoryViewModel {
 
     // ---------- 分页加载 ----------
     fun refreshHistory() {
+        if (!UserRepository.isLoggedIn) return  // 未登录不加载
         scope.launch { loadHist(reset = true) }
     }
 

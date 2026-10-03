@@ -365,7 +365,10 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     }
 
     // ---------- 历史 ----------
-    fun refreshHistory() { scope.launch { loadHist(reset = true) } }
+    fun refreshHistory() {
+        if (!UserRepository.isLoggedIn) return
+        scope.launch { loadHist(reset = true) }
+    }
 
     fun loadMoreHistory() {
         if (_historyLoading.value || !_historyHasMore.value) return

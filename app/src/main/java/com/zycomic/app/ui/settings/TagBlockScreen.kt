@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.settings
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -127,6 +128,7 @@ private fun AddBlacklistDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
                 .verticalScroll(rememberScrollState()),
         ) {
             Row(
@@ -223,6 +225,7 @@ private fun RemoveBlacklistDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
                 .verticalScroll(rememberScrollState()),
         ) {
             Row(
