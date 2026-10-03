@@ -151,7 +151,7 @@ fun LibraryScreen(
                             ),
                         )
                     },
-                    isActionMode = true,
+                isActionMode = true,
                     onCancelActionMode = { vm.exitSelection() },
                     scrollBehavior = scrollBehavior,
                 )
@@ -219,11 +219,11 @@ fun LibraryScreen(
                             ),
                         )
                     },
-                    scrollBehavior = scrollBehavior,
-                )
-            }
-        },
-        bottomBar = {
+                scrollBehavior = scrollBehavior,
+            )
+        }
+    },
+    bottomBar = {
             if (selectionMode) {
                 Row(
                     modifier = Modifier
@@ -363,6 +363,7 @@ fun LibraryScreen(
                 }
             }
         }
+    }
     }
 
     // 筛选 / 排序 / 显示 / 管理收藏夹 对话框
