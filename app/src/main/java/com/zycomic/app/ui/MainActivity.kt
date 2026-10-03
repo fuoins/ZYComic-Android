@@ -235,6 +235,10 @@ fun AppContent() {
                 1 -> LibraryScreen(
                     onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
+                    onOpenSearch = {
+                        searchKeyword = ""
+                        showSearch = true
+                    },
                 )
                 2 -> HistoryScreen(
                     onOpenManga = { detailBookId = it },

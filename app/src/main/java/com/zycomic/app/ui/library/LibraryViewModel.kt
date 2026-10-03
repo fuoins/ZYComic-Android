@@ -12,8 +12,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -50,6 +53,48 @@ class LibraryViewModel(val mode: Int = 2) {
     // ---- 收藏多选 ----
     val selectionMode = MutableStateFlow(false)
     val selectedIds = MutableStateFlow<Set<String>>(emptySet())   // bookId 集合
+
+    // ---- 本地筛选 / 显示（客户端筛选，不触发 API）----
+    private val _searchQuery = MutableStateFlow<String?>(null)
+    /** 本地搜索关键词；null 表示未进入搜索框（顶栏显示标题），非空表示搜索中 */
+    val searchQuery: StateFlow<String?> = _searchQuery.asStateFlow()
+    val isUnreadFilter = MutableStateFlow(-1)   // -1 全部 / 0 已读完 / 1 未读完
+    val isReadFilter = MutableStateFlow(-1)     // -1 全部 / 0 未阅读过 / 1 阅读过
+    val displayMode = MutableStateFlow(0)       // 0 默认列表 / 1 列表2(历史样式)
+    val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
+    val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
+
+    /**
+     * 经过本地搜索 + 客户端筛选后的收藏列表。
+     * 服务端筛选（isEnd/isFullVersion/showOnlyUpdated/folderId/order/orderType）在
+     * [loadFav] 时传给 API，这里不再重复过滤。
+     */
+    val filteredFavs: StateFlow<List<FavoriteItem>> =
+        combine(_favItems, _searchQuery, isUnreadFilter, isReadFilter) { list, query, unreadF, readF ->
+            var result = list
+            if (!query.isNullOrBlank()) {
+                val q = query.trim()
+                result = result.filter { it.bookName.contains(q, ignoreCase = true) }
+            }
+            // 未读完：chapterName 非空 且 readLast != chapterName（chapterName 为空不算未读完）
+            fun FavoriteItem.isUnread(): Boolean =
+                this.chapterName.isNotBlank() && this.readLast != this.chapterName
+            when (unreadF) {
+                1 -> result = result.filter { it.isUnread() }
+                0 -> result = result.filterNot { it.isUnread() }
+            }
+            // 阅读过：readLast 非空
+            when (readF) {
+                1 -> result = result.filter { it.readLast.isNotBlank() }
+                0 -> result = result.filter { it.readLast.isBlank() }
+            }
+            result
+        }.stateIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
 
     // ---- 历史 ----
     private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
@@ -119,6 +164,27 @@ class LibraryViewModel(val mode: Int = 2) {
         refreshFavorites()
     }
 
+    // ---------- 本地筛选 / 显示（不触发 API）----------
+    /** 更新本地搜索词；空串视为 null（退出搜索框，回到标题）。 */
+    fun updateSearchQuery(q: String?) {
+        _searchQuery.value = q?.takeIf { it.isNotBlank() }
+    }
+
+    /** 未读完筛选：-1 全部 / 0 已读完 / 1 未读完（客户端筛选）。 */
+    fun selectIsUnread(v: Int) { isUnreadFilter.value = v }
+
+    /** 阅读过筛选：-1 全部 / 0 未阅读过 / 1 阅读过（客户端筛选）。 */
+    fun selectIsRead(v: Int) { isReadFilter.value = v }
+
+    /** 显示模式：0 默认列表 / 1 列表2。 */
+    fun selectDisplayMode(m: Int) { displayMode.value = m }
+
+    /** 切换封面左上角未读完标记显示。 */
+    fun toggleShowUnreadBadge() { showUnreadBadge.value = !showUnreadBadge.value }
+
+    /** 切换封面右下角 NEW 标记显示。 */
+    fun toggleShowUpdateBadge() { showUpdateBadge.value = !showUpdateBadge.value }
+
     // ---------- 收藏列表 ----------
     fun refreshFavorites() {
         scope.launch { loadFav(reset = true) }
@@ -166,6 +232,26 @@ class LibraryViewModel(val mode: Int = 2) {
         val s = selectedIds.value.toMutableSet()
         if (!s.add(bookId)) s.remove(bookId)
         selectedIds.value = s
+    }
+
+    /** 长按进入多选时，同时选中当前项。 */
+    fun enterSelectionAndSelect(bookId: String) {
+        selectionMode.value = true
+        selectedIds.value = setOf(bookId)
+    }
+
+    /** 全选当前筛选结果中的所有收藏。 */
+    fun selectAll() {
+        selectedIds.value = filteredFavs.value.map { it.bookId }.toSet()
+    }
+
+    /** 在当前筛选结果范围内反选。 */
+    fun invertSelection() {
+        val current = selectedIds.value.toMutableSet()
+        filteredFavs.value.forEach {
+            if (!current.add(it.bookId)) current.remove(it.bookId)
+        }
+        selectedIds.value = current
     }
 
     /** 全选已加载出的收藏；若已全选则取消全选 */
