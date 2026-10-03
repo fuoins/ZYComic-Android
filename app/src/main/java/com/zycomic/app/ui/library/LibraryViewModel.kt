@@ -69,27 +69,42 @@ class LibraryViewModel(val mode: Int = 2) {
      * 服务端筛选（isFullVersion/folderId）在 [loadFav] 时传给 API；
      * order/orderType 也传给 API（请求返回已排好序），切换排序时本地重排不请求。
      */
+    private data class FavFilterState(
+        val list: List<FavoriteItem>,
+        val query: String?,
+        val unreadF: Int,
+        val readF: Int,
+        val endF: Int,
+    )
+
     val filteredFavs: StateFlow<List<FavoriteItem>> =
-        combine(_favItems, _searchQuery, isUnreadFilter, isReadFilter, isEndFilter, onlyUpdatedFilter, order, orderType) { list, query, unreadF, readF, endF, onlyUp, ord, ordType ->
-            var result = list
-            if (!query.isNullOrBlank()) {
-                val q = query.trim()
+        combine(
+            combine(_favItems, _searchQuery, isUnreadFilter, isReadFilter, isEndFilter) { list, query, unreadF, readF, endF ->
+                FavFilterState(list, query, unreadF, readF, endF)
+            },
+            onlyUpdatedFilter,
+            order,
+            orderType,
+        ) { state, onlyUp, ord, ordType ->
+            var result = state.list
+            if (!state.query.isNullOrBlank()) {
+                val q = state.query.trim()
                 result = result.filter { it.bookName.contains(q, ignoreCase = true) }
             }
             // 未读完：chapterName 非空 且 readLast != chapterName
             fun FavoriteItem.isUnread(): Boolean =
                 this.chapterName.isNotBlank() && this.readLast != this.chapterName
-            when (unreadF) {
+            when (state.unreadF) {
                 1 -> result = result.filter { it.isUnread() }
                 0 -> result = result.filterNot { it.isUnread() }
             }
             // 阅读过：readLast 非空
-            when (readF) {
+            when (state.readF) {
                 1 -> result = result.filter { it.readLast.isNotBlank() }
                 0 -> result = result.filter { it.readLast.isBlank() }
             }
             // 完结：end == "完结"
-            when (endF) {
+            when (state.endF) {
                 1 -> result = result.filter { it.end == "完结" }
                 0 -> result = result.filter { it.end != "完结" }
             }
