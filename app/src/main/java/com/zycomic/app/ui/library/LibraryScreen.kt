@@ -30,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -41,10 +40,6 @@ import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
-import com.zycomic.app.ui.theme.BluePrimary
-import com.zycomic.app.ui.theme.ErrorRed
-import com.zycomic.app.ui.theme.OffWhite
-import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun LibraryScreen(
@@ -138,7 +133,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!selectionMode) {
                 Text("收藏", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                Text("管理", color = BluePrimary, modifier = Modifier
+                Text("管理", color = MaterialTheme.colorScheme.primary, modifier = Modifier
                     .clickableNoRipple { vm.enterSelection() }
                     .padding(8.dp))
             } else {
@@ -146,7 +141,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                 val allSelected = favs.isNotEmpty() && selectedIds.size == favs.size
                 Text(
                     if (allSelected) "取消" else "全选",
-                    color = BluePrimary,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.clickableNoRipple {
                         if (allSelected) vm.exitSelection() else vm.toggleSelectAllLoadedFavorites()
                     }.padding(8.dp),
@@ -180,11 +175,11 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                 // 第5行：排序
                 SortRow(order = order, orderType = orderType, onSelect = { o, t -> vm.selectSort(o, t) })
 
-                Text("收起筛选", color = TextSecondary, modifier = Modifier
+                Text("收起筛选", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier
                     .clickableNoRipple { filterExpanded = false }
                     .padding(horizontal = 16.dp, vertical = 4.dp))
             } else {
-                Text("展开筛选", color = BluePrimary, modifier = Modifier
+                Text("展开筛选", color = MaterialTheme.colorScheme.primary, modifier = Modifier
                     .clickableNoRipple { filterExpanded = true }
                     .padding(horizontal = 16.dp, vertical = 4.dp))
             }
@@ -210,7 +205,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                     }
                     if (appending) item { LoadingFooter() }
                     else if (!hasMore) item {
-                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = TextSecondary)
+                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -219,7 +214,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
         // 多选底部栏
         if (selectionMode) {
             Row(
-                modifier = Modifier.fillMaxWidth().background(Color(0xFFF0F2F5)),
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -227,11 +222,11 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                         if (selectedIds.isNotEmpty()) showRemoveConfirm = true
                     }.padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("取消收藏", color = ErrorRed) }
+                ) { Text("取消收藏", color = MaterialTheme.colorScheme.error) }
                 Box(
                     modifier = Modifier.weight(1f).clickableNoRipple { showMoveDialog = true }.padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("移动收藏夹", color = BluePrimary) }
+                ) { Text("移动收藏夹", color = MaterialTheme.colorScheme.primary) }
             }
         }
     }
@@ -239,7 +234,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
     // 移动收藏夹弹窗
     if (showMoveDialog) {
         androidx.compose.ui.window.Dialog(onDismissRequest = { showMoveDialog = false }) {
-            Column(Modifier.background(Color.White).padding(16.dp).fillMaxWidth()) {
+            Column(Modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp).fillMaxWidth()) {
                 Text("移动到收藏夹", style = MaterialTheme.typography.titleMedium)
                 Text("全部收藏夹", Modifier.fillMaxWidth().clickableNoRipple {
                     vm.moveSelectedTo(null); showMoveDialog = false
@@ -266,14 +261,14 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
     // 收藏夹长按：重命名 / 删除
     actionFolder?.let { f ->
         androidx.compose.ui.window.Dialog(onDismissRequest = { actionFolder = null }) {
-            Column(Modifier.background(Color.White).padding(16.dp).fillMaxWidth()) {
+            Column(Modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp).fillMaxWidth()) {
                 Text(f.name, style = MaterialTheme.typography.titleMedium)
                 Text("重命名", Modifier.fillMaxWidth().clickableNoRipple {
                     renameTarget = f; actionFolder = null
                 }.padding(12.dp))
                 Text("删除", Modifier.fillMaxWidth().clickableNoRipple {
                     vm.deleteFolder(f.id.toString()); actionFolder = null
-                }.padding(12.dp), color = ErrorRed)
+                }.padding(12.dp), color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -295,7 +290,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
             title = { Text("取消收藏确认") },
             text = { Text("确定取消选中的 ${selectedIds.size} 本漫画的收藏？") },
             confirmButton = {
-                Text("确定取消", color = ErrorRed, modifier = Modifier
+                Text("确定取消", color = MaterialTheme.colorScheme.error, modifier = Modifier
                     .clickableNoRipple {
                         showRemoveConfirm = false
                         vm.batchRemove()
@@ -303,7 +298,7 @@ private fun FavContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
                     .padding(8.dp))
             },
             dismissButton = {
-                Text("取消", color = TextSecondary, modifier = Modifier
+                Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier
                     .clickableNoRipple { showRemoveConfirm = false }
                     .padding(8.dp))
             },
@@ -354,25 +349,25 @@ private fun FavRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .background(if (selected) Color(0xFFE3F0FF) else Color.White)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = coverUrl(item.bookImg),
             contentDescription = item.bookName,
-            modifier = Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(OffWhite),
+            modifier = Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
         )
         Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Text(item.bookName, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-            Text("最新：${item.chapterName.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Text("最新：${item.chapterName.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (item.readLast.isNotBlank()) {
-                Text("读到：${item.readLast}", style = MaterialTheme.typography.bodySmall, color = BluePrimary, modifier = Modifier.padding(top = 2.dp))
+                Text("读到：${item.readLast}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
             }
-            Text(updateLine("更新", item.lastTime, item.end), style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.padding(top = 2.dp))
+            Text(updateLine("更新", item.lastTime, item.end), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
         }
         if (item.isNew) {
-            Text("NEW", color = ErrorRed, style = MaterialTheme.typography.labelMedium)
+            Text("NEW", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -399,9 +394,9 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.weight(1f))
             if (!selMode) {
-                Text("删除", color = ErrorRed, modifier = Modifier.clickableNoRipple { vm.enterHistorySelection() }.padding(8.dp))
+                Text("删除", color = MaterialTheme.colorScheme.error, modifier = Modifier.clickableNoRipple { vm.enterHistorySelection() }.padding(8.dp))
             } else {
-                Text("取消", color = TextSecondary, modifier = Modifier.clickableNoRipple { vm.exitHistorySelection() }.padding(8.dp))
+                Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickableNoRipple { vm.exitHistorySelection() }.padding(8.dp))
             }
         }
         // 多选顶部栏（与列表平行）
@@ -411,7 +406,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
                 val allSelected = history.isNotEmpty() && selIds.size == history.size
                 Text(
                     if (allSelected) "取消" else "全选",
-                    color = BluePrimary,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.clickableNoRipple {
                         if (allSelected) vm.exitHistorySelection() else vm.toggleSelectAllLoadedHistory()
                     }.padding(horizontal = 12.dp),
@@ -434,7 +429,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
                 }
                 if (loading) item { LoadingFooter() }
                 else if (!hasMore && history.isNotEmpty()) item {
-                    Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = TextSecondary)
+                    Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -442,7 +437,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
         // 多选底部栏
         if (selMode) {
             Row(
-                modifier = Modifier.fillMaxWidth().background(Color(0xFFF0F2F5)),
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -450,7 +445,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
                         if (selIds.isNotEmpty()) showDeleteConfirm = true
                     }.padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("删除", color = ErrorRed) }
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -462,7 +457,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
             title = { Text("删除确认") },
             text = { Text("确定删除选中的 ${selIds.size} 条阅读历史？") },
             confirmButton = {
-                Text("确定删除", color = ErrorRed, modifier = Modifier
+                Text("确定删除", color = MaterialTheme.colorScheme.error, modifier = Modifier
                     .clickableNoRipple {
                         showDeleteConfirm = false
                         vm.deleteSelectedHistory()
@@ -470,7 +465,7 @@ private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) 
                     .padding(8.dp))
             },
             dismissButton = {
-                Text("取消", color = TextSecondary, modifier = Modifier
+                Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier
                     .clickableNoRipple { showDeleteConfirm = false }
                     .padding(8.dp))
             },
@@ -485,19 +480,19 @@ private fun HistoryRow(item: HistoryItem, selected: Boolean, selectionMode: Bool
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick)
-            .background(if (selected) Color(0xFFE3F0FF) else Color.White)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = coverUrl(item.bookImg),
             contentDescription = item.bookName,
-            modifier = Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(OffWhite),
+            modifier = Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
         )
         Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Text(item.bookName, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-            Text("上次阅读：${item.chapterName.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
-            Text(updateLine("上次更新", item.lastTime, item.end), style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.padding(top = 2.dp))
+            Text("上次阅读：${item.chapterName.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Text(updateLine("上次更新", item.lastTime, item.end), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -531,7 +526,7 @@ private fun FolderNameDialog(
 ) {
     var text by remember { mutableStateOf(initial) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.background(Color.White).padding(16.dp).fillMaxWidth()) {
+        Column(Modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp).fillMaxWidth()) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             androidx.compose.material3.OutlinedTextField(
                 value = text,

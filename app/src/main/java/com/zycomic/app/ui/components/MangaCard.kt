@@ -14,13 +14,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.net.RouteManager
-import com.zycomic.app.ui.theme.OffWhite
 
 /**
  * 把漫画封面字段拼成可加载 URL。
@@ -62,7 +60,7 @@ fun MangaCard(
                 .fillMaxWidth()
                 .aspectRatio(0.72f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(OffWhite),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             val url = coverUrl(manga)
             if (url.isNotEmpty()) {
@@ -77,7 +75,7 @@ fun MangaCard(
         Text(
             text = manga.name,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF1A1C1E),
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier

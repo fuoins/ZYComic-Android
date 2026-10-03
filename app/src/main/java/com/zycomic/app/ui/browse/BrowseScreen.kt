@@ -46,8 +46,6 @@ import com.zycomic.app.ui.components.ErrorView
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.MangaCard
-import com.zycomic.app.ui.theme.Divider
-import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun BrowseScreen(
@@ -104,9 +102,9 @@ fun BrowseScreen(
 
         // 主 Tab
         TabRow(selectedTabIndex = mainTab) {
-            Tab(selected = mainTab == 0, onClick = { vm.selectMainTab(0) }, text = { Text("分类", color = androidx.compose.ui.graphics.Color.Black) })
-            Tab(selected = mainTab == 1, onClick = { vm.selectMainTab(1) }, text = { Text("最近更新", color = androidx.compose.ui.graphics.Color.Black) })
-            Tab(selected = mainTab == 2, onClick = { vm.selectMainTab(2) }, text = { Text("排行", color = androidx.compose.ui.graphics.Color.Black) })
+            Tab(selected = mainTab == 0, onClick = { vm.selectMainTab(0) }, text = { Text("分类", color = MaterialTheme.colorScheme.onSurface) })
+            Tab(selected = mainTab == 1, onClick = { vm.selectMainTab(1) }, text = { Text("最近更新", color = MaterialTheme.colorScheme.onSurface) })
+            Tab(selected = mainTab == 2, onClick = { vm.selectMainTab(2) }, text = { Text("排行", color = MaterialTheme.colorScheme.onSurface) })
         }
 
         when (mainTab) {
@@ -157,7 +155,7 @@ private fun MangaGrid(
             item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
         } else if (!hasMore && mangas.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -181,7 +179,7 @@ private fun FilterArea(vm: BrowseViewModel) {
             modifier = Modifier.fillMaxWidth().clickable { vm.toggleFilterExpanded() }.padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("筛选", style = MaterialTheme.typography.titleSmall, color = TextSecondary)
+            Text("筛选", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Icon(
                 if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                 contentDescription = null,
@@ -233,7 +231,7 @@ private fun FilterArea(vm: BrowseViewModel) {
                     FilterChip(text = label, selected = st == v, onClick = { vm.selectSt(v) })
                 }
             }
-            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Divider))
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
         }
     }
 
@@ -257,7 +255,7 @@ private fun NewestArea(vm: BrowseViewModel, newestNums: Int) {
         Text(
             "更新了${newestNums}本，持续更新中",
             style = MaterialTheme.typography.bodySmall,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 6.dp),
         )
     }
@@ -299,7 +297,7 @@ private fun TagSelectDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.White),
+                .background(MaterialTheme.colorScheme.surface),
         ) {
             // 顶部标题栏
             Row(
@@ -307,7 +305,7 @@ private fun TagSelectDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("选择标签", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             // 搜索框
             androidx.compose.material3.OutlinedTextField(

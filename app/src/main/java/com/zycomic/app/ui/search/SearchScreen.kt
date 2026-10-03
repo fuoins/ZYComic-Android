@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.MangaCard
-import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun SearchScreen(
@@ -102,7 +102,7 @@ fun SearchScreen(
                     }
                     if (appending) item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
                     else if (!hasMore && mangas.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = TextSecondary)
+                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -121,7 +121,7 @@ fun SearchOverlay(
         androidx.compose.foundation.layout.Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.White),
+                .background(MaterialTheme.colorScheme.surface),
         ) {
             SearchScreen(
                 initialKeyword = initialKeyword,

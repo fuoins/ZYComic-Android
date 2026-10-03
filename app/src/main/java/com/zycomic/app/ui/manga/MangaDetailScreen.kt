@@ -36,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,9 +46,6 @@ import com.zycomic.app.reader.ReaderLauncher
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.MangaCard
-import com.zycomic.app.ui.theme.BluePrimary
-import com.zycomic.app.ui.theme.OffWhite
-import com.zycomic.app.ui.theme.TextSecondary
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 
@@ -99,7 +95,7 @@ fun MangaDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .statusBarsPadding(),
     ) {
         when {
@@ -140,7 +136,7 @@ fun MangaDetailScreen(
                         modifier = Modifier
                             .size(width = 100.dp, height = 140.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(OffWhite),
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
                     )
                     Column(modifier = Modifier.padding(start = 16.dp)) {
                         Text(
@@ -153,7 +149,7 @@ fun MangaDetailScreen(
                             Text(
                                 "作者：$author",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = BluePrimary,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
                                     .padding(top = 6.dp)
                                     .clickable { onSearchKeyword(author) },
@@ -162,19 +158,19 @@ fun MangaDetailScreen(
                         Text(
                             "类别：${detail!!.categoryName}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                         Text(
                             "地区：${areaText(detail!!.bookArea)}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                         Text(
                             "状态：${detail!!.state.ifBlank { "未知" }}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -190,13 +186,13 @@ fun MangaDetailScreen(
                 ) {
                     val isFav = detail!!.fav == 1
                     androidx.compose.animation.AnimatedVisibility(visible = isFav) {
-                        Text("已收藏", style = MaterialTheme.typography.bodyMedium, color = BluePrimary, modifier = Modifier.padding(end = 8.dp))
+                        Text("已收藏", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
                     }
                     IconButton(onClick = { vm.toggleFavorite() }) {
                         Icon(
                             if (isFav) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = "收藏",
-                            tint = if (isFav) BluePrimary else TextSecondary,
+                            tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(28.dp),
                         )
                     }
@@ -207,7 +203,7 @@ fun MangaDetailScreen(
                     Text(
                         detail!!.text,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),
                     )
                 }
@@ -240,7 +236,7 @@ fun MangaDetailScreen(
                         Text(
                             if (chapterAsc) "升序" else "降序",
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         IconButton(onClick = { vm.toggleChapterSort() }) {
                             Icon(Icons.Default.SwapVert, contentDescription = "切换排序")
@@ -256,7 +252,7 @@ fun MangaDetailScreen(
                         ) {
                             Text(ch.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             if (ch.readed == 1) {
-                                Text("已读", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                                Text("已读", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
@@ -290,9 +286,9 @@ fun MangaDetailScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(20.dp),
-                containerColor = BluePrimary,
+                containerColor = MaterialTheme.colorScheme.primary,
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "开始阅读", tint = Color.White)
+                Icon(Icons.Default.PlayArrow, contentDescription = "开始阅读", tint = MaterialTheme.colorScheme.onPrimary)
             }
         }
     }
@@ -321,7 +317,7 @@ private fun FolderPickDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(16.dp)
                 .clip(RoundedCornerShape(12.dp)),
         ) {

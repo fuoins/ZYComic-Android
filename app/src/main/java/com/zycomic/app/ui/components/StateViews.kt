@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.zycomic.app.ui.theme.TextSecondary
 
 /** 列表底部加载状态：“正在获取...” */
 @Composable
@@ -37,7 +36,7 @@ fun LoadingFooter(modifier: Modifier = Modifier) {
             Text(
                 text = "正在获取...",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 10.dp),
             )
         }
@@ -59,7 +58,7 @@ fun EmptyView(
         Text(
             text = message,
             style = MaterialTheme.typography.bodyLarge,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -81,7 +80,7 @@ fun ErrorView(
         Text(
             text = message.ifBlank { "加载失败" },
             style = MaterialTheme.typography.bodyLarge,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         TextButton(onClick = onRetry) {
             Text("重试")

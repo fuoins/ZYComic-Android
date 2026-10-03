@@ -23,7 +23,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.zycomic.app.ui.components.ErrorView
-import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun ReaderScreen(

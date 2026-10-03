@@ -16,12 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.zycomic.app.ui.theme.BluePrimary
-import com.zycomic.app.ui.theme.GrayChip
-import com.zycomic.app.ui.theme.GrayChipBorder
-import com.zycomic.app.ui.theme.TextPrimary
 
 /**
  * 胶囊筛选组件。
@@ -43,8 +38,8 @@ fun FilterChip(
     onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(percent = 50)
-    val bg = if (selected) BluePrimary else GrayChip
-    val contentColor = if (selected) Color.White else TextPrimary
+    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
     val interaction = remember { MutableInteractionSource() }
 
     Box(
@@ -85,7 +80,7 @@ fun OutlinedFilterChip(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(if (selected) BluePrimary else Color.White)
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
             .clickable(interaction, indication = null) { onClick() }
             .then(
                 if (!selected) Modifier.padding(1.dp) else Modifier
@@ -96,7 +91,7 @@ fun OutlinedFilterChip(
         Text(
             text = text,
             style = MaterialTheme.typography.titleSmall,
-            color = if (selected) Color.White else TextPrimary,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
         )
     }
 }

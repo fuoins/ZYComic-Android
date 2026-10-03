@@ -20,8 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.zycomic.app.ui.theme.ErrorRed
-import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun LoginScreen(onClose: () -> Unit) {
@@ -56,7 +54,7 @@ fun LoginScreen(onClose: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
         )
         if (error != null) {
-            Text(error!!, color = ErrorRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+            Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
         }
         Button(
             onClick = { vm.login() },
@@ -67,7 +65,7 @@ fun LoginScreen(onClose: () -> Unit) {
             else Text("登录")
         }
         TextButton(onClick = { vm.register() }, enabled = !loading) {
-            Text("没有账号？注册", color = TextSecondary)
+            Text("没有账号？注册", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

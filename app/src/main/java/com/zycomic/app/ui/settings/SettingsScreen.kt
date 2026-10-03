@@ -31,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -39,9 +38,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.ui.components.FilterChip
-import com.zycomic.app.ui.theme.BlueContainer
-import com.zycomic.app.ui.theme.BluePrimary
-import com.zycomic.app.ui.theme.TextSecondary
 
 @Composable
 fun SettingsScreen() {
@@ -86,7 +82,7 @@ fun SettingsScreen() {
                 Text(
                     "对屏蔽的标签漫画进行隐藏(正常会显示404)。建议登录后配合gay标签一键屏蔽使用。开启后部分分类会有大量屏蔽内容，为凑够布局会多获取几页，加载变慢属正常现象。建议选择[一般向]或[禁漫]或[搜索]，[排行]基本都是gay标签内容。如果你点击[BL向]只有两本属于正常，因为获取十页全屏蔽了。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Switch(checked = filterEnabled, onCheckedChange = { vm.setFilterEnabled(it) })
@@ -98,13 +94,13 @@ fun SettingsScreen() {
         // gay 一键屏蔽卡片（primaryContainer 背景区分）
         Box(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-                .background(BlueContainer, RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp))
                 .padding(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("gay 标签一键屏蔽", style = MaterialTheme.typography.titleMedium)
-                    Text("自动屏蔽所有女性向/gay标签（${SettingsViewModel.GAY_TAGS.size}个）", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Text("自动屏蔽所有女性向/gay标签（${SettingsViewModel.GAY_TAGS.size}个）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Button(onClick = { showGayConfirm = true }) { Text("一键屏蔽") }
             }
@@ -125,7 +121,7 @@ fun SettingsScreen() {
         // ===== 测速日志 =====
         SectionTitle("测速日志")
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text("网络配置更新时间：$updateTime", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Text("网络配置更新时间：$updateTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             // 展开状态：key = "line_0" / "img_0"
             var expandedHosts by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -150,7 +146,7 @@ fun SettingsScreen() {
                         Text(
                             text = "${index + 1}. $host",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (index == currentLineIdx) BluePrimary else Color.Black,
+                            color = if (index == currentLineIdx) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         // HTTP/域名延迟
@@ -158,10 +154,10 @@ fun SettingsScreen() {
                             text = " HTTP:${formatDelay(delay)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = when {
-                                delay == null -> TextSecondary
-                                delay == Long.MAX_VALUE -> Color.Red
-                                delay < 300 -> BluePrimary
-                                else -> TextSecondary
+                                delay == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
+                                delay < 300 -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
                         // 最快IP + TCP延迟
@@ -169,18 +165,18 @@ fun SettingsScreen() {
                             Text(
                                 text = " 最快IP:${fastest.key}(${fastest.value}ms)",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         if (index == currentLineIdx) {
-                            Text(" ←", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                            Text(" ←", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
                         // 展开/收起箭头
                         if (!hostIpMap.isNullOrEmpty()) {
                             Text(
                                 text = if (isExpanded) " ▲" else " ▼",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.clickable {
                                     expandedHosts = if (isExpanded) expandedHosts - expandKey else expandedHosts + expandKey
                                 },
@@ -194,9 +190,9 @@ fun SettingsScreen() {
                                 text = "  $ip: ${formatDelay(tcpDelay)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = when {
-                                    tcpDelay == Long.MAX_VALUE -> Color.Red
-                                    tcpDelay < 300 -> BluePrimary
-                                    else -> TextSecondary
+                                    tcpDelay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
+                                    tcpDelay < 300 -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.padding(start = 24.dp, top = 1.dp),
                             )
@@ -224,34 +220,34 @@ fun SettingsScreen() {
                         Text(
                             text = "${index + 1}. $domain",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (index == currentImgIdx) BluePrimary else Color.Black,
+                            color = if (index == currentImgIdx) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         Text(
                             text = " HTTP:${formatDelay(delay)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = when {
-                                delay == null -> TextSecondary
-                                delay == Long.MAX_VALUE -> Color.Red
-                                delay < 300 -> BluePrimary
-                                else -> TextSecondary
+                                delay == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
+                                delay < 300 -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
                         if (fastest != null) {
                             Text(
                                 text = " 最快IP:${fastest.key}(${fastest.value}ms)",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         if (index == currentImgIdx) {
-                            Text(" ←", style = MaterialTheme.typography.bodySmall, color = BluePrimary)
+                            Text(" ←", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
                         if (!hostIpMap.isNullOrEmpty()) {
                             Text(
                                 text = if (isExpanded) " ▲" else " ▼",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.clickable {
                                     expandedHosts = if (isExpanded) expandedHosts - expandKey else expandedHosts + expandKey
                                 },
@@ -264,9 +260,9 @@ fun SettingsScreen() {
                                 text = "  $ip: ${formatDelay(tcpDelay)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = when {
-                                    tcpDelay == Long.MAX_VALUE -> Color.Red
-                                    tcpDelay < 300 -> BluePrimary
-                                    else -> TextSecondary
+                                    tcpDelay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
+                                    tcpDelay < 300 -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.padding(start = 24.dp, top = 1.dp),
                             )
@@ -297,7 +293,7 @@ fun SettingsScreen() {
                 Text(
                     "开启=本地代理MITM（稳定），关闭=自定义DNS+SSLSocketFactory（抓包时用）。切换后需重启App生效。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Switch(checked = proxyEnabled, onCheckedChange = { vm.setProxyEnabled(it) })
@@ -309,7 +305,7 @@ fun SettingsScreen() {
             Text(
                 "格式: {\"port\":7891,\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":[\"域名1\",\"域名2\"]}",
                 style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
                 value = devJson,
@@ -331,7 +327,7 @@ fun SettingsScreen() {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White, RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
                     .padding(24.dp),
             ) {
                 Text("确认屏蔽", style = MaterialTheme.typography.titleMedium)
@@ -409,7 +405,7 @@ private fun AddBlacklistDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
+                .background(MaterialTheme.colorScheme.surface)
                 .verticalScroll(rememberScrollState()),
         ) {
             // 顶部栏：标题 + 关闭
@@ -510,7 +506,7 @@ private fun RemoveBlacklistDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
+                .background(MaterialTheme.colorScheme.surface)
                 .verticalScroll(rememberScrollState()),
         ) {
             // 顶部栏：标题 + 关闭
@@ -558,12 +554,12 @@ private fun RemoveBlacklistDialog(
                 loading -> Text(
                     "加载中...",
                     modifier = Modifier.padding(16.dp),
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 blockedTags.isEmpty() -> Text(
                     "暂无屏蔽标签",
                     modifier = Modifier.padding(16.dp),
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 else -> FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),

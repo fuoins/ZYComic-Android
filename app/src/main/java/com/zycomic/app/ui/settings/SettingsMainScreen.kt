@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -9,6 +10,7 @@ import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -18,8 +20,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 
@@ -40,14 +46,29 @@ fun SettingsMainScreen(
     onOpenAdvanced: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val topBarState = rememberTopAppBarState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("设置") },
+                actions = {
+                    IconButton(onClick = {
+                        Toast.makeText(context, "搜索功能即将上线", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Outlined.Search, contentDescription = "搜索")
+                    }
+                },
+                scrollBehavior = scrollBehavior,
             )
         },
     ) { contentPadding ->
-        ScrollbarLazyColumn(contentPadding = contentPadding) {
+        ScrollbarLazyColumn(
+            contentPadding = contentPadding,
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        ) {
             item {
                 TextPreferenceWidget(
                     title = "外观",

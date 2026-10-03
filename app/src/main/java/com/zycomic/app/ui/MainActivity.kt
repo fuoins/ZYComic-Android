@@ -1,10 +1,14 @@
 package com.zycomic.app.ui
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.SystemBarStyle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +21,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -32,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -54,20 +62,37 @@ import com.zycomic.app.ui.settings.SettingsViewModel
 import com.zycomic.app.ui.settings.SpeedTestScreen
 import com.zycomic.app.ui.settings.TagBlockScreen
 import com.zycomic.app.ui.settings.ZYSettingsAppearanceScreen
-import com.zycomic.app.ui.theme.ZYComicTheme
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
+import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
+import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 根据 UiPreferences 设置 Activity XML 主题（浅色/深色/AMOLED）
+        val uiPreferences = Injekt.get<UiPreferences>()
+        ThemingDelegate.getThemeResIds(
+            uiPreferences.appTheme().get(),
+            uiPreferences.themeDarkAmoled().get(),
+        ).forEach { setTheme(it) }
+
         com.zycomic.app.net.RouteManager.applyDefaultConfig()
         com.zycomic.app.net.NetworkModule.init(this)
         setContent {
-            ZYComicTheme {
-                AppContent()
+            TachiyomiTheme {
+                CompositionLocalProvider(
+                    LocalTextStyle provides MaterialTheme.typography.bodySmall,
+                    LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+                ) {
+                    AppContent()
+                }
             }
         }
 
@@ -96,6 +121,18 @@ private enum class SettingsDialog {
 @Composable
 fun AppContent() {
     val context = LocalContext.current
+
+    // edge-to-edge 系统栏适配：根据背景亮度决定状态栏图标明暗
+    val isSystemInDarkTheme = isSystemInDarkTheme()
+    val statusBarBg = MaterialTheme.colorScheme.surface
+    LaunchedEffect(isSystemInDarkTheme, statusBarBg) {
+        val lightStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.BLACK)
+        val darkStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+        enableEdgeToEdge(
+            statusBarStyle = if (statusBarBg.luminance() > 0.5f) lightStyle else darkStyle,
+            navigationBarStyle = if (isSystemInDarkTheme) darkStyle else lightStyle,
+        )
+    }
 
     var bottomTab by remember { mutableIntStateOf(0) } // 0分类 1书架 2历史 3我的 4设置
 
