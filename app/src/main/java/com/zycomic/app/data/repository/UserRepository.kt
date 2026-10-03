@@ -1,5 +1,7 @@
 package com.zycomic.app.data.repository
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.zycomic.app.data.dto.LoginRequest
 import com.zycomic.app.data.dto.PointLog
 import com.zycomic.app.data.dto.User
@@ -9,6 +11,7 @@ import com.zycomic.app.net.RouteManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.Json
 import java.io.IOException
 
 /**
@@ -17,10 +20,21 @@ import java.io.IOException
  * - [userFlow] 是全局唯一的登录状态流，所有 ViewModel 收集它。
  * - 登录 / 登出 / 启动校验时都会更新 [userFlow]。
  * - cookie 由 [NetworkModule.cookieJar] 全局维护。
+ * - 用户信息本地持久化到 SharedPreferences，启动时先读本地显示登录，后台再刷新。
  */
 object UserRepository {
 
     private val api get() = NetworkModule.api
+
+    private lateinit var prefs: SharedPreferences
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    private const val KEY_USER_INFO = "user_info_json"
+
+    /** 必须在 App.onCreate 中调用一次，初始化 SharedPreferences。 */
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("zycomic_user", Context.MODE_PRIVATE)
+    }
 
     private val _userFlow = MutableStateFlow<User?>(null)
 
@@ -30,10 +44,49 @@ object UserRepository {
     /** 当前是否已登录（同步读取） */
     val isLoggedIn: Boolean get() = _userFlow.value != null
 
+    // ==================== 本地持久化 ====================
+
+    /** 保存用户信息到本地。 */
+    private fun saveUserInfoLocal(user: User) {
+        if (!::prefs.isInitialized) return
+        prefs.edit().putString(KEY_USER_INFO, json.encodeToString(User.serializer(), user)).apply()
+    }
+
+    /** 从本地读取用户信息，无缓存或解析失败返回 null。 */
+    private fun loadUserInfoLocal(): User? {
+        if (!::prefs.isInitialized) return null
+        val jsonStr = prefs.getString(KEY_USER_INFO, null) ?: return null
+        return try {
+            json.decodeFromString(User.serializer(), jsonStr)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 清除本地用户信息。 */
+    private fun clearUserInfoLocal() {
+        if (!::prefs.isInitialized) return
+        prefs.edit().remove(KEY_USER_INFO).apply()
+    }
+
+    /**
+     * 启动时从本地恢复登录态：直接设置 userFlow，UI 立即显示登录状态。
+     * 不会发起网络请求，没网也能显示登录。
+     * @return true=本地有登录缓存，false=无缓存
+     */
+    fun restoreLoginFromLocal(): Boolean {
+        val local = loadUserInfoLocal()
+        if (local != null && local.uid.isNotEmpty() && local.uid != "0") {
+            _userFlow.value = local
+            return true
+        }
+        return false
+    }
+
     // ==================== 登录 / 注册 ====================
 
     /**
-     * 登录：先调 /account/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow。
+     * 登录：先调 /account/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow 并持久化。
      */
     suspend fun login(username: String, password: String): User {
         val loginResp = api.login(LoginRequest(username, password))
@@ -52,6 +105,7 @@ object UserRepository {
             NetworkModule.cookieJar.add("uid", info.uid, RouteManager.lineHost)
         }
         _userFlow.value = info
+        saveUserInfoLocal(info)
         return info
     }
 
@@ -66,11 +120,12 @@ object UserRepository {
         // 注册成功后拉取用户信息
         val info = getUserInfo()
         _userFlow.value = info
+        saveUserInfoLocal(info)
         return info
     }
 
     /**
-     * 登出：先调用服务端登出 API，再清除全局 cookie，userFlow 置 null。
+     * 登出：先调用服务端登出 API，再清除全局 cookie 和本地用户信息，userFlow 置 null。
      * 即使登出 API 调用失败也会清 cookie（本地登出）。
      */
     suspend fun logout() {
@@ -80,29 +135,30 @@ object UserRepository {
             // 登出 API 失败不阻塞本地登出
         }
         NetworkModule.cookieJar.clear()
+        clearUserInfoLocal()
         _userFlow.value = null
     }
 
     /**
-     * 启动时校验登录态：调 /users/info，成功则更新 userFlow。
-     * - 服务端明确返回 uid 无效（空或 "0"）→ 调用 logout() 登出并清除 cookie。
-     * - 网络异常 → 不清除 cookie，只返回 false，保留登录态下次启动再试。
+     * 启动时后台校验登录态：调 /users/info 刷新用户信息。
+     * - 成功 → 更新 userFlow 并持久化
+     * - 服务端明确返回 uid 无效（空或 "0"）→ 调用 logout() 登出并清除 cookie 和本地缓存
+     * - 网络异常 → 不清除 cookie 和本地缓存，保留登录态下次启动再试
      *   （避免首次连接超时/线路抖动导致有效 cookie 被误清除）
-     * @return true=登录有效，false=未登录或校验失败
+     * 调用前应先调用 [restoreLoginFromLocal] 让 UI 立即显示登录状态。
      */
-    suspend fun verifyLogin(): Boolean {
-        return try {
+    suspend fun verifyLogin() {
+        try {
             val info = getUserInfo()
             if (info.uid.isEmpty() || info.uid == "0") {
                 // 服务端明确返回 uid 无效，视为未登录
                 logout()
-                return false
+                return
             }
             _userFlow.value = info
-            true
-        } catch (e: Exception) {
-            // 网络异常：保留 cookie，不登出，下次启动再试
-            false
+            saveUserInfoLocal(info)
+        } catch (_: Exception) {
+            // 网络异常：保留 cookie 和本地登录态，下次启动再试
         }
     }
 
@@ -115,9 +171,11 @@ object UserRepository {
         return resp.data ?: throw IOException("用户信息为空")
     }
 
-    /** 刷新当前用户信息到 userFlow。 */
+    /** 刷新当前用户信息到 userFlow 并持久化。 */
     suspend fun refreshUserInfo() {
-        _userFlow.value = getUserInfo()
+        val info = getUserInfo()
+        _userFlow.value = info
+        saveUserInfoLocal(info)
     }
 
     // ==================== 签到 / 福利 / 积分 ====================

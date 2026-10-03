@@ -121,7 +121,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             DevConfig.startProxy()
         }
 
-        // 启动时校验登录态（cookie 已由 GlobalCookieJar 从 SharedPreferences 恢复）
+        // 初始化用户仓库（本地用户信息存储）
+        com.zycomic.app.data.repository.UserRepository.init(this)
+        // 先从本地恢复登录态，UI 立即显示登录（没网也显示）
+        com.zycomic.app.data.repository.UserRepository.restoreLoginFromLocal()
+        // 后台异步校验登录态并刷新用户信息（cookie 已由 GlobalCookieJar 从 SharedPreferences 恢复）
         ProcessLifecycleOwner.get().lifecycleScope.launch {
             com.zycomic.app.data.repository.UserRepository.verifyLogin()
         }
