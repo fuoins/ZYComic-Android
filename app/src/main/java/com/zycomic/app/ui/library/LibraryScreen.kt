@@ -657,7 +657,7 @@ private fun FilterDialog(
                             state = when (isUnread) {
                                 1 -> TriState.ENABLED_IS
                                 0 -> TriState.DISABLED
-                                else -> TriState.IGNORE
+                                else -> TriState.DISABLED
                             },
                             onClick = { vm.selectIsUnread(toggleTriState(isUnread)) },
                         )
@@ -666,7 +666,7 @@ private fun FilterDialog(
                             state = when (isRead) {
                                 1 -> TriState.ENABLED_IS
                                 0 -> TriState.DISABLED
-                                else -> TriState.IGNORE
+                                else -> TriState.DISABLED
                             },
                             onClick = { vm.selectIsRead(toggleTriState(isRead)) },
                         )
@@ -675,7 +675,7 @@ private fun FilterDialog(
                             state = when (isEnd) {
                                 1 -> TriState.ENABLED_IS
                                 0 -> TriState.DISABLED
-                                else -> TriState.IGNORE
+                                else -> TriState.DISABLED
                             },
                             onClick = { vm.selectIsEnd(toggleTriState(isEnd)) },
                         )
