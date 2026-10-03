@@ -7,7 +7,6 @@ import kotlinx.serialization.SerialName
 data class LoginRequest(
     val username: String,
     val password: String,
-    val captcha: String = "",
 )
 
 /**

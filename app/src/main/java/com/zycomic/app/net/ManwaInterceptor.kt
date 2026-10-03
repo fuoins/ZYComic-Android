@@ -19,10 +19,13 @@ class ManwaInterceptor : Interceptor {
         const val DEVICE_ID = "asawsdqwefwsnjfiowehnfjuoweisfnuj"
 
         const val UA =
-            "Mozilla/5.0 (Linux; Android 16; PLC110 Build/BP2A.250605.015; wv) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 " +
-            "Chrome/150.0.7871.181 Mobile Safari/537.36 " +
-            "uni-app Html5Plus/1.0 (Immersed/40.285713)"
+            "Mozilla/5.0 (Linux; Android 16; PLC110) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 " +
+                "mwa-1.1.27+1 (Android/16 OnePlus/PLC110)"
+
+        const val ORIGIN = "http://mseeowpm1.xyz"
+        const val REFERER = "http://mseeowpm1.xyz"
+        const val ACCEPT_LANGUAGE = "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
     }
 
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -49,6 +52,9 @@ class ManwaInterceptor : Interceptor {
             .header("devid", ts)
             .header("X-Token", Crypto.md5Hex(ts + Crypto.XTOKEN_SALT))
             .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", ACCEPT_LANGUAGE)
+            .header("Origin", ORIGIN)
+            .header("Referer", REFERER)
             .header("Connection", "keep-alive")
             .build()
 
