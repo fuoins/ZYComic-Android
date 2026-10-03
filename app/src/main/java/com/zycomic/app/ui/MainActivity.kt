@@ -48,7 +48,7 @@ import androidx.lifecycle.lifecycleScope
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
-import com.zycomic.app.ui.library.HistoryScreen
+import com.zycomic.app.ui.history.HistoryScreen
 import com.zycomic.app.ui.library.LibraryScreen
 import com.zycomic.app.ui.login.LoginOverlay
 import com.zycomic.app.ui.manga.MangaDetailOverlay

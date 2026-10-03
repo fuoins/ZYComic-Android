@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.Folder
-import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.LoadingFooter
@@ -64,35 +63,6 @@ fun LibraryScreen(
         }
 
         FavContent(vm, onOpenManga)
-    }
-}
-
-/**
- * 独立的阅读历史页面（底部导航"历史"tab）。
- */
-@Composable
-fun HistoryScreen(
-    onOpenManga: (String) -> Unit,
-    onRequireLogin: () -> Unit,
-) {
-    val vm = remember { LibraryViewModel(mode = 1) }
-    val user by vm.user.collectAsState()
-
-    LaunchedEffect(vm.needLogin) {
-        vm.needLogin.collect { if (it) onRequireLogin() }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("阅读历史", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        }
-
-        if (user == null) {
-            EmptyView("请先登录", modifier = Modifier.fillMaxSize())
-            return@Column
-        }
-
-        HistoryContent(vm, onOpenManga)
     }
 }
 
@@ -368,131 +338,6 @@ private fun FavRow(
         }
         if (item.isNew) {
             Text("NEW", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-// ==================== 阅读历史 ====================
-
-@Composable
-private fun HistoryContent(vm: LibraryViewModel, onOpenManga: (String) -> Unit) {
-    val history by vm.history.collectAsState()
-    val loading by vm.historyLoading.collectAsState()
-    val hasMore by vm.historyHasMore.collectAsState()
-    val selMode by vm.historySelectionMode.collectAsState()
-    val selIds by vm.historySelectedIds.collectAsState()
-    val listState = rememberLazyListState()
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-
-    LaunchedEffect(listState.canScrollForward, history.size) {
-        val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (history.isNotEmpty() && last >= history.size - 3 && hasMore) vm.loadMoreHistory()
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        // 顶部栏
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.weight(1f))
-            if (!selMode) {
-                Text("删除", color = MaterialTheme.colorScheme.error, modifier = Modifier.clickableNoRipple { vm.enterHistorySelection() }.padding(8.dp))
-            } else {
-                Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickableNoRipple { vm.exitHistorySelection() }.padding(8.dp))
-            }
-        }
-        // 多选顶部栏（与列表平行）
-        if (selMode) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("已选(${selIds.size})", modifier = Modifier.weight(1f))
-                val allSelected = history.isNotEmpty() && selIds.size == history.size
-                Text(
-                    if (allSelected) "取消" else "全选",
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickableNoRipple {
-                        if (allSelected) vm.exitHistorySelection() else vm.toggleSelectAllLoadedHistory()
-                    }.padding(horizontal = 12.dp),
-                )
-            }
-        }
-
-        Box(modifier = Modifier.weight(1f)) {
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                items(history, key = { it.id }) { h ->
-                    HistoryRow(
-                        item = h,
-                        selected = selIds.contains(h.id),
-                        selectionMode = selMode,
-                        onClick = {
-                            if (selMode) vm.toggleHistorySelect(h.id)
-                            else onOpenManga(h.bookId)
-                        },
-                    )
-                }
-                if (loading) item { LoadingFooter() }
-                else if (!hasMore && history.isNotEmpty()) item {
-                    Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-
-        // 多选底部栏
-        if (selMode) {
-            Row(
-                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier.weight(1f).clickableNoRipple {
-                        if (selIds.isNotEmpty()) showDeleteConfirm = true
-                    }.padding(vertical = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            }
-        }
-    }
-
-    // 删除确认对话框
-    if (showDeleteConfirm) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除确认") },
-            text = { Text("确定删除选中的 ${selIds.size} 条阅读历史？") },
-            confirmButton = {
-                Text("确定删除", color = MaterialTheme.colorScheme.error, modifier = Modifier
-                    .clickableNoRipple {
-                        showDeleteConfirm = false
-                        vm.deleteSelectedHistory()
-                    }
-                    .padding(8.dp))
-            },
-            dismissButton = {
-                Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier
-                    .clickableNoRipple { showDeleteConfirm = false }
-                    .padding(8.dp))
-            },
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun HistoryRow(item: HistoryItem, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick)
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AsyncImage(
-            model = coverUrl(item.bookImg),
-            contentDescription = item.bookName,
-            modifier = Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
-        )
-        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
-            Text(item.bookName, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-            Text("上次阅读：${item.chapterName.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-            Text(updateLine("上次更新", item.lastTime, item.end), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
