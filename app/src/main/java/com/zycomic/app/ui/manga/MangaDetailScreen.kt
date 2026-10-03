@@ -253,31 +253,42 @@ fun MangaDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         val isFav = d.fav == 1
-                        // 收藏状态（纯展示，不可点击）
+                        // 收藏按钮：未收藏点击→添加到全部收藏夹；已收藏点击→取消收藏
                         ActionItem(
                             modifier = Modifier.weight(1f),
                             icon = if (isFav) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                             label = if (isFav) "已收藏" else "未收藏",
                             tint = if (isFav) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
+                            onClick = { vm.toggleFavorite() },
                         )
-                        // 添加到全部收藏夹
+                        // 添加到全部收藏夹：已收藏时toast提示
                         ActionItem(
                             modifier = Modifier.weight(1f),
                             icon = Icons.Filled.BookmarkAdd,
                             label = "全部收藏夹",
                             tint = MaterialTheme.colorScheme.onSurface,
-                            onClick = { vm.addToAllFolders() },
+                            onClick = {
+                                if (isFav) {
+                                    Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    vm.addToAllFolders()
+                                }
+                            },
                         )
-                        // 添加到其他收藏夹
+                        // 添加到其他收藏夹：已收藏时toast提示
                         ActionItem(
                             modifier = Modifier.weight(1f),
                             icon = Icons.Outlined.CreateNewFolder,
                             label = "其他收藏夹",
                             tint = MaterialTheme.colorScheme.onSurface,
                             onClick = {
-                                vm.openFolderPicker()
-                                showFolderDialog = true
+                                if (isFav) {
+                                    Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    vm.openFolderPicker()
+                                    showFolderDialog = true
+                                }
                             },
                         )
                     }
