@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -146,8 +144,7 @@ fun AppBar(
     )
     Column(
         modifier = modifier
-            .background(barBg)
-            .statusBarsPadding(),
+            .background(barBg),
     ) {
         TopAppBar(
             navigationIcon = {
@@ -182,7 +179,6 @@ fun AppBar(
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = barBg,
             ),
-            windowInsets = WindowInsets(0, 0, 0, 0),
             scrollBehavior = scrollBehavior,
         )
     }

@@ -5,8 +5,6 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -62,8 +60,7 @@ fun SettingsMainScreen(
         topBar = {
             Column(
                 modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface)
-                    .statusBarsPadding(),
+                    .background(MaterialTheme.colorScheme.surface),
             ) {
                 TopAppBar(
                     title = { Text("设置") },
@@ -74,7 +71,6 @@ fun SettingsMainScreen(
                             Icon(Icons.Outlined.Search, contentDescription = "搜索")
                         }
                     },
-                    windowInsets = WindowInsets(0, 0, 0, 0),
                     scrollBehavior = scrollBehavior,
                 )
             }
