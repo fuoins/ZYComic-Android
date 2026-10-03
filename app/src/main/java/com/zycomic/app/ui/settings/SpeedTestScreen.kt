@@ -48,6 +48,7 @@ fun SpeedTestScreen(
     val updateTime by vm.configUpdateTime.collectAsState()
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("测速日志") },

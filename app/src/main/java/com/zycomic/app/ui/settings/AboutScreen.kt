@@ -27,6 +27,7 @@ fun AboutScreen(
 ) {
     val context = LocalContext.current
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("关于") },
