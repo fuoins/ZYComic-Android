@@ -100,19 +100,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        lifecycleScope.launch {
-            val loggedIn = try {
-                UserRepository.verifyLogin()
-            } catch (e: Exception) {
-                false
-            }
-            if (!loggedIn) {
-                Toast.makeText(
-                    this@MainActivity,
-                    "首次进入建议注册登录，才能使用收藏功能",
-                    Toast.LENGTH_LONG,
-                ).show()
-            }
+        // 登录态已在 App.kt 启动时处理（本地恢复+后台刷新），这里只检查未登录提示
+        if (!UserRepository.isLoggedIn) {
+            Toast.makeText(
+                this@MainActivity,
+                "首次进入建议注册登录，才能使用收藏功能",
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 }
