@@ -331,9 +331,7 @@ private fun FavRow(
         Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Text(item.bookName, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text("最新：${item.chapterName.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (item.readLast.isNotBlank()) {
-                Text("读到：${item.readLast}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
-            }
+            Text("读到：${item.readLast.ifBlank { "未读" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
             Text(updateLine("更新", item.lastTime, item.end), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
         }
         if (item.isNew) {
