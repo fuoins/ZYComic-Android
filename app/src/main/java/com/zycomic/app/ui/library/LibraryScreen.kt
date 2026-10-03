@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -84,6 +85,7 @@ import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentListOfBuilder
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.EmptyScreen
@@ -196,33 +198,15 @@ fun LibraryScreen(
                     },
                     actions = {
                         AppBarActions(
-                            persistentListOf(
+                            persistentListOfBuilder {
                                 if (!isSearching) {
-                                    AppBar.Action(
-                                        title = "刷新",
-                                        icon = Icons.Default.Refresh,
-                                        onClick = { vm.refreshFavorites() },
-                                    )
-                                },
-                                if (isSearching) {
-                                    AppBar.Action(
-                                        title = "清除",
-                                        icon = Icons.Default.Close,
-                                        onClick = { vm.updateSearchQuery("") },
-                                    )
+                                    add(AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refreshFavorites() }))
+                                    add(AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { vm.updateSearchQuery("") }))
                                 } else {
-                                    AppBar.Action(
-                                        title = "搜索",
-                                        icon = Icons.Default.Search,
-                                        onClick = { vm.updateSearchQuery("") },
-                                    )
-                                },
-                                AppBar.Action(
-                                    title = "筛选",
-                                    icon = Icons.Outlined.FilterList,
-                                    onClick = { showFilterDialog = true },
-                                ),
-                            ),
+                                    add(AppBar.Action(title = "清除", icon = Icons.Default.Close, onClick = { vm.updateSearchQuery("") }))
+                                }
+                                add(AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }))
+                            }.build(),
                         )
                     },
                 scrollBehavior = scrollBehavior,
