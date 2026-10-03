@@ -7,5 +7,5 @@
     <path
         android:name="letter_z"
         android:fillColor="#FFFFFFFF"
-        android:pathData="M108,108 L324,108 L324,156 L156,276 L324,276 L324,324 L108,324 L108,276 L276,156 L108,156 Z"/>
+        android:pathData="M156,150 L276,150 L276,186 L198,246 L276,246 L276,282 L156,282 L156,246 L234,186 L156,186 Z"/>
 </vector>
