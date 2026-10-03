@@ -1,7 +1,9 @@
 package com.zycomic.app.ui.browse
 
 import com.zycomic.app.data.AllTags
+import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
@@ -60,6 +62,20 @@ class BrowseViewModel {
     // ---- 排行子 Tab：0 人气 / 1 新番 / 2 完结 ----
     val rankType = MutableStateFlow(0)
 
+    // ---- 显示模式：0紧凑网格 1舒适网格(默认) 2仅封面网格 ----
+    val displayMode = MutableStateFlow(1)
+    val gridColumns = MutableStateFlow(3)
+
+    // ---- 多选模式 ----
+    val selectionMode = MutableStateFlow(false)
+    val selectedIds = MutableStateFlow<Set<String>>(emptySet())
+
+    // ---- 收藏夹列表 ----
+    private val _folders = MutableStateFlow<List<Folder>>(emptyList())
+    val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
+    private val _foldersLoading = MutableStateFlow(false)
+    val foldersLoading: StateFlow<Boolean> = _foldersLoading.asStateFlow()
+
     // ---- 登录状态 ----
     val user = UserRepository.userFlow
 
@@ -111,6 +127,70 @@ class BrowseViewModel {
     }
 
     fun selectDate(date: String) { newestDate.value = date; refresh() }
+
+    // ---- 显示模式 ----
+    fun setDisplayMode(mode: Int) { displayMode.value = mode }
+    fun setGridColumns(cols: Int) { gridColumns.value = cols }
+
+    // ---- 多选 ----
+    fun enterSelection() { selectionMode.value = true; selectedIds.value = emptySet() }
+    fun exitSelection() { selectionMode.value = false; selectedIds.value = emptySet() }
+    fun toggleSelect(id: String) {
+        val cur = selectedIds.value.toMutableSet()
+        if (!cur.add(id)) cur.remove(id)
+        selectedIds.value = cur
+    }
+    fun selectAll() { selectedIds.value = _mangas.value.map { it.id }.toSet() }
+    fun invertSelection() {
+        val all = _mangas.value.map { it.id }.toSet()
+        selectedIds.value = all - selectedIds.value
+    }
+
+    // ---- 收藏夹 ----
+    fun loadFolders() {
+        if (_foldersLoading.value) return
+        _foldersLoading.value = true
+        scope.launch {
+            try {
+                _folders.value = FavoriteRepository.getFolderList()
+            } catch (_: Exception) {
+            } finally {
+                _foldersLoading.value = false
+            }
+        }
+    }
+
+    /** 添加选中漫画到全部收藏夹（folder_id=0） */
+    fun addToAllFolders(onDone: (Boolean, String) -> Unit) {
+        val ids = selectedIds.value.toList()
+        if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
+        scope.launch {
+            try {
+                ids.forEach { id ->
+                    FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, 0)
+                }
+                onDone(true, "已添加 ${ids.size} 本到全部收藏夹")
+            } catch (e: Exception) {
+                onDone(false, e.message ?: "收藏失败")
+            }
+        }
+    }
+
+    /** 添加选中漫画到指定收藏夹 */
+    fun addToFolder(folderId: String, onDone: (Boolean, String) -> Unit) {
+        val ids = selectedIds.value.toList()
+        if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
+        scope.launch {
+            try {
+                ids.forEach { id ->
+                    FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, folderId.toIntOrNull() ?: 0)
+                }
+                onDone(true, "已添加 ${ids.size} 本到收藏夹")
+            } catch (e: Exception) {
+                onDone(false, e.message ?: "收藏失败")
+            }
+        }
+    }
 
     /** 从详情页标签点击返回：选中该标签并切到分类 Tab。 */
     fun applyPendingTag(tag: String) {
