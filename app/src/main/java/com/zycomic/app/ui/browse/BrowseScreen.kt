@@ -58,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
-import io.coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Manga
 import eu.kanade.presentation.components.AppBar
