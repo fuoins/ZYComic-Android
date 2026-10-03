@@ -173,12 +173,12 @@ fun LibraryScreen(
                 }
                 AppBar(
                     navigationIcon = if (isSearching) Icons.AutoMirrored.Filled.ArrowBack else null,
-                    navigateUp = {
-                        if (isSearching) {
+                    navigateUp = if (isSearching) {
+                        {
                             vm.updateSearchQuery(null)
                             focusManager.clearFocus()
                         }
-                    },
+                    } else null,
                     titleContent = {
                         if (isSearching) {
                             BasicTextField(
