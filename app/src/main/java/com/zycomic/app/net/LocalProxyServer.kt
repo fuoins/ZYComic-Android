@@ -327,10 +327,17 @@ class LocalProxyServer(
 
     /**
      * 解析 host -> 上游 IP。
-     * 从 rule[host] 列表中轮询取一个（不用固定第一个）。
-     * 没有则返回 null（调用方回退为直连 host 本身）。
+     * 优先使用测速选出的最快 IP（[RouteManager.fastestIp]）；
+     * 否则从 rule[host] 列表中轮询取一个；
+     * 都没有则返回 null（调用方回退为直连 host 本身）。
      */
     private fun resolveHostIp(host: String): String? {
+        // 优先使用测速选出的最快 IP
+        RouteManager.fastestIp[host]?.let {
+            Log.d(TAG, "resolveHostIp: $host -> $it (fastestIp)")
+            return it
+        }
+        // 回退：rule 轮询
         val ips = rule[host] ?: return null
         if (ips.isEmpty()) return null
         val idx = ipPollIndex.getAndIncrement() % ips.size

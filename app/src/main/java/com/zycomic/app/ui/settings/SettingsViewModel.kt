@@ -21,8 +21,10 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.security.SecureRandom
@@ -180,17 +182,33 @@ class SettingsViewModel {
     // ==================== HTTP 测速 ====================
 
     /**
-     * 基于全局 client 构建 2 秒短超时副本（保留 cookie/拦截器/DNS/SNI）。
+     * 针对特定 IP 构建临时测速 client：
+     * - 绕过本地代理（NO_PROXY），否则代理自己做 DNS 轮询，自定义 Dns 无效。
+     * - 自定义 Dns：目标域名强制解析到指定 IP，其他域名走系统 DNS。
+     * - 2 秒超时。
+     * - 继承 baseClient 的 cookieJar / trust-all SSL / 拦截器。
      */
-    private fun shortTimeoutClient(): OkHttpClient =
-        NetworkModule.client.newBuilder()
+    private fun ipTargetedClient(baseClient: OkHttpClient, domain: String, ip: String): OkHttpClient =
+        baseClient.newBuilder()
+            .proxy(Proxy.NO_PROXY)
+            .dns { hostname ->
+                if (hostname.equals(domain, ignoreCase = true)) {
+                    listOf(InetAddress.getByName(ip))
+                } else {
+                    Dns.SYSTEM.lookup(hostname)
+                }
+            }
             .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(2, TimeUnit.SECONDS)
             .build()
 
-    /** 测单条线路：GET 完整域名 URL。成功=延迟毫秒，失败=Long.MAX_VALUE。 */
-    private suspend fun measureLine(client: OkHttpClient, lineUrl: String): Long = withContext(Dispatchers.IO) {
+    /**
+     * 测单条线路的指定 IP：绕过代理 + 自定义DNS将域名解析到 targetIp，GET 完整域名 URL。
+     * 成功=延迟毫秒，失败=Long.MAX_VALUE。
+     */
+    private suspend fun measureLineIp(baseClient: OkHttpClient, lineUrl: String, domain: String, ip: String): Long = withContext(Dispatchers.IO) {
         val url = "$lineUrl/api/index/index?facility=android&deviceid=speedtest&timestamp=${System.currentTimeMillis()}"
+        val client = ipTargetedClient(baseClient, domain, ip)
         val req = Request.Builder().url(url).get().build()
         val start = System.nanoTime()
         try {
@@ -203,8 +221,12 @@ class SettingsViewModel {
         }
     }
 
-    /** 测单个图源：GET https://host/。成功=延迟毫秒，失败=Long.MAX_VALUE。 */
-    private suspend fun measureImg(client: OkHttpClient, domain: String): Long = withContext(Dispatchers.IO) {
+    /**
+     * 测单个图源的指定 IP：绕过代理 + 自定义DNS，GET https://domain/。
+     * 成功=延迟毫秒，失败=Long.MAX_VALUE。
+     */
+    private suspend fun measureImgIp(baseClient: OkHttpClient, domain: String, ip: String): Long = withContext(Dispatchers.IO) {
+        val client = ipTargetedClient(baseClient, domain, ip)
         val req = Request.Builder().url("https://$domain/").get().build()
         val start = System.nanoTime()
         try {
@@ -218,26 +240,73 @@ class SettingsViewModel {
     }
 
     /**
-     * 纯 HTTP 并行测速：所有线路/图源并行发 HTTP GET，延迟毫秒为结果，失败=Long.MAX_VALUE。
-     * 走本地代理（抓包可见）。
+     * IP 级并行测速：对每个域名的所有预设 IP 分别发 HTTP 请求，选最快 IP。
+     * 测速绕过本地代理 + 自定义 DNS 直连指定 IP，2 秒超时。
+     *
+     * @return Triple(线路 index->最优延迟, 图源 index->最优延迟, 域名->(IP->延迟))
      */
-    private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
-        val client = shortTimeoutClient()
+    private suspend fun runMeasure(): Triple<Map<Int, Long>, Map<Int, Long>, Map<String, Map<String, Long>>> = coroutineScope {
+        val baseClient = NetworkModule.client
+        val ipDelayMap = mutableMapOf<String, MutableMap<String, Long>>()
 
-        // 线路 HTTP 测速（并行）
-        val lineHttp = RouteManager.LINE_HOSTS.map { url ->
-            async { measureLine(client, url) }
-        }.awaitAll()
+        // ---- 线路测速（每条线路的所有 IP 并行）----
+        val lineResults = RouteManager.LINE_HOSTS.mapIndexed { index, lineUrl ->
+            async {
+                val domain = lineUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
+                val ips = RouteManager.resolveIp(domain)
+                val delays: Map<String, Long>
+                val bestDelay: Long
 
-        // 图源 HTTP 测速（并行）
-        val imgHttp = RouteManager.IMG_DOMAINS.map { domain ->
-            async { measureImg(client, domain) }
-        }.awaitAll()
+                if (ips.isEmpty()) {
+                    // 无预设 IP：退化为域名级测速，以域名本身作为唯一"IP"条目
+                    val d = measureLineIp(baseClient, lineUrl, domain, domain)
+                    delays = mapOf(domain to d)
+                    bestDelay = d
+                } else {
+                    val results = ips.map { ip ->
+                        async { ip to measureLineIp(baseClient, lineUrl, domain, ip) }
+                    }.awaitAll().toMap()
+                    delays = results
+                    bestDelay = results.values.minOrNull() ?: Long.MAX_VALUE
+                    // 记录最快 IP 供代理优先使用
+                    if (bestDelay < Long.MAX_VALUE) {
+                        val fastestIp = results.entries.first { it.value == bestDelay }.key
+                        RouteManager.setFastestIp(domain, fastestIp)
+                    }
+                }
+                synchronized(ipDelayMap) { ipDelayMap[domain] = delays.toMutableMap() }
+                index to bestDelay
+            }
+        }.awaitAll().toMap()
 
-        val lineResults = lineHttp.mapIndexed { index, delay -> index to delay }.toMap()
-        val imgResults = imgHttp.mapIndexed { index, delay -> index to delay }.toMap()
+        // ---- 图源测速（每个图源的所有 IP 并行）----
+        val imgResults = RouteManager.IMG_DOMAINS.mapIndexed { index, domain ->
+            async {
+                val ips = RouteManager.resolveIp(domain)
+                val delays: Map<String, Long>
+                val bestDelay: Long
 
-        lineResults to imgResults
+                if (ips.isEmpty()) {
+                    val d = measureImgIp(baseClient, domain, domain)
+                    delays = mapOf(domain to d)
+                    bestDelay = d
+                } else {
+                    val results = ips.map { ip ->
+                        async { ip to measureImgIp(baseClient, domain, ip) }
+                    }.awaitAll().toMap()
+                    delays = results
+                    bestDelay = results.values.minOrNull() ?: Long.MAX_VALUE
+                    if (bestDelay < Long.MAX_VALUE) {
+                        val fastestIp = results.entries.first { it.value == bestDelay }.key
+                        RouteManager.setFastestIp(domain, fastestIp)
+                    }
+                }
+                synchronized(ipDelayMap) { ipDelayMap[domain] = delays.toMutableMap() }
+                index to bestDelay
+            }
+        }.awaitAll().toMap()
+
+        Triple(lineResults, imgResults, ipDelayMap)
     }
 
     /** 设置页"重新测速"按钮：仅测速展示，不自动切换线路。 */
@@ -245,11 +314,13 @@ class SettingsViewModel {
         scope.launch {
             testing.value = true
             try {
-                val (lines, imgs) = runMeasure()
+                val (lines, imgs, ipMap) = runMeasure()
                 lineDelays.value = lines
                 imgDelays.value = imgs
+                ipDelays.value = ipMap
                 // 持久化到 RouteManager，切换页面后不丢失
                 RouteManager.setLastDelays(lines, imgs)
+                RouteManager.setLastIpDelays(ipMap)
             } finally {
                 testing.value = false
             }
@@ -264,10 +335,12 @@ class SettingsViewModel {
     suspend fun autoSelectFastest(): Pair<Int, Int> {
         autoSelecting.value = true
         return try {
-            val (lines, imgs) = runMeasure()
+            val (lines, imgs, ipMap) = runMeasure()
             lineDelays.value = lines
             imgDelays.value = imgs
+            ipDelays.value = ipMap
             RouteManager.setLastDelays(lines, imgs)
+            RouteManager.setLastIpDelays(ipMap)
 
             val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
             val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
