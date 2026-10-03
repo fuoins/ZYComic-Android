@@ -11,8 +11,11 @@ import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -36,6 +39,10 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 未登录事件：UI 层收到后跳转登录页。 */
     val needLogin = MutableStateFlow(false)
+
+    /** 收藏成功事件：UI 层收到后显示 toast。 */
+    private val _favSuccess = MutableSharedFlow<String>()
+    val favSuccess: SharedFlow<String> = _favSuccess.asSharedFlow()
 
     val user = UserRepository.userFlow
 
@@ -102,6 +109,7 @@ class MangaDetailViewModel(private val bookId: String) {
                 FavoriteRepository.addFavorite(bookIdInt, folderId)
                 _detail.value = _detail.value?.copy(fav = 1)
                 UserRepository.refreshUserInfo()
+                _favSuccess.emit("收藏成功")
             } catch (e: NotLoggedInException) {
                 needLogin.value = true
             } catch (_: Exception) {
@@ -123,6 +131,7 @@ class MangaDetailViewModel(private val bookId: String) {
                 FavoriteRepository.addFavorite(bookIdInt, 0)
                 _detail.value = _detail.value?.copy(fav = 1)
                 UserRepository.refreshUserInfo()
+                _favSuccess.emit("收藏成功")
             } catch (e: NotLoggedInException) {
                 needLogin.value = true
             } catch (_: Exception) {

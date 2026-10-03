@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.onGloballyPositioned
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,19 +28,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +47,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -116,12 +117,17 @@ fun MangaDetailScreen(
 
     var showFolderDialog by remember { mutableStateOf(false) }
     var showCoverMenu by remember { mutableStateOf(false) }
-    var showTopMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(needLogin) {
         if (needLogin) {
             onRequireLogin()
             vm.needLogin.value = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        vm.favSuccess.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -136,6 +142,9 @@ fun MangaDetailScreen(
             detail == null -> EmptyView()
             else -> {
                 val d = detail!!
+                val scrollState = rememberScrollState()
+                val scope = rememberCoroutineScope()
+                var recommendY by remember { mutableStateOf(0) }
 
                 // 1. 模糊封面背景
                 Box(Modifier.matchParentSize()) {
@@ -164,7 +173,7 @@ fun MangaDetailScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(scrollState),
                 ) {
                     // 头部：封面 + 信息（顶部预留状态栏 + 顶栏高度）
                     Row(
@@ -405,7 +414,9 @@ fun MangaDetailScreen(
                     Text(
                         "相关推荐",
                         style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                        modifier = Modifier
+                            .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                            .onGloballyPositioned { recommendY = it.positionInParent().y.toInt() },
                     )
                     if (d.loveList.isEmpty()) {
                         Text(
@@ -444,27 +455,14 @@ fun MangaDetailScreen(
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                     Spacer(Modifier.weight(1f))
-                    Box {
-                        IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "菜单")
-                        }
-                        DropdownMenu(
-                            expanded = showTopMenu,
-                            onDismissRequest = { showTopMenu = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("删除") },
-                                onClick = {
-                                    showTopMenu = false
-                                    vm.deleteHistory()
-                                    Toast.makeText(
-                                        context,
-                                        "已删除历史记录",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                },
-                            )
-                        }
+                    TextButton(onClick = {
+                        scope.launch { scrollState.animateScrollTo(recommendY) }
+                    }) {
+                        Text(
+                            "相关推荐",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }
@@ -650,33 +648,95 @@ private fun FolderPickDialog(
     onDismiss: () -> Unit,
     onPick: (Int) -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.85f)
                 .background(MaterialTheme.colorScheme.surface)
-                .padding(16.dp)
-                .clip(RoundedCornerShape(12.dp)),
+                .statusBarsPadding(),
         ) {
-            Text("选择收藏夹", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "默认收藏夹",
-                style = MaterialTheme.typography.bodyLarge,
+            // 顶部标题栏
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPick(0) }
-                    .padding(vertical = 12.dp),
-            )
-            folders.forEach { f ->
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "${f.name} (${f.count})",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onPick(f.id) }
-                        .padding(vertical = 12.dp),
+                    "选择收藏夹",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(start = 8.dp),
                 )
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                }
             }
+            HorizontalDivider()
+
+            // 收藏夹列表
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                // 默认收藏夹
+                item {
+                    FolderRow(
+                        icon = Icons.Filled.Bookmark,
+                        name = "默认收藏夹",
+                        count = null,
+                        onClick = { onPick(0) },
+                    )
+                }
+                // 用户收藏夹
+                items(folders) { f ->
+                    FolderRow(
+                        icon = Icons.Outlined.Folder,
+                        name = f.name,
+                        count = f.count,
+                        onClick = { onPick(f.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderRow(
+    icon: ImageVector,
+    name: String,
+    count: Int?,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(24.dp),
+        )
+        Spacer(Modifier.width(16.dp))
+        Text(
+            name,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        if (count != null) {
+            Text(
+                "$count",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
