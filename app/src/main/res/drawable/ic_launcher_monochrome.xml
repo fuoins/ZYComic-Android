@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -6,5 +7,5 @@
     <path
         android:name="letter_z"
         android:fillColor="#FFFFFFFF"
-        android:pathData="M100,100 L332,100 L332,140 L140,292 L332,292 L332,332 L100,332 L100,292 L292,140 L100,140 Z"/>
+        android:pathData="M108,108 L324,108 L324,156 L156,276 L324,276 L324,324 L108,324 L108,276 L276,156 L108,156 Z"/>
 </vector>

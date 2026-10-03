@@ -142,7 +142,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_dark_theme_pure_black),
                     enabled = themeMode != ThemeMode.LIGHT,
                     onValueChanged = {
-                        (context as? Activity)?.let { ActivityCompat.recreate(it) }
                         true
                     },
                 ),

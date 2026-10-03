@@ -20,9 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Favorite
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.Logout
@@ -137,24 +135,6 @@ fun ProfileScreen(
                         },
                     )
                 }
-            }
-
-            item { HorizontalDivider() }
-
-            // ---- 快捷入口 ----
-            item {
-                TextPreferenceWidget(
-                    title = "收藏",
-                    icon = Icons.Outlined.CollectionsBookmark,
-                    onPreferenceClick = { onNavigateToTab(1) },
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "阅读历史",
-                    icon = Icons.Outlined.History,
-                    onPreferenceClick = { onNavigateToTab(2) },
-                )
             }
 
             item { HorizontalDivider() }

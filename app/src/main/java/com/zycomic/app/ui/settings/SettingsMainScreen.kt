@@ -1,5 +1,7 @@
 package com.zycomic.app.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -8,6 +10,7 @@ import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
@@ -122,6 +125,20 @@ fun SettingsMainScreen(
                     subtitle = "开发者配置、本地代理",
                     icon = Icons.Outlined.Code,
                     onPreferenceClick = onOpenAdvanced,
+                )
+            }
+            item { HorizontalDivider() }
+            item {
+                TextPreferenceWidget(
+                    title = "赞助",
+                    icon = Icons.Outlined.FavoriteBorder,
+                    onPreferenceClick = {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://zy520.de5.net/juanzeng/"),
+                        )
+                        context.startActivity(intent)
+                    },
                 )
             }
             item { HorizontalDivider() }

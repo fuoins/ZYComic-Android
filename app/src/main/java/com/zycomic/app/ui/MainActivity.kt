@@ -68,6 +68,7 @@ import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
+import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -86,7 +87,10 @@ class MainActivity : ComponentActivity() {
         com.zycomic.app.net.RouteManager.applyDefaultConfig()
         com.zycomic.app.net.NetworkModule.init(this)
         setContent {
-            TachiyomiTheme {
+            val uiPreferences = remember { Injekt.get<UiPreferences>() }
+            val appTheme by uiPreferences.appTheme().collectAsState()
+            val amoled by uiPreferences.themeDarkAmoled().collectAsState()
+            TachiyomiTheme(appTheme = appTheme, amoled = amoled) {
                 CompositionLocalProvider(
                     LocalTextStyle provides MaterialTheme.typography.bodySmall,
                     LocalContentColor provides MaterialTheme.colorScheme.onBackground,
