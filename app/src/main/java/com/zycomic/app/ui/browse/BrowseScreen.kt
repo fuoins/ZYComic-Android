@@ -46,6 +46,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +69,9 @@ import eu.kanade.presentation.components.SearchToolbar
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.TabText
@@ -95,6 +99,13 @@ fun BrowseScreen(
     val pagerState = rememberPagerState(pageCount = { 3 })
     LaunchedEffect(mainTab) {
         if (pagerState.currentPage != mainTab) pagerState.animateScrollToPage(mainTab)
+    }
+    // 监听用户左右滑动切换页面，同步到 ViewModel 并触发请求
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }
+            .distinctUntilChanged()
+            .filter { it != vm.mainTab.value }
+            .collect { page -> vm.selectMainTab(page) }
     }
 
     val selectionMode by vm.selectionMode.collectAsState()

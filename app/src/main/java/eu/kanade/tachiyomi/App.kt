@@ -121,6 +121,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             DevConfig.startProxy()
         }
 
+        // 启动时校验登录态（cookie 已由 GlobalCookieJar 从 SharedPreferences 恢复）
+        ProcessLifecycleOwner.get().lifecycleScope.launch {
+            com.zycomic.app.data.repository.UserRepository.verifyLogin()
+        }
+
         patchInjekt()
         TelemetryConfig.init(
             applicationContext,
