@@ -16,15 +16,14 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object RouteManager {
 
-    // ---- 7 条线路 ----
+    // ---- 6 条线路 ----
     val LINE_HOSTS: List<String> = listOf(
         "https://mseeowpm.online",   // 1
-        "https://mseeowpm.pro",      // 2
-        "https://mseeowpm.cc",       // 3
-        "http://mseeowpm.pro",       // 4
-        "http://mseeowpm2.cc",       // 5
-        "https://mseeowpma.cc",      // 6
-        "http://mseeowpm1.xyz",      // 7
+        "https://mseeowpm.cc",       // 2
+        "http://mseeowpm.pro",       // 3
+        "http://mseeowpm2.cc",       // 4
+        "https://mseeowpma.cc",      // 5
+        "http://mseeowpm1.xyz",      // 6
     )
 
     // ---- 6 个图源域名 ----
