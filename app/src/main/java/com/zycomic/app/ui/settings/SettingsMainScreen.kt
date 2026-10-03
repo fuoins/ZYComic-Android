@@ -3,6 +3,9 @@ package com.zycomic.app.ui.settings
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.layout.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -56,17 +59,24 @@ fun SettingsMainScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("设置") },
-                actions = {
-                    IconButton(onClick = {
-                        Toast.makeText(context, "搜索功能即将上线", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Outlined.Search, contentDescription = "搜索")
-                    }
-                },
-                scrollBehavior = scrollBehavior,
-            )
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surface)
+                    .statusBarsPadding(),
+            ) {
+                TopAppBar(
+                    title = { Text("设置") },
+                    actions = {
+                        IconButton(onClick = {
+                            Toast.makeText(context, "搜索功能即将上线", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Outlined.Search, contentDescription = "搜索")
+                        }
+                    },
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    scrollBehavior = scrollBehavior,
+                )
+            }
         },
     ) { contentPadding ->
         ScrollbarLazyColumn(
