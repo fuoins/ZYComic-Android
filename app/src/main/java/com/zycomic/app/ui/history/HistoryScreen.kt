@@ -22,7 +22,6 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.AlertDialog
@@ -37,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,6 +91,7 @@ fun HistoryScreen(
     var singleDeleteTarget by remember { mutableStateOf<HistoryItem?>(null) }
 
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     LaunchedEffect(listState.canScrollForward, filtered.size) {
         val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         if (filtered.isNotEmpty() && last >= filtered.size - 3 && hasMore) {
@@ -140,13 +141,9 @@ fun HistoryScreen(
                                 AppBar.Action(
                                     title = "刷新",
                                     icon = Icons.Default.Refresh,
-                                    onClick = { vm.refreshHistory() },
-                                ),
-                                AppBar.Action(
-                                    title = "筛选",
-                                    icon = Icons.Outlined.FilterList,
                                     onClick = {
-                                        Toast.makeText(context, "筛选功能即将上线", Toast.LENGTH_SHORT).show()
+                                        vm.refreshHistory()
+                                        scope.launch { listState.scrollToItem(0) }
                                     },
                                 ),
                                 AppBar.Action(
