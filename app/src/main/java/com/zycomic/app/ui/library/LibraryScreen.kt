@@ -24,10 +24,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -47,9 +53,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -64,9 +76,11 @@ import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
-import eu.kanade.presentation.components.SearchToolbar
 import kotlinx.collections.immutable.persistentListOf
+import tachiyomi.core.common.preference.TriState
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
+import tachiyomi.presentation.core.components.SortItem
+import tachiyomi.presentation.core.components.TriStateItem
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
@@ -139,13 +153,61 @@ fun LibraryScreen(
                     scrollBehavior = scrollBehavior,
                 )
             } else {
-                SearchToolbar(
-                    titleContent = { AppBarTitle("收藏") },
-                    searchQuery = searchQuery,
-                    onChangeSearchQuery = { vm.updateSearchQuery(it) },
+                val isSearching = searchQuery != null
+                val focusRequester = remember { FocusRequester() }
+                val keyboardController = LocalSoftwareKeyboardController.current
+                val focusManager = LocalFocusManager.current
+                LaunchedEffect(isSearching) {
+                    if (isSearching) {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }
+                }
+                AppBar(
+                    navigationIcon = if (isSearching) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Refresh,
+                    navigateUp = {
+                        if (isSearching) {
+                            vm.updateSearchQuery(null)
+                            focusManager.clearFocus()
+                        } else {
+                            vm.refreshFavorites()
+                        }
+                    },
+                    titleContent = {
+                        if (isSearching) {
+                            BasicTextField(
+                                value = searchQuery ?: "",
+                                onValueChange = { vm.updateSearchQuery(it) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(focusRequester),
+                                textStyle = MaterialTheme.typography.titleMedium.copy(
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    fontWeight = FontWeight.Normal,
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                singleLine = true,
+                            )
+                        } else {
+                            AppBarTitle("收藏")
+                        }
+                    },
                     actions = {
                         AppBarActions(
                             persistentListOf(
+                                if (isSearching) {
+                                    AppBar.Action(
+                                        title = "清除",
+                                        icon = Icons.Default.Close,
+                                        onClick = { vm.updateSearchQuery("") },
+                                    )
+                                } else {
+                                    AppBar.Action(
+                                        title = "搜索",
+                                        icon = Icons.Default.Search,
+                                        onClick = { vm.updateSearchQuery("") },
+                                    )
+                                },
                                 AppBar.Action(
                                     title = "筛选",
                                     icon = Icons.Outlined.FilterList,
@@ -558,24 +620,16 @@ private fun FilterDialog(
 
     val folders by vm.folders.collectAsState()
     val selectedFolder by vm.selectedFolderId.collectAsState()
-    val isEnd by vm.isEnd.collectAsState()
     val isFull by vm.isFullVersion.collectAsState()
-    val onlyUpdated by vm.showOnlyUpdated.collectAsState()
     val order by vm.order.collectAsState()
     val orderType by vm.orderType.collectAsState()
     val isUnread by vm.isUnreadFilter.collectAsState()
     val isRead by vm.isReadFilter.collectAsState()
+    val isEnd by vm.isEndFilter.collectAsState()
+    val onlyUpdated by vm.onlyUpdatedFilter.collectAsState()
     val displayMode by vm.displayMode.collectAsState()
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
-
-    // 各分组展开状态
-    var expUnread by remember { mutableStateOf(true) }
-    var expRead by remember { mutableStateOf(false) }
-    var expEnd by remember { mutableStateOf(false) }
-    var expFolder by remember { mutableStateOf(true) }
-    var expFull by remember { mutableStateOf(false) }
-    var expUpdated by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -597,34 +651,37 @@ private fun FilterDialog(
             ) {
                 when (tab) {
                     0 -> {
-                        FilterGroup(
-                            title = "未读完",
-                            expanded = expUnread,
-                            onToggle = { expUnread = !expUnread },
-                            options = listOf(-1 to "全部", 1 to "未读完", 0 to "已读完"),
-                            selected = isUnread,
-                            onSelect = { vm.selectIsUnread(it) },
+                        // 三态筛选：未读完 / 阅读过 / 完结
+                        TriStateItem(
+                            label = "未读完",
+                            state = when (isUnread) {
+                                1 -> TriState.ENABLED_IS
+                                0 -> TriState.DISABLED
+                                else -> TriState.IGNORE
+                            },
+                            onClick = { vm.selectIsUnread(toggleTriState(isUnread)) },
                         )
-                        FilterGroup(
-                            title = "阅读过",
-                            expanded = expRead,
-                            onToggle = { expRead = !expRead },
-                            options = listOf(-1 to "全部", 1 to "阅读过", 0 to "未阅读过"),
-                            selected = isRead,
-                            onSelect = { vm.selectIsRead(it) },
+                        TriStateItem(
+                            label = "阅读过",
+                            state = when (isRead) {
+                                1 -> TriState.ENABLED_IS
+                                0 -> TriState.DISABLED
+                                else -> TriState.IGNORE
+                            },
+                            onClick = { vm.selectIsRead(toggleTriState(isRead)) },
                         )
-                        FilterGroup(
-                            title = "完结",
-                            expanded = expEnd,
-                            onToggle = { expEnd = !expEnd },
-                            options = listOf(-1 to "全部", 0 to "连载中", 1 to "已完结"),
-                            selected = isEnd,
-                            onSelect = { vm.selectIsEnd(it) },
+                        TriStateItem(
+                            label = "完结",
+                            state = when (isEnd) {
+                                1 -> TriState.ENABLED_IS
+                                0 -> TriState.DISABLED
+                                else -> TriState.IGNORE
+                            },
+                            onClick = { vm.selectIsEnd(toggleTriState(isEnd)) },
                         )
-                        FilterGroup(
-                            title = "收藏夹",
-                            expanded = expFolder,
-                            onToggle = { expFolder = !expFolder },
+                        HorizontalDivider()
+                        // 收藏夹（单选，服务端筛选）
+                        SingleChoiceChipRow(
                             options = buildList {
                                 add(0 to "全部收藏夹")
                                 folders.forEach { add(it.id to it.name) }
@@ -632,28 +689,37 @@ private fun FilterDialog(
                             selected = selectedFolder,
                             onSelect = { vm.selectFolder(it) },
                         )
-                        FilterGroup(
-                            title = "画质",
-                            expanded = expFull,
-                            onToggle = { expFull = !expFull },
+                        HorizontalDivider()
+                        // 画质（单选，服务端筛选）
+                        SingleChoiceChipRow(
                             options = listOf(-1 to "全部", 1 to "高清", 2 to "清水版", 3 to "未删减", 4 to "完整版"),
                             selected = isFull,
                             onSelect = { vm.selectIsFull(it) },
                         )
-                        FilterGroup(
-                            title = "只显示更新",
-                            expanded = expUpdated,
-                            onToggle = { expUpdated = !expUpdated },
-                            options = listOf(-1 to "关", 1 to "开"),
-                            selected = onlyUpdated,
-                            onSelect = { vm.selectShowOnlyUpdated(it) },
+                        HorizontalDivider()
+                        // 只显示更新（单选，客户端筛选）
+                        SingleChoiceChipRow(
+                            options = listOf(0 to "关闭只显示更新", 1 to "只显示更新"),
+                            selected = if (onlyUpdated) 1 else 0,
+                            onSelect = { vm.selectOnlyUpdated(it == 1) },
                         )
                     }
                     1 -> {
-                        SortChipRow(
-                            order = order,
-                            orderType = orderType,
-                            onSelect = { o, t -> vm.selectSort(o, t) },
+                        SortItem(
+                            label = "收藏日期",
+                            sortDescending = if (order == 2) orderType == 0 else null,
+                            onClick = {
+                                if (order == 2) vm.selectSort(2, if (orderType == 0) 1 else 0)
+                                else vm.selectSort(2, 0)
+                            },
+                        )
+                        SortItem(
+                            label = "更新日期",
+                            sortDescending = if (order == 1) orderType == 0 else null,
+                            onClick = {
+                                if (order == 1) vm.selectSort(1, if (orderType == 0) 1 else 0)
+                                else vm.selectSort(1, 0)
+                            },
                         )
                     }
                     2 -> {
@@ -726,6 +792,38 @@ private fun FilterDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+/** 三态值循环切换：IGNORE(-1) -> ENABLED_IS(1) -> DISABLED(0) -> IGNORE(-1)。 */
+private fun toggleTriState(current: Int): Int = when (current) {
+    -1 -> 1
+    1 -> 0
+    else -> -1
+}
+
+/** 单选芯片行：FlowRow 自动换行，选中态高亮，只能选一个。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SingleChoiceChipRow(
+    options: List<Pair<Int, String>>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        options.forEach { (value, label) ->
+            FilterChip(
+                text = label,
+                selected = selected == value,
+                onClick = { onSelect(value) },
+            )
         }
     }
 }

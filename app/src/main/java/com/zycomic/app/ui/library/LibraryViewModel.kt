@@ -34,10 +34,8 @@ class LibraryViewModel(val mode: Int = 2) {
     // ---- 收藏夹 ----
     val folders = MutableStateFlow<List<Folder>>(emptyList())
     val selectedFolderId = MutableStateFlow(0)        // 0 = 全部收藏夹
-    val isEnd = MutableStateFlow(-1)                  // -1 全部 / 0 连载 / 1 完结
     val isFullVersion = MutableStateFlow(-1)           // -1 全部 / 1 高清 / 2 清水 / 3 未删减 / 4 完整
-    val showOnlyUpdated = MutableStateFlow(-1)        // -1 全部 / 1 只显示更新
-    val order = MutableStateFlow(2)                   // 1 更新时间 / 2 收藏时间（默认收藏时间）
+    val order = MutableStateFlow(2)                   // 1 更新日期 / 2 收藏日期（默认收藏日期）
     val orderType = MutableStateFlow(0)               // 0 降序 / 1 升序
 
     // ---- 收藏列表 ----
@@ -60,23 +58,25 @@ class LibraryViewModel(val mode: Int = 2) {
     val searchQuery: StateFlow<String?> = _searchQuery.asStateFlow()
     val isUnreadFilter = MutableStateFlow(-1)   // -1 全部 / 0 已读完 / 1 未读完
     val isReadFilter = MutableStateFlow(-1)     // -1 全部 / 0 未阅读过 / 1 阅读过
+    val isEndFilter = MutableStateFlow(-1)      // -1 全部 / 0 连载中 / 1 已完结（客户端筛选）
+    val onlyUpdatedFilter = MutableStateFlow(false) // false=关闭只显示更新 / true=只显示更新（客户端筛选）
     val displayMode = MutableStateFlow(0)       // 0 默认列表 / 1 列表2(历史样式)
     val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
     val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
 
     /**
-     * 经过本地搜索 + 客户端筛选后的收藏列表。
-     * 服务端筛选（isEnd/isFullVersion/showOnlyUpdated/folderId/order/orderType）在
-     * [loadFav] 时传给 API，这里不再重复过滤。
+     * 经过本地搜索 + 客户端筛选 + 本地排序后的收藏列表。
+     * 服务端筛选（isFullVersion/folderId）在 [loadFav] 时传给 API；
+     * order/orderType 也传给 API（请求返回已排好序），切换排序时本地重排不请求。
      */
     val filteredFavs: StateFlow<List<FavoriteItem>> =
-        combine(_favItems, _searchQuery, isUnreadFilter, isReadFilter) { list, query, unreadF, readF ->
+        combine(_favItems, _searchQuery, isUnreadFilter, isReadFilter, isEndFilter, onlyUpdatedFilter, order, orderType) { list, query, unreadF, readF, endF, onlyUp, ord, ordType ->
             var result = list
             if (!query.isNullOrBlank()) {
                 val q = query.trim()
                 result = result.filter { it.bookName.contains(q, ignoreCase = true) }
             }
-            // 未读完：chapterName 非空 且 readLast != chapterName（chapterName 为空不算未读完）
+            // 未读完：chapterName 非空 且 readLast != chapterName
             fun FavoriteItem.isUnread(): Boolean =
                 this.chapterName.isNotBlank() && this.readLast != this.chapterName
             when (unreadF) {
@@ -88,12 +88,30 @@ class LibraryViewModel(val mode: Int = 2) {
                 1 -> result = result.filter { it.readLast.isNotBlank() }
                 0 -> result = result.filter { it.readLast.isBlank() }
             }
+            // 完结：end == "完结"
+            when (endF) {
+                1 -> result = result.filter { it.end == "完结" }
+                0 -> result = result.filter { it.end != "完结" }
+            }
+            // 只显示更新：is_new == true
+            if (onlyUp) {
+                result = result.filter { it.isNew }
+            }
+            // 本地排序（切换排序时不请求，直接对已有数据排序）
+            result = when (ord) {
+                1 -> result.sortedByDescendingOrAscending({ it.lastTime }, ordType == 0)
+                else -> result.sortedByDescendingOrAscending({ it.id.toLongOrNull() ?: 0L }, ordType == 0)
+            }
             result
         }.stateIn(
             scope = scope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
         )
+
+/** 按选择器排序，descending=true 降序，false 升序。 */
+private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selector: (T) -> R, descending: Boolean): List<T> =
+    if (descending) this.sortedByDescending(selector) else this.sortedBy(selector)
 
 
     // ---- 历史 ----
@@ -153,15 +171,18 @@ class LibraryViewModel(val mode: Int = 2) {
     }
 
     fun selectFolder(id: Int) { selectedFolderId.value = id; refreshFavorites() }
-    fun selectIsEnd(v: Int) { isEnd.value = v; refreshFavorites() }
     fun selectIsFull(v: Int) { isFullVersion.value = v; refreshFavorites() }
-    fun selectShowOnlyUpdated(v: Int) { showOnlyUpdated.value = v; refreshFavorites() }
 
-    /** 排序：order=1 更新时间 / 2 收藏时间；orderType=0 降序 / 1 升序 */
+    /** 完结筛选：-1 全部 / 0 连载中 / 1 已完结（客户端筛选，不请求）。 */
+    fun selectIsEnd(v: Int) { isEndFilter.value = v }
+
+    /** 只显示更新：false=关闭 / true=只显示更新（客户端筛选，不请求）。 */
+    fun selectOnlyUpdated(v: Boolean) { onlyUpdatedFilter.value = v }
+
+    /** 排序：order=1 更新日期 / 2 收藏日期；orderType=0 降序 / 1 升序（本地排序，不请求）。 */
     fun selectSort(order: Int, orderType: Int) {
         this.order.value = order
         this.orderType.value = orderType
-        refreshFavorites()
     }
 
     // ---------- 本地筛选 / 显示（不触发 API）----------
@@ -208,9 +229,7 @@ class LibraryViewModel(val mode: Int = 2) {
                 order = order.value,
                 orderType = orderType.value,
                 folderId = selectedFolderId.value,
-                isEnd = isEnd.value,
                 isFullVersion = isFullVersion.value,
-                showOnlyUpdated = showOnlyUpdated.value,
             )
             favPage++
             _favItems.value = if (reset) list else _favItems.value + list
