@@ -55,7 +55,6 @@ fun SettingsMainScreen(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("设置") },

@@ -62,6 +62,7 @@ class LibraryViewModel(val mode: Int = 2) {
     val onlyUpdatedFilter = MutableStateFlow(false) // false=关闭只显示更新 / true=只显示更新（客户端筛选）
     // 显示模式：0=紧凑网格 1=舒适网格 2=仅封面网格 3=列表1(封面+标题) 4=列表2(历史样式) 5=列表3(当前样式,默认)
     val displayMode = MutableStateFlow(5)
+    val gridColumns = MutableStateFlow(3) // 网格列数，0=自动，1-10
     val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
     val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
 
@@ -215,6 +216,9 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     /** 显示模式：0 默认列表 / 1 列表2。 */
     fun selectDisplayMode(m: Int) { displayMode.value = m }
+
+    /** 设置网格列数，0=自动，1-10。 */
+    fun setGridColumns(n: Int) { gridColumns.value = n }
 
     /** 切换封面左上角未读完标记显示。 */
     fun toggleShowUnreadBadge() { showUnreadBadge.value = !showUnreadBadge.value }

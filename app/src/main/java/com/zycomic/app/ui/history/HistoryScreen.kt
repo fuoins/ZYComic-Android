@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -98,7 +99,6 @@ fun HistoryScreen(
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { scrollBehavior ->
             if (selectionMode) {
                 AppBar(
@@ -137,6 +137,11 @@ fun HistoryScreen(
                     actions = {
                         AppBarActions(
                             persistentListOf(
+                                AppBar.Action(
+                                    title = "刷新",
+                                    icon = Icons.Default.Refresh,
+                                    onClick = { vm.refreshHistory() },
+                                ),
                                 AppBar.Action(
                                     title = "筛选",
                                     icon = Icons.Outlined.FilterList,

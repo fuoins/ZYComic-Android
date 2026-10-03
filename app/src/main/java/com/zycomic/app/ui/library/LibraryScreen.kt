@@ -43,6 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -107,6 +108,7 @@ fun LibraryScreen(
     val selectionMode by vm.selectionMode.collectAsState()
     val selectedIds by vm.selectedIds.collectAsState()
     val displayMode by vm.displayMode.collectAsState()
+    val gridColumns by vm.gridColumns.collectAsState()
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
 
@@ -130,7 +132,6 @@ fun LibraryScreen(
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { scrollBehavior ->
             if (selectionMode) {
                 AppBar(
@@ -167,13 +168,11 @@ fun LibraryScreen(
                     }
                 }
                 AppBar(
-                    navigationIcon = if (isSearching) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Refresh,
+                    navigationIcon = if (isSearching) Icons.AutoMirrored.Filled.ArrowBack else null,
                     navigateUp = {
                         if (isSearching) {
                             vm.updateSearchQuery(null)
                             focusManager.clearFocus()
-                        } else {
-                            vm.refreshFavorites()
                         }
                     },
                     titleContent = {
@@ -198,6 +197,13 @@ fun LibraryScreen(
                     actions = {
                         AppBarActions(
                             persistentListOf(
+                                if (!isSearching) {
+                                    AppBar.Action(
+                                        title = "刷新",
+                                        icon = Icons.Default.Refresh,
+                                        onClick = { vm.refreshFavorites() },
+                                    )
+                                },
                                 if (isSearching) {
                                     AppBar.Action(
                                         title = "清除",
@@ -265,7 +271,7 @@ fun LibraryScreen(
             else -> {
                 if (displayMode <= 2) {
                 // 网格模式：0=紧凑 1=舒适 2=仅封面
-                val columns = if (displayMode == 1) 2 else 3
+                val columns = if (gridColumns > 0) gridColumns else if (displayMode == 1) 2 else 3
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
                     contentPadding = contentPadding,
@@ -588,15 +594,17 @@ private fun FavItemRow(
                 )
                 .fillMaxWidth()
                 .height(96.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CoverWithBadges(
-                item = item,
-                coverWidth = 48.dp,
-                coverHeight = 64.dp,
-                showUnreadBadge = showUnreadBadge,
-                showUpdateBadge = showUpdateBadge,
+            AsyncImage(
+                model = coverUrl(item.bookImg),
+                contentDescription = item.bookName,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(3f / 4f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
             )
             Column(
                 modifier = Modifier
@@ -626,6 +634,11 @@ private fun FavItemRow(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            ItemBadges(
+                item = item,
+                showUnreadBadge = showUnreadBadge,
+                showUpdateBadge = showUpdateBadge,
+            )
         }
     } else if (displayMode == 3) {
         // 列表1（只有封面+标题）
@@ -672,16 +685,18 @@ private fun FavItemRow(
                     },
                 )
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(96.dp)
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CoverWithBadges(
-                item = item,
-                coverWidth = 56.dp,
-                coverHeight = 72.dp,
-                showUnreadBadge = showUnreadBadge,
-                showUpdateBadge = showUpdateBadge,
+            AsyncImage(
+                model = coverUrl(item.bookImg),
+                contentDescription = item.bookName,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(3f / 4f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
             )
             Column(
                 modifier = Modifier
@@ -716,6 +731,11 @@ private fun FavItemRow(
                     modifier = Modifier.padding(top = 1.dp),
                 )
             }
+            ItemBadges(
+                item = item,
+                showUnreadBadge = showUnreadBadge,
+                showUpdateBadge = showUpdateBadge,
+            )
         }
     }
 }
@@ -728,6 +748,7 @@ private fun CoverWithBadges(
     coverHeight: Dp,
     showUnreadBadge: Boolean,
     showUpdateBadge: Boolean,
+    showBadges: Boolean = true,
 ) {
     Box {
         AsyncImage(
@@ -738,32 +759,80 @@ private fun CoverWithBadges(
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         )
+        if (showBadges) {
+            if (showUnreadBadge && item.isUnread()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(2.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        "未读完",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+            if (showUpdateBadge && item.isNew) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(2.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MaterialTheme.colorScheme.error)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        "NEW",
+                        color = MaterialTheme.colorScheme.onError,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 列表项右侧的标记组：未读完（蓝色）+ NEW（红色）。 */
+@Composable
+private fun ItemBadges(
+    item: FavoriteItem,
+    showUnreadBadge: Boolean,
+    showUpdateBadge: Boolean,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (showUnreadBadge && item.isUnread()) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(2.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(MaterialTheme.colorScheme.error)
+                    .background(MaterialTheme.colorScheme.primary)
                     .padding(horizontal = 4.dp, vertical = 1.dp),
             ) {
                 Text(
                     "未读完",
-                    color = MaterialTheme.colorScheme.onError,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
         }
         if (showUpdateBadge && item.isNew) {
-            Text(
-                "NEW",
-                color = MaterialTheme.colorScheme.error,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.labelSmall,
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(4.dp),
-            )
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.error)
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    "NEW",
+                    color = MaterialTheme.colorScheme.onError,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
     }
 }
@@ -787,6 +856,7 @@ private fun FilterDialog(
     val isEnd by vm.isEndFilter.collectAsState()
     val onlyUpdated by vm.onlyUpdatedFilter.collectAsState()
     val displayMode by vm.displayMode.collectAsState()
+    val gridColumns by vm.gridColumns.collectAsState()
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
 
@@ -796,7 +866,8 @@ private fun FilterDialog(
     ) { page ->
         Column(
             modifier = Modifier
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 16.dp),
         ) {
             when (page) {
                 0 -> {
@@ -893,6 +964,28 @@ private fun FilterDialog(
                         onSelect = { vm.selectDisplayMode(it) },
                     )
                     HorizontalDivider()
+                    if (displayMode <= 2) {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text("每行数量", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    if (gridColumns == 0) "自动" else gridColumns.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Slider(
+                                value = gridColumns.toFloat(),
+                                onValueChange = { vm.setGridColumns(it.toInt()) },
+                                valueRange = 0f..10f,
+                                steps = 9,
+                            )
+                        }
+                        HorizontalDivider()
+                    }
                     SwitchRow(
                         title = "未读完标记",
                         checked = showUnreadBadge,
