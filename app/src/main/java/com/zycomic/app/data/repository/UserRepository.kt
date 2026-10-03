@@ -35,8 +35,8 @@ object UserRepository {
     /**
      * 登录：先调 /account/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow。
      */
-    suspend fun login(username: String, password: String, captcha: String = ""): User {
-        val loginResp = api.login(LoginRequest(username, password, captcha))
+    suspend fun login(username: String, password: String): User {
+        val loginResp = api.login(LoginRequest(username, password))
         if (loginResp.code != 1) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
 
         // 登录后手动写入 uid cookie（服务端可能不自动设置，后续请求必须携带）
