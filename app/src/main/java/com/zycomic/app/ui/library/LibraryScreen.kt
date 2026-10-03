@@ -262,7 +262,8 @@ fun LibraryScreen(
                 message = if (!searchQuery.isNullOrBlank()) "没有搜索结果" else "暂无收藏",
                 modifier = Modifier.padding(contentPadding),
             )
-            else if (displayMode <= 2) {
+            else -> {
+                if (displayMode <= 2) {
                 // 网格模式：0=紧凑 1=舒适 2=仅封面
                 val columns = if (displayMode == 1) 2 else 3
                 LazyVerticalGrid(
@@ -307,7 +308,8 @@ fun LibraryScreen(
                         }
                     }
                 }
-            } else FastScrollLazyColumn(
+            } else {
+                FastScrollLazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
@@ -357,6 +359,7 @@ fun LibraryScreen(
                                 .padding(16.dp),
                         )
                     }
+                }
                 }
             }
         }
