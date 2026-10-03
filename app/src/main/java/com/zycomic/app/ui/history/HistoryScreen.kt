@@ -4,7 +4,9 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -119,18 +121,6 @@ fun HistoryScreen(
                                     icon = Icons.Outlined.FlipToBack,
                                     onClick = { vm.invertSelection() },
                                 ),
-                                AppBar.Action(
-                                    title = "收藏",
-                                    icon = Icons.Outlined.BookmarkAdd,
-                                    onClick = { vm.favoriteSelected() },
-                                    enabled = selectedIds.isNotEmpty(),
-                                ),
-                                AppBar.Action(
-                                    title = "删除",
-                                    icon = Icons.Outlined.DeleteSweep,
-                                    onClick = { showBatchDelete = true },
-                                    enabled = selectedIds.isNotEmpty(),
-                                ),
                             ),
                         )
                     },
@@ -164,6 +154,42 @@ fun HistoryScreen(
                     },
                     scrollBehavior = scrollBehavior,
                 )
+            }
+        },
+        bottomBar = {
+            if (selectionMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = selectedIds.isNotEmpty()) { vm.favoriteSelected() }
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "收藏",
+                            color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = selectedIds.isNotEmpty()) { showBatchDelete = true }
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "删除",
+                            color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         },
     ) { contentPadding ->
