@@ -114,10 +114,10 @@ class LibraryViewModel(val mode: Int = 2) {
             if (onlyUp) {
                 result = result.filter { it.isNew }
             }
-            // 本地排序（切换排序时不请求，直接对已有数据排序）
+            // 本地排序：更新日期用 lastTime 本地排序；收藏日期保持API返回的原始顺序（服务端已按收藏时间排好）
             result = when (ord) {
                 1 -> result.sortedByDescendingOrAscending({ it.lastTime }, ordType == 0)
-                else -> result.sortedByDescendingOrAscending({ it.id.toLongOrNull() ?: 0L }, ordType == 0)
+                else -> result  // order=2 收藏日期：不排序，保持API顺序
             }
             result
         }.stateIn(
@@ -196,10 +196,14 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     /** 只显示更新：false=关闭 / true=只显示更新（客户端筛选，不请求）。 */
     fun selectOnlyUpdated(v: Boolean) { onlyUpdatedFilter.value = v }
 
-    /** 排序：order=1 更新日期 / 2 收藏日期；orderType=0 降序 / 1 升序（本地排序，不请求）。 */
+    /** 排序：order=1 更新日期（本地排序）/ 2 收藏日期（重新请求API，保持服务端顺序）；orderType=0 降序 / 1 升序。 */
     fun selectSort(order: Int, orderType: Int) {
         this.order.value = order
         this.orderType.value = orderType
+        // 收藏日期排序：本地无收藏时间字段，必须重新请求API保持服务端顺序
+        if (order == 2) {
+            refreshFavorites()
+        }
     }
 
     // ---------- 本地筛选 / 显示（不触发 API）----------
