@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -177,11 +178,11 @@ fun MangaDetailScreen(
                         .fillMaxSize()
                         .verticalScroll(scrollState),
                 ) {
-                    // 头部：封面 + 信息（顶部预留状态栏 + 顶栏高度）
+                    // 头部：封面 + 信息（顶部预留顶栏高度，内容延伸到状态栏下实现全屏）
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .statusBarsPadding()
+                            .padding(top = 56.dp)
                             .padding(top = 56.dp, start = 16.dp, end = 16.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
@@ -445,12 +446,16 @@ fun MangaDetailScreen(
                     Spacer(Modifier.height(96.dp))
                 }
 
-                // 7. 顶部栏（叠加）
+                // 7. 顶部栏（叠加，半透明背景渐变）
+                val topBarAlpha = if (scrollState.value > 100) 1f else scrollState.value / 100f
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .statusBarsPadding(),
+                        .statusBarsPadding()
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = topBarAlpha * 0.95f)
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onClose) {
@@ -476,6 +481,7 @@ fun MangaDetailScreen(
                 onClick = { openReader(vm.defaultChapterId()) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
                     .padding(20.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
             ) {

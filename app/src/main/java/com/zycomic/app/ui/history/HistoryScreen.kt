@@ -102,6 +102,7 @@ fun HistoryScreen(
 
     var showBatchDelete by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
+    var showFavoriteConfirm by remember { mutableStateOf<HistoryItem?>(null) }
     var singleDeleteTarget by remember { mutableStateOf<HistoryItem?>(null) }
 
     val listState = rememberLazyListState()
@@ -275,7 +276,7 @@ fun HistoryScreen(
                                 else vm.enterSelectionAndSelect(item.id)
                             },
                             onClickCover = { onOpenManga(item.bookId) },
-                            onClickFavorite = { vm.favoriteSingle(item.bookId) },
+                            onClickFavorite = { showFavoriteConfirm = item },
                             onClickDelete = { singleDeleteTarget = item },
                         )
                     }
@@ -326,6 +327,40 @@ fun HistoryScreen(
                     modifier = Modifier
                         .clip(MaterialTheme.shapes.small)
                         .combinedClickable(onClick = { singleDeleteTarget = null })
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            },
+        )
+    }
+
+    // 收藏确认
+    showFavoriteConfirm?.let { target ->
+        AlertDialog(
+            onDismissRequest = { showFavoriteConfirm = null },
+            title = { Text("收藏确认") },
+            text = { Text("确定收藏《${target.bookName}》到全部收藏夹？") },
+            confirmButton = {
+                Text(
+                    text = "确定收藏",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .combinedClickable(
+                            onClick = {
+                                vm.favoriteSingle(target.bookId)
+                                showFavoriteConfirm = null
+                            },
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            },
+            dismissButton = {
+                Text(
+                    text = "取消",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .combinedClickable(onClick = { showFavoriteConfirm = null })
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             },
@@ -511,15 +546,13 @@ private fun HistoryItemRow(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        Text(
-            text = "收藏",
-            color = MaterialTheme.colorScheme.primary,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .combinedClickable(onClick = onClickFavorite)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        )
+        IconButton(onClick = onClickFavorite) {
+            Icon(
+                imageVector = Icons.Outlined.FavoriteBorder,
+                contentDescription = "收藏",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
         IconButton(onClick = onClickDelete) {
             Icon(
                 imageVector = Icons.Outlined.Delete,
