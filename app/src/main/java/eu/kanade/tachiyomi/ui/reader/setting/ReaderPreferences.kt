@@ -154,7 +154,7 @@ class ReaderPreferences(
 
     fun navigationModePager() = preferenceStore.getInt("reader_navigation_mode_pager", 0)
 
-    fun navigationModeWebtoon() = preferenceStore.getInt("reader_navigation_mode_webtoon", 0)
+    fun navigationModeWebtoon() = preferenceStore.getInt("reader_navigation_mode_webtoon", 5)
 
     fun pagerNavInverted() = preferenceStore.getEnum("reader_tapping_inverted", TappingInvertMode.NONE)
 
