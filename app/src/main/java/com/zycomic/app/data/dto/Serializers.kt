@@ -66,6 +66,31 @@ object BooleanOrIntSerializer : KSerializer<Boolean> {
 }
 
 /**
+ * 兼容数字和字符串的 Int 序列化器。
+ * 服务端 consecutive_sign / ad_clicks 等字段可能返回数字（3）或空字符串（""）。
+ * 字符串无法解析为数字时返回 0。
+ */
+object IntOrStringSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("IntOrString", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        return if (decoder is JsonDecoder) {
+            when (val element = decoder.decodeJsonElement()) {
+                is JsonPrimitive -> element.content.toIntOrNull() ?: 0
+                else -> 0
+            }
+        } else {
+            decoder.decodeInt()
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeInt(value)
+    }
+}
+
+/**
  * 兼容字符串和字符串数组的 String 序列化器。
  * 服务端 author 有时返回字符串（"作者名"），有时返回数组（["作者名"]）。
  * 数组时取第一个元素，空数组返回空字符串。

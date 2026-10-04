@@ -19,8 +19,11 @@ data class WelfareResponse(
 @Serializable
 data class WelfareData(
     val sign_list: List<SignDay> = emptyList(),
+    @Serializable(with = IntOrStringSerializer::class)
     val consecutive_sign: Int = 0,
+    @Serializable(with = BooleanOrIntSerializer::class)
     val check_ad_bonus_today: Boolean = false,
+    @Serializable(with = IntOrStringSerializer::class)
     val ad_clicks: Int = 0,
     val prev_date: String = "",
     val next_date: String = "",
@@ -30,6 +33,7 @@ data class WelfareData(
 @Serializable
 data class SignDay(
     val status: String = "",
+    @Serializable(with = StringOrIntSerializer::class)
     val index: String = "",
     val date: String = "",
 )
