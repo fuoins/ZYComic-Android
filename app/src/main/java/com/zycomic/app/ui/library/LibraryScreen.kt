@@ -97,12 +97,11 @@ import tachiyomi.presentation.core.util.selectedBackground
 
 @Composable
 fun LibraryScreen(
+    vm: LibraryViewModel,
     onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
     onOpenSearch: (String) -> Unit,
 ) {
-    val vm = remember { LibraryViewModel(mode = 0) }
-
     val user by vm.user.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()
     val favs by vm.favItems.collectAsState()

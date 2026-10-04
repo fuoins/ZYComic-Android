@@ -77,11 +77,11 @@ import tachiyomi.presentation.core.util.selectedBackground
 
 @Composable
 fun HistoryScreen(
+    vm: HistoryViewModel,
     onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
     onOpenSearch: (String) -> Unit,
 ) {
-    val vm = remember { HistoryViewModel() }
     val context = LocalContext.current
 
     val user by vm.user.collectAsState()

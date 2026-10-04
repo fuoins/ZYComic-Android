@@ -50,8 +50,11 @@ import androidx.lifecycle.lifecycleScope
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
+import com.zycomic.app.ui.browse.BrowseViewModel
 import com.zycomic.app.ui.history.HistoryScreen
+import com.zycomic.app.ui.history.HistoryViewModel
 import com.zycomic.app.ui.library.LibraryScreen
+import com.zycomic.app.ui.library.LibraryViewModel
 import com.zycomic.app.ui.login.LoginOverlay
 import com.zycomic.app.ui.manga.MangaDetailOverlay
 import com.zycomic.app.ui.profile.ProfileScreen
@@ -146,6 +149,10 @@ fun AppContent() {
 
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
+    // 底部导航各页面 ViewModel（Activity scope，切换 tab 不销毁）
+    val browseVm = remember { BrowseViewModel() }
+    val libraryVm = remember { LibraryViewModel(mode = 0) }
+    val historyVm = remember { HistoryViewModel() }
     var speedTesting by remember { mutableStateOf(true) }
 
     // 设置子页面 Dialog 状态
@@ -223,6 +230,7 @@ fun AppContent() {
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when (bottomTab) {
                 0 -> BrowseScreen(
+                    vm = browseVm,
                     pendingTag = pendingTag,
                     onPendingTagConsumed = { pendingTag = null },
                     onOpenManga = { detailBookId = it },
@@ -230,6 +238,7 @@ fun AppContent() {
                     onRequireLogin = { loginOpen = true },
                 )
                 1 -> LibraryScreen(
+                    vm = libraryVm,
                     onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
                     onOpenSearch = { kw ->
@@ -238,6 +247,7 @@ fun AppContent() {
                     },
                 )
                 2 -> HistoryScreen(
+                    vm = historyVm,
                     onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
                     onOpenSearch = { kw ->

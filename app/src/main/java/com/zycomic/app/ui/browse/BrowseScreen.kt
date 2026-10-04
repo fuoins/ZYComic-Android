@@ -79,13 +79,13 @@ import tachiyomi.presentation.core.components.material.TabText
 
 @Composable
 fun BrowseScreen(
+    vm: BrowseViewModel,
     pendingTag: String?,
     onPendingTagConsumed: () -> Unit,
     onOpenManga: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onRequireLogin: () -> Unit,
 ) {
-    val vm = remember { BrowseViewModel() }
     val scope = rememberCoroutineScope()
 
     pendingTag?.let { tag ->
@@ -217,6 +217,7 @@ fun BrowseScreen(
                     vm = vm,
                     displayMode = displayMode,
                     gridColumns = gridColumns,
+                    onGridColumnsChange = { vm.setGridColumns(it) },
                     selectionMode = selectionMode,
                     selectedIds = selectedIds,
                     onOpenManga = onOpenManga,
@@ -267,6 +268,7 @@ private fun BrowseTabContent(
     vm: BrowseViewModel,
     displayMode: Int,
     gridColumns: Int,
+    onGridColumnsChange: (Int) -> Unit,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     onOpenManga: (String) -> Unit,
@@ -325,6 +327,28 @@ private fun BrowseTabContent(
                 } else if (!hasMore && mangas.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                // 仅封面网格模式：底部每行数量选择
+                if (displayMode == 2) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (gridColumns == 0) "自动" else gridColumns.toString(),
+                                modifier = Modifier.padding(end = 8.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            androidx.compose.material3.Slider(
+                                value = gridColumns.toFloat(),
+                                onValueChange = { onGridColumnsChange(it.toInt()) },
+                                valueRange = 0f..10f,
+                                steps = 9,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
