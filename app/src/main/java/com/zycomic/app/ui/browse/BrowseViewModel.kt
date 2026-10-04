@@ -68,9 +68,18 @@ class BrowseViewModel {
     // ---- 排行子 Tab：0 人气 / 1 新番 / 2 完结 ----
     val rankType = MutableStateFlow(0)
 
-    // ---- 显示模式：0紧凑网格 1舒适网格(默认) 2仅封面网格 ----
-    val displayMode = MutableStateFlow(1)
-    val gridColumns = MutableStateFlow(3)
+    // ---- 显示模式：0紧凑网格 1舒适网格(默认) 2仅封面网格 ----（持久化）
+    val displayMode = MutableStateFlow(prefs.getInt("browse_display_mode", 1))
+    val gridColumns = MutableStateFlow(prefs.getInt("browse_grid_columns", 3))
+
+    fun setDisplayMode(mode: Int) {
+        displayMode.value = mode
+        prefs.edit().putInt("browse_display_mode", mode).apply()
+    }
+    fun setGridColumns(cols: Int) {
+        gridColumns.value = cols
+        prefs.edit().putInt("browse_grid_columns", cols).apply()
+    }
 
     // ---- 多选模式 ----
     val selectionMode = MutableStateFlow(false)
@@ -309,5 +318,10 @@ class BrowseViewModel {
         val AREAS = listOf(0 to "全部", 1 to "韩国", 2 to "日漫", 3 to "国漫", 4 to "台漫", 5 to "其他", 6 to "未分类")
         val ENDS = listOf(0 to "全部", 1 to "连载", 2 to "完结")
         val STS = listOf(2 to "收藏", 0 to "最新", 1 to "最旧", 3 to "新漫")
+
+        private lateinit var prefs: android.content.SharedPreferences
+        fun init(context: android.content.Context) {
+            prefs = context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
+        }
     }
 }

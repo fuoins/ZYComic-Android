@@ -60,9 +60,9 @@ class LibraryViewModel(val mode: Int = 2) {
     val isReadFilter = MutableStateFlow(-1)     // -1 全部 / 0 未阅读过 / 1 阅读过
     val isEndFilter = MutableStateFlow(-1)      // -1 全部 / 0 连载中 / 1 已完结（客户端筛选）
     val onlyUpdatedFilter = MutableStateFlow(false) // false=关闭只显示更新 / true=只显示更新（客户端筛选）
-    // 显示模式：0=紧凑网格 1=舒适网格 2=仅封面网格 3=列表1(封面+标题) 4=列表2(历史样式) 5=列表3(当前样式,默认)
-    val displayMode = MutableStateFlow(5)
-    val gridColumns = MutableStateFlow(3) // 网格列数，0=自动，1-10
+    // 显示模式：0=紧凑网格 1=舒适网格 2=仅封面网格 3=列表1(封面+标题) 4=列表2(历史样式) 5=列表3(当前样式,默认)（持久化）
+    val displayMode = MutableStateFlow(prefs.getInt("library_display_mode", 5))
+    val gridColumns = MutableStateFlow(prefs.getInt("library_grid_columns", 3)) // 网格列数，0=自动，1-10
     val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
     val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
 
@@ -226,10 +226,16 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     fun selectIsRead(v: Int) { isReadFilter.value = v }
 
     /** 显示模式：0 默认列表 / 1 列表2。 */
-    fun selectDisplayMode(m: Int) { displayMode.value = m }
+    fun selectDisplayMode(m: Int) {
+        displayMode.value = m
+        prefs.edit().putInt("library_display_mode", m).apply()
+    }
 
     /** 设置网格列数，0=自动，1-10。 */
-    fun setGridColumns(n: Int) { gridColumns.value = n }
+    fun setGridColumns(n: Int) {
+        gridColumns.value = n
+        prefs.edit().putInt("library_grid_columns", n).apply()
+    }
 
     /** 切换封面左上角未读完标记显示。 */
     fun toggleShowUnreadBadge() { showUnreadBadge.value = !showUnreadBadge.value }
@@ -428,6 +434,13 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
                 _history.value = _history.value.filterNot { it.id in ids }
                 exitHistorySelection()
             } catch (_: Exception) {}
+        }
+    }
+
+    companion object {
+        private lateinit var prefs: android.content.SharedPreferences
+        fun init(context: android.content.Context) {
+            prefs = context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
         }
     }
 }

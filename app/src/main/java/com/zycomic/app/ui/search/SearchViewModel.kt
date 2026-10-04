@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.search
 
+import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.TagRepository
@@ -28,6 +29,20 @@ class SearchViewModel {
 
     private val _hasMore = MutableStateFlow(true)
     val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+
+    // ---- 显示模式（持久化）----
+    val displayMode = MutableStateFlow(prefs.getInt("search_display_mode", 1)) // 默认舒适网格
+    val gridColumns = MutableStateFlow(prefs.getInt("search_grid_columns", 3))  // 默认每行3
+
+    fun setDisplayMode(mode: Int) {
+        displayMode.value = mode
+        prefs.edit().putInt("search_display_mode", mode).apply()
+    }
+
+    fun setGridColumns(cols: Int) {
+        gridColumns.value = cols
+        prefs.edit().putInt("search_grid_columns", cols).apply()
+    }
 
     private var currentPage = 1
     private var hasSearched = false
@@ -70,6 +85,13 @@ class SearchViewModel {
         } finally {
             _loading.value = false
             _appending.value = false
+        }
+    }
+
+    companion object {
+        private lateinit var prefs: android.content.SharedPreferences
+        fun init(context: Context) {
+            prefs = context.getSharedPreferences("zycomic_display", Context.MODE_PRIVATE)
         }
     }
 }

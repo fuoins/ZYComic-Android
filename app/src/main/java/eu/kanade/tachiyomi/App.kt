@@ -124,6 +124,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         // 初始化用户仓库（本地用户信息存储）
         com.zycomic.app.data.repository.UserRepository.init(this)
+        // 初始化搜索页显示模式持久化
+        com.zycomic.app.ui.search.SearchViewModel.init(this)
+        // 初始化分类页显示模式持久化
+        com.zycomic.app.ui.browse.BrowseViewModel.init(this)
+        // 初始化收藏页显示模式持久化
+        com.zycomic.app.ui.library.LibraryViewModel.init(this)
         // 先从本地恢复登录态，UI 立即显示登录（没网也显示）
         com.zycomic.app.data.repository.UserRepository.restoreLoginFromLocal()
         // 后台异步校验登录态并刷新用户信息（cookie 已由 GlobalCookieJar 从 SharedPreferences 恢复）
