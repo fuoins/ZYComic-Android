@@ -30,6 +30,9 @@ class SearchViewModel {
     private val _hasMore = MutableStateFlow(true)
     val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
 
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
     // ---- 显示模式（持久化）----
     val displayMode = MutableStateFlow(prefs.getInt("search_display_mode", 1)) // 默认舒适网格
     val gridColumns = MutableStateFlow(prefs.getInt("search_grid_columns", 3))  // 默认每行3
@@ -82,6 +85,9 @@ class SearchViewModel {
             currentPage = lastInvoked + 1
             _mangas.value = if (reset) result else _mangas.value + result
             if (result.isEmpty()) _hasMore.value = false
+            _error.value = null
+        } catch (e: Exception) {
+            if (reset) _error.value = e.message ?: "加载失败"
         } finally {
             _loading.value = false
             _appending.value = false

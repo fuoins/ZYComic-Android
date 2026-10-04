@@ -207,8 +207,8 @@ fun LibraryScreen(
                         AppBarActions(
                             if (!isSearching) {
                                 persistentListOf(
-                                    AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refreshFavorites() }),
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { vm.updateSearchQuery("") }),
+                                    AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refreshFavorites() }),
                                     AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
                                     AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
                                 )

@@ -389,22 +389,21 @@ class SettingsViewModel {
                 sslContext.init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
 
                 val dohClient = OkHttpClient.Builder()
-                    .connectTimeout(2, TimeUnit.SECONDS)
-                    .readTimeout(2, TimeUnit.SECONDS)
-                    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
+                    .connectTimeout(3, TimeUnit.SECONDS)
+                    .readTimeout(3, TimeUnit.SECONDS)
                     .sslSocketFactory(sslContext.socketFactory, trustAll)
                     .hostnameVerifier { _, _ -> true }
                     .build()
 
                 val jsonParser = Json { ignoreUnknownKeys = true }
-                // 遍历 STATIC_IP 中所有域名（customRule 可能为空，必须用预设域名列表）
-                val domainsToUpdate = RouteManager.STATIC_IP.keys
+                // 遍历当前配置（DevConfig rule）中所有域名，包括 dns.google
+                val domainsToUpdate = DevConfig.getRule().keys
                 val newRuleMap = mutableMapOf<String, List<String>>()
                 var successCount = 0
                 var failCount = 0
 
                 for (domain in domainsToUpdate) {
-                    val oldIps = RouteManager.resolveIp(domain)
+                    val oldIps = DevConfig.getRule()[domain] ?: emptyList()
                     // dns.google 本身不查询（DoH 服务域名），保留旧 IP
                     if (domain == "dns.google") {
                         newRuleMap[domain] = oldIps
@@ -449,7 +448,7 @@ class SettingsViewModel {
                 // 应用新 rule 并重启代理
                 RouteManager.setCustomRule(newRuleMap)
                 // 保存到 DevConfig（保持配置一致），然后重启代理使新 IP 生效
-                val currentSni = RouteManager.sniDomains
+                val currentSni = DevConfig.getSniDomains()
                 val configJson = buildString {
                     append("{\"port\":${DevConfig.getPort()},\"rule\":{")
                     newRuleMap.entries.forEachIndexed { i, (domain, ips) ->
