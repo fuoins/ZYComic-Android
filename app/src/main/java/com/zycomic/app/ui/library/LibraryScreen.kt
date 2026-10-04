@@ -46,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -133,6 +134,7 @@ fun LibraryScreen(
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Folder?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     LaunchedEffect(listState.canScrollForward, filtered.size) {
@@ -264,6 +266,17 @@ fun LibraryScreen(
                 modifier = Modifier.padding(contentPadding),
             )
             else -> {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        isRefreshing = true
+                        vm.refresh()
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    LaunchedEffect(loading) {
+                        if (!loading) isRefreshing = false
+                    }
                 if (displayMode <= 2) {
                 // 网格模式：0=紧凑 1=舒适 2=仅封面
                 val columns = if (gridColumns > 0) gridColumns else if (displayMode == 1) 2 else 3
@@ -360,6 +373,7 @@ fun LibraryScreen(
                                 .padding(16.dp),
                         )
                     }
+                }
                 }
                 }
             }

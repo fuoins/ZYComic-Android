@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -104,6 +105,7 @@ fun HistoryScreen(
     var showFolderDialog by remember { mutableStateOf(false) }
     var showFavoriteConfirm by remember { mutableStateOf<HistoryItem?>(null) }
     var singleDeleteTarget by remember { mutableStateOf<HistoryItem?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -237,7 +239,18 @@ fun HistoryScreen(
                 modifier = Modifier.padding(contentPadding),
             )
             // 列表
-            else -> FastScrollLazyColumn(
+            else -> PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    vm.refresh()
+                },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                LaunchedEffect(loading) {
+                    if (!loading) isRefreshing = false
+                }
+                FastScrollLazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
@@ -294,6 +307,7 @@ fun HistoryScreen(
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                         )
                     }
+                }
                 }
             }
         }

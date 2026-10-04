@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -149,6 +150,7 @@ fun BrowseScreen(
                         AppBarActions(
                             persistentListOf(
                                 AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = onOpenSearch),
+                                AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                 AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
                                 AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
                             ),
@@ -281,7 +283,11 @@ private fun BrowseTabContent(
     val hasMore by vm.hasMore.collectAsState()
     val error by vm.error.collectAsState()
 
-    val gridState = rememberLazyGridState()
+    // 每个tab独立的滚动状态，避免切换tab时内容重叠
+    val gridStates = remember { Array(3) { LazyGridState() } }
+    val gridState = gridStates[mainTab]
+
+    var isRefreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(gridState.canScrollForward, mangas.size) {
         val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -301,14 +307,25 @@ private fun BrowseTabContent(
             }
             mangas.isEmpty() && !loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有漫画") }
             else -> Column(modifier = Modifier.fillMaxSize()) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
-                    state = gridState,
-                    contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        isRefreshing = true
+                        vm.refresh()
+                    },
                     modifier = Modifier.weight(1f),
                 ) {
+                    LaunchedEffect(loading) {
+                        if (!loading) isRefreshing = false
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                        state = gridState,
+                        contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
                     items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
                         val m = mangas[i]
                         MangaGridItem(
@@ -329,6 +346,7 @@ private fun BrowseTabContent(
                             Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                }
                 }
                 // 仅封面网格模式：固定底部每行数量选择
                 if (displayMode == 2) {
