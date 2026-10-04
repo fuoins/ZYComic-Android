@@ -104,7 +104,7 @@ object DevConfig {
         context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             ?.edit()
             ?.putString(KEY_CONFIG_JSON, json)
-            ?.apply()
+            ?.commit()
         cachedJson = json
     }
 

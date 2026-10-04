@@ -20,8 +20,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Scrollbar
+import androidx.compose.foundation.rememberScrollbarState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -429,15 +432,32 @@ fun MangaDetailScreen(
                             modifier = Modifier.padding(16.dp),
                         )
                     } else {
-                        LazyRow(
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                horizontal = 16.dp,
-                                vertical = 8.dp,
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            items(d.loveList) { m ->
-                                RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
+                        val lazyRowState = rememberLazyListState()
+                        val scrollbarState = rememberScrollbarState()
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            LazyRow(
+                                state = lazyRowState,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                    horizontal = 16.dp,
+                                    vertical = 8.dp,
+                                ),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                items(d.loveList) { m ->
+                                    RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
+                                }
+                            }
+                            androidx.compose.foundation.Scrollbar(
+                                state = scrollbarState,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(horizontal = 24.dp)
+                                    .height(4.dp),
+                                orientation = androidx.compose.foundation.ScrollbarOrientation.Horizontal,
+                                reverseDirection = false,
+                            ) {
+                                lazyRowState.interactionSource
                             }
                         }
                     }
@@ -452,10 +472,10 @@ fun MangaDetailScreen(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .statusBarsPadding()
                         .background(
                             MaterialTheme.colorScheme.surface.copy(alpha = topBarAlpha * 0.95f)
-                        ),
+                        )
+                        .statusBarsPadding(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onClose) {
