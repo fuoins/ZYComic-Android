@@ -216,7 +216,7 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     // ---------- 本地筛选 / 显示（不触发 API）----------
     /** 更新本地搜索词；空串视为 null（退出搜索框，回到标题）。 */
     fun updateSearchQuery(q: String?) {
-        _searchQuery.value = q?.takeIf { it.isNotBlank() }
+        _searchQuery.value = q
     }
 
     /** 未读完筛选：-1 全部 / 0 已读完 / 1 未读完（客户端筛选）。 */

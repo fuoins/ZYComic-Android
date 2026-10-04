@@ -118,8 +118,8 @@ class HistoryViewModel {
 
     // ---------- 搜索 ----------
     fun updateSearchQuery(query: String?) {
-        // 空字符串视为 null（关闭搜索框）
-        _searchQuery.value = query?.takeIf { it.isNotBlank() }
+        // null=关闭搜索框，空字符串=搜索模式已激活但输入为空
+        _searchQuery.value = query
     }
 
     // ---------- 多选 ----------
