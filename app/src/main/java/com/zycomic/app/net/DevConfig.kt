@@ -101,10 +101,15 @@ object DevConfig {
 
     /** 保存配置到 SharedPreferences 并更新缓存。 */
     fun saveConfig(json: String) {
-        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            ?.edit()
-            ?.putString(KEY_CONFIG_JSON, json)
-            ?.commit()
+        val ctx = context
+        if (ctx != null) {
+            val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val ok = prefs.edit().putString(KEY_CONFIG_JSON, json).commit()
+            if (!ok) {
+                // commit 失败时用 apply 异步写入兜底
+                prefs.edit().putString(KEY_CONFIG_JSON, json).apply()
+            }
+        }
         cachedJson = json
     }
 

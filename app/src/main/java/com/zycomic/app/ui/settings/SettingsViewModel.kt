@@ -493,6 +493,8 @@ class SettingsViewModel {
                 DevConfig.applyConfig(jsonStr)
                 // 重启代理使新配置生效
                 DevConfig.restartProxy()
+                // 同步更新 UI 状态，关闭再打开仍显示新配置
+                devConfigJson.value = jsonStr
                 val ruleCount = DevConfig.getRule().size
                 val sniCount = DevConfig.getSniDomains().size
                 toast.value = "配置已保存并重启代理（${ruleCount}条rule, ${sniCount}条sni, port=${DevConfig.getPort()}）"
