@@ -21,6 +21,7 @@ import com.zycomic.app.data.dto.RankResponse
 import com.zycomic.app.data.dto.RemoveBlacklistRequest
 import com.zycomic.app.data.dto.SearchResponse
 import com.zycomic.app.data.dto.User
+import com.zycomic.app.data.dto.WelfareRequest
 import com.zycomic.app.data.dto.WelfareResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -149,8 +150,8 @@ interface ApiService {
     ): ApiResponse<JsonElement>
 
     // ---------- 签到福利 ----------
-    @GET("api/users/welfare")
-    suspend fun welfare(): WelfareResponse
+    @POST("api/users/welfare")
+    suspend fun welfare(@Body body: WelfareRequest): WelfareResponse
 
     // ---------- 积分明细 ----------
     @GET("api/users/point_logs")

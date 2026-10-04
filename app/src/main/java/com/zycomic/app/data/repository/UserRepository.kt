@@ -6,6 +6,7 @@ import com.zycomic.app.data.dto.LoginRequest
 import com.zycomic.app.data.dto.PointLog
 import com.zycomic.app.data.dto.User
 import com.zycomic.app.data.dto.WelfareData
+import com.zycomic.app.data.dto.WelfareRequest
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,7 +183,9 @@ object UserRepository {
 
     /** 获取签到福利信息（同时触发签到）。 */
     suspend fun getWelfare(): WelfareData? {
-        val resp = api.welfare()
+        val calendar = java.util.Calendar.getInstance()
+        val date = String.format("%04d-%02d-01", calendar.get(java.util.Calendar.YEAR), calendar.get(java.util.Calendar.MONTH) + 1)
+        val resp = api.welfare(WelfareRequest(date = date))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取福利失败" })
         return resp.data
     }

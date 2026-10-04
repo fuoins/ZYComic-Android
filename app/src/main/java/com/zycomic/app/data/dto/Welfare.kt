@@ -2,6 +2,12 @@ package com.zycomic.app.data.dto
 
 import kotlinx.serialization.Serializable
 
+/** 签到福利请求：date 为当前月份1号，如 2026-10-01 */
+@Serializable
+data class WelfareRequest(
+    val date: String = "",
+)
+
 /** 签到福利响应 */
 @Serializable
 data class WelfareResponse(
