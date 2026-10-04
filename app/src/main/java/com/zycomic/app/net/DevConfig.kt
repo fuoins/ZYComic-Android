@@ -26,6 +26,9 @@ object DevConfig {
     private var context: Context? = null
     private var cachedJson: String? = null
 
+    /** 全局 ApplicationContext，供 RouteManager 等使用。 */
+    val appContext: Context? get() = context
+
     /** 全局代理服务器引用，用于重启。 */
     @Volatile
     var proxyServer: LocalProxyServer? = null
@@ -161,6 +164,13 @@ object DevConfig {
         newProxy.start()
         proxyServer = newProxy
         Log.i(TAG, "Proxy restarted on port ${getPort()}")
+    }
+
+    /** 动态更新代理配置（不重启，新图源添加后调用）。 */
+    fun updateProxyConfig() {
+        proxyServer?.updateRule(getRule())
+        proxyServer?.updateSniDomains(getSniDomains())
+        Log.i(TAG, "Proxy config updated dynamically")
     }
 
     /** 启动代理服务器（App 启动时调用）。 */

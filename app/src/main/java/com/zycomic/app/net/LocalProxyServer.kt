@@ -43,13 +43,25 @@ import javax.net.ssl.X509TrustManager
  */
 class LocalProxyServer(
     private val port: Int,
-    private val rule: Map<String, List<String>>,
-    private val sniDomains: Set<String>,
+    @Volatile private var rule: Map<String, List<String>>,
+    @Volatile private var sniDomains: Set<String>,
 ) {
     private var serverSocket: ServerSocket? = null
 
     @Volatile
     private var running = false
+
+    /** 动态更新 rule（不需要重启代理）。 */
+    fun updateRule(newRule: Map<String, List<String>>) {
+        rule = newRule
+        Log.d(TAG, "updateRule: ${newRule.size} domains")
+    }
+
+    /** 动态更新 sniDomains（不需要重启代理）。 */
+    fun updateSniDomains(newSni: Set<String>) {
+        sniDomains = newSni
+        Log.d(TAG, "updateSniDomains: ${newSni.size} domains")
+    }
 
     /** 自签名证书 SSLContext，用于客户端→代理的 TLS 握手。 */
     private val serverSSLContext: SSLContext

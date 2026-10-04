@@ -72,6 +72,11 @@ object RouteManager {
         if (imgs.isNotEmpty()) imgDomains = imgs
     }
 
+    /** 直接更新图源域名列表（新图源发现后调用）。 */
+    fun updateImgDomains(domains: List<String>) {
+        imgDomains = domains
+    }
+
     // ---- 当前选择 ----
     @Volatile var lineIndex: Int = 0
         private set
@@ -177,6 +182,28 @@ object RouteManager {
     /** 切换图源 */
     fun setImgHost(index: Int) {
         imgIndex = index.coerceIn(0, imgDomains.lastIndex)
+        saveImgIndex()
+    }
+
+    /** 从 SharedPreferences 加载图源索引（App启动时调用）。 */
+    fun loadImgIndex() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            val saved = prefs.getInt("img_index", 0)
+            if (saved in 0..imgDomains.lastIndex) {
+                imgIndex = saved
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** 保存图源索引到 SharedPreferences。 */
+    private fun saveImgIndex() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putInt("img_index", imgIndex).apply()
+        } catch (_: Exception) {}
     }
 
     /** 设置自定义 rule（开发者配置） */

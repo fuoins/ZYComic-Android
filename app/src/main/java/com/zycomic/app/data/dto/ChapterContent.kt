@@ -23,6 +23,9 @@ data class ChapterContent(
     val imgDomains: List<String> = emptyList(),
     @kotlinx.serialization.SerialName("_CURRENT_IMG_DOMAIN")
     val currentImgDomain: String = "",
+    @kotlinx.serialization.SerialName("_CURRENT_IMG_INDEX")
+    @Serializable(with = StringOrIntSerializer::class)
+    val currentImgIndex: String = "",
     @Serializable(with = StringOrIntSerializer::class)
     val prev: String = "",
     @Serializable(with = StringOrIntSerializer::class)

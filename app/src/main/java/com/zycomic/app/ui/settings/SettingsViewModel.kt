@@ -349,23 +349,15 @@ class SettingsViewModel {
             RouteManager.setLastDelays(lines, imgs)
             RouteManager.setLastIpDelays(ipMap)
 
+            // 只自动选最快线路，图源不自动选（打开章节时用服务端推荐的 _CURRENT_IMG_DOMAIN）
             val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-            val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
 
-            if (bestLine == null && bestImg == null) {
-                -1 to -1
-            } else {
-                if (bestLine != null) {
-                    RouteManager.setLine(bestLine)
-                    currentLineIndex.value = bestLine
-                    NetworkModule.rebuild()
-                }
-                if (bestImg != null) {
-                    RouteManager.setImgHost(bestImg)
-                    currentImgIndex.value = bestImg
-                }
-                (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
+            if (bestLine != null) {
+                RouteManager.setLine(bestLine)
+                currentLineIndex.value = bestLine
+                NetworkModule.rebuild()
             }
+            (bestLine ?: RouteManager.lineIndex) to RouteManager.imgIndex
         } finally {
             autoSelecting.value = false
         }

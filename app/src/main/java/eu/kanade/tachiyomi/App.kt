@@ -117,6 +117,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         // 初始化开发者配置
         DevConfig.init(this)
+        // 加载持久化的图源索引
+        com.zycomic.app.net.RouteManager.loadImgIndex()
         // 本地代理（SNI绕过）开关：开启时启动代理，关闭时用方案B（自定义DNS+SSLSocketFactory）
         if (DevConfig.isProxyEnabled()) {
             DevConfig.startProxy()

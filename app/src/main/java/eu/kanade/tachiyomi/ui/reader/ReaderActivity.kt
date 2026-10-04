@@ -198,6 +198,9 @@ class ReaderActivity : BaseActivity() {
 
     private var loadingIndicator: ReaderProgressIndicator? = null
 
+    /** 图源切换对话框显示状态。 */
+    private var showImgSourceDialog by mutableStateOf(false)
+
     var isScrollingThroughPages = false
         private set
 
@@ -514,6 +517,44 @@ class ReaderActivity : BaseActivity() {
                 // SY <--
                 null -> {}
             }
+
+            // 图源切换对话框
+            if (showImgSourceDialog) {
+                val imgDomains = com.zycomic.app.data.repository.ReaderRepository.currentImgDomains
+                val currentDomain = com.zycomic.app.net.RouteManager.imgHost
+                AlertDialog(
+                    onDismissRequest = { showImgSourceDialog = false },
+                    title = { Text("切换图源") },
+                    text = {
+                        androidx.compose.foundation.layout.Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            imgDomains.forEachIndexed { index, domain ->
+                                val isSelected = domain == currentDomain
+                                TextButton(
+                                    onClick = {
+                                        showImgSourceDialog = false
+                                        switchImgSource(index, domain)
+                                    },
+                                ) {
+                                    Text(
+                                        text = if (isSelected) "● $domain" else "○ $domain",
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            if (imgDomains.isEmpty()) {
+                                Text("暂无图源信息")
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showImgSourceDialog = false }) {
+                            Text("取消")
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -538,6 +579,26 @@ class ReaderActivity : BaseActivity() {
         // <-- AM (DISCORD)
 
         super.onPause()
+    }
+
+    /**
+     * 切换图源：更新 RouteManager + 重建网络 + 清空缓存 + 重启 Activity 重新加载图片。
+     */
+    private fun switchImgSource(index: Int, domain: String) {
+        try {
+            com.zycomic.app.net.RouteManager.setImgHost(index)
+            com.zycomic.app.net.NetworkModule.rebuild()
+            // 清空章节缓存，强制重新拉取并用新图源拼接URL
+            com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+            // 重启 Activity 重新加载
+            val intent = intent
+            finish()
+            startActivity(intent)
+            Toast.makeText(this, "已切换图源: $domain", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            android.util.Log.e("ReaderActivity", "切换图源失败", e)
+            Toast.makeText(this, "切换图源失败", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /**
@@ -757,7 +818,7 @@ class ReaderActivity : BaseActivity() {
             },
             onClickShiftPage = ::shiftDoublePages,
             onClickSourceSwitch = {
-                Toast.makeText(this, "切换图源功能开发中", Toast.LENGTH_SHORT).show()
+                showImgSourceDialog = true
             },
             // SY <--
         )
