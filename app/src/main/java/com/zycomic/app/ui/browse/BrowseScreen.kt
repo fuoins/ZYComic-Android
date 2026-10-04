@@ -124,7 +124,7 @@ fun BrowseScreen(
     }
 
     Scaffold(
-        topBar = { scrollBehavior ->
+        topBar = {
             if (selectionMode) {
                 AppBar(
                     titleContent = { Text("${selectedIds.size}") },
@@ -138,7 +138,6 @@ fun BrowseScreen(
                     },
                     isActionMode = true,
                     onCancelActionMode = { vm.exitSelection() },
-                    scrollBehavior = scrollBehavior,
                 )
             } else {
                 SearchToolbar(
@@ -155,7 +154,6 @@ fun BrowseScreen(
                             ),
                         )
                     },
-                    scrollBehavior = scrollBehavior,
                 )
             }
         },

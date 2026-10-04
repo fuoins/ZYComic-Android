@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.manga
 
 import android.widget.Toast
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -67,6 +68,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -136,10 +138,28 @@ fun MangaDetailScreen(
         }
     }
 
+    // 进入动画：从底部滑入 + 淡入
+    var animStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { animStarted = true }
+    val slideY by animateFloatAsState(
+        targetValue = if (animStarted) 0f else 400f,
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 280, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "detailSlideY",
+    )
+    val fadeAlpha by animateFloatAsState(
+        targetValue = if (animStarted) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 240, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "detailFadeAlpha",
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            .graphicsLayer {
+                translationY = slideY
+                alpha = fadeAlpha
+            },
     ) {
         when {
             loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
