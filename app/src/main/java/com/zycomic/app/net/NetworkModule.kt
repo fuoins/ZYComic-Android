@@ -105,11 +105,11 @@ object NetworkModule {
     }
 
     /**
-     * 切换线路后重建 Retrofit + 重写 cookie 到新域名。
+     * 切换线路后重建 Retrofit。
+     * GlobalCookieJar 全局共享 cookie，不按 host 分开，无需重写 domain。
      * OkHttpClient 本身无需重建（拦截器无状态）。
      */
     fun rebuild() {
-        cookieJar.rewriteForHost(RouteManager.baseUrl)
         _retrofit = null
         _api = null
         buildRetrofit()

@@ -2,6 +2,7 @@ package com.zycomic.app.ui.settings
 
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.repository.TagRepository
+import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
@@ -159,12 +160,18 @@ class SettingsViewModel {
         }
     }
 
-    /** 切换线路 */
+    /** 切换线路：重建网络后验证登录态，失效则自动登出。 */
     fun selectLine(index: Int) {
         RouteManager.setLine(index)
         currentLineIndex.value = index
         com.zycomic.app.net.NetworkModule.rebuild()
         toast.value = "已切换到线路 ${index + 1}"
+        // 切换线路后验证登录态（cookie 可能在新线路失效）
+        scope.launch {
+            try {
+                UserRepository.verifyLogin()
+            } catch (_: Exception) {}
+        }
     }
 
     /** 切换图源：更新 imgHost 并清除 Coil 缓存，避免旧图源图片/封面被缓存命中。 */
