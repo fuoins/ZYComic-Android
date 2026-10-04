@@ -1,15 +1,21 @@
 package com.zycomic.app.ui.settings
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -111,29 +117,71 @@ fun AdvancedSettingsScreen(
     }
 
     if (showDevConfig) {
-        Dialog(onDismissRequest = { showDevConfig = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                Text("开发者配置", style = MaterialTheme.typography.titleLarge)
+        Dialog(
+            onDismissRequest = { showDevConfig = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .statusBarsPadding(),
+            ) {
+                // 顶部标题栏
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "开发者配置",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { showDevConfig = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                    }
+                }
+                HorizontalDivider()
+
+                // 格式说明
                 Text(
                     "格式: {\"port\":7891,\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":[\"域名1\",\"域名2\"]}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
+
+                // JSON 编辑区域
                 OutlinedTextField(
                     value = devJson,
                     onValueChange = { vm.devConfigJson.value = it },
                     label = { Text("开发者配置 (JSON)") },
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 16.dp),
                     minLines = 8,
-                    maxLines = 15,
+                    maxLines = 20,
                 )
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier.padding(top = 8.dp),
+
+                // 底部按钮
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(onClick = { showDevConfig = false }) { Text("关闭") }
-                    Button(onClick = { vm.saveDevConfig(devJson) }) { Text("保存配置") }
+                    Button(
+                        onClick = { showDevConfig = false },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("关闭") }
+                    Button(
+                        onClick = { vm.saveDevConfig(devJson) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("保存配置") }
                 }
             }
         }
