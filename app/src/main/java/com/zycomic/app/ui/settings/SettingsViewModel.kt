@@ -380,6 +380,7 @@ class SettingsViewModel {
     fun updateNetworkConfig(provider: String = "alidns", useProxy: Boolean = false) {
         scope.launch {
             try {
+                withContext(Dispatchers.IO) {
                 // 构建独立的 DoH OkHttpClient（3秒超时，trust-all）
                 val trustAll = object : X509TrustManager {
                     override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -481,6 +482,7 @@ class SettingsViewModel {
 
                 toast.value = "更新完成，成功${successCount}个，失败${failCount}个（代理已重启）"
                 configUpdateTime.value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+                }
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "updateNetworkConfig failed", e)
                 toast.value = "更新网络配置失败: ${e.message}"
