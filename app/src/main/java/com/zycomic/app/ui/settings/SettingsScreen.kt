@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -560,11 +561,12 @@ private fun RemoveBlacklistDialog(
             }
 
             when {
-                loading -> Text(
-                    "加载中...",
-                    modifier = Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                loading -> Box(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                }
                 blockedTags.isEmpty() -> Text(
                     "暂无屏蔽标签",
                     modifier = Modifier.padding(16.dp),

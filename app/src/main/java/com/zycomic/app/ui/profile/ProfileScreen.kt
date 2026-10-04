@@ -35,6 +35,10 @@ import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
+import android.widget.Toast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -71,6 +75,8 @@ fun ProfileScreen(
     val context = LocalContext.current
     val user by UserRepository.userFlow.collectAsState()
     var showPointLogs by remember { mutableStateOf(false) }
+    var showRewardDialog by remember { mutableStateOf(false) }
+    var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     tachiyomi.presentation.core.components.material.Scaffold(
@@ -132,6 +138,13 @@ fun ProfileScreen(
                 }
                 item {
                     TextPreferenceWidget(
+                        title = if (rewarding) "领取中..." else "奖励破解领取",
+                        icon = Icons.Outlined.Code,
+                        onPreferenceClick = { if (!rewarding) showRewardDialog = true },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
                         title = "退出登录",
                         icon = Icons.Outlined.Logout,
                         onPreferenceClick = {
@@ -165,6 +178,35 @@ fun ProfileScreen(
 
     if (showPointLogs) {
         PointLogsOverlay(onClose = { showPointLogs = false })
+    }
+
+    if (showRewardDialog) {
+        AlertDialog(
+            onDismissRequest = { showRewardDialog = false },
+            title = { Text("奖励破解领取") },
+            text = { Text("确认领取今日广告奖励？") },
+            confirmButton = {
+                Button(
+                    enabled = !rewarding,
+                    onClick = {
+                        scope.launch {
+                            rewarding = true
+                            showRewardDialog = false
+                            runCatching { UserRepository.getWelfare() }
+                                .onSuccess { Toast.makeText(context, "领取成功", Toast.LENGTH_SHORT).show() }
+                                .onFailure { Toast.makeText(context, it.message ?: "领取失败", Toast.LENGTH_SHORT).show() }
+                            rewarding = false
+                        }
+                    },
+                ) {
+                    if (rewarding) CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    else Text("确认")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRewardDialog = false }) { Text("取消") }
+            },
+        )
     }
 }
 
