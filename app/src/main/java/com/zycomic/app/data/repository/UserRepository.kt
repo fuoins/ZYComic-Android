@@ -181,11 +181,13 @@ object UserRepository {
 
     // ==================== 签到 / 福利 / 积分 ====================
 
-    /** 获取签到福利信息（同时触发签到）。 */
-    suspend fun getWelfare(): WelfareData? {
-        val calendar = java.util.Calendar.getInstance()
-        val date = String.format("%04d-%02d-01", calendar.get(java.util.Calendar.YEAR), calendar.get(java.util.Calendar.MONTH) + 1)
-        val resp = api.welfare(WelfareRequest(date = date))
+    /** 获取签到福利信息（同时触发签到）。date 为目标月份第一天 yyyy-MM-01，默认当前月。 */
+    suspend fun getWelfare(date: String? = null): WelfareData? {
+        val body = date ?: run {
+            val calendar = java.util.Calendar.getInstance()
+            String.format("%04d-%02d-01", calendar.get(java.util.Calendar.YEAR), calendar.get(java.util.Calendar.MONTH) + 1)
+        }
+        val resp = api.welfare(WelfareRequest(date = body))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取福利失败" })
         return resp.data
     }

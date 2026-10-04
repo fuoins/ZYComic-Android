@@ -47,12 +47,12 @@ class PointLogsViewModel {
         }
     }
 
-    fun loadWelfare() {
+    fun loadWelfare(month: String? = null) {
         scope.launch {
             _welfareLoading.value = true
             _welfareError.value = null
             try {
-                _welfare.value = UserRepository.getWelfare()
+                _welfare.value = UserRepository.getWelfare(month)
             } catch (e: Exception) {
                 _welfareError.value = e.message ?: "加载失败"
             } finally {

@@ -18,24 +18,28 @@ data class WelfareResponse(
 
 @Serializable
 data class WelfareData(
+    val user_data: WelfareUserData? = null,
     val sign_list: List<SignDay> = emptyList(),
-    @Serializable(with = IntOrStringSerializer::class)
-    val consecutive_sign: Int = 0,
-    @Serializable(with = BooleanOrIntSerializer::class)
-    val check_ad_bonus_today: Boolean = false,
-    @Serializable(with = IntOrStringSerializer::class)
-    val ad_clicks: Int = 0,
     val prev_date: String = "",
     val next_date: String = "",
-    val current_month: String = "",
+    @Serializable(with = BooleanOrIntSerializer::class)
+    val ad_bonus: Boolean = false,
+    @Serializable(with = BooleanOrIntSerializer::class)
+    val check_ad_bonus_today: Boolean = false,
+)
+
+@Serializable
+data class WelfareUserData(
+    val point: Int = 0,
+    val consecutiveDays: Int = 0,
+    val availableCount: Int = 0,
 )
 
 @Serializable
 data class SignDay(
-    val status: String = "",
-    @Serializable(with = StringOrIntSerializer::class)
-    val index: String = "",
     val date: String = "",
+    @Serializable(with = BooleanOrIntSerializer::class)
+    val signed: Boolean = false,
 )
 
 /** 积分明细项 */

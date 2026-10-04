@@ -3,6 +3,7 @@ package com.zycomic.app.ui.profile
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,12 +58,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.UserRepository
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
+import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -250,7 +254,7 @@ private fun PointLogsOverlay(onClose: () -> Unit) {
                 item { LevelExpandSection() }
 
                 // 2. 签到日历
-                item { SignCalendarSection(welfare = welfare, loading = welfareLoading, error = welfareError) }
+                item { SignCalendarSection(welfare = welfare, loading = welfareLoading, error = welfareError, onReload = { month -> vm.loadWelfare(month) }) }
 
                 // 3. 积分明细标题
                 item {
@@ -357,65 +361,95 @@ private fun LevelExpandSection() {
     HorizontalDivider()
 }
 
-/** 签到日历区域，参考 komikku 日历样式。 */
+/** 签到日历区域。 */
 @Composable
 private fun SignCalendarSection(
-    welfare: com.zycomic.app.data.dto.WelfareData?,
-    loading: Boolean = false,
-    error: String? = null,
+    welfare: WelfareData?,
+    loading: Boolean,
+    error: String?,
+    onReload: (String) -> Unit,
 ) {
-    val context = LocalContext.current
-    val signMap = remember(welfare) {
-        welfare?.sign_list?.associate { it.date to (it.status == "signedin") } ?: emptyMap()
+    val today = remember { LocalDate.now().toString() }
+    val firstDate = welfare?.sign_list?.firstOrNull()?.date
+    val currentMonthLd = remember(firstDate) {
+        firstDate?.let { runCatching { LocalDate.parse(it).withDayOfMonth(1) }.getOrNull() }
+            ?: LocalDate.now().withDayOfMonth(1)
     }
-    val currentMonth = welfare?.current_month ?: ""
-    val consecutive = welfare?.consecutive_sign ?: 0
+    val monthText = "${currentMonthLd.year}年${currentMonthLd.monthValue}月"
+    val currentMonthStr = String.format("%04d-%02d-01", currentMonthLd.year, currentMonthLd.monthValue)
+    val prevMonthStr = run {
+        val p = currentMonthLd.minusMonths(1)
+        String.format("%04d-%02d-01", p.year, p.monthValue)
+    }
+    val nextMonthStr = run {
+        val n = currentMonthLd.plusMonths(1)
+        String.format("%04d-%02d-01", n.year, n.monthValue)
+    }
+    val consecutive = welfare?.user_data?.consecutiveDays ?: 0
+    val point = welfare?.user_data?.point ?: 0
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        // 标题行：月份 + 连续签到
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            TextButton(onClick = { onReload(prevMonthStr) }, enabled = !loading) { Text("上一月") }
             Text(
-                "2026年${currentMonth}月签到",
+                monthText,
                 style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { onReload(nextMonthStr) }, enabled = !loading) { Text("下一月") }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
             Text(
-                "连续签到 $consecutive 天",
+                "连续 $consecutive 天",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(16.dp))
+            Text(
+                "积分 $point",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Spacer(Modifier.height(12.dp))
 
-        // 星期标题
         Row(modifier = Modifier.fillMaxWidth()) {
             listOf("日", "一", "二", "三", "四", "五", "六").forEach { day ->
                 Text(
                     day,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
         Spacer(Modifier.height(8.dp))
 
-        // 日期格子
         when {
             loading -> Box(
                 modifier = Modifier.fillMaxWidth().padding(32.dp),
                 contentAlignment = Alignment.Center,
-            ) { androidx.compose.material3.CircularProgressIndicator() }
-            error != null -> Text(
-                "签到数据加载失败：$error",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(16.dp),
-            )
+            ) { CircularProgressIndicator() }
+            error != null -> Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "签到数据加载失败：$error",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = { onReload(currentMonthStr) }) { Text("重试") }
+            }
             welfare == null || welfare.sign_list.isEmpty() -> Text(
                 "暂无签到数据",
                 style = MaterialTheme.typography.bodyMedium,
@@ -423,33 +457,34 @@ private fun SignCalendarSection(
                 modifier = Modifier.padding(16.dp),
             )
             else -> {
-                val firstDay = welfare.sign_list.first().date
-                val firstDayOfWeek = java.time.LocalDate.parse(firstDay).dayOfWeek.value % 7
-                val days = welfare.sign_list
-
-            // 第一行前面的空格
-            Row(modifier = Modifier.fillMaxWidth()) {
-                repeat(firstDayOfWeek) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-                days.take(7 - firstDayOfWeek).forEach { day ->
-                    SignDayCell(day = day, signed = signMap[day.date] ?: false)
-                }
-            }
-            // 剩余行
-            days.drop(7 - firstDayOfWeek).chunked(7).forEach { week ->
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    week.forEach { day ->
-                        SignDayCell(day = day, signed = signMap[day.date] ?: false)
+                val leadingBlanks = remember(welfare) {
+                    val prev = welfare.prev_date.takeIf { it.isNotEmpty() }
+                    if (prev != null) {
+                        runCatching { (LocalDate.parse(prev).dayOfWeek.value % 7 + 1) % 7 }.getOrDefault(0)
+                    } else {
+                        runCatching { LocalDate.parse(welfare.sign_list.first().date).dayOfWeek.value % 7 }.getOrDefault(0)
                     }
-                    repeat(7 - week.size) { Spacer(modifier = Modifier.weight(1f)) }
                 }
-            }
+                val days = welfare.sign_list
+                val firstRowCount = (7 - leadingBlanks).coerceAtMost(days.size)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    repeat(leadingBlanks) { Spacer(modifier = Modifier.weight(1f)) }
+                    days.take(firstRowCount).forEach { day ->
+                        SignDayCell(date = day.date, signed = day.signed, isToday = day.date == today)
+                    }
+                }
+                days.drop(firstRowCount).chunked(7).forEach { week ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            SignDayCell(date = day.date, signed = day.signed, isToday = day.date == today)
+                        }
+                        repeat(7 - week.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                }
             }
         }
 
         Spacer(Modifier.height(8.dp))
-        // 图例
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -481,11 +516,11 @@ private fun SignCalendarSection(
 
 /** 签到日历中的单个日期格子。 */
 @Composable
-private fun SignDayCell(day: com.zycomic.app.data.dto.SignDay, signed: Boolean) {
+private fun SignDayCell(date: String, signed: Boolean, isToday: Boolean) {
     val dayNum = try {
-        java.time.LocalDate.parse(day.date).dayOfMonth
+        LocalDate.parse(date).dayOfMonth
     } catch (_: Exception) {
-        day.index.toIntOrNull() ?: 0
+        0
     }
     Box(
         modifier = Modifier
@@ -497,6 +532,10 @@ private fun SignDayCell(day: com.zycomic.app.data.dto.SignDay, signed: Boolean) 
             modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
+                .then(
+                    if (isToday) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    else Modifier,
+                )
                 .background(
                     if (signed) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceVariant,
@@ -504,7 +543,7 @@ private fun SignDayCell(day: com.zycomic.app.data.dto.SignDay, signed: Boolean) 
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                dayNum.toString(),
+                if (signed) "✓" else dayNum.toString(),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (signed) MaterialTheme.colorScheme.onPrimary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
