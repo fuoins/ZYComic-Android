@@ -417,7 +417,7 @@ fun MangaDetailScreen(
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier
                             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                            .onGloballyPositioned { recommendY = it.positionInParent().y.toInt() },
+                            .onGloballyPositioned { recommendY = it.positionInRoot().y.toInt() },
                     )
                     if (d.loveList.isEmpty()) {
                         Text(
