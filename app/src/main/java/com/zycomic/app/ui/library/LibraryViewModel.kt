@@ -187,6 +187,13 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
         }
     }
 
+    /** 收藏页可见时调用：folders 为空且已登录则请求一次（缓存，不重复请求）。 */
+    fun ensureFoldersLoaded() {
+        if (UserRepository.isLoggedIn && folders.value.isEmpty()) {
+            loadFolders()
+        }
+    }
+
     fun selectFolder(id: Int) { selectedFolderId.value = id; refreshFavorites() }
     fun selectIsFull(v: Int) { isFullVersion.value = v; refreshFavorites() }
 

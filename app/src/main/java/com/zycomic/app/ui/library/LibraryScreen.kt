@@ -120,6 +120,11 @@ fun LibraryScreen(
         vm.needLogin.collect { if (it) onRequireLogin() }
     }
 
+    // 页面首次可见时：收藏夹为空且已登录则请求一次（缓存）
+    LaunchedEffect(Unit) {
+        vm.ensureFoldersLoaded()
+    }
+
     // 多选模式下按返回键 = 退出多选
     BackHandler(enabled = selectionMode) { vm.exitSelection() }
 
