@@ -65,14 +65,8 @@ import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 fun ProfileScreen(
     onRequireLogin: () -> Unit,
     onNavigateToTab: (Int) -> Unit,
-    onOpenAppearance: () -> Unit,
-    onOpenReader: () -> Unit,
     onOpenTagBlock: () -> Unit,
     onBlockGayTags: () -> Unit,
-    onOpenSpeedTest: () -> Unit,
-    onOpenDataStorage: () -> Unit,
-    onOpenAdvanced: () -> Unit,
-    onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current
     val user by UserRepository.userFlow.collectAsState()
@@ -152,20 +146,6 @@ fun ProfileScreen(
             // ---- 设置入口 ----
             item {
                 TextPreferenceWidget(
-                    title = "外观",
-                    icon = Icons.Outlined.Palette,
-                    onPreferenceClick = onOpenAppearance,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "阅读器",
-                    icon = Icons.AutoMirrored.Outlined.ChromeReaderMode,
-                    onPreferenceClick = onOpenReader,
-                )
-            }
-            item {
-                TextPreferenceWidget(
                     title = "标签屏蔽",
                     icon = Icons.AutoMirrored.Outlined.Label,
                     onPreferenceClick = onOpenTagBlock,
@@ -178,57 +158,8 @@ fun ProfileScreen(
                     onPreferenceClick = onBlockGayTags,
                 )
             }
-            item {
-                TextPreferenceWidget(
-                    title = "测速日志",
-                    icon = Icons.Outlined.Speed,
-                    onPreferenceClick = onOpenSpeedTest,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "数据与存储",
-                    icon = Icons.Outlined.Storage,
-                    onPreferenceClick = onOpenDataStorage,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "高级",
-                    icon = Icons.Outlined.Code,
-                    onPreferenceClick = onOpenAdvanced,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "关于",
-                    icon = Icons.Outlined.Info,
-                    onPreferenceClick = onOpenAbout,
-                )
-            }
 
             item { HorizontalDivider() }
-
-            // ---- 赞助 ----
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    TextButton(onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://zy520.de5.net/juanzeng/"))
-                        context.startActivity(intent)
-                    }) {
-                        Icon(
-                            imageVector = Icons.Filled.Favorite,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.size(4.dp))
-                        Text("赞助", color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
         }
     }
 

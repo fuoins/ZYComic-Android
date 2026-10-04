@@ -189,6 +189,8 @@ fun AppContent() {
     val openAbout = { settingsDialog = SettingsDialog.About }
     val blockGayTags = { showGayConfirm = true }
 
+    // 测速完成前不渲染底层页面，避免页面用默认线路发起请求
+    if (!speedTesting) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.navigationBars,
@@ -258,14 +260,8 @@ fun AppContent() {
                 3 -> ProfileScreen(
                     onRequireLogin = { loginOpen = true },
                     onNavigateToTab = { bottomTab = it },
-                    onOpenAppearance = openAppearance,
-                    onOpenReader = openReader,
                     onOpenTagBlock = openTagBlock,
                     onBlockGayTags = blockGayTags,
-                    onOpenSpeedTest = openSpeedTest,
-                    onOpenDataStorage = openDataStorage,
-                    onOpenAdvanced = openAdvanced,
-                    onOpenAbout = openAbout,
                 )
                 4 -> SettingsMainScreen(
                     onOpenAppearance = openAppearance,
@@ -399,6 +395,7 @@ fun AppContent() {
                 }
             },
         )
+    }
     }
 
     // ---- 启动测速全屏加载层 ----
