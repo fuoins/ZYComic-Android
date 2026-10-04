@@ -17,17 +17,25 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FlipToBack
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.WindowInsets
@@ -93,6 +101,7 @@ fun HistoryScreen(
     BackHandler(enabled = selectionMode) { vm.exitSelection() }
 
     var showBatchDelete by remember { mutableStateOf(false) }
+    var showFolderDialog by remember { mutableStateOf(false) }
     var singleDeleteTarget by remember { mutableStateOf<HistoryItem?>(null) }
 
     val listState = rememberLazyListState()
@@ -164,19 +173,38 @@ fun HistoryScreen(
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 ) {
+                    // 全部收藏夹
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable(enabled = selectedIds.isNotEmpty()) { vm.favoriteSelected() }
+                            .clickable(enabled = selectedIds.isNotEmpty()) { vm.favoriteSelected(0) }
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "收藏",
+                            "全部收藏夹",
                             color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    // 其他收藏夹
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = selectedIds.isNotEmpty()) {
+                                vm.loadFolders()
+                                showFolderDialog = true
+                            }
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "其他收藏夹",
+                            color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // 删除
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -336,6 +364,78 @@ fun HistoryScreen(
                 )
             },
         )
+    }
+
+    // 收藏夹选择对话框
+    if (showFolderDialog) {
+        val folders by vm.folders.collectAsState()
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showFolderDialog = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .statusBarsPadding(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "选择收藏夹",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { showFolderDialog = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                    }
+                }
+                HorizontalDivider()
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    vm.favoriteSelected(0)
+                                    showFolderDialog = false
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Bookmark, contentDescription = null, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Text("默认收藏夹", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    items(folders) { f ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    vm.favoriteSelected(f.id)
+                                    showFolderDialog = false
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Text(f.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text("${f.count}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

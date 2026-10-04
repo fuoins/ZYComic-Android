@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.history
 
 import android.util.Log
+import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
@@ -191,6 +192,9 @@ class HistoryViewModel {
     }
 
     // ---------- 收藏 ----------
+    private val _folders = MutableStateFlow<List<Folder>>(emptyList())
+    val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
+
     /** 收藏单条（bookId 为漫画 ID）。 */
     fun favoriteSingle(bookId: String) {
         scope.launch {
@@ -204,8 +208,8 @@ class HistoryViewModel {
         }
     }
 
-    /** 批量收藏选中的历史记录（按 bookId 去重）。 */
-    fun favoriteSelected() {
+    /** 批量收藏选中的历史记录到指定收藏夹（按 bookId 去重）。 */
+    fun favoriteSelected(folderId: Int = 0) {
         val ids = _selectedIds.value
         if (ids.isEmpty()) return
         scope.launch {
@@ -214,12 +218,23 @@ class HistoryViewModel {
                     .filter { it.id in ids }
                     .map { it.bookId }
                     .distinct()
-                bookIds.forEach { FavoriteRepository.addFavorite(it.toInt()) }
+                bookIds.forEach { FavoriteRepository.addFavorite(it.toInt(), folderId) }
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "批量收藏失败", e)
             }
+        }
+    }
+
+    /** 加载收藏夹列表。 */
+    fun loadFolders() {
+        scope.launch {
+            try {
+                _folders.value = FavoriteRepository.getFolderList()
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {}
         }
     }
 }
