@@ -276,11 +276,20 @@ fun SettingsScreen() {
             }
         }
 
-        // 更新网络配置
-        Button(
-            onClick = { vm.updateNetworkConfig() },
-            modifier = Modifier.padding(16.dp),
-        ) { Text("更新网络配置") }
+        // 更新网络配置（阿里+腾讯两个选项）
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = { vm.updateNetworkConfig("alidns") },
+                modifier = Modifier.weight(1f),
+            ) { Text("阿里更新") }
+            Button(
+                onClick = { vm.updateNetworkConfig("tencent") },
+                modifier = Modifier.weight(1f),
+            ) { Text("腾讯更新") }
+        }
 
         // 本地代理（SNI绕过）开关
         val proxyEnabled by vm.proxyEnabled.collectAsState()

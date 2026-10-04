@@ -372,10 +372,11 @@ class SettingsViewModel {
     }
 
     /**
-     * DoH 自动更新 IP：遍历当前 customRule 中所有域名，通过 dns.google 查询 A 记录，
+     * DoH 自动更新 IP：遍历当前 customRule 中所有域名，通过指定 DoH 服务查询 A 记录，
      * 如果 IP 列表有变化则更新。
+     * @param provider DoH 服务："alidns"=阿里云, "tencent"=腾讯
      */
-    fun updateNetworkConfig() {
+    fun updateNetworkConfig(provider: String = "alidns") {
         scope.launch {
             try {
                 // 构建独立的 DoH OkHttpClient（2秒超时，走本地代理 + trust-all）
@@ -396,20 +397,25 @@ class SettingsViewModel {
                     .build()
 
                 val jsonParser = Json { ignoreUnknownKeys = true }
-                val currentRule = RouteManager.customRule
+                // 遍历 STATIC_IP 中所有域名（customRule 可能为空，必须用预设域名列表）
+                val domainsToUpdate = RouteManager.STATIC_IP.keys
                 val newRuleMap = mutableMapOf<String, List<String>>()
                 var successCount = 0
                 var failCount = 0
 
-                // 遍历当前 customRule 中的所有域名（跳过 dns.google 本身）
-                for ((domain, oldIps) in currentRule) {
+                for (domain in domainsToUpdate) {
+                    val oldIps = RouteManager.resolveIp(domain)
+                    // dns.google 本身不查询（DoH 服务域名），保留旧 IP
                     if (domain == "dns.google") {
                         newRuleMap[domain] = oldIps
                         continue
                     }
                     try {
-                        val url = "https://dns.google/resolve?name=$domain&type=A"
-                        val req = Request.Builder().url(url).build()
+                        val dohUrl = when (provider) {
+                            "tencent" -> "https://doh.pub/dns-query?name=$domain&type=A"
+                            else -> "https://dns.alidns.com/resolve?name=$domain&type=A"
+                        }
+                        val req = Request.Builder().url(dohUrl).build()
                         val resp = dohClient.newCall(req).execute()
                         val body = resp.body?.string() ?: ""
                         resp.close()

@@ -95,9 +95,16 @@ fun AdvancedSettingsScreen(
             }
             item {
                 TextPreferenceWidget(
-                    title = "更新网络配置(DoH)",
-                    subtitle = "通过 DNS over HTTPS 刷新 IP 列表",
-                    onPreferenceClick = { vm.updateNetworkConfig() },
+                    title = "更新网络配置(阿里云DoH)",
+                    subtitle = "通过阿里云 DNS over HTTPS 刷新 IP 列表",
+                    onPreferenceClick = { vm.updateNetworkConfig("alidns") },
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = "更新网络配置(腾讯DoH)",
+                    subtitle = "通过腾讯 DNS over HTTPS 刷新 IP 列表",
+                    onPreferenceClick = { vm.updateNetworkConfig("tencent") },
                 )
             }
             item {
@@ -156,17 +163,21 @@ fun AdvancedSettingsScreen(
                 )
 
                 // JSON 编辑区域
-                OutlinedTextField(
-                    value = devJson,
-                    onValueChange = { vm.devConfigJson.value = it },
-                    label = { Text("开发者配置 (JSON)") },
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
                         .weight(1f)
+                        .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    minLines = 8,
-                    maxLines = 20,
-                )
+                ) {
+                    OutlinedTextField(
+                        value = devJson,
+                        onValueChange = { vm.devConfigJson.value = it },
+                        label = { Text("开发者配置 (JSON)") },
+                        modifier = Modifier.fillMaxSize(),
+                        minLines = 8,
+                        maxLines = 20,
+                    )
+                }
 
                 // 底部按钮
                 Row(
