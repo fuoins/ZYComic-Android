@@ -270,7 +270,7 @@ fun LibraryScreen(
                     isRefreshing = isRefreshing,
                     onRefresh = {
                         isRefreshing = true
-                        vm.refresh()
+                        vm.refreshFavorites()
                     },
                     modifier = Modifier.fillMaxSize(),
                 ) {

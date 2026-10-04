@@ -243,7 +243,7 @@ fun HistoryScreen(
                 isRefreshing = isRefreshing,
                 onRefresh = {
                     isRefreshing = true
-                    vm.refresh()
+                    vm.refreshHistory()
                 },
                 modifier = Modifier.fillMaxSize(),
             ) {

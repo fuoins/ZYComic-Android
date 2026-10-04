@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -285,7 +286,7 @@ private fun BrowseTabContent(
 
     // 每个tab独立的滚动状态，避免切换tab时内容重叠
     val gridStates = remember { Array(3) { LazyGridState() } }
-    val gridState = gridStates[mainTab]
+    val gridState = gridStates[page]
 
     var isRefreshing by remember { mutableStateOf(false) }
 
