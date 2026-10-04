@@ -36,6 +36,42 @@ object RouteManager {
         "newmwimserv6.cc",
     )
 
+    // ---- 动态域名列表（开发者配置更新后同步）----
+    /** 当前生效的线路列表（测速和请求用这个，不用硬编码 LINE_HOSTS） */
+    @Volatile var lineHosts: List<String> = LINE_HOSTS
+        private set
+    /** 当前生效的图源域名列表（测速用这个，不用硬编码 IMG_DOMAINS） */
+    @Volatile var imgDomains: List<String> = IMG_DOMAINS
+        private set
+
+    /**
+     * 根据 customRule 的 keys 更新线路和图源域名列表。
+     * 线路域名：包含 "mseeowpm"；图源域名：包含 "mw" 且不是线路；排除 dns.google。
+     */
+    fun updateDomainsFromRule(rule: Map<String, List<String>>) {
+        val lines = mutableListOf<String>()
+        val imgs = mutableListOf<String>()
+        rule.keys.forEach { domain ->
+            when {
+                domain == "dns.google" -> return@forEach
+                domain.contains("mseeowpm") -> {
+                    // 线路域名：补全 http/https 前缀（和 LINE_HOSTS 格式一致）
+                    val url = if (domain.endsWith(".pro") || domain.endsWith(".cc") && !domain.contains("mseeowpm")) {
+                        "http://$domain"
+                    } else {
+                        "https://$domain"
+                    }
+                    lines.add(url)
+                }
+                domain.contains("mw") || domain.contains("img") || domain.contains("imserv") || domain.contains("fimsv") -> {
+                    imgs.add(domain)
+                }
+            }
+        }
+        if (lines.isNotEmpty()) lineHosts = lines
+        if (imgs.isNotEmpty()) imgDomains = imgs
+    }
+
     // ---- 当前选择 ----
     @Volatile var lineIndex: Int = 0
         private set
@@ -83,10 +119,10 @@ object RouteManager {
     }
 
     /** 当前接口 baseUrl */
-    val baseUrl: String get() = LINE_HOSTS[lineIndex.coerceIn(0, LINE_HOSTS.lastIndex)]
+    val baseUrl: String get() = lineHosts[lineIndex.coerceIn(0, lineHosts.lastIndex)]
 
     /** 当前图源 host（不含 scheme） */
-    val imgHost: String get() = IMG_DOMAINS[imgIndex.coerceIn(0, IMG_DOMAINS.lastIndex)]
+    val imgHost: String get() = imgDomains[imgIndex.coerceIn(0, imgDomains.lastIndex)]
 
     /** 当前线路 host（不含 scheme） */
     val lineHost: String
@@ -135,17 +171,18 @@ object RouteManager {
 
     /** 切换线路 */
     fun setLine(index: Int) {
-        lineIndex = index.coerceIn(0, LINE_HOSTS.lastIndex)
+        lineIndex = index.coerceIn(0, lineHosts.lastIndex)
     }
 
     /** 切换图源 */
     fun setImgHost(index: Int) {
-        imgIndex = index.coerceIn(0, IMG_DOMAINS.lastIndex)
+        imgIndex = index.coerceIn(0, imgDomains.lastIndex)
     }
 
     /** 设置自定义 rule（开发者配置） */
     fun setCustomRule(rule: Map<String, List<String>>) {
         customRule = rule
+        updateDomainsFromRule(rule)
     }
 
     /** 设置 SNI 绕过域名列表 */

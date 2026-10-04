@@ -257,7 +257,7 @@ class SettingsViewModel {
         val ipDelayMap = mutableMapOf<String, MutableMap<String, Long>>()
 
         // ---- 线路测速（每条线路的所有 IP 并行）----
-        val lineResults = RouteManager.LINE_HOSTS.mapIndexed { index, lineUrl ->
+        val lineResults = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
             async {
                 val domain = lineUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
                 val ips = RouteManager.resolveIp(domain)
@@ -287,7 +287,7 @@ class SettingsViewModel {
         }.awaitAll().toMap()
 
         // ---- 图源测速（每个图源的所有 IP 并行）----
-        val imgResults = RouteManager.IMG_DOMAINS.mapIndexed { index, domain ->
+        val imgResults = RouteManager.imgDomains.mapIndexed { index, domain ->
             async {
                 val ips = RouteManager.resolveIp(domain)
                 val delays: Map<String, Long>
@@ -499,6 +499,12 @@ class SettingsViewModel {
                 DevConfig.applyConfig(jsonStr)
                 // 重启代理使新配置生效
                 DevConfig.restartProxy()
+                // 清空测速缓存，强制下次测速用新配置
+                RouteManager.clearFastestIps()
+                RouteManager.setLastDelays(emptyMap(), emptyMap())
+                RouteManager.setLastIpDelays(emptyMap())
+                // 重建网络客户端，让新代理配置生效
+                NetworkModule.rebuild()
                 // 同步更新 UI 状态，关闭再打开仍显示新配置
                 devConfigJson.value = jsonStr
                 val ruleCount = DevConfig.getRule().size

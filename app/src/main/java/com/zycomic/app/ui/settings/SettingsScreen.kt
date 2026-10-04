@@ -128,7 +128,7 @@ fun SettingsScreen() {
 
             // 线路列表
             Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            RouteManager.LINE_HOSTS.forEachIndexed { index, url ->
+            RouteManager.lineHosts.forEachIndexed { index, url ->
                 val host = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
                 val delay = lineDelays[index]
                 val hostIpMap = ipDelays[host]
@@ -203,7 +203,7 @@ fun SettingsScreen() {
 
             // 图源列表
             Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            RouteManager.IMG_DOMAINS.forEachIndexed { index, domain ->
+            RouteManager.imgDomains.forEachIndexed { index, domain ->
                 val delay = imgDelays[index]
                 val hostIpMap = ipDelays[domain]
                 val fastest = hostIpMap?.filterValues { it < Long.MAX_VALUE }?.minByOrNull { it.value }

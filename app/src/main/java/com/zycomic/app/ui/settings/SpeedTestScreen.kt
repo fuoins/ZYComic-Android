@@ -74,12 +74,12 @@ fun SpeedTestScreen(
                 item {
                     Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(RouteManager.LINE_HOSTS.size) { index ->
+                items(RouteManager.lineHosts.size) { index ->
                     SpeedLineRow(
                         index = index,
-                        host = RouteManager.LINE_HOSTS[index].removePrefix("https://").removePrefix("http://").substringBefore('/'),
+                        host = RouteManager.lineHosts[index].removePrefix("https://").removePrefix("http://").substringBefore('/'),
                         delay = lineDelays[index],
-                        ipMap = ipDelays[RouteManager.LINE_HOSTS[index].removePrefix("https://").removePrefix("http://").substringBefore('/')],
+                        ipMap = ipDelays[RouteManager.lineHosts[index].removePrefix("https://").removePrefix("http://").substringBefore('/')],
                         isSelected = index == currentLineIdx,
                         expandKey = "line_$index",
                         expandedHosts = expandedHosts,
@@ -93,12 +93,12 @@ fun SpeedTestScreen(
                 item {
                     Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(RouteManager.IMG_DOMAINS.size) { index ->
+                items(RouteManager.imgDomains.size) { index ->
                     SpeedLineRow(
                         index = index,
-                        host = RouteManager.IMG_DOMAINS[index],
+                        host = RouteManager.imgDomains[index],
                         delay = imgDelays[index],
-                        ipMap = ipDelays[RouteManager.IMG_DOMAINS[index]],
+                        ipMap = ipDelays[RouteManager.imgDomains[index]],
                         isSelected = index == currentImgIdx,
                         expandKey = "img_$index",
                         expandedHosts = expandedHosts,
