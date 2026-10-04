@@ -243,6 +243,8 @@ private fun PointLogsOverlay(onClose: () -> Unit) {
     val logs by vm.logs.collectAsState()
     val loading by vm.loading.collectAsState()
     val welfare by vm.welfare.collectAsState()
+    val welfareLoading by vm.welfareLoading.collectAsState()
+    val welfareError by vm.welfareError.collectAsState()
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onClose,
@@ -275,7 +277,7 @@ private fun PointLogsOverlay(onClose: () -> Unit) {
                 item { LevelExpandSection() }
 
                 // 2. 签到日历
-                item { SignCalendarSection(welfare = welfare) }
+                item { SignCalendarSection(welfare = welfare, loading = welfareLoading, error = welfareError) }
 
                 // 3. 积分明细标题
                 item {
@@ -384,7 +386,11 @@ private fun LevelExpandSection() {
 
 /** 签到日历区域，参考 komikku 日历样式。 */
 @Composable
-private fun SignCalendarSection(welfare: com.zycomic.app.data.dto.WelfareData?) {
+private fun SignCalendarSection(
+    welfare: com.zycomic.app.data.dto.WelfareData?,
+    loading: Boolean = false,
+    error: String? = null,
+) {
     val context = LocalContext.current
     val signMap = remember(welfare) {
         welfare?.sign_list?.associate { it.date to (it.status == "signedin") } ?: emptyMap()
@@ -426,10 +432,27 @@ private fun SignCalendarSection(welfare: com.zycomic.app.data.dto.WelfareData?) 
         Spacer(Modifier.height(8.dp))
 
         // 日期格子
-        if (welfare != null && welfare.sign_list.isNotEmpty()) {
-            val firstDay = welfare.sign_list.first().date
-            val firstDayOfWeek = java.time.LocalDate.parse(firstDay).dayOfWeek.value % 7
-            val days = welfare.sign_list
+        when {
+            loading -> Box(
+                modifier = Modifier.fillMaxWidth().padding(32.dp),
+                contentAlignment = Alignment.Center,
+            ) { androidx.compose.material3.CircularProgressIndicator() }
+            error != null -> Text(
+                "签到数据加载失败：$error",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(16.dp),
+            )
+            welfare == null || welfare.sign_list.isEmpty() -> Text(
+                "暂无签到数据",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp),
+            )
+            else -> {
+                val firstDay = welfare.sign_list.first().date
+                val firstDayOfWeek = java.time.LocalDate.parse(firstDay).dayOfWeek.value % 7
+                val days = welfare.sign_list
 
             // 第一行前面的空格
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -449,20 +472,7 @@ private fun SignCalendarSection(welfare: com.zycomic.app.data.dto.WelfareData?) 
                     repeat(7 - week.size) { Spacer(modifier = Modifier.weight(1f)) }
                 }
             }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "加载中...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
-        }
 
         Spacer(Modifier.height(8.dp))
         // 图例

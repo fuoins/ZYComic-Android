@@ -22,6 +22,10 @@ class PointLogsViewModel {
 
     private val _welfare = MutableStateFlow<WelfareData?>(null)
     val welfare: StateFlow<WelfareData?> = _welfare.asStateFlow()
+    private val _welfareLoading = MutableStateFlow(true)
+    val welfareLoading: StateFlow<Boolean> = _welfareLoading.asStateFlow()
+    private val _welfareError = MutableStateFlow<String?>(null)
+    val welfareError: StateFlow<String?> = _welfareError.asStateFlow()
 
     private var page = 1
 
@@ -45,9 +49,14 @@ class PointLogsViewModel {
 
     fun loadWelfare() {
         scope.launch {
+            _welfareLoading.value = true
+            _welfareError.value = null
             try {
                 _welfare.value = UserRepository.getWelfare()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                _welfareError.value = e.message ?: "加载失败"
+            } finally {
+                _welfareLoading.value = false
             }
         }
     }
