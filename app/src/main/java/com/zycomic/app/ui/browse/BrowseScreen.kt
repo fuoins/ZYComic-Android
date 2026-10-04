@@ -542,17 +542,15 @@ private fun DisplayFilter(vm: BrowseViewModel) {
         }
     }
 
-    if (displayMode != 2) {
-        FilterSection("每行数量") {
-            Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
-            androidx.compose.material3.Slider(
-                value = gridColumns.toFloat(),
-                onValueChange = { vm.setGridColumns(it.toInt()) },
-                valueRange = 0f..10f,
-                steps = 9,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+    FilterSection("每行数量") {
+        Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
+        androidx.compose.material3.Slider(
+            value = gridColumns.toFloat(),
+            onValueChange = { vm.setGridColumns(it.toInt()) },
+            valueRange = 0f..10f,
+            steps = 9,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

@@ -284,7 +284,7 @@ fun LibraryScreen(
                             }
                         }
                     }
-                    gridItems(filtered, key = { it.bookId }, contentType = { "grid" }) { item ->
+                    gridItems(filtered, key = { it.id }, contentType = { "grid" }) { item ->
                         FavGridItem(
                             item = item,
                             displayMode = displayMode,
@@ -331,7 +331,7 @@ fun LibraryScreen(
                         }
                     }
                 }
-                items(filtered, key = { it.bookId }, contentType = { "item" }) { item ->
+                items(filtered, key = { it.id }, contentType = { "item" }) { item ->
                     FavItemRow(
                         item = item,
                         displayMode = displayMode,
