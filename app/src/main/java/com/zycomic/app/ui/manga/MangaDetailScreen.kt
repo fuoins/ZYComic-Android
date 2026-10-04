@@ -143,7 +143,9 @@ fun MangaDetailScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         when {
-            loading -> LoadingFooter()
+            loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator()
+            }
             error != null -> ErrorView(message = error ?: "", onRetry = { vm.load() })
             detail == null -> EmptyView()
             else -> {
