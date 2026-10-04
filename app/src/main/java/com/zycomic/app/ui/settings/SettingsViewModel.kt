@@ -470,6 +470,10 @@ class SettingsViewModel {
                 }
                 DevConfig.saveConfig(configJson)
                 DevConfig.restartProxy()
+                // 清空旧的最快IP缓存，强制测速重新选择
+                RouteManager.clearFastestIps()
+                // 重建网络客户端，让新代理配置生效
+                NetworkModule.rebuild()
 
                 toast.value = "更新完成，成功${successCount}个，失败${failCount}个（代理已重启）"
                 configUpdateTime.value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())

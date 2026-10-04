@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -301,54 +302,57 @@ private fun BrowseTabContent(
                 }
             }
             mangas.isEmpty() && !loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有漫画") }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
-                state = gridState,
-                contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, bottomPadding + 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
-                    val m = mangas[i]
-                    MangaGridItem(
-                        manga = m,
-                        displayMode = displayMode,
-                        selected = selectionMode && m.id in selectedIds,
-                        selectionMode = selectionMode,
-                        onClick = { if (selectionMode) onToggleSelect(m.id) else onOpenManga(m.id) },
-                        onLongClick = { onLongClick(m.id) },
-                    )
-                }
-                if (appending) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { Text("加载中...") }
+            else -> Column(modifier = Modifier.fillMaxSize()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                    state = gridState,
+                    contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
+                        val m = mangas[i]
+                        MangaGridItem(
+                            manga = m,
+                            displayMode = displayMode,
+                            selected = selectionMode && m.id in selectedIds,
+                            selectionMode = selectionMode,
+                            onClick = { if (selectionMode) onToggleSelect(m.id) else onOpenManga(m.id) },
+                            onLongClick = { onLongClick(m.id) },
+                        )
                     }
-                } else if (!hasMore && mangas.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                // 仅封面网格模式：底部每行数量选择
-                if (displayMode == 2) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                if (gridColumns == 0) "自动" else gridColumns.toString(),
-                                modifier = Modifier.padding(end = 8.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            androidx.compose.material3.Slider(
-                                value = gridColumns.toFloat(),
-                                onValueChange = { onGridColumnsChange(it.toInt()) },
-                                valueRange = 0f..10f,
-                                steps = 9,
-                                modifier = Modifier.weight(1f),
-                            )
+                    if (appending) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { Text("加载中...") }
                         }
+                    } else if (!hasMore && mangas.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                // 仅封面网格模式：固定底部每行数量选择
+                if (displayMode == 2) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .navigationBarsPadding(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (gridColumns == 0) "自动" else gridColumns.toString(),
+                            modifier = Modifier.padding(end = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        androidx.compose.material3.Slider(
+                            value = gridColumns.toFloat(),
+                            onValueChange = { onGridColumnsChange(it.toInt()) },
+                            valueRange = 0f..10f,
+                            steps = 9,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
             }

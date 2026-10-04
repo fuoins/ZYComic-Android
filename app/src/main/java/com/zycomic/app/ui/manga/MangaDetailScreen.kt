@@ -759,7 +759,13 @@ fun MangaDetailOverlay(
     onTagClick: (String) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
         MangaDetailScreen(
             bookId = bookId,
             onClose = onClose,

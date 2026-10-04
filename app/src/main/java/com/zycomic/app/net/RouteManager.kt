@@ -79,6 +79,11 @@ object RouteManager {
         fastestIp[host] = ip
     }
 
+    /** 清空所有最快 IP 缓存（更新配置后调用，强制测速重新选 IP）。 */
+    fun clearFastestIps() {
+        fastestIp.clear()
+    }
+
     /** 当前接口 baseUrl */
     val baseUrl: String get() = LINE_HOSTS[lineIndex.coerceIn(0, LINE_HOSTS.lastIndex)]
 
