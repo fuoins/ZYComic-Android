@@ -146,10 +146,6 @@ class BrowseViewModel {
 
     fun selectDate(date: String) { newestDate.value = date; refresh() }
 
-    // ---- 显示模式 ----
-    fun setDisplayMode(mode: Int) { displayMode.value = mode }
-    fun setGridColumns(cols: Int) { gridColumns.value = cols }
-
     // ---- 多选 ----
     fun enterSelection() { selectionMode.value = true; selectedIds.value = emptySet() }
     fun exitSelection() { selectionMode.value = false; selectedIds.value = emptySet() }

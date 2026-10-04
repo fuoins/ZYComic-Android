@@ -473,6 +473,7 @@ private fun SignCalendarSection(
                 }
             }
             }
+        }
 
         Spacer(Modifier.height(8.dp))
         // 图例
