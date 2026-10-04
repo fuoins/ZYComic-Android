@@ -374,12 +374,13 @@ class SettingsViewModel {
     /**
      * DoH 自动更新 IP：遍历当前 customRule 中所有域名，通过指定 DoH 服务查询 A 记录，
      * 如果 IP 列表有变化则更新。
-     * @param provider DoH 服务："alidns"=阿里云, "tencent"=腾讯
+     * @param provider DoH 服务："alidns"=阿里云, "tencent"=腾讯, "google"=Google
+     * @param useProxy 是否走本地代理（Google DoH 国内被墙，走代理可测试）
      */
-    fun updateNetworkConfig(provider: String = "alidns") {
+    fun updateNetworkConfig(provider: String = "alidns", useProxy: Boolean = false) {
         scope.launch {
             try {
-                // 构建独立的 DoH OkHttpClient（2秒超时，走本地代理 + trust-all）
+                // 构建独立的 DoH OkHttpClient（3秒超时，trust-all）
                 val trustAll = object : X509TrustManager {
                     override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
                     override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -388,12 +389,15 @@ class SettingsViewModel {
                 val sslContext = SSLContext.getInstance("TLS")
                 sslContext.init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
 
-                val dohClient = OkHttpClient.Builder()
+                val dohClientBuilder = OkHttpClient.Builder()
                     .connectTimeout(3, TimeUnit.SECONDS)
                     .readTimeout(3, TimeUnit.SECONDS)
                     .sslSocketFactory(sslContext.socketFactory, trustAll)
                     .hostnameVerifier { _, _ -> true }
-                    .build()
+                if (useProxy) {
+                    dohClientBuilder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
+                }
+                val dohClient = dohClientBuilder.build()
 
                 val jsonParser = Json { ignoreUnknownKeys = true }
                 // 遍历当前配置（DevConfig rule）中所有域名，包括 dns.google
@@ -412,6 +416,7 @@ class SettingsViewModel {
                     try {
                         val dohUrl = when (provider) {
                             "tencent" -> "https://doh.pub/dns-query?name=$domain&type=A"
+                            "google" -> "https://dns.google/resolve?name=$domain&type=A"
                             else -> "https://dns.alidns.com/resolve?name=$domain&type=A"
                         }
                         val req = Request.Builder().url(dohUrl).build()

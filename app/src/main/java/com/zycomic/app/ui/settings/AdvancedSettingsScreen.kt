@@ -112,6 +112,20 @@ fun AdvancedSettingsScreen(
             }
             item {
                 TextPreferenceWidget(
+                    title = "更新网络配置(Google DoH-直连)",
+                    subtitle = "通过 Google DNS over HTTPS 刷新 IP（不走代理，国内可能失败）",
+                    onPreferenceClick = { vm.updateNetworkConfig("google", useProxy = false) },
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = "更新网络配置(Google DoH-走代理)",
+                    subtitle = "通过 Google DNS over HTTPS 刷新 IP（走本地代理）",
+                    onPreferenceClick = { vm.updateNetworkConfig("google", useProxy = true) },
+                )
+            }
+            item {
+                TextPreferenceWidget(
                     title = "测速日志",
                     onPreferenceClick = onOpenSpeedTest,
                 )

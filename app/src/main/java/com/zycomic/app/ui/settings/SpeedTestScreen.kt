@@ -118,14 +118,6 @@ fun SpeedTestScreen(
                         Text(if (testing) "测速中..." else "重新测速")
                     }
                 }
-
-                item {
-                    TextPreferenceWidget(
-                        title = "更新网络配置(DoH)",
-                        subtitle = "通过 DNS over HTTPS 刷新 IP 列表并重启代理",
-                        onPreferenceClick = { vm.updateNetworkConfig() },
-                    )
-                }
             }
         }
     }
