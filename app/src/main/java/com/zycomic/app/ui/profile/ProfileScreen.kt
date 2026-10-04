@@ -512,7 +512,7 @@ private fun SignDayCell(day: com.zycomic.app.data.dto.SignDay, signed: Boolean) 
     val dayNum = try {
         java.time.LocalDate.parse(day.date).dayOfMonth
     } catch (_: Exception) {
-        day.index
+        day.index.toIntOrNull() ?: 0
     }
     Box(
         modifier = Modifier

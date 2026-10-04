@@ -30,7 +30,7 @@ data class WelfareData(
 @Serializable
 data class SignDay(
     val status: String = "",
-    val index: Int = 0,
+    val index: String = "",
     val date: String = "",
 )
 

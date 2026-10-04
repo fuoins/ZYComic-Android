@@ -622,6 +622,7 @@ private fun FavItemRow(
             AsyncImage(
                 model = coverUrl(item.bookImg),
                 contentDescription = item.bookName,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxHeight()
                     .aspectRatio(3f / 4f)
@@ -714,6 +715,7 @@ private fun FavItemRow(
             AsyncImage(
                 model = coverUrl(item.bookImg),
                 contentDescription = item.bookName,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxHeight()
                     .aspectRatio(3f / 4f)
