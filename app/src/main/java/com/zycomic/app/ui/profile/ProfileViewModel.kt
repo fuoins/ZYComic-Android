@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.profile
 
 import com.zycomic.app.data.dto.PointLog
+import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,9 +20,15 @@ class PointLogsViewModel {
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
+    private val _welfare = MutableStateFlow<WelfareData?>(null)
+    val welfare: StateFlow<WelfareData?> = _welfare.asStateFlow()
+
     private var page = 1
 
-    init { load() }
+    init {
+        load()
+        loadWelfare()
+    }
 
     fun load() {
         scope.launch {
@@ -32,6 +39,15 @@ class PointLogsViewModel {
             } catch (_: Exception) {
             } finally {
                 _loading.value = false
+            }
+        }
+    }
+
+    fun loadWelfare() {
+        scope.launch {
+            try {
+                _welfare.value = UserRepository.getWelfare()
+            } catch (_: Exception) {
             }
         }
     }

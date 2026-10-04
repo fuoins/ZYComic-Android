@@ -196,6 +196,6 @@ object UserRepository {
     suspend fun getPointLogs(page: Int): List<PointLog> {
         val resp = api.pointLogs(page)
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取积分明细失败" })
-        return resp.data
+        return resp.data?.list ?: emptyList()
     }
 }
