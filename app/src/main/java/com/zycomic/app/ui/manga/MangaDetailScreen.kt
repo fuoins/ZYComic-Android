@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.Scrollbar
-import androidx.compose.foundation.rememberScrollbarState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -435,8 +433,7 @@ fun MangaDetailScreen(
                         )
                     } else {
                         val lazyRowState = rememberLazyListState()
-                        val scrollbarState = rememberScrollbarState()
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             LazyRow(
                                 state = lazyRowState,
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -450,16 +447,29 @@ fun MangaDetailScreen(
                                     RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
                                 }
                             }
-                            androidx.compose.foundation.Scrollbar(
-                                state = scrollbarState,
+                            // 简单横向滚动指示条
+                            val scrollProgress = lazyRowState.let {
+                                val total = it.layoutInfo.visibleItemsInfo.size
+                                val first = it.firstVisibleItemIndex
+                                val offset = it.firstVisibleItemScrollOffset
+                                if (total > 0) (first + offset / 1000f) / (d.loveList.size - total + 1).coerceAtLeast(1) else 0f
+                            }
+                            Box(
                                 modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(horizontal = 24.dp)
-                                    .height(4.dp),
-                                orientation = androidx.compose.foundation.ScrollbarOrientation.Horizontal,
-                                reverseDirection = false,
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp, vertical = 4.dp)
+                                    .height(3.dp)
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
                             ) {
-                                lazyRowState.interactionSource
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(0.3f)
+                                        .align(Alignment.CenterStart)
+                                        .offset(x = (scrollProgress * 0.7f * 100).coerceIn(0f, 70f).dp)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                )
                             }
                         }
                     }
