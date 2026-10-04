@@ -224,7 +224,7 @@ object RouteManager {
     "newmwimserv6.cc": ["104.238.220.203","172.96.161.195","172.96.141.5","172.93.103.134"],
     "dns.google": ["8.8.8.8","8.8.4.4"]
   },
-  "sni": ["mseeowpm.online","mseeowpm.pro","mseeowpm.cc","mseeowpm2.cc","mseeowpma.cc","mseeowpm1.xyz","newmwimserv5.cc","mwappimgs.cc","mwfimsvfast31.cc","mwfimsvfast40.cc","newmwimserv4.cc","newmwimserv6.cc","dns.google"]
+  "sni": ["mseeowpm.online","mseeowpm.pro","mseeowpm.cc","mseeowpm2.cc","mseeowpma.cc","mseeowpm1.xyz","newmwimserv5.cc","mwappimgs.cc","mwfimsvfast31.cc","mwfimsvfast40.cc","newmwimserv4.cc","newmwimserv6.cc"]
 }
     """
 

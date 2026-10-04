@@ -92,7 +92,8 @@ object DevConfig {
             val root = Json { ignoreUnknownKeys = true }
                 .parseToJsonElement(getConfigJson()).jsonObject
             val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
-            sniArr.map { it.jsonPrimitive.content }.toSet()
+            // dns.google 不走 MITM，用普通隧道
+            sniArr.map { it.jsonPrimitive.content }.filter { it != "dns.google" }.toSet()
         } catch (e: Exception) {
             Log.e(TAG, "getSniDomains failed", e)
             emptySet()
@@ -136,7 +137,8 @@ object DevConfig {
             }
 
             val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
-            val sniSet = sniArr.map { it.jsonPrimitive.content }.toSet()
+            // dns.google 不走 MITM，用普通隧道（IP直连+正常SNI即可，8.8.8.8支持）
+            val sniSet = sniArr.map { it.jsonPrimitive.content }.filter { it != "dns.google" }.toSet()
 
             RouteManager.setCustomRule(ruleMap)
             RouteManager.setSniDomains(sniSet)
