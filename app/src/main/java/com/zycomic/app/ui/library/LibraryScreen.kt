@@ -99,7 +99,7 @@ import tachiyomi.presentation.core.util.selectedBackground
 fun LibraryScreen(
     onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
-    onOpenSearch: () -> Unit,
+    onOpenSearch: (String) -> Unit,
 ) {
     val vm = remember { LibraryViewModel(mode = 0) }
 
@@ -273,7 +273,7 @@ fun LibraryScreen(
                     if (!searchQuery.isNullOrBlank()) {
                         item(key = "global-search", contentType = "global-search", span = { GridItemSpan(columns) }) {
                             TextButton(
-                                onClick = onOpenSearch,
+                                onClick = { onOpenSearch(searchQuery ?: "") },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             ) {
                                 Text(text = "全局搜索：${searchQuery}", color = MaterialTheme.colorScheme.primary)
@@ -315,7 +315,7 @@ fun LibraryScreen(
                 if (!searchQuery.isNullOrBlank()) {
                     item(key = "global-search", contentType = "global-search") {
                         TextButton(
-                            onClick = onOpenSearch,
+                            onClick = { onOpenSearch(searchQuery ?: "") },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 4.dp),

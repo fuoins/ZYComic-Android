@@ -71,6 +71,7 @@ import tachiyomi.presentation.core.util.selectedBackground
 fun HistoryScreen(
     onOpenManga: (String) -> Unit,
     onRequireLogin: () -> Unit,
+    onOpenSearch: (String) -> Unit,
 ) {
     val vm = remember { HistoryViewModel() }
     val context = LocalContext.current
@@ -212,6 +213,22 @@ fun HistoryScreen(
                 contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
             ) {
+                // 本地搜索词非空时，提供"全局搜索"入口
+                if (!searchQuery.isNullOrBlank()) {
+                    item(key = "global-search", contentType = "global-search") {
+                        androidx.compose.material3.TextButton(
+                            onClick = { onOpenSearch(searchQuery ?: "") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                text = "全局搜索：${searchQuery}",
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
                 filtered.forEach { item ->
                     item(
                         key = "history-${item.id}",

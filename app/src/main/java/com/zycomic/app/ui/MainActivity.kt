@@ -232,14 +232,18 @@ fun AppContent() {
                 1 -> LibraryScreen(
                     onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
-                    onOpenSearch = {
-                        searchKeyword = ""
+                    onOpenSearch = { kw ->
+                        searchKeyword = kw
                         showSearch = true
                     },
                 )
                 2 -> HistoryScreen(
                     onOpenManga = { detailBookId = it },
                     onRequireLogin = { loginOpen = true },
+                    onOpenSearch = { kw ->
+                        searchKeyword = kw
+                        showSearch = true
+                    },
                 )
                 3 -> ProfileScreen(
                     onRequireLogin = { loginOpen = true },
