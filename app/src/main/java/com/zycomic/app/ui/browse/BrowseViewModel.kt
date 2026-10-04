@@ -20,7 +20,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/** 分类页 ViewModel（普通类，由 remember 持有）。收集 userFlow 同步登录状态。 */
+/** 分类页 ViewModel（普通类，由 remember 持有）。三个 tab 独立数据。 */
 class BrowseViewModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -28,21 +28,27 @@ class BrowseViewModel {
     // ---- 主 Tab：0 分类 / 1 最近更新 / 2 排行 ----
     val mainTab = MutableStateFlow(0)
 
-    // ---- 列表状态 ----
-    private val _mangas = MutableStateFlow<List<Manga>>(emptyList())
-    val mangas: StateFlow<List<Manga>> = _mangas.asStateFlow()
+    /** 单个 tab 的列表状态 */
+    private class TabState {
+        val mangas = MutableStateFlow<List<Manga>>(emptyList())
+        val loading = MutableStateFlow(false)
+        val appending = MutableStateFlow(false)
+        val error = MutableStateFlow<String?>(null)
+        val hasMore = MutableStateFlow(true)
+        var currentPage = 1
+        var loaded = false  // 该 tab 是否已经加载过数据
+    }
 
-    private val _loading = MutableStateFlow(false)
-    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+    private val tabStates = Array(3) { TabState() }
 
-    private val _appending = MutableStateFlow(false)
-    val appending: StateFlow<Boolean> = _appending.asStateFlow()
+    /** 当前 tab 的状态（随 mainTab 变化） */
+    private val cur: TabState get() = tabStates[mainTab.value]
 
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
-
-    private val _hasMore = MutableStateFlow(true)
-    val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+    val mangas: StateFlow<List<Manga>> get() = cur.mangas
+    val loading: StateFlow<Boolean> get() = cur.loading
+    val appending: StateFlow<Boolean> get() = cur.appending
+    val error: StateFlow<String?> get() = cur.error
+    val hasMore: StateFlow<Boolean> get() = cur.hasMore
 
     // ---- 分类筛选状态 ----
     val gender = MutableStateFlow(2)            // 默认 2 一般向
@@ -79,8 +85,6 @@ class BrowseViewModel {
     // ---- 登录状态 ----
     val user = UserRepository.userFlow
 
-    private var currentPage = 1
-
     /** 请求序号：每次自增，用于丢弃过期请求的结果（竞态防护）。 */
     private val requestSeq = java.util.concurrent.atomic.AtomicLong(0)
 
@@ -90,13 +94,18 @@ class BrowseViewModel {
     /** 日期选项：7天 + 今天 + 前6天。 */
     val dateOptions: List<Pair<String, String>> = buildDateOptions()
 
-    init { refresh() }
+    init {
+        // 初始化时只加载第一个 tab（分类），其他 tab 切换时再加载
+        refresh()
+    }
 
     fun selectMainTab(tab: Int) {
-        // 移除 if 判断：点击当前 tab 也强制刷新
+        if (mainTab.value == tab) return
         mainTab.value = tab
-        // 直接调 refresh，让 doLoad 自己设置加载状态/清空列表
-        refresh()
+        // 切换到该 tab 时，如果还没加载过数据，自动加载
+        if (!tabStates[tab].loaded) {
+            refresh()
+        }
     }
 
     fun selectRankType(type: Int) {
@@ -112,9 +121,9 @@ class BrowseViewModel {
     fun toggleFilterExpanded() { filterExpanded.value = !filterExpanded.value }
 
     fun toggleTag(tag: String) {
-        val cur = selectedTags.value.toMutableSet()
-        if (!cur.add(tag)) cur.remove(tag)
-        selectedTags.value = cur
+        val curTags = selectedTags.value.toMutableSet()
+        if (!curTags.add(tag)) curTags.remove(tag)
+        selectedTags.value = curTags
         refresh()
     }
 
@@ -136,13 +145,13 @@ class BrowseViewModel {
     fun enterSelection() { selectionMode.value = true; selectedIds.value = emptySet() }
     fun exitSelection() { selectionMode.value = false; selectedIds.value = emptySet() }
     fun toggleSelect(id: String) {
-        val cur = selectedIds.value.toMutableSet()
-        if (!cur.add(id)) cur.remove(id)
-        selectedIds.value = cur
+        val curIds = selectedIds.value.toMutableSet()
+        if (!curIds.add(id)) curIds.remove(id)
+        selectedIds.value = curIds
     }
-    fun selectAll() { selectedIds.value = _mangas.value.map { it.id }.toSet() }
+    fun selectAll() { selectedIds.value = cur.mangas.value.map { it.id }.toSet() }
     fun invertSelection() {
-        val all = _mangas.value.map { it.id }.toSet()
+        val all = cur.mangas.value.map { it.id }.toSet()
         selectedIds.value = all - selectedIds.value
     }
 
@@ -206,32 +215,33 @@ class BrowseViewModel {
     }
 
     fun loadMore() {
-        // 如果正在加载则直接 return，不 cancel 当前 job
-        if (_loading.value || _appending.value || !_hasMore.value) return
+        val ts = cur
+        if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         currentJob = scope.launch { doLoad(reset = false) }
     }
 
     private suspend fun doLoad(reset: Boolean) {
+        val ts = cur
+        val tab = mainTab.value
         // 自增请求序号；用于判断本次结果是否已被更新的请求取代
         val reqId = requestSeq.incrementAndGet()
-        android.util.Log.d("BrowseVM", "doLoad start: tab=${mainTab.value}, page=$currentPage, reset=$reset, reqId=$reqId")
         if (reset) {
-            currentPage = 1
-            _hasMore.value = true
-            _loading.value = true
-            _error.value = null
+            ts.currentPage = 1
+            ts.hasMore.value = true
+            ts.loading.value = true
+            ts.error.value = null
             // 重置时先清空列表，避免旧数据残留
-            _mangas.value = emptyList()
+            ts.mangas.value = emptyList()
         } else {
-            _appending.value = true
+            ts.appending.value = true
         }
         try {
             val target = if (reset) 30 else 15
-            var lastInvoked = currentPage
+            var lastInvoked = ts.currentPage
 
             val rawLoader: suspend (Int) -> List<Manga> = { p ->
                 lastInvoked = p
-                when (mainTab.value) {
+                when (tab) {
                     1 -> MangaRepository.getNewest(p, newestDate.value, 30).first
                     2 -> MangaRepository.getRank(rankType.value, p)
                     else -> MangaRepository.getClasses(
@@ -246,32 +256,31 @@ class BrowseViewModel {
             }
 
             val result = if (TagRepository.isFilterEnabled()) {
-                MangaRepository.loadWithFilter(currentPage, target, rawLoader)
+                MangaRepository.loadWithFilter(ts.currentPage, target, rawLoader)
             } else {
-                rawLoader(currentPage)
+                rawLoader(ts.currentPage)
             }
 
             // 竞态防护：期间若有更新的请求，丢弃本次结果
             if (reqId != requestSeq.get()) return
-            currentPage = lastInvoked + 1
+            ts.currentPage = lastInvoked + 1
 
-            if (mainTab.value == 1 && reset) {
+            if (tab == 1 && reset) {
                 newestNums.value = MangaRepository.getNewest(1, newestDate.value, 30).second
             }
 
-            _mangas.value = if (reset) result else _mangas.value + result
-            android.util.Log.d("BrowseVM", "doLoad done: reqId=$reqId, got ${result.size} items")
-            if (result.isEmpty()) _hasMore.value = false
+            ts.mangas.value = if (reset) result else ts.mangas.value + result
+            ts.loaded = true
+            if (result.isEmpty()) ts.hasMore.value = false
         } catch (e: Exception) {
-            android.util.Log.w("BrowseVM", "doLoad error: ${e.message}")
             // 过期请求的异常不更新 UI
             if (reqId != requestSeq.get()) return
-            if (reset) _error.value = e.message ?: "加载失败"
+            if (reset) ts.error.value = e.message ?: "加载失败"
         } finally {
             // 仅当仍是最新请求时才复位加载态，避免旧任务覆盖新任务的状态
             if (reqId == requestSeq.get()) {
-                _loading.value = false
-                _appending.value = false
+                ts.loading.value = false
+                ts.appending.value = false
             }
         }
     }

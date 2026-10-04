@@ -25,7 +25,6 @@ object RouteManager {
         "https://mseeowpma.cc",      // 5
         "http://mseeowpm1.xyz",      // 6
         "https://manwa.me",          // 7（旧版本线路）
-        "http://wz65.cc",            // 8（旧版本线路）
     )
 
     // ---- 6 个图源域名 ----
