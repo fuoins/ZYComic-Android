@@ -15,6 +15,7 @@ enum class ReaderBottomButton(val value: String, val stringRes: StringResource) 
     CropBordersContinuesVertical("cbc", SYMR.strings.pref_crop_borders_continuous_vertical),
     CropBordersWebtoon("cbw", SYMR.strings.pref_crop_borders_webtoon),
     PageLayout("pl", SYMR.strings.page_layout),
+    SourceSwitch("src", MR.strings.action_view_chapters), // 切换图源，后续设计功能
     ;
 
     fun isIn(buttons: Collection<String>) = value in buttons
@@ -22,10 +23,8 @@ enum class ReaderBottomButton(val value: String, val stringRes: StringResource) 
     companion object {
         val BUTTONS_DEFAULTS = setOf(
             ViewChapters,
-            WebView,
-            CropBordersPager,
-            CropBordersContinuesVertical,
             PageLayout,
+            SourceSwitch,
         ).map { it.value }.toSet()
     }
 }

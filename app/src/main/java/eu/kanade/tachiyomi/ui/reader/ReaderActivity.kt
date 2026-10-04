@@ -756,6 +756,9 @@ class ReaderActivity : BaseActivity() {
                 }
             },
             onClickShiftPage = ::shiftDoublePages,
+            onClickSourceSwitch = {
+                Toast.makeText(this, "切换图源功能开发中", Toast.LENGTH_SHORT).show()
+            },
             // SY <--
         )
     }

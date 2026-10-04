@@ -8,6 +8,7 @@ import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +48,7 @@ fun ReaderBottomBar(
     onClickShare: (() -> Unit)?,
     onClickPageLayout: () -> Unit,
     onClickShiftPage: () -> Unit,
+    onClickSourceSwitch: () -> Unit,
     // SY <--
     modifier: Modifier = Modifier,
 ) {
@@ -163,6 +165,16 @@ fun ReaderBottomBar(
                     // KMK -->
                     tint = iconColor,
                     // KMK <--
+                )
+            }
+        }
+
+        if (ReaderBottomButton.SourceSwitch.isIn(enabledButtons)) {
+            IconButton(onClick = onClickSourceSwitch) {
+                Icon(
+                    imageVector = Icons.Outlined.SwapHoriz,
+                    contentDescription = "切换图源",
+                    tint = iconColor,
                 )
             }
         }

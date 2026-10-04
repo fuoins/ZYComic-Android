@@ -45,7 +45,7 @@ class ReaderPreferences(
 
     fun defaultReadingMode() = preferenceStore.getInt(
         "pref_default_reading_mode_key",
-        ReadingMode.RIGHT_TO_LEFT.flagValue,
+        ReadingMode.WEBTOON.flagValue,
     )
 
     fun defaultOrientationType() = preferenceStore.getInt(
@@ -98,7 +98,7 @@ class ReaderPreferences(
 
     fun skipDupe() = preferenceStore.getBoolean("skip_dupe", false)
 
-    fun webtoonDisableZoomOut() = preferenceStore.getBoolean("webtoon_disable_zoom_out", false)
+    fun webtoonDisableZoomOut() = preferenceStore.getBoolean("webtoon_disable_zoom_out", true)
 
     // KMK -->
     fun pagedDisableZoomIn() = preferenceStore.getBoolean("paged_disable_zoom_in", false)
