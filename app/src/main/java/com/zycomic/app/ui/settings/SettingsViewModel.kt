@@ -165,6 +165,7 @@ class SettingsViewModel {
         RouteManager.setLine(index)
         currentLineIndex.value = index
         com.zycomic.app.net.NetworkModule.rebuild()
+        com.zycomic.app.net.NetworkModule.cookieJar.syncToAllLines()
         toast.value = "已切换到线路 ${index + 1}"
         // 切换线路后验证登录态（cookie 可能在新线路失效）
         scope.launch {

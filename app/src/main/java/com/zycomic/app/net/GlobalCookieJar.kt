@@ -74,6 +74,25 @@ class GlobalCookieJar(context: Context) : CookieJar {
         persistToPrefs()
     }
 
+    /** 遍历所有线路域名，把当前 cookie 用各线路域名重建后写入（切线路/failover 后调用）。 */
+    @Synchronized
+    fun syncToAllLines() {
+        val existing = getAll()
+        RouteManager.lineHosts.forEach { lineUrl ->
+            val host = lineUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
+            existing.forEach { c ->
+                store[c.name] = Cookie.Builder()
+                    .name(c.name)
+                    .value(c.value)
+                    .domain(host)
+                    .path("/")
+                    .expiresAt(if (c.expiresAt == 0L) Long.MAX_VALUE else c.expiresAt)
+                    .build()
+            }
+        }
+        persistToPrefs()
+    }
+
     /** 手动写入一个 cookie（登录后确保 uid 存在） */
     @Synchronized
     fun add(name: String, value: String, domain: String) {

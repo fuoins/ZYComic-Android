@@ -271,6 +271,7 @@ object RouteManager {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             selectNextLine()
             NetworkModule.rebuild()
+            NetworkModule.cookieJar.syncToAllLines()
         }
     }
 
