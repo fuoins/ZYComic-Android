@@ -125,6 +125,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
         // 合并本地缓存的服务端下发线路（只增不减）
         com.zycomic.app.net.RouteManager.loadServerLinesFromPrefs()
+        // 合并持久化的图源列表
+        com.zycomic.app.net.RouteManager.loadImgDomainsFromPrefs()
 
         // 初始化用户仓库（本地用户信息存储）
         com.zycomic.app.data.repository.UserRepository.init(this)

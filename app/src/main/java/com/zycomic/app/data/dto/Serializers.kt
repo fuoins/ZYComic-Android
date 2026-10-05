@@ -202,7 +202,10 @@ object PicListSerializer : KSerializer<List<String>> {
 
 /**
  * 兼容字符串和数组的图片域名列表序列化器。
- * 服务端 img_domains / _ALL_IMG_DOMAINS 可能是数组（["domain1","domain2"]）或单个字符串。
+ * 服务端 img_domains / _ALL_IMG_DOMAINS 可能是：
+ * - 数组 ["domain1","domain2"]
+ * - 普通字符串 "domain1,domain2"
+ * - Base64 编码的上述字符串
  */
 object ImgDomainsSerializer : KSerializer<List<String>> {
     override val descriptor: SerialDescriptor =
@@ -219,14 +222,28 @@ object ImgDomainsSerializer : KSerializer<List<String>> {
                         }
                     }.filter { it.isNotEmpty() }
                 }
-                is JsonPrimitive -> {
-                    if (element.content.isNotEmpty()) listOf(element.content) else emptyList()
-                }
+                is JsonPrimitive -> parseDomains(element.content)
                 else -> emptyList()
             }
         } else {
             emptyList()
         }
+    }
+
+    private fun parseDomains(raw: String): List<String> {
+        if (raw.isBlank()) return emptyList()
+        val text = try {
+            String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT), Charsets.UTF_8)
+        } catch (_: Exception) {
+            raw
+        }
+        val trimmed = text.trim()
+        val inner = if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            trimmed.removeSurrounding("[", "]")
+        } else {
+            trimmed
+        }
+        return inner.split(",").map { it.trim().trim('"') }.filter { it.isNotEmpty() }
     }
 
     override fun serialize(encoder: Encoder, value: List<String>) {

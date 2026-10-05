@@ -30,11 +30,15 @@ data class Manga(
     val author: String = "",
     @JsonNames("serialize", "status")
     val state: String = "",          // "连载" / "完结"
+    @Serializable(with = IntOrStringSerializer::class)
     val score: Int = 0,
+    @Serializable(with = IntOrStringSerializer::class)
     val hits: Int = 0,
+    @Serializable(with = StringOrIntSerializer::class)
     val shits: String = "",
     @JsonNames("desc", "content")
     val text: String = "",
+    @Serializable(with = IntOrStringSerializer::class)
     val nums: Int = 0,
     val addtime: String = "",
     @Serializable(with = StringOrIntSerializer::class)
@@ -51,7 +55,9 @@ data class Manga(
     val chapterList: List<Chapter> = emptyList(),
     @SerialName("love_list") val loveList: List<Manga> = emptyList(),
     @SerialName("last_chapter") val lastChapter: String = "",
-    @SerialName("comment_nums") val commentNums: Int = 0,
+    @SerialName("comment_nums")
+    @Serializable(with = IntOrStringSerializer::class)
+    val commentNums: Int = 0,
 )
 
 /** 章节信息。id 为字符串数字（"123"），兼容数字形态。 */

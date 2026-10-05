@@ -80,9 +80,33 @@ object RouteManager {
         if (imgs.isNotEmpty()) imgDomains = imgs
     }
 
-    /** 直接更新图源域名列表（新图源发现后调用）。 */
+    /** 更新图源列表：以硬编码 IMG_DOMAINS 为基底合并追加，去重并持久化。 */
     fun updateImgDomains(domains: List<String>) {
-        imgDomains = domains
+        val merged = IMG_DOMAINS.toMutableList()
+        domains.forEach { d -> if (merged.none { it.equals(d, ignoreCase = true) }) merged.add(d) }
+        imgDomains = merged
+        persistImgDomains(merged)
+    }
+
+    /** 启动时读持久化的图源列表并合并。 */
+    fun loadImgDomainsFromPrefs() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .getString("img_domains", null) ?: return
+            val arr = org.json.JSONArray(raw)
+            val list = ArrayList<String>(arr.length())
+            for (i in 0 until arr.length()) list.add(arr.getString(i))
+            updateImgDomains(list)
+        } catch (_: Exception) {}
+    }
+
+    private fun persistImgDomains(domains: List<String>) {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putString("img_domains", org.json.JSONArray(domains).toString()).apply()
+        } catch (_: Exception) {}
     }
 
     private fun normalizeLine(url: String): String {
