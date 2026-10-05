@@ -153,10 +153,10 @@ class MangaDetailViewModel(private val bookId: String) {
         }
     }
 
-    /** 章节列表：服务端返回顺序即降序（最新在前），升序时反转。 */
+    /** 章节列表：按 sort 排序，默认降序（最新章节在最上面）。 */
     fun sortedChapters(): List<Chapter> {
         val list = _detail.value?.chapterList ?: return emptyList()
-        return if (chapterAsc.value) list.reversed() else list.toList()
+        return if (chapterAsc.value) list.sortedBy { it.sort } else list.sortedByDescending { it.sort }
     }
 
     /**
