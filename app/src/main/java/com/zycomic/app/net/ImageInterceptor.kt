@@ -60,7 +60,7 @@ class ImageInterceptor : Interceptor {
                 val tmp = Buffer()
                 val n = super.read(tmp, byteCount)
                 if (n > 0) {
-                    val bytes = tmp.readByteArray(n.toInt())
+                    val bytes = tmp.readByteArray(n)
                     sink.write(bytes)
                     try { cacheOut.write(bytes) } catch (_: Exception) {}
                 }
