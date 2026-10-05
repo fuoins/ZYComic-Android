@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ fun SpeedTestScreen(
     val ipDelays by vm.ipDelays.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
+    val autoSel by vm.autoSelectEnabled.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
 
     Scaffold(
@@ -71,6 +73,23 @@ fun SpeedTestScreen(
             var expandedHosts by remember { mutableStateOf<Set<String>>(emptySet()) }
 
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("自动选择最快线路", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (autoSel) "已开启，当前自动选中线路 ${currentLineIdx + 1}（手动点击线路将关闭自动）"
+                                else "已关闭，纯手动模式",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = autoSel, onCheckedChange = { vm.setAutoSelectEnabled(it) })
+                    }
+                }
                 item {
                     Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }

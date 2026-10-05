@@ -50,6 +50,7 @@ class SettingsViewModel {
     // 测速
     val currentLineIndex = MutableStateFlow(RouteManager.lineIndex)
     val currentImgIndex = MutableStateFlow(RouteManager.imgIndex)
+    val autoSelectEnabled = MutableStateFlow(RouteManager.autoSelectEnabled)
     /** 手动测速进行中（设置页"重新测速"按钮） */
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
@@ -160,8 +161,12 @@ class SettingsViewModel {
         }
     }
 
-    /** 切换线路：重建网络后验证登录态，失效则自动登出。 */
+    /** 切换线路：重建网络后验证登录态，失效则自动登出。手动选线会关闭自动模式。 */
     fun selectLine(index: Int) {
+        if (autoSelectEnabled.value) {
+            RouteManager.setAutoSelectEnabled(false)
+            autoSelectEnabled.value = false
+        }
         RouteManager.setLine(index)
         currentLineIndex.value = index
         com.zycomic.app.net.NetworkModule.rebuild()
@@ -173,6 +178,12 @@ class SettingsViewModel {
                 UserRepository.verifyLogin()
             } catch (_: Exception) {}
         }
+    }
+
+    fun setAutoSelectEnabled(v: Boolean) {
+        RouteManager.setAutoSelectEnabled(v)
+        autoSelectEnabled.value = v
+        toast.value = if (v) "已开启自动选线" else "已关闭自动选线（手动模式）"
     }
 
     /** 切换图源：更新 imgHost 并清除 Coil 缓存，避免旧图源图片/封面被缓存命中。 */
