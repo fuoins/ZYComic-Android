@@ -6,7 +6,6 @@ import java.net.Proxy
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
@@ -133,16 +132,14 @@ object NetworkModule {
     // ==================== 方案B：自定义 DNS + SNI 移除（关闭本地代理时使用） ====================
 
     /**
-     * 自定义 DNS：rule 配置中的域名 → IP 列表轮询，其他域名走系统 DNS。
+     * 自定义 DNS：rule 配置中的域名 → 全部 IP，其他域名走系统 DNS。
+     * OkHttp 内部按顺序尝试，连接池自动复用。
      */
     private object RuleDns : Dns {
-        private val pollIndex = AtomicInteger(0)
-
         override fun lookup(hostname: String): List<InetAddress> {
             val ips = DevConfig.getRule()[hostname]
             if (!ips.isNullOrEmpty()) {
-                val idx = pollIndex.getAndIncrement() % ips.size
-                return listOf(InetAddress.getByName(ips[idx]))
+                return ips.map { InetAddress.getByName(it) }
             }
             return Dns.SYSTEM.lookup(hostname)
         }
