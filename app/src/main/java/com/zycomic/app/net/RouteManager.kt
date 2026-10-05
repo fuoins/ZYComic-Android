@@ -1,5 +1,8 @@
 package com.zycomic.app.net
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
@@ -268,7 +271,7 @@ object RouteManager {
     }
 
     private fun failover() {
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO).launch {
             selectNextLine()
             NetworkModule.rebuild()
             NetworkModule.cookieJar.syncToAllLines()
