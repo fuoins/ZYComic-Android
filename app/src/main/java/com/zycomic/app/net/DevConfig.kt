@@ -62,14 +62,6 @@ object DevConfig {
             ?.getBoolean(KEY_PROXY_ENABLED, false) ?: false
     }
 
-    /** 设置本地代理开关（需重启 App 生效）。 */
-    fun setProxyEnabled(enabled: Boolean) {
-        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            ?.edit()
-            ?.putBoolean(KEY_PROXY_ENABLED, enabled)
-            ?.apply()
-    }
-
     /** 代理端口，默认 7891。 */
     fun getPort(): Int {
         return try {
@@ -159,22 +151,6 @@ object DevConfig {
         } catch (e: Exception) {
             Log.e(TAG, "applyToRouteManager failed", e)
         }
-    }
-
-    /**
-     * 重启代理服务器（新配置生效）。
-     * 由设置页保存配置后调用。
-     */
-    fun restartProxy() {
-        proxyServer?.stop()
-        val newProxy = LocalProxyServer(
-            port = getPort(),
-            rule = getRule(),
-            sniDomains = getSniDomains(),
-        )
-        newProxy.start()
-        proxyServer = newProxy
-        Log.i(TAG, "Proxy restarted on port ${getPort()}")
     }
 
     /** 动态更新代理配置（不重启，新图源添加后调用）。 */

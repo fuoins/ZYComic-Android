@@ -15,25 +15,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.net.Proxy
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 class SettingsViewModel {
 
@@ -66,18 +53,6 @@ class SettingsViewModel {
     // 屏蔽标签弹窗提交状态
     val addingBlacklist = MutableStateFlow(false)
     val removingBlacklist = MutableStateFlow(false)
-
-    // 开发者配置 JSON
-    val devConfigJson = MutableStateFlow(DevConfig.getConfigJson())
-
-    // 本地代理（SNI绕过）开关
-    val proxyEnabled = MutableStateFlow(DevConfig.isProxyEnabled())
-
-    fun setProxyEnabled(v: Boolean) {
-        DevConfig.setProxyEnabled(v)
-        proxyEnabled.value = v
-        toast.value = if (v) "已开启本地代理，重启App生效" else "已关闭本地代理（抓包模式），重启App生效"
-    }
 
     /** 提交后 toast 消息。 */
     val toast = MutableStateFlow<String?>(null)
@@ -403,152 +378,6 @@ class SettingsViewModel {
             (bestLine ?: RouteManager.lineIndex) to RouteManager.imgIndex
         } finally {
             autoSelecting.value = false
-        }
-    }
-
-    /**
-     * DoH 自动更新 IP：遍历当前 customRule 中所有域名，通过指定 DoH 服务查询 A 记录，
-     * 如果 IP 列表有变化则更新。
-     * @param provider DoH 服务："alidns"=阿里云, "tencent"=腾讯, "google"=Google
-     * @param useProxy 是否走本地代理（Google DoH 国内被墙，走代理可测试）
-     */
-    fun updateNetworkConfig(provider: String = "alidns", useProxy: Boolean = false) {
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                // 构建独立的 DoH OkHttpClient（3秒超时，trust-all）
-                val trustAll = object : X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-                }
-                val sslContext = SSLContext.getInstance("TLS")
-                sslContext.init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
-
-                val dohClientBuilder = OkHttpClient.Builder()
-                    .connectTimeout(3, TimeUnit.SECONDS)
-                    .readTimeout(3, TimeUnit.SECONDS)
-                    .sslSocketFactory(sslContext.socketFactory, trustAll)
-                    .hostnameVerifier { _, _ -> true }
-                if (useProxy) {
-                    dohClientBuilder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
-                }
-                val dohClient = dohClientBuilder.build()
-
-                val jsonParser = Json { ignoreUnknownKeys = true }
-                // 遍历当前配置（DevConfig rule）中所有域名，包括 dns.google
-                val domainsToUpdate = DevConfig.getRule().keys
-                val newRuleMap = mutableMapOf<String, List<String>>()
-                var successCount = 0
-                var failCount = 0
-
-                for (domain in domainsToUpdate) {
-                    val oldIps = DevConfig.getRule()[domain] ?: emptyList()
-                    // dns.google 本身不查询（DoH 服务域名），保留旧 IP
-                    if (domain == "dns.google") {
-                        newRuleMap[domain] = oldIps
-                        continue
-                    }
-                    try {
-                        val dohUrl = when (provider) {
-                            "tencent" -> "https://doh.pub/dns-query?name=$domain&type=A"
-                            "google" -> "https://dns.google/resolve?name=$domain&type=A"
-                            else -> "https://dns.alidns.com/resolve?name=$domain&type=A"
-                        }
-                        val req = Request.Builder().url(dohUrl).build()
-                        val resp = dohClient.newCall(req).execute()
-                        val body = resp.body?.string() ?: ""
-                        resp.close()
-
-                        val root = jsonParser.parseToJsonElement(body).jsonObject
-                        val answerArr = root["Answer"]?.jsonArray ?: JsonArray(emptyList())
-                        val newIps = answerArr
-                            .filter { it.jsonObject["type"]?.jsonPrimitive?.intOrNull == 1 }
-                            .map { it.jsonObject["data"]?.jsonPrimitive?.content ?: "" }
-                            .filter { it.isNotEmpty() }
-
-                        if (newIps.isNotEmpty()) {
-                            newRuleMap[domain] = newIps
-                            // 只有 IP 列表有变化才算成功更新
-                            if (newIps != oldIps) {
-                                successCount++
-                            }
-                        } else {
-                            // 没查到，保留旧 IP
-                            newRuleMap[domain] = oldIps
-                            failCount++
-                        }
-                    } catch (e: Exception) {
-                        // 失败的域名保留旧 IP，不中断
-                        newRuleMap[domain] = oldIps
-                        failCount++
-                        android.util.Log.e("SettingsViewModel", "DoH query failed: $domain", e)
-                    }
-                }
-
-                // 应用新 rule 并重启代理
-                RouteManager.setCustomRule(newRuleMap)
-                // 保存到 DevConfig（保持配置一致），然后重启代理使新 IP 生效
-                val currentSni = DevConfig.getSniDomains()
-                val configJson = buildString {
-                    append("{\"port\":${DevConfig.getPort()},\"rule\":{")
-                    newRuleMap.entries.forEachIndexed { i, (domain, ips) ->
-                        if (i > 0) append(",")
-                        append("\"$domain\":[")
-                        ips.forEachIndexed { j, ip ->
-                            if (j > 0) append(",")
-                            append("\"$ip\"")
-                        }
-                        append("]")
-                    }
-                    append("},\"sni\":[")
-                    currentSni.forEachIndexed { i, d ->
-                        if (i > 0) append(",")
-                        append("\"$d\"")
-                    }
-                    append("]}")
-                }
-                DevConfig.saveConfig(configJson)
-                DevConfig.restartProxy()
-                // 清空旧的最快IP缓存，强制测速重新选择
-                RouteManager.clearFastestIps()
-                // 重建网络客户端，让新代理配置生效
-                NetworkModule.rebuild()
-
-                toast.value = "更新完成，成功${successCount}个，失败${failCount}个（代理已重启）"
-                configUpdateTime.value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("SettingsViewModel", "updateNetworkConfig failed", e)
-                toast.value = "更新网络配置失败: ${e.message}"
-            }
-        }
-    }
-
-    // ==================== 开发者配置 ====================
-
-    /** 解析开发者配置 JSON 并应用。新格式：{"port":7891,"rule":{"domain":["ip1"]},"sni":["domain1"]} */
-    fun saveDevConfig(jsonStr: String) {
-        scope.launch {
-            try {
-                DevConfig.applyConfig(jsonStr)
-                // 重启代理使新配置生效
-                DevConfig.restartProxy()
-                // 清空测速缓存，强制下次测速用新配置
-                RouteManager.clearFastestIps()
-                RouteManager.setLastDelays(emptyMap(), emptyMap())
-                RouteManager.setLastIpDelays(emptyMap())
-                // 重建网络客户端，让新代理配置生效
-                NetworkModule.rebuild()
-                // 同步更新 UI 状态，关闭再打开仍显示新配置
-                devConfigJson.value = jsonStr
-                val ruleCount = DevConfig.getRule().size
-                val sniCount = DevConfig.getSniDomains().size
-                toast.value = "配置已保存并重启代理（${ruleCount}条rule, ${sniCount}条sni, port=${DevConfig.getPort()}）"
-            } catch (e: Exception) {
-                android.util.Log.e("SettingsViewModel", "saveDevConfig failed", e)
-                toast.value = "配置解析失败: ${e.message}"
-            }
         }
     }
 
