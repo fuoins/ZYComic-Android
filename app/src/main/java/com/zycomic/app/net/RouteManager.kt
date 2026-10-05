@@ -77,7 +77,11 @@ object RouteManager {
             lines.forEach { l -> if (merged.none { sameLine(it, l) }) merged.add(l) }
             lineHosts = merged
         }
-        if (imgs.isNotEmpty()) imgDomains = imgs
+        if (imgs.isNotEmpty()) {
+            val merged = imgDomains.toMutableList()
+            imgs.forEach { d -> if (merged.none { it.equals(d, ignoreCase = true) }) merged.add(d) }
+            imgDomains = merged
+        }
     }
 
     /** 更新图源列表：以硬编码 IMG_DOMAINS 为基底合并追加，去重并持久化。 */
