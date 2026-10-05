@@ -21,7 +21,7 @@ import java.io.IOException
  * Manwa 原生图源：把 ZYComic 的 API 适配成 komikku [HttpSource] 接口。
  *
  * 设计原则：
- * - 网络复用 [NetworkModule.client]（已含 ManwaInterceptor 签名/响应解密 + ImageInterceptor 图片流式解密），
+ * - 网络复用 [NetworkModule.imageClient]（已含 ManwaInterceptor 签名/响应解密 + ImageInterceptor 图片流式解密），
  *   不在此做任何手动解密。
  * - 章节内容 JSON 由 ManwaInterceptor 解密后交给 Retrofit；图片由 ImageInterceptor 流式解密。
  * - [baseUrl] 随线路切换动态读取。
@@ -36,8 +36,8 @@ object ManwaSource : HttpSource() {
     /** baseUrl 随线路切换动态读取（不能缓存为 val）。 */
     override val baseUrl: String get() = RouteManager.baseUrl
 
-    /** 复用全局 OkHttpClient（已包含解密/签名拦截器链）。 */
-    override val client: OkHttpClient get() = NetworkModule.client
+    /** 复用图片专用 OkHttpClient（已包含解密/签名拦截器链，长超时高并发）。 */
+    override val client: OkHttpClient get() = NetworkModule.imageClient
 
     override val headers: Headers = Headers.Builder()
         .add("User-Agent", ManwaInterceptor.UA)

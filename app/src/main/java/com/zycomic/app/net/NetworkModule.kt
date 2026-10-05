@@ -12,6 +12,8 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -56,48 +58,84 @@ object NetworkModule {
         useAlternativeNames = true
     }
 
-    @Volatile private var _client: OkHttpClient? = null
+    @Volatile private var _apiClient: OkHttpClient? = null
+    @Volatile private var _imageClient: OkHttpClient? = null
     @Volatile private var _retrofit: Retrofit? = null
     @Volatile private var _api: ApiService? = null
 
-    /** 当前 OkHttpClient（单例，切换线路无需重建 client，仅重建 Retrofit） */
-    val client: OkHttpClient
-        get() = _client ?: buildClient().also { _client = it }
+    private val manwaInterceptor by lazy { ManwaInterceptor() }
+    private val imageInterceptor by lazy { ImageInterceptor() }
+
+    /** 向后兼容别名，等同 [apiClient]。 */
+    val client: OkHttpClient get() = apiClient
+
+    /** API 请求 client（接口/列表/详情）。 */
+    val apiClient: OkHttpClient
+        get() = _apiClient ?: buildApiClient().also { _apiClient = it }
+
+    /** 图片下载 client（长超时 + 更高并发）。 */
+    val imageClient: OkHttpClient
+        get() = _imageClient ?: buildImageClient().also { _imageClient = it }
 
     /** 当前 ApiService（baseUrl 取 [RouteManager.baseUrl]） */
     val api: ApiService
         get() = _api ?: buildRetrofit().let { _api = it.create(ApiService::class.java); _api!! }
 
-    private fun buildClient(): OkHttpClient {
-        val builder = OkHttpClient.Builder()
+    private fun buildApiClient(): OkHttpClient {
+        return OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .cookieJar(cookieJar)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
+            .dispatcher(Dispatcher().apply {
+                maxRequests = 16
+                maxRequestsPerHost = 8
+            })
             .enableTrustAll()
-            .addInterceptor(ManwaInterceptor())
-            .addInterceptor(ImageInterceptor())
+            .applyNetworkConfig()
+            .build()
+    }
 
+    private fun buildImageClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(90, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(12, 5, TimeUnit.MINUTES))
+            .dispatcher(Dispatcher().apply {
+                maxRequests = 32
+                maxRequestsPerHost = 8
+            })
+            .enableTrustAll()
+            .applyNetworkConfig()
+            .build()
+    }
+
+    private fun OkHttpClient.Builder.applyNetworkConfig(): OkHttpClient.Builder {
+        cookieJar(cookieJar)
+        addInterceptor(manwaInterceptor)
+        addInterceptor(imageInterceptor)
         if (DevConfig.isProxyEnabled()) {
             // 方案A：本地代理（MITM，SNI绕过稳定）
-            builder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
+            proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
         } else {
             // 方案B：自定义DNS（rule IP直连）+ 自定义SSLSocketFactory（移除SNI）
             val baseSslContext = SSLContext.getInstance("TLS").apply {
                 init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
             }
-            builder.dns(RuleDns)
-            builder.sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
+            dns(RuleDns)
+            sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
         }
-
-        return builder.build()
+        return this
     }
 
     private fun buildRetrofit(): Retrofit {
         val contentType = "application/json".toMediaType()
         return Retrofit.Builder()
             .baseUrl(RouteManager.baseUrl + "/")
-            .client(client)
+            .client(apiClient)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
             .also { _retrofit = it }
