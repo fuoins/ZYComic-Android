@@ -90,12 +90,14 @@ object RouteManager {
         return if (t.startsWith("http://") || t.startsWith("https://")) t else "https://$t"
     }
 
-    private fun sameLine(a: String, b: String): Boolean =
-        normalizeLine(a).removeSuffix("/") == normalizeLine(b).removeSuffix("/")
+    private fun lineKey(url: String): String =
+        url.trim().removePrefix("http://").removePrefix("https://").removeSuffix("/")
+
+    private fun sameLine(a: String, b: String): Boolean = lineKey(a) == lineKey(b)
 
     /** 服务端线路追加：只增不减去重，不覆盖硬编码线路。返回本次新增的线路。 */
     fun appendServerLines(serverLines: List<String>): List<String> {
-        val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }.distinct()
+        val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }.distinctBy { lineKey(it) }
         if (normalized.isEmpty()) return emptyList()
         persistServerLines(normalized)
         val current = lineHosts.toMutableList()
