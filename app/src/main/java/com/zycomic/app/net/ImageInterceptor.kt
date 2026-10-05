@@ -10,7 +10,7 @@ import okio.BufferedSource
 import okio.CipherSource
 import okio.ForwardingSource
 import okio.buffer
-import okio.Okio
+import okio.source
 
 /**
  * 图片拦截器：密文磁盘缓存 + 统一解密管线。
@@ -34,7 +34,7 @@ class ImageInterceptor : Interceptor {
             val cachedBody = object : ResponseBody() {
                 override fun contentType() = "image/webp".toMediaType()
                 override fun contentLength() = cached.length()
-                override fun source(): BufferedSource = Okio.source(cached).buffer()
+                override fun source(): BufferedSource = cached.source().buffer()
             }
             val cachedResp = Response.Builder()
                 .request(original)
@@ -114,14 +114,14 @@ class ImageInterceptor : Interceptor {
     }
 
     private fun isImageMagic(bytes: ByteArray): Boolean {
-        if (bytes.size < 4) return false
-        if (bytes.size >= 12 &&
-            bytes[0] == 0x52.toByte() && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
-            bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50
+        fun match(prefix: ByteArray): Boolean =
+            bytes.size >= prefix.size && bytes.copyOf(prefix.size).contentEquals(prefix)
+        if (match(byteArrayOf(0x52, 0x49, 0x46, 0x46)) && bytes.size >= 12 &&
+            bytes.copyOfRange(8, 12).contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50))
         ) return true
-        if (bytes[0] == 0x89.toByte() && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true
-        if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
-        if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) return true
+        if (match(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))) return true
+        if (match(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()))) return true
+        if (match(byteArrayOf(0x47, 0x49, 0x46, 0x38))) return true
         return false
     }
 }
