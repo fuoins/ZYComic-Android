@@ -100,7 +100,7 @@ object RouteManager {
         private set
 
     /** 每个域名测速选出的最快 IP（host -> ip），供代理优先使用 */
-    val fastestIp: MutableMap<String, String> = mutableMapOf()
+    val fastestIp: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
 
     /** 写入最近一次测速结果（SettingsViewModel 测速完成后调用）。 */
     fun setLastDelays(line: Map<Int, Long>, img: Map<Int, Long>) {
@@ -204,6 +204,51 @@ object RouteManager {
             ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
                 .edit().putInt("img_index", imgIndex).apply()
         } catch (_: Exception) {}
+    }
+
+    // ---- 自动选线 ----
+    @Volatile
+    var autoSelectEnabled: Boolean = true
+        private set
+
+    @Volatile
+    var lastFastestLineIndex: Int = 0
+        private set
+
+    /** 从 SP 恢复自动选线偏好，开启时用上次最快线路作为当前线路。 */
+    fun loadAutoSelectPrefs() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            autoSelectEnabled = prefs.getBoolean("auto_select", true)
+            lastFastestLineIndex = prefs.getInt("last_fastest_line", 0)
+            if (autoSelectEnabled && lastFastestLineIndex in 0..lineHosts.lastIndex) {
+                lineIndex = lastFastestLineIndex
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun setAutoSelectEnabled(v: Boolean) {
+        autoSelectEnabled = v
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("auto_select", v).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun saveLastFastestLine(index: Int) {
+        lastFastestLineIndex = index
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putInt("last_fastest_line", index).apply()
+        } catch (_: Exception) {}
+    }
+
+    /** 临时切换到下一条线路（不持久化）。 */
+    fun selectNextLine() {
+        lineIndex = (lineIndex + 1) % lineHosts.size
     }
 
     /** 设置自定义 rule（开发者配置） */
