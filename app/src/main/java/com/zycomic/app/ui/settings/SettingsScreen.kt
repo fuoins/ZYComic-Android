@@ -301,7 +301,7 @@ fun SettingsScreen() {
             Column(modifier = Modifier.weight(1f)) {
                 Text("本地代理（SNI绕过）", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "开启=本地代理MITM（稳定），关闭=自定义DNS+SSLSocketFactory（抓包时用）。切换后需重启App生效。",
+                    "开启=本地代理MITM模式，关闭=自定义DNS+SNI移除（默认推荐）。切换后需重启App生效。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -309,24 +309,26 @@ fun SettingsScreen() {
             Switch(checked = proxyEnabled, onCheckedChange = { vm.setProxyEnabled(it) })
         }
 
-        // 开发者设置
-        SectionTitle("开发者设置")
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text(
-                "格式: {\"port\":7891,\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":[\"域名1\",\"域名2\"]}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                value = devJson,
-                onValueChange = { vm.devConfigJson.value = it },
-                label = { Text("开发者配置 (JSON)") },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                minLines = 8,
-                maxLines = 15,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.saveDevConfig(devJson) }) { Text("保存配置") }
+        // 开发者设置（仅代理模式显示JSON配置；方案B下rule由DoH刷新即可）
+        if (proxyEnabled) {
+            SectionTitle("开发者设置")
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text(
+                    "格式: {\"port\":7891,\"rule\":{\"域名\":[\"ip1\",\"ip2\"]},\"sni\":[\"域名1\",\"域名2\"]}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = devJson,
+                    onValueChange = { vm.devConfigJson.value = it },
+                    label = { Text("开发者配置 (JSON)") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    minLines = 8,
+                    maxLines = 15,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { vm.saveDevConfig(devJson) }) { Text("保存配置") }
+                }
             }
         }
     }
