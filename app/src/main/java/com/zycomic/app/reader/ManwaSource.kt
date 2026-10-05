@@ -95,7 +95,8 @@ object ManwaSource : HttpSource() {
                 url = "/chapter/${ch.id}"
                 name = ch.name
                 date_upload = parseAddtime(ch.addtime)
-                chapter_number = -1f
+                chapter_number = ch.sort.toFloat()
+                read = ch.readed == 1
             }
         }
         return SMangaUpdate(smanga, schapters)

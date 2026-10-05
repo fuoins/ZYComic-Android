@@ -121,11 +121,7 @@ fun ChapterListDialog(
                     onLongClick = { /*TODO*/ },
                     onClick = { onClickChapter(chapterItem.chapter) },
                     // KMK -->
-                    onDownloadClick = if (onDownloadAction != null) {
-                        { action -> onDownloadAction(chapterItem.chapter, action) }
-                    } else {
-                        null
-                    },
+                    onDownloadClick = null,
                     // KMK <--
                     onChapterSwipe = {
                         onBookmark(chapterItem.chapter)
