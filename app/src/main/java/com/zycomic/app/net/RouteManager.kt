@@ -71,9 +71,9 @@ object RouteManager {
                 }
             }
         }
-        // 线路：以硬编码 LINE_HOSTS 为基底，rule 推导的线路只追加去重，绝不覆盖
+        // 线路：在当前 lineHosts 基础上追加 rule 推导的线路，不重置（保留 Trello 追加的线路）
         if (lines.isNotEmpty()) {
-            val merged = LINE_HOSTS.toMutableList()
+            val merged = lineHosts.toMutableList()
             lines.forEach { l -> if (merged.none { sameLine(it, l) }) merged.add(l) }
             lineHosts = merged
         }
