@@ -120,6 +120,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         DevConfig.migrateProxyDefaultIfNeeded()
         // 加载持久化的图源索引
         com.zycomic.app.net.RouteManager.loadImgIndex()
+        // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）
+        com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
         // 本地代理（SNI绕过）开关：开启时启动代理，关闭时用方案B（自定义DNS+SSLSocketFactory）
         if (DevConfig.isProxyEnabled()) {
             DevConfig.startProxy()
@@ -138,6 +140,25 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 后台异步校验登录态并刷新用户信息（cookie 已由 GlobalCookieJar 从 SharedPreferences 恢复）
         ProcessLifecycleOwner.get().lifecycleScope.launch {
             com.zycomic.app.data.repository.UserRepository.verifyLogin()
+        }
+        // 后台测速选线 + 图源测速（fire-and-forget，不阻塞 UI）
+        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            if (com.zycomic.app.net.RouteManager.autoSelectEnabled) {
+                try {
+                    val delays = com.zycomic.app.net.SpeedTester.testAllLines()
+                    com.zycomic.app.net.RouteManager.setLastDelays(delays, com.zycomic.app.net.RouteManager.lastImgDelays)
+                    val fastest = com.zycomic.app.net.SpeedTester.selectFastestLine(delays)
+                    if (fastest != com.zycomic.app.net.RouteManager.lineIndex) {
+                        com.zycomic.app.net.RouteManager.setLine(fastest)
+                        com.zycomic.app.net.NetworkModule.rebuild()
+                    }
+                    com.zycomic.app.net.RouteManager.saveLastFastestLine(fastest)
+                } catch (_: Exception) {}
+            }
+            try {
+                val imgDelays = com.zycomic.app.net.SpeedTester.testAllImgHosts()
+                com.zycomic.app.net.RouteManager.setLastDelays(com.zycomic.app.net.RouteManager.lastLineDelays, imgDelays)
+            } catch (_: Exception) {}
         }
 
         patchInjekt()
