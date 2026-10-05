@@ -118,6 +118,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 初始化开发者配置
         DevConfig.init(this)
         DevConfig.migrateProxyDefaultIfNeeded()
+        com.zycomic.app.net.ImageCacheManager.init(this)
         // 加载持久化的图源索引
         com.zycomic.app.net.RouteManager.loadImgIndex()
         // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）

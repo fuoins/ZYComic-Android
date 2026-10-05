@@ -4,13 +4,17 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Response
 import okhttp3.ResponseBody
+import okio.Buffer
 import okio.BufferedSource
 import okio.CipherSource
+import okio.ForwardingSource
 import okio.buffer
+import okio.Okio
 
 /**
- * 图片拦截器：统一尝试解密。
- * peek 前 16 字节试解密，解密结果是图片魔数则流式解密整图，否则回退明文。
+ * 图片拦截器：密文磁盘缓存 + 统一解密管线。
+ * 缓存密文；命中缓存直接读文件；未命中边下边写缓存。
+ * 对缓存命中/网络命中统一尝试解密，解密结果是图片魔数则流式解密，否则回退明文。
  */
 class ImageInterceptor : Interceptor {
 
@@ -24,6 +28,18 @@ class ImageInterceptor : Interceptor {
         val url = original.url.toString()
         if (!isImageRequest(url)) return chain.proceed(original)
 
+        val cached = ImageCacheManager.get(url)
+        if (cached != null) {
+            val cachedBody = object : ResponseBody() {
+                override fun contentType() = "image/webp".toMediaType()
+                override fun contentLength() = cached.length()
+                override fun source(): BufferedSource = Okio.source(cached).buffer()
+            }
+            val cachedResp = original.newBuilder()
+                .code(200).message("OK").body(cachedBody).build()
+            return decryptResponseIfNeeded(cachedResp)
+        }
+
         val imgReq = original.newBuilder()
             .header("User-Agent", ManwaInterceptor.UA)
             .header(HEADER_X_REQUESTED_WITH, VALUE_X_REQUESTED_WITH)
@@ -34,6 +50,35 @@ class ImageInterceptor : Interceptor {
         val response = chain.proceed(imgReq)
         val body = response.body ?: return response
 
+        val cacheOut = ImageCacheManager.putStream(url)
+        val originalSource = body.source()
+        val cachingSource = object : ForwardingSource(originalSource) {
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                val tmp = Buffer()
+                val n = super.read(tmp, byteCount)
+                if (n > 0) {
+                    tmp.copyTo(sink, 0, n)
+                    try { cacheOut.write(tmp, n) } catch (_: Exception) {}
+                }
+                if (n == -1L) {
+                    try {
+                        cacheOut.close()
+                        ImageCacheManager.commit(url)
+                    } catch (_: Exception) {}
+                }
+                return n
+            }
+        }
+        val cachingBody = object : ResponseBody() {
+            override fun contentType() = body.contentType()
+            override fun contentLength() = body.contentLength()
+            override fun source(): BufferedSource = cachingSource.buffer()
+        }
+        return decryptResponseIfNeeded(response.newBuilder().body(cachingBody).build())
+    }
+
+    private fun decryptResponseIfNeeded(response: Response): Response {
+        val body = response.body ?: return response
         val headEncrypted = try {
             body.source().peek().readByteArray(16)
         } catch (_: Exception) {
