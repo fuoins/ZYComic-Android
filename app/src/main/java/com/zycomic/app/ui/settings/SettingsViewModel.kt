@@ -264,14 +264,42 @@ class SettingsViewModel {
      *
      * @return Triple(线路 index->最优延迟, 图源 index->最优延迟, 域名->(IP->延迟))
      */
+    /** 方案B域名级测速：RuleDns client 直接 GET，不逐 IP。 */
+    private suspend fun measureLineDomain(lineUrl: String): Long = withContext(Dispatchers.IO) {
+        val url = "$lineUrl/api/index/index?facility=android&deviceid=speedtest&timestamp=${System.currentTimeMillis()}"
+        val req = Request.Builder().url(url).get().build()
+        val start = System.nanoTime()
+        try {
+            NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
+            (System.nanoTime() - start) / 1_000_000
+        } catch (_: Exception) {
+            Long.MAX_VALUE
+        }
+    }
+
+    private suspend fun measureImgDomain(domain: String): Long = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("https://$domain/").get().build()
+        val start = System.nanoTime()
+        try {
+            NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
+            (System.nanoTime() - start) / 1_000_000
+        } catch (_: Exception) {
+            Long.MAX_VALUE
+        }
+    }
+
     private suspend fun runMeasure(): Triple<Map<Int, Long>, Map<Int, Long>, Map<String, Map<String, Long>>> = coroutineScope {
         val baseClient = NetworkModule.client
         val ipDelayMap = mutableMapOf<String, MutableMap<String, Long>>()
+        val proxyOn = DevConfig.isProxyEnabled()
 
-        // ---- 线路测速（每条线路的所有 IP 并行）----
+        // ---- 线路测速 ----
         val lineResults = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
             async {
                 val domain = lineUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
+                if (!proxyOn) {
+                    return@async index to measureLineDomain(lineUrl)
+                }
                 val ips = RouteManager.resolveIp(domain)
                 val delays: Map<String, Long>
                 val bestDelay: Long
@@ -298,9 +326,12 @@ class SettingsViewModel {
             }
         }.awaitAll().toMap()
 
-        // ---- 图源测速（每个图源的所有 IP 并行）----
+        // ---- 图源测速 ----
         val imgResults = RouteManager.imgDomains.mapIndexed { index, domain ->
             async {
+                if (!proxyOn) {
+                    return@async index to measureImgDomain(domain)
+                }
                 val ips = RouteManager.resolveIp(domain)
                 val delays: Map<String, Long>
                 val bestDelay: Long
