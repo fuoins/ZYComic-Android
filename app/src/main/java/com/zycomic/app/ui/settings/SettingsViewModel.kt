@@ -233,28 +233,23 @@ class SettingsViewModel {
         }
     }
 
-    /**
-     * App 启动自动测速 + 自动选择最快线路/图源。
-     * 成功：调用 RouteManager.setLine/setImgHost 并重建网络，返回 (最快线路索引, 最快图源索引)。
-     * 全部失败：保持当前线路，返回 (-1, -1)。
-     */
-    suspend fun autoSelectFastest(): Pair<Int, Int> {
+    /** App 启动自动测速线路并切最快，返回线路索引；不测图源。 */
+    suspend fun autoSelectFastest(): Int = coroutineScope {
         autoSelecting.value = true
-        return try {
-            val (lines, imgs) = runMeasure()
+        try {
+            val lines = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
+                async { index to measureLineDomain(lineUrl) }
+            }.awaitAll().toMap()
             lineDelays.value = lines
-            imgDelays.value = imgs
-            RouteManager.setLastDelays(lines, imgs)
+            RouteManager.lastLineDelays = lines
 
-            // 只自动选最快线路，图源不自动选（打开章节时用服务端推荐的 _CURRENT_IMG_DOMAIN）
             val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-
             if (bestLine != null) {
                 RouteManager.setLine(bestLine)
                 currentLineIndex.value = bestLine
                 NetworkModule.rebuild()
             }
-            (bestLine ?: RouteManager.lineIndex) to RouteManager.imgIndex
+            bestLine ?: RouteManager.lineIndex
         } finally {
             autoSelecting.value = false
         }
