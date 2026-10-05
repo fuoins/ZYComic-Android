@@ -12,6 +12,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Response
@@ -96,7 +98,7 @@ object ManwaSource : HttpSource() {
                 name = ch.name
                 date_upload = parseAddtime(ch.addtime)
                 chapter_number = ch.sort.toFloat()
-                read = ch.readed == 1
+                memo = JsonObject(mapOf("server_read" to JsonPrimitive(ch.readed == 1)))
             }
         }
         return SMangaUpdate(smanga, schapters)

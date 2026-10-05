@@ -25,6 +25,7 @@ fun Chapter.copyFromSChapter(sChapter: SChapter): Chapter {
         chapterNumber = sChapter.chapter_number.toDouble(),
         scanlator = sChapter.scanlator?.ifBlank { null }?.trim(),
         memo = sChapter.memo,
+        read = sChapter.memo["server_read"]?.jsonPrimitive?.booleanOrNull ?: this.read,
     )
 }
 
