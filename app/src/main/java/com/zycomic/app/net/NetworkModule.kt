@@ -93,7 +93,7 @@ object NetworkModule {
                 maxRequestsPerHost = 8
             })
             .enableTrustAll()
-            .applyNetworkConfig()
+            .applyNetworkConfig(withFailover = true)
             .build()
     }
 
@@ -113,8 +113,9 @@ object NetworkModule {
             .build()
     }
 
-    private fun OkHttpClient.Builder.applyNetworkConfig(): OkHttpClient.Builder {
+    private fun OkHttpClient.Builder.applyNetworkConfig(withFailover: Boolean = false): OkHttpClient.Builder {
         cookieJar(cookieJar)
+        if (withFailover) addInterceptor(LineFailoverInterceptor())
         addInterceptor(manwaInterceptor)
         addInterceptor(imageInterceptor)
         if (DevConfig.isProxyEnabled()) {

@@ -251,6 +251,29 @@ object RouteManager {
         lineIndex = (lineIndex + 1) % lineHosts.size
     }
 
+    // ---- 故障自动切换 ----
+    @Volatile
+    var consecutiveFailures: Int = 0
+        private set
+
+    fun recordApiFailure() {
+        if (++consecutiveFailures >= 3 && autoSelectEnabled) {
+            consecutiveFailures = 0
+            failover()
+        }
+    }
+
+    fun recordApiSuccess() {
+        consecutiveFailures = 0
+    }
+
+    private fun failover() {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            selectNextLine()
+            NetworkModule.rebuild()
+        }
+    }
+
     /** 设置自定义 rule（开发者配置） */
     fun setCustomRule(rule: Map<String, List<String>>) {
         customRule = rule
