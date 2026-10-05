@@ -22,6 +22,7 @@ object DevConfig {
     private const val PREFS_NAME = "zycomic_dev_config"
     private const val KEY_CONFIG_JSON = "config_json"
     private const val KEY_PROXY_ENABLED = "proxy_enabled"
+    private const val KEY_PROXY_MIGRATED = "proxy_migrated_v1"
 
     private var context: Context? = null
     private var cachedJson: String? = null
@@ -45,10 +46,20 @@ object DevConfig {
 
     fun getConfigJson(): String = cachedJson ?: RouteManager.DEFAULT_CONFIG_JSON
 
-    /** 本地代理（SNI绕过）开关，默认开启。 */
+    /** 老用户迁移：默认值由 true 改为 false。曾显式开启过代理(true)的老用户删除该 key，让新默认 false 生效。 */
+    fun migrateProxyDefaultIfNeeded() {
+        val ctx = context ?: return
+        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_PROXY_MIGRATED, false)) return
+        val editor = prefs.edit()
+        if (prefs.getBoolean(KEY_PROXY_ENABLED, false)) editor.remove(KEY_PROXY_ENABLED)
+        editor.putBoolean(KEY_PROXY_MIGRATED, true).commit()
+    }
+
+    /** 本地代理（SNI绕过）开关，默认关闭。 */
     fun isProxyEnabled(): Boolean {
         return context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            ?.getBoolean(KEY_PROXY_ENABLED, true) ?: true
+            ?.getBoolean(KEY_PROXY_ENABLED, false) ?: false
     }
 
     /** 设置本地代理开关（需重启 App 生效）。 */
