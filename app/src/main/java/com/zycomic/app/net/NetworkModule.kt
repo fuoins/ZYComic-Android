@@ -191,7 +191,12 @@ object NetworkModule {
                 params.serverNames = null
                 socket.sslParameters = params
             } catch (_: Exception) {
-                // 移除 SNI 失败时忽略，连接可能正常但 SNI 未移除
+                try {
+                    val field = socket.javaClass.getDeclaredField("serverNames")
+                    field.isAccessible = true
+                    field.set(socket, null)
+                } catch (_: Exception) {
+                }
             }
         }
     }
