@@ -160,9 +160,13 @@ fun AppContent() {
     var showGayConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val lineIdx = settingsVm.autoSelectFastest()
+        val (li, ii) = settingsVm.autoSelectFastest()
         speedTesting = false
-        Toast.makeText(context, "已选择线路${lineIdx + 1}", Toast.LENGTH_SHORT).show()
+        if (li == -1 && ii == -1) {
+            Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "已选择线路${li + 1} + 图源${ii + 1}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // 收集 toast 消息
