@@ -83,26 +83,40 @@ class ImageInterceptor : Interceptor {
 
     private fun decryptResponseIfNeeded(response: Response): Response {
         val body = response.body ?: return response
-        val headEncrypted = try {
-            body.source().peek().readByteArray(16)
-        } catch (_: Exception) {
-            return response
-        }
-        if (headEncrypted.size < 16) return response
+        val source = body.source()
+        val url = response.request.url.toString()
 
-        val headDecrypted = try {
-            Crypto.createImageCipher().doFinal(headEncrypted)
-        } catch (_: Exception) {
-            return response
+        val rawHead = try { source.peek().readByteArray(16) } catch (_: Exception) { return response }
+        if (rawHead.size >= 4 && isImageMagic(rawHead)) return response
+
+        val len = body.contentLength()
+        if (len > 0 && len % 16 != 0L) return response
+
+        val forceDecrypt = url.contains("_zb")
+        if (!forceDecrypt) {
+            if (rawHead.size < 16) return response
+            val decryptedHead = try {
+                Crypto.createImageCipher().doFinal(rawHead)
+            } catch (_: Exception) {
+                return response
+            }
+            if (!isImageMagic(decryptedHead)) return response
         }
-        if (!isImageMagic(headDecrypted)) return response
 
         val cipher = Crypto.createImageCipher()
-        val cipherSource = CipherSource(body.source(), cipher)
+        val safeSource = object : ForwardingSource(CipherSource(source, cipher)) {
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                return try {
+                    super.read(sink, byteCount)
+                } catch (_: Exception) {
+                    -1
+                }
+            }
+        }
         val streamingBody = object : ResponseBody() {
             override fun contentType() = "image/webp".toMediaType()
             override fun contentLength(): Long = -1
-            override fun source(): BufferedSource = cipherSource.buffer()
+            override fun source(): BufferedSource = safeSource.buffer()
         }
         return response.newBuilder().body(streamingBody).build()
     }
