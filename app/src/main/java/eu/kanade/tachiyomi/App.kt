@@ -123,6 +123,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadImgIndex()
         // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）
         com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
+        // 合并本地缓存的服务端下发线路（只增不减）
+        com.zycomic.app.net.RouteManager.loadServerLinesFromPrefs()
 
         // 初始化用户仓库（本地用户信息存储）
         com.zycomic.app.data.repository.UserRepository.init(this)
@@ -160,6 +162,23 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 } catch (_: Exception) {}
                 com.zycomic.app.net.RouteManager.markSpeedTestToday()
             }
+        }
+        // 后台拉取服务端最新线路（只增不减），有新线路则重新测速选最快
+        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val resp = com.zycomic.app.net.NetworkModule.api.indexLines()
+                val lines = resp.serverLines ?: return@launch
+                if (com.zycomic.app.net.RouteManager.appendServerLines(lines)) {
+                    val delays = com.zycomic.app.net.SpeedTester.testAllLines()
+                    com.zycomic.app.net.RouteManager.setLastDelays(delays, com.zycomic.app.net.RouteManager.lastImgDelays)
+                    val fastest = com.zycomic.app.net.SpeedTester.selectFastestLine(delays)
+                    if (com.zycomic.app.net.RouteManager.autoSelectEnabled && fastest != com.zycomic.app.net.RouteManager.lineIndex) {
+                        com.zycomic.app.net.RouteManager.setLine(fastest)
+                        com.zycomic.app.net.NetworkModule.rebuild()
+                    }
+                    com.zycomic.app.net.RouteManager.saveLastFastestLine(fastest)
+                }
+            } catch (_: Exception) {}
         }
 
         patchInjekt()

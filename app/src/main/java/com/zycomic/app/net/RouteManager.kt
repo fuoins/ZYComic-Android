@@ -80,6 +80,52 @@ object RouteManager {
         imgDomains = domains
     }
 
+    private fun normalizeLine(url: String): String {
+        val t = url.trim()
+        return if (t.startsWith("http://") || t.startsWith("https://")) t else "https://$t"
+    }
+
+    private fun sameLine(a: String, b: String): Boolean =
+        normalizeLine(a).removeSuffix("/") == normalizeLine(b).removeSuffix("/")
+
+    /** 服务端线路追加：只增不减去重，不覆盖硬编码线路。返回是否新增了线路。 */
+    fun appendServerLines(serverLines: List<String>): Boolean {
+        val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }
+        if (normalized.isEmpty()) return false
+        persistServerLines(normalized)
+        val current = lineHosts.toMutableList()
+        var added = false
+        normalized.forEach { url ->
+            if (current.none { sameLine(it, url) }) {
+                current.add(url)
+                added = true
+            }
+        }
+        if (added) lineHosts = current
+        return added
+    }
+
+    /** 启动时读本地缓存的服务端线路并合并。 */
+    fun loadServerLinesFromPrefs() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .getString("server_lines", null) ?: return
+            val arr = org.json.JSONArray(raw)
+            val list = ArrayList<String>(arr.length())
+            for (i in 0 until arr.length()) list.add(arr.getString(i))
+            appendServerLines(list)
+        } catch (_: Exception) {}
+    }
+
+    private fun persistServerLines(lines: List<String>) {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putString("server_lines", org.json.JSONArray(lines).toString()).apply()
+        } catch (_: Exception) {}
+    }
+
     // ---- 当前选择 ----
     @Volatile var lineIndex: Int = 0
         private set
