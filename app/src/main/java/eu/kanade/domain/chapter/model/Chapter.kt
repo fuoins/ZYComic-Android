@@ -25,7 +25,7 @@ fun Chapter.copyFromSChapter(sChapter: SChapter): Chapter {
         chapterNumber = sChapter.chapter_number.toDouble(),
         scanlator = sChapter.scanlator?.ifBlank { null }?.trim(),
         memo = sChapter.memo,
-        read = (sChapter.memo["server_read"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull ?: this.read,
+        read = (sChapter.memo["server_read"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true" || this.read,
     )
 }
 
