@@ -71,7 +71,12 @@ object RouteManager {
                 }
             }
         }
-        if (lines.isNotEmpty()) lineHosts = lines
+        // 线路：以硬编码 LINE_HOSTS 为基底，rule 推导的线路只追加去重，绝不覆盖
+        if (lines.isNotEmpty()) {
+            val merged = LINE_HOSTS.toMutableList()
+            lines.forEach { l -> if (merged.none { sameLine(it, l) }) merged.add(l) }
+            lineHosts = merged
+        }
         if (imgs.isNotEmpty()) imgDomains = imgs
     }
 
@@ -88,20 +93,20 @@ object RouteManager {
     private fun sameLine(a: String, b: String): Boolean =
         normalizeLine(a).removeSuffix("/") == normalizeLine(b).removeSuffix("/")
 
-    /** 服务端线路追加：只增不减去重，不覆盖硬编码线路。返回是否新增了线路。 */
-    fun appendServerLines(serverLines: List<String>): Boolean {
-        val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }
-        if (normalized.isEmpty()) return false
+    /** 服务端线路追加：只增不减去重，不覆盖硬编码线路。返回本次新增的线路。 */
+    fun appendServerLines(serverLines: List<String>): List<String> {
+        val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }.distinct()
+        if (normalized.isEmpty()) return emptyList()
         persistServerLines(normalized)
         val current = lineHosts.toMutableList()
-        var added = false
+        val added = mutableListOf<String>()
         normalized.forEach { url ->
             if (current.none { sameLine(it, url) }) {
                 current.add(url)
-                added = true
+                added.add(url)
             }
         }
-        if (added) lineHosts = current
+        if (added.isNotEmpty()) lineHosts = current
         return added
     }
 
