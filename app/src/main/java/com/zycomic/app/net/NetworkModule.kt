@@ -153,6 +153,23 @@ object NetworkModule {
         buildRetrofit()
     }
 
+    /** 测速专用 client：NO_PROXY + trust-all + 3s 超时；方案B下附 RuleDns + SNI 移除。 */
+    fun newSpeedTestClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .enableTrustAll()
+        if (!DevConfig.isProxyEnabled()) {
+            val sslContext = SSLContext.getInstance("TLS").apply {
+                init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
+            }
+            builder.dns(RuleDns)
+            builder.sslSocketFactory(SniRemovingSocketFactory(sslContext.socketFactory), trustAllManager)
+        }
+        return builder.build()
+    }
+
     // ---- trust-all SSL（信任代理自签名证书 + MITM 场景 + IP直连场景） ----
     private val trustAllManager = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
