@@ -123,7 +123,6 @@ object RouteManager {
     fun appendServerLines(serverLines: List<String>): List<String> {
         val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }.distinctBy { lineKey(it) }
         if (normalized.isEmpty()) return emptyList()
-        persistServerLines(normalized)
         val current = lineHosts.toMutableList()
         val added = mutableListOf<String>()
         normalized.forEach { url ->
@@ -132,7 +131,10 @@ object RouteManager {
                 added.add(url)
             }
         }
-        if (added.isNotEmpty()) lineHosts = current
+        if (added.isNotEmpty()) {
+            lineHosts = current
+            persistServerLines(current)
+        }
         return added
     }
 
