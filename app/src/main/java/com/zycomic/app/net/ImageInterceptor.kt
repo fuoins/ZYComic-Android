@@ -7,16 +7,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody
 import okio.Buffer
 import okio.BufferedSource
-import okio.CipherSource
-import okio.ForwardingSource
-import okio.buffer
-import okio.source
 
-/**
- * 图片拦截器：密文磁盘缓存 + 统一解密管线。
- * 缓存密文；命中缓存直接读文件；未命中边下边写缓存。
- * 对缓存命中/网络命中统一尝试解密，解密结果是图片魔数则流式解密，否则回退明文。
- */
 class ImageInterceptor : Interceptor {
 
     companion object {
@@ -31,16 +22,9 @@ class ImageInterceptor : Interceptor {
 
         val cached = ImageCacheManager.get(url)
         if (cached != null) {
-            val cachedBody = object : ResponseBody() {
-                override fun contentType() = "image/webp".toMediaType()
-                override fun contentLength() = cached.length()
-                override fun source(): BufferedSource = cached.source().buffer()
-            }
-            val cachedResp = Response.Builder()
-                .request(original)
-                .protocol(Protocol.HTTP_1_1)
-                .code(200).message("OK").body(cachedBody).build()
-            return decryptResponseIfNeeded(cachedResp)
+            val bytes = cached.readBytes()
+            val out = decryptIfNeeded(bytes, url)
+            return buildResponse(original, out)
         }
 
         val imgReq = original.newBuilder()
@@ -52,73 +36,34 @@ class ImageInterceptor : Interceptor {
 
         val response = chain.proceed(imgReq)
         val body = response.body ?: return response
+        val raw = try { body.source().readByteArray() } catch (_: Exception) { return response }
 
-        val cacheOut = ImageCacheManager.putStream(url)
-        val originalSource = body.source()
-        val cachingSource = object : ForwardingSource(originalSource) {
-            override fun read(sink: Buffer, byteCount: Long): Long {
-                val tmp = Buffer()
-                val n = super.read(tmp, byteCount)
-                if (n > 0) {
-                    val bytes = tmp.readByteArray(n)
-                    sink.write(bytes)
-                    try { cacheOut.write(bytes) } catch (_: Exception) {}
-                }
-                if (n == -1L) {
-                    try {
-                        cacheOut.close()
-                        ImageCacheManager.commit(url)
-                    } catch (_: Exception) {}
-                }
-                return n
-            }
-        }
-        val cachingBody = object : ResponseBody() {
-            override fun contentType() = body.contentType()
-            override fun contentLength() = body.contentLength()
-            override fun source(): BufferedSource = cachingSource.buffer()
-        }
-        return decryptResponseIfNeeded(response.newBuilder().body(cachingBody).build())
+        try {
+            ImageCacheManager.putStream(url).use { it.write(raw) }
+            ImageCacheManager.commit(url)
+        } catch (_: Exception) {}
+
+        val out = decryptIfNeeded(raw, url)
+        return buildResponse(original, out)
     }
 
-    private fun decryptResponseIfNeeded(response: Response): Response {
-        val body = response.body ?: return response
-        val source = body.source()
-        val url = response.request.url.toString()
-
-        val rawHead = try { source.peek().readByteArray(16) } catch (_: Exception) { return response }
-        if (rawHead.size >= 4 && isImageMagic(rawHead)) return response
-
-        val len = body.contentLength()
-        if (len > 0 && len % 16 != 0L) return response
-
-        val forceDecrypt = url.contains("_zb")
-        if (!forceDecrypt) {
-            if (rawHead.size < 16) return response
-            val decryptedHead = try {
-                Crypto.createImageCipher().doFinal(rawHead)
-            } catch (_: Exception) {
-                return response
-            }
-            if (!isImageMagic(decryptedHead)) return response
-        }
-
-        val cipher = Crypto.createImageCipher()
-        val safeSource = object : ForwardingSource(CipherSource(source, cipher)) {
-            override fun read(sink: Buffer, byteCount: Long): Long {
-                return try {
-                    super.read(sink, byteCount)
-                } catch (_: Exception) {
-                    -1
-                }
-            }
-        }
-        val streamingBody = object : ResponseBody() {
+    private fun buildResponse(request: okhttp3.Request, bytes: ByteArray): Response {
+        val body = object : ResponseBody() {
             override fun contentType() = "image/webp".toMediaType()
-            override fun contentLength(): Long = -1
-            override fun source(): BufferedSource = safeSource.buffer()
+            override fun contentLength() = bytes.size.toLong()
+            override fun source(): BufferedSource = Buffer().apply { write(bytes) }
         }
-        return response.newBuilder().body(streamingBody).build()
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(200).message("OK")
+            .body(body).build()
+    }
+
+    private fun decryptIfNeeded(raw: ByteArray, url: String): ByteArray {
+        if (isImageMagic(raw)) return raw
+        val decrypted = try { Crypto.createImageCipher().doFinal(raw) } catch (_: Exception) { return raw }
+        return if (isImageMagic(decrypted)) decrypted else raw
     }
 
     private fun isImageRequest(url: String): Boolean {
@@ -128,14 +73,13 @@ class ImageInterceptor : Interceptor {
     }
 
     private fun isImageMagic(bytes: ByteArray): Boolean {
-        fun match(prefix: ByteArray): Boolean =
-            bytes.size >= prefix.size && bytes.copyOf(prefix.size).contentEquals(prefix)
-        if (match(byteArrayOf(0x52, 0x49, 0x46, 0x46)) && bytes.size >= 12 &&
-            bytes.copyOfRange(8, 12).contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50))
+        if (bytes.size < 4) return false
+        if (bytes[0] == 0x52.toByte() && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+            bytes.size >= 12 && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50
         ) return true
-        if (match(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))) return true
-        if (match(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()))) return true
-        if (match(byteArrayOf(0x47, 0x49, 0x46, 0x38))) return true
+        if (bytes[0] == 0x89.toByte() && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true
+        if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
+        if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) return true
         return false
     }
 }
