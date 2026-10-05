@@ -42,10 +42,6 @@ interface ApiService {
     @GET("api/index/index")
     suspend fun index(): ApiResponse<Manga>
 
-    /** 同首页接口，仅提取服务端动态下发的线路列表。 */
-    @GET("api/index/index")
-    suspend fun indexLines(): com.zycomic.app.data.dto.IndexLinesResponse
-
     // ---------- 排行榜 ----------
     // type=0 人气, 1 新番, 2 完结
     @GET("api/rank/index")

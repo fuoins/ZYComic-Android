@@ -163,11 +163,10 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 com.zycomic.app.net.RouteManager.markSpeedTestToday()
             }
         }
-        // 后台拉取服务端最新线路（只增不减），有新线路则重新测速选最快
+        // 后台从 Trello 拉取线路（只增不减），有新线路则重新测速选最快
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val resp = com.zycomic.app.net.NetworkModule.api.indexLines()
-                val lines = resp.serverLines ?: return@launch
+                val lines = com.zycomic.app.net.TrelloConfigFetcher.fetchLines()
                 if (com.zycomic.app.net.RouteManager.appendServerLines(lines)) {
                     val delays = com.zycomic.app.net.SpeedTester.testAllLines()
                     com.zycomic.app.net.RouteManager.setLastDelays(delays, com.zycomic.app.net.RouteManager.lastImgDelays)
