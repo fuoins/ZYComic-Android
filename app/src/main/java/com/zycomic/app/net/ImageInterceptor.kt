@@ -2,6 +2,7 @@ package com.zycomic.app.net
 
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okio.Buffer
@@ -35,7 +36,9 @@ class ImageInterceptor : Interceptor {
                 override fun contentLength() = cached.length()
                 override fun source(): BufferedSource = Okio.source(cached).buffer()
             }
-            val cachedResp = original.newBuilder()
+            val cachedResp = Response.Builder()
+                .request(original)
+                .protocol(Protocol.HTTP_1_1)
                 .code(200).message("OK").body(cachedBody).build()
             return decryptResponseIfNeeded(cachedResp)
         }
@@ -57,8 +60,9 @@ class ImageInterceptor : Interceptor {
                 val tmp = Buffer()
                 val n = super.read(tmp, byteCount)
                 if (n > 0) {
-                    tmp.copyTo(sink, 0, n)
-                    try { cacheOut.write(tmp, n) } catch (_: Exception) {}
+                    val bytes = tmp.readByteArray(n.toInt())
+                    sink.write(bytes)
+                    try { cacheOut.write(bytes) } catch (_: Exception) {}
                 }
                 if (n == -1L) {
                     try {
