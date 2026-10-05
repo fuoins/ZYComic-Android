@@ -172,7 +172,7 @@ class ReaderPreferences(
 
     // SY -->
 
-    fun readerThreads() = preferenceStore.getInt("eh_reader_threads", 2)
+    fun readerThreads() = preferenceStore.getInt("eh_reader_threads", 4)
 
     fun readerInstantRetry() = preferenceStore.getBoolean("eh_reader_instant_retry", true)
 
