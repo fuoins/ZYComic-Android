@@ -72,6 +72,8 @@ object ReaderLauncher {
                     name = ch.name,
                     dateUpload = ManwaSource.parseAddtime(ch.addtime),
                     sourceOrder = ch.sort.toLong(),
+                    chapterNumber = ch.sort.toDouble(),
+                    read = ch.readed == 1,
                 )
             }
             chapterRepository.addAll(domainChapters)

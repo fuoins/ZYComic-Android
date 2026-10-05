@@ -97,7 +97,7 @@ object ManwaSource : HttpSource() {
                 url = "/chapter/${ch.id}"
                 name = ch.name
                 date_upload = parseAddtime(ch.addtime)
-                chapter_number = ch.sort.toFloat()
+                chapter_number = -1f
                 memo = JsonObject(mapOf("server_read" to JsonPrimitive(ch.readed == 1)))
             }
         }
