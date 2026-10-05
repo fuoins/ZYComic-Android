@@ -5,7 +5,10 @@ import com.zycomic.app.data.dto.ChapterContent
 import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
+import com.zycomic.app.net.SpeedTester
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -151,6 +154,18 @@ object ReaderRepository {
 
                 // 4. 更新 RouteManager 图源列表并切换
                 addNewImgDomainToRouteManager(domain)
+
+                // 5. 后台测速新图源，更快则切过去（fire-and-forget）
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val newDelay = SpeedTester.testSingleImgHost(domain)
+                        val curDelay = SpeedTester.testSingleImgHost(RouteManager.imgHost)
+                        if (newDelay < curDelay) {
+                            val idx = RouteManager.imgDomains.indexOf(domain)
+                            if (idx >= 0 && RouteManager.imgIndex != idx) RouteManager.setImgHost(idx)
+                        }
+                    } catch (_: Exception) {}
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "自动选择图源失败: $domain", e)

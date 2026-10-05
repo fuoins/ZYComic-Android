@@ -32,6 +32,8 @@ object SpeedTester {
         }.awaitAll().toMap()
     }
 
+    suspend fun testSingleImgHost(domain: String): Long = measure("https://$domain/")
+
     fun selectFastestLine(delays: Map<Int, Long>): Int =
         delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key ?: 0
 }

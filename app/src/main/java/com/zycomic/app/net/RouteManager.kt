@@ -103,6 +103,24 @@ object RouteManager {
         lastImgDelays = img
     }
 
+    fun isSpeedTestToday(): Boolean = try {
+        val ctx = DevConfig.appContext ?: return false
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            .getString("last_speed_test_date", "") == today
+    } catch (_: Exception) { false }
+
+    fun markSpeedTestToday() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                .format(java.util.Date())
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putString("last_speed_test_date", today).apply()
+        } catch (_: Exception) {}
+    }
+
     /** 当前接口 baseUrl */
     val baseUrl: String get() = lineHosts[lineIndex.coerceIn(0, lineHosts.lastIndex)]
 
