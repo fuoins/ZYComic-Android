@@ -170,8 +170,20 @@ class SettingsViewModel {
 
     /** 方案B域名级测速：RuleDns client 直接 GET，不逐 IP。 */
     private suspend fun measureLineDomain(lineUrl: String): Long = withContext(Dispatchers.IO) {
-        val url = "$lineUrl/api/index/index?facility=android&deviceid=speedtest&timestamp=${System.currentTimeMillis()}"
-        val req = Request.Builder().url(url).get().build()
+        val ts = System.currentTimeMillis().toString()
+        val url = "$lineUrl/api/index/index?facility=android&deviceid=${ManwaInterceptor.DEVICE_ID}&timestamp=$ts"
+        val req = Request.Builder()
+            .url(url)
+            .get()
+            .header("User-Agent", ManwaInterceptor.UA)
+            .header("devid", ts)
+            .header("X-Token", Crypto.md5Hex(ts + Crypto.XTOKEN_SALT))
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", ManwaInterceptor.ACCEPT_LANGUAGE)
+            .header("Origin", ManwaInterceptor.ORIGIN)
+            .header("Referer", ManwaInterceptor.REFERER)
+            .header("Connection", "keep-alive")
+            .build()
         val start = System.nanoTime()
         try {
             NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
@@ -182,7 +194,9 @@ class SettingsViewModel {
     }
 
     private suspend fun measureImgDomain(domain: String): Long = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url("https://$domain/").get().build()
+        val req = Request.Builder().url("https://$domain/").get()
+            .header("User-Agent", ManwaInterceptor.UA)
+            .build()
         val start = System.nanoTime()
         try {
             NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
