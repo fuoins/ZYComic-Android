@@ -168,6 +168,6 @@ class MangaDetailViewModel(private val bookId: String) {
         val list = _detail.value?.chapterList ?: return ""
         val d = _detail.value!!
         if (d.start.isNotBlank() && d.start != "0") return d.start
-        return list.lastOrNull()?.id ?: ""
+        return list.minByOrNull { it.sort }?.id ?: list.firstOrNull()?.id ?: ""
     }
 }
