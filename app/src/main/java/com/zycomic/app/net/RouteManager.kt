@@ -113,8 +113,11 @@ object RouteManager {
                 .getString("server_lines", null) ?: return
             val arr = org.json.JSONArray(raw)
             val list = ArrayList<String>(arr.length())
-            for (i in 0 until arr.length()) list.add(arr.getString(i))
-            appendServerLines(list)
+            for (i in 0 until arr.length()) {
+                val s = arr.getString(i)
+                if (s.isNotBlank() && !s.contains("{") && !s.contains("\"") && !s.contains(" ")) list.add(s)
+            }
+            if (list.isNotEmpty()) appendServerLines(list)
         } catch (_: Exception) {}
     }
 
