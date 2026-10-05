@@ -50,7 +50,6 @@ fun SettingsScreen() {
     val testing by vm.testing.collectAsState()
     val lineDelays by vm.lineDelays.collectAsState()
     val imgDelays by vm.imgDelays.collectAsState()
-    val ipDelays by vm.ipDelays.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
@@ -131,7 +130,7 @@ fun SettingsScreen() {
             RouteManager.lineHosts.forEachIndexed { index, url ->
                 val host = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
                 val delay = lineDelays[index]
-                val hostIpMap = ipDelays[host]
+                val hostIpMap: Map<String, Long>? = null
                 val fastest = hostIpMap?.filterValues { it < Long.MAX_VALUE }?.minByOrNull { it.value }
                 val expandKey = "line_$index"
                 val isExpanded = expandedHosts.contains(expandKey)
@@ -205,7 +204,7 @@ fun SettingsScreen() {
             Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             RouteManager.imgDomains.forEachIndexed { index, domain ->
                 val delay = imgDelays[index]
-                val hostIpMap = ipDelays[domain]
+                val hostIpMap: Map<String, Long>? = null
                 val fastest = hostIpMap?.filterValues { it < Long.MAX_VALUE }?.minByOrNull { it.value }
                 val expandKey = "img_$index"
                 val isExpanded = expandedHosts.contains(expandKey)

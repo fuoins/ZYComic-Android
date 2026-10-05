@@ -115,10 +115,8 @@ object ReaderRepository {
                     // 已有图源：切换
                     if (RouteManager.imgIndex != existingIndex) {
                         RouteManager.setImgHost(existingIndex)
-                        NetworkModule.rebuild()
                         Log.d(TAG, "切换到已有图源: $domain (index=$existingIndex)")
                     }
-                    // 用测速结果自动选最快IP（fastestIp 已在启动测速时设置）
                     return@withContext
                 }
 
@@ -151,14 +149,8 @@ object ReaderRepository {
                 DevConfig.applyConfig(newConfig)
                 Log.d(TAG, "新图源 $domain 已添加到配置（${ips.size}个IP）")
 
-                // 4. 动态更新代理（不重启）
-                DevConfig.updateProxyConfig()
-
-                // 5. 更新 RouteManager 图源列表并切换
+                // 4. 更新 RouteManager 图源列表并切换
                 addNewImgDomainToRouteManager(domain)
-
-                // 6. 设置最快IP（用第一个IP，后续测速会优化）
-                RouteManager.setFastestIp(domain, ips.first())
 
             } catch (e: Exception) {
                 Log.e(TAG, "自动选择图源失败: $domain", e)
@@ -176,7 +168,6 @@ object ReaderRepository {
         val index = RouteManager.imgDomains.indexOf(domain)
         if (index >= 0 && RouteManager.imgIndex != index) {
             RouteManager.setImgHost(index)
-            NetworkModule.rebuild()
             Log.d(TAG, "切换到新图源: $domain (index=$index)")
         }
     }

@@ -14,8 +14,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * - 7 条控制面线路（接口域名），可切换。
  * - 6 个数据面图源（图片 CDN 域名），可切换。
- * - 预设 IP 映射表，供 [LocalProxyServer] 做 IP 直连。
- * - SNI 绕过域名列表，供 [LocalProxyServer] 做 MITM（不发 SNI）。
+ * - 预设 IP 映射表，供 RuleDns 做 IP 直连。
+ * - SNI 绕过域名列表，供 SniRemovingSocketFactory 移除 SNI。
  */
 object RouteManager {
 
@@ -97,33 +97,10 @@ object RouteManager {
     var lastImgDelays: Map<Int, Long> = emptyMap()
         private set
 
-    /** 最近一次每 IP 的 TCP 延迟：域名 -> (IP -> 毫秒)，失败为 Long.MAX_VALUE */
-    @Volatile
-    var lastIpDelays: Map<String, Map<String, Long>> = emptyMap()
-        private set
-
-    /** 每个域名测速选出的最快 IP（host -> ip），供代理优先使用 */
-    val fastestIp: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
-
     /** 写入最近一次测速结果（SettingsViewModel 测速完成后调用）。 */
     fun setLastDelays(line: Map<Int, Long>, img: Map<Int, Long>) {
         lastLineDelays = line
         lastImgDelays = img
-    }
-
-    /** 写入最近一次每 IP 的 TCP 延迟（SettingsViewModel 测速完成后调用）。 */
-    fun setLastIpDelays(ipDelays: Map<String, Map<String, Long>>) {
-        lastIpDelays = ipDelays
-    }
-
-    /** 记录某域名的最快 IP（测速完成后调用）。 */
-    fun setFastestIp(host: String, ip: String) {
-        fastestIp[host] = ip
-    }
-
-    /** 清空所有最快 IP 缓存（更新配置后调用，强制测速重新选 IP）。 */
-    fun clearFastestIps() {
-        fastestIp.clear()
     }
 
     /** 当前接口 baseUrl */

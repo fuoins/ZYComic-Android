@@ -122,10 +122,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadImgIndex()
         // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）
         com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
-        // 本地代理（SNI绕过）开关：开启时启动代理，关闭时用方案B（自定义DNS+SSLSocketFactory）
-        if (DevConfig.isProxyEnabled()) {
-            DevConfig.startProxy()
-        }
 
         // 初始化用户仓库（本地用户信息存储）
         com.zycomic.app.data.repository.UserRepository.init(this)

@@ -1,7 +1,6 @@
 package com.zycomic.app.net
 
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.net.Proxy
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -24,12 +23,10 @@ import okhttp3.MediaType.Companion.toMediaType
 
 /**
  * 网络模块：构建 OkHttpClient 与 Retrofit，整合所有拦截器。
- *
- * 方案A：所有流量走本地 HTTP 代理 [LocalProxyServer]（127.0.0.1:port）。
- * - 代理负责 IP 直连（rule 配置）和 SNI 绕过（MITM 模式）。
- * - 客户端→代理的 TLS 使用自签名证书，因此需要 trust-all + hostnameVerifier 信任所有。
+ * 直连模式：RuleDns 做 rule 域名 IP 直连，SniRemovingSocketFactory 移除 SNI，trust-all 信任证书。
  *
  * 拦截器链顺序（application interceptors）：
+ * 0. [LineFailoverInterceptor] —— API 请求失败计数，连续失败自动切线路
  * 1. [ManwaInterceptor]       —— 追加通用 query + 鉴权头 + 响应 AES 解密
  * 2. [ImageInterceptor]        —— 图片请求加头 + CipherSource 流式解密
  *
@@ -118,17 +115,11 @@ object NetworkModule {
         if (withFailover) addInterceptor(LineFailoverInterceptor())
         addInterceptor(manwaInterceptor)
         addInterceptor(imageInterceptor)
-        if (DevConfig.isProxyEnabled()) {
-            // 方案A：本地代理（MITM，SNI绕过稳定）
-            proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", DevConfig.getPort())))
-        } else {
-            // 方案B：自定义DNS（rule IP直连）+ 自定义SSLSocketFactory（移除SNI）
-            val baseSslContext = SSLContext.getInstance("TLS").apply {
-                init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-            }
-            dns(RuleDns)
-            sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
+        val baseSslContext = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
         }
+        dns(RuleDns)
+        sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
         return this
     }
 
@@ -153,21 +144,19 @@ object NetworkModule {
         buildRetrofit()
     }
 
-    /** 测速专用 client：NO_PROXY + trust-all + 3s 超时；方案B下附 RuleDns + SNI 移除。 */
+    /** 测速专用 client：NO_PROXY + trust-all + RuleDns + SNI 移除 + 3s 超时。 */
     fun newSpeedTestClient(): OkHttpClient {
-        val builder = OkHttpClient.Builder()
+        val sslContext = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
+        }
+        return OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
             .connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(3, TimeUnit.SECONDS)
             .enableTrustAll()
-        if (!DevConfig.isProxyEnabled()) {
-            val sslContext = SSLContext.getInstance("TLS").apply {
-                init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-            }
-            builder.dns(RuleDns)
-            builder.sslSocketFactory(SniRemovingSocketFactory(sslContext.socketFactory), trustAllManager)
-        }
-        return builder.build()
+            .dns(RuleDns)
+            .sslSocketFactory(SniRemovingSocketFactory(sslContext.socketFactory), trustAllManager)
+            .build()
     }
 
     // ---- trust-all SSL（信任代理自签名证书 + MITM 场景 + IP直连场景） ----

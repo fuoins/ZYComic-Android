@@ -4,17 +4,13 @@ import android.content.Context
 import android.util.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * 开发者配置管理（方案A：本地代理模式）。
- *
- * - 配置持久化到 SharedPreferences。
- * - 配置格式：{"port":7891,"rule":{"domain":["ip1"]},"sni":["domain1"]}
- * - 同时持有全局 [LocalProxyServer] 引用，方便设置页保存配置后重启代理。
+ * 开发者配置管理（直连模式：自定义 DNS + SNI 移除）。
+ * 配置持久化到 SharedPreferences，格式：{"rule":{"domain":["ip1"]},"sni":["domain1"]}
  */
 object DevConfig {
 
@@ -30,11 +26,6 @@ object DevConfig {
     /** 全局 ApplicationContext，供 RouteManager 等使用。 */
     val appContext: Context? get() = context
 
-    /** 全局代理服务器引用，用于重启。 */
-    @Volatile
-    var proxyServer: LocalProxyServer? = null
-        private set
-
     /** 初始化：从 SharedPreferences 读取配置（若无则用默认配置），并应用到 RouteManager。 */
     fun init(ctx: Context) {
         context = ctx.applicationContext
@@ -46,7 +37,7 @@ object DevConfig {
 
     fun getConfigJson(): String = cachedJson ?: RouteManager.DEFAULT_CONFIG_JSON
 
-    /** 老用户迁移：默认值由 true 改为 false。曾显式开启过代理(true)的老用户删除该 key，让新默认 false 生效。 */
+    /** 老用户迁移：清理曾显式开启代理的遗留 SP key。 */
     fun migrateProxyDefaultIfNeeded() {
         val ctx = context ?: return
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -54,24 +45,6 @@ object DevConfig {
         val editor = prefs.edit()
         if (prefs.getBoolean(KEY_PROXY_ENABLED, false)) editor.remove(KEY_PROXY_ENABLED)
         editor.putBoolean(KEY_PROXY_MIGRATED, true).commit()
-    }
-
-    /** 本地代理（SNI绕过）开关，默认关闭。 */
-    fun isProxyEnabled(): Boolean {
-        return context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            ?.getBoolean(KEY_PROXY_ENABLED, false) ?: false
-    }
-
-    /** 代理端口，默认 7891。 */
-    fun getPort(): Int {
-        return try {
-            val root = Json { ignoreUnknownKeys = true }
-                .parseToJsonElement(getConfigJson()).jsonObject
-            root["port"]?.jsonPrimitive?.intOrNull ?: 7891
-        } catch (e: Exception) {
-            Log.e(TAG, "getPort failed, using default 7891", e)
-            7891
-        }
     }
 
     /** 域名→IP 列表映射。 */
@@ -120,10 +93,7 @@ object DevConfig {
         cachedJson = json
     }
 
-    /**
-     * 保存配置 + 更新 RouteManager。
-     * 注意：代理重启由调用方处理（stop 旧代理 + start 新代理）。
-     */
+    /** 保存配置 + 更新 RouteManager。 */
     fun applyConfig(json: String) {
         saveConfig(json)
         applyToRouteManager(json)
@@ -153,28 +123,7 @@ object DevConfig {
         }
     }
 
-    /** 动态更新代理配置（不重启，新图源添加后调用）。 */
-    fun updateProxyConfig() {
-        proxyServer?.updateRule(getRule())
-        proxyServer?.updateSniDomains(getSniDomains())
-        Log.i(TAG, "Proxy config updated dynamically")
-    }
-
-    /** 启动代理服务器（App 启动时调用）。 */
-    fun startProxy() {
-        if (proxyServer != null) return
-        proxyServer = LocalProxyServer(
-            port = getPort(),
-            rule = getRule(),
-            sniDomains = getSniDomains(),
-        ).also { it.start() }
-        Log.i(TAG, "Proxy started on port ${getPort()}")
-    }
-
-    /**
-     * 清除 Coil 图片加载器的内存缓存 + 磁盘缓存。
-     * 切换图源后调用，避免旧图源的封面/图片被缓存命中导致仍请求旧域名。
-     */
+    /** 清除 Coil 图片加载器的内存缓存 + 磁盘缓存。 */
     fun clearImageCaches() {
         try {
             val ctx = context ?: run {
