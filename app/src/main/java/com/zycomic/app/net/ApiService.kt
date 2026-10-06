@@ -123,6 +123,9 @@ interface ApiService {
         @Query("task") task: Int = 1,
     ): okhttp3.ResponseBody
 
+    @POST("api/users/welfare")
+    suspend fun claimAdBonus(@Body body: com.zycomic.app.data.dto.AdBonusRequest): com.zycomic.app.data.dto.AdBonusResponse
+
     @POST("api/account/logout")
     suspend fun logout(): ApiResponse<JsonElement>
 

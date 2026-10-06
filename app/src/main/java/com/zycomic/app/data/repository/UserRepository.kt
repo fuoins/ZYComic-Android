@@ -28,12 +28,14 @@ object UserRepository {
     private val api get() = NetworkModule.api
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var appCtx: Context
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private const val KEY_USER_INFO = "user_info_json"
 
     /** 必须在 App.onCreate 中调用一次，初始化 SharedPreferences。 */
     fun init(context: Context) {
+        appCtx = context.applicationContext
         prefs = context.getSharedPreferences("zycomic_user", Context.MODE_PRIVATE)
     }
 
@@ -224,10 +226,9 @@ object UserRepository {
         return getWelfare()
     }
 
-    private suspend fun getAdLinks(): List<String> {
-        val html = api.getWawaWise().string()
-        return Regex("https?://s\\.chmsrv\\.com/click\\.php\\?d=[^\"'\\s<>]+").findAll(html).map { it.value }.toList()
-    }
+    private suspend fun getAdLinks(): List<String> =
+        Regex("https?://s\\.chmsrv\\.com/click\\.php\\?d=[^\"'\\s<>]+")
+            .findAll(api.getWawaWise().string()).map { it.value }.toList()
 
     private suspend fun clickAd(link: String) {
         val encoded = java.net.URLEncoder.encode(link, "UTF-8")
@@ -235,18 +236,20 @@ object UserRepository {
     }
 
     suspend fun claimAdBonus(): Int {
-        val links = getAdLinks()
-        if (links.isEmpty()) throw IOException("未获取到广告链接")
         val pointBefore = getUserInfo().point
-        repeat(5) { i ->
-            clickAd(links[i % links.size])
-            kotlinx.coroutines.delay((1000..2000).random().toLong())
+        val html = api.getWawaWise().string()
+        val helper = com.zycomic.app.net.AdClickHelper(appCtx)
+        repeat(5) {
+            val link = helper.getAdLink(html) ?: throw IOException("广告链接提取失败")
+            clickAd(link)
+            kotlinx.coroutines.delay(1000)
         }
-        getWelfare()
+        val resp = api.claimAdBonus(com.zycomic.app.data.dto.AdBonusRequest())
+        if (resp.code != 1 || resp.data?.status != "success") {
+            throw IOException(resp.data?.msg?.ifEmpty { resp.msg.ifEmpty { "领取失败" } } ?: "领取失败")
+        }
         val pointAfter = getUserInfo().point
-        val diff = pointAfter - pointBefore
-        if (diff <= 0) throw IOException("领取失败，积分未增加")
-        return diff
+        return pointAfter - pointBefore
     }
 
     /** 积分明细分页。 */

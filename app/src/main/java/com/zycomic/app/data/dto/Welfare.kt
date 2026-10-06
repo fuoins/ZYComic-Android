@@ -75,3 +75,21 @@ data class PointLogData(
     val uid: Int = 0,
     val consecutive_sign: Int = 0,
 )
+
+@Serializable
+data class AdBonusRequest(
+    val action: String = "ad_bonus",
+)
+
+@Serializable
+data class AdBonusResponse(
+    val code: Int = 0,
+    val data: AdBonusData? = null,
+    val msg: String = "",
+)
+
+@Serializable
+data class AdBonusData(
+    val status: String = "",
+    val msg: String = "",
+)
