@@ -40,13 +40,14 @@ data class WelfareUserData(
 data class SignDay(
     val date: String = "",
     val status: String = "",
-    val index: String? = null,
+    @Serializable(with = IntOrStringSerializer::class)
+    val index: Int? = null,
 ) {
     val isSigned: Boolean get() = status == "signedin"
     val isMissed: Boolean get() = status == "signednot"
     val isFuture: Boolean get() = status == "signedyet"
     val isPlaceholder: Boolean get() = status.isEmpty()
-    val dayNum: Int? get() = index?.toIntOrNull()
+    val dayNum: Int? get() = index
 }
 
 /** 积分明细项 */

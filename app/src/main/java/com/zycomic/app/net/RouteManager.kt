@@ -333,14 +333,14 @@ object RouteManager {
     }
 
     // ---- 封面/章节统一用测速最快图源 ----
-    var useFastestImgForAll: Boolean by androidx.compose.runtime.mutableStateOf(false)
+    var useFastestImgForAll: Boolean by androidx.compose.runtime.mutableStateOf(true)
         private set
 
     fun loadUseFastestImgForAll() {
         try {
             val ctx = DevConfig.appContext ?: return
             useFastestImgForAll = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .getBoolean("use_fastest_img_for_all", false)
+                .getBoolean("use_fastest_img_for_all", true)
         } catch (_: Exception) {}
     }
 
