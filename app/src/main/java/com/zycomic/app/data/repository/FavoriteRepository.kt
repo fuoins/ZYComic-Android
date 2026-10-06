@@ -60,17 +60,17 @@ object FavoriteRepository {
 
     // ==================== 单本收藏操作 ====================
 
-    /** 添加收藏：val=0。 */
+    /** 添加收藏：POST users/favorite, action=add。 */
     suspend fun addFavorite(bookId: Int, folderId: Int = 0) {
         checkLoggedIn()
-        val resp = api.favorite(FavoriteRequest(`val` = 0, bookId = bookId, folderId = folderId))
+        val resp = api.batchFavorite(BatchFavoriteRequest(ids = bookId.toString(), action = "add"))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "收藏失败" })
     }
 
-    /** 取消收藏：val=1 + action=del。 */
+    /** 取消收藏：POST users/favorite, action=del。 */
     suspend fun removeFavorite(bookId: Int) {
         checkLoggedIn()
-        val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId, action = "del"))
+        val resp = api.batchFavorite(BatchFavoriteRequest(ids = bookId.toString(), action = "del"))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "取消收藏失败" })
     }
 

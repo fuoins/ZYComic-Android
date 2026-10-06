@@ -125,9 +125,9 @@ interface ApiService {
     @POST("api/detail/favorite")
     suspend fun favorite(@Body body: FavoriteRequest): ApiResponse<JsonElement>
 
-    // ---------- 批量取消收藏 ----------
-    // body={"ids":"id1,id2","action":"del"}
-    @POST("api/detail/favorite")
+    // ---------- 收藏 add/del（单本/批量统一） ----------
+    // body={"ids":"id1,id2","action":"add|del"}
+    @POST("api/users/favorite")
     suspend fun batchFavorite(@Body body: BatchFavoriteRequest): ApiResponse<JsonElement>
 
     // ---------- 收藏分类 ----------

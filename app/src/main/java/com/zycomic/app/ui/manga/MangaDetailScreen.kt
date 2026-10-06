@@ -475,6 +475,7 @@ fun MangaDetailScreen(
                             // 横向滚动指示条：用 layoutInfo 实测 item 宽度，避免硬编码导致跳动
                             val li = lazyRowState.layoutInfo
                             val scrollProgress = when {
+                                !lazyRowState.canScrollForward -> 1f
                                 li.visibleItemsInfo.isEmpty() || li.totalItemsCount <= 1 -> 1f
                                 else -> {
                                     val first = li.visibleItemsInfo.first()
@@ -652,6 +653,7 @@ private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .width(96.dp)
+            .height(180.dp)
             .clickable(onClick = onClick),
     ) {
         AsyncImage(
@@ -659,7 +661,7 @@ private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
             contentDescription = manga.name,
             modifier = Modifier
                 .width(96.dp)
-                .aspectRatio(2f / 3f)
+                .height(144.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentScale = ContentScale.Crop,
