@@ -27,21 +27,3 @@ fun FilterSection(title: String, content: @Composable () -> Unit) {
         }
     }
 }
-
-@Composable
-fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit, bold: Boolean = false) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
-        )
-    }
-}
