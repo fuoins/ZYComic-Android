@@ -530,7 +530,8 @@ class ReaderActivity : BaseActivity() {
                 val chapterDomains = com.zycomic.app.data.repository.ReaderRepository.currentImgDomains
                 val allDomains = com.zycomic.app.net.RouteManager.imgDomains
                 val otherDomains = allDomains.filterNot { d -> chapterDomains.any { it.equals(d, true) } }
-                val currentDomain = com.zycomic.app.net.RouteManager.imgHost
+                val rm = com.zycomic.app.net.RouteManager
+                val currentDomain = if (rm.useFastestImgForAll) rm.fastestImgDomain ?: rm.imgHost else rm.imgHost
                 var imgTesting by remember { mutableStateOf(false) }
                 val scope = rememberCoroutineScope()
                 fun delayOf(domain: String): String {
@@ -621,24 +622,32 @@ class ReaderActivity : BaseActivity() {
                                     imgTesting = true
                                     scope.launch(Dispatchers.IO) {
                                         try {
+                                            val rm = com.zycomic.app.net.RouteManager
                                             val delays = com.zycomic.app.net.SpeedTester.testAllImgHosts()
-                                            com.zycomic.app.net.RouteManager.setLastDelays(com.zycomic.app.net.RouteManager.lastLineDelays, delays)
-                                            val fastest = delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-                                            if (fastest != null && fastest != com.zycomic.app.net.RouteManager.imgIndex) {
-                                                com.zycomic.app.net.RouteManager.setImgHost(fastest)
-                                                com.zycomic.app.net.NetworkModule.rebuild()
-                                                com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
-                                                launch(Dispatchers.Main) {
-                                                    showImgSourceDialog = false
-                                                    Toast.makeText(this@ReaderActivity, "已切换到最快图源", Toast.LENGTH_SHORT).show()
-                                                    val intent = intent
-                                                    finish()
-                                                    startActivity(intent)
+                                            rm.setLastDelays(rm.lastLineDelays, delays)
+                                            if (rm.useFastestImgForAll) {
+                                                val fastest = delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+                                                if (fastest != null && fastest != rm.imgIndex) {
+                                                    rm.setImgHost(fastest)
+                                                    com.zycomic.app.net.NetworkModule.rebuild()
+                                                    com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+                                                    launch(Dispatchers.Main) {
+                                                        showImgSourceDialog = false
+                                                        Toast.makeText(this@ReaderActivity, "已切换到最快图源", Toast.LENGTH_SHORT).show()
+                                                        val intent = intent
+                                                        finish()
+                                                        startActivity(intent)
+                                                    }
+                                                } else {
+                                                    launch(Dispatchers.Main) {
+                                                        imgTesting = false
+                                                        Toast.makeText(this@ReaderActivity, "测速完成，当前已是最快", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
                                             } else {
                                                 launch(Dispatchers.Main) {
                                                     imgTesting = false
-                                                    Toast.makeText(this@ReaderActivity, "测速完成，当前已是最快", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(this@ReaderActivity, "测速完成", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                         } catch (e: Exception) {

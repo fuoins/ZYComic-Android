@@ -333,8 +333,7 @@ object RouteManager {
     }
 
     // ---- 封面/章节统一用测速最快图源 ----
-    @Volatile
-    var useFastestImgForAll: Boolean = false
+    var useFastestImgForAll: Boolean by androidx.compose.runtime.mutableStateOf(false)
         private set
 
     fun loadUseFastestImgForAll() {
