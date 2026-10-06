@@ -240,7 +240,7 @@ fun ProfileScreen(
                             rewarding = true
                             showRewardDialog = false
                             runCatching { UserRepository.claimAdBonus() }
-                                .onSuccess { Toast.makeText(context, "领取成功，+$it积分", Toast.LENGTH_SHORT).show() }
+                                .onSuccess { Toast.makeText(context, "领取成功，+${it}积分", Toast.LENGTH_SHORT).show() }
                                 .onFailure { Toast.makeText(context, it.message ?: "领取失败", Toast.LENGTH_SHORT).show() }
                             rewarding = false
                         }
