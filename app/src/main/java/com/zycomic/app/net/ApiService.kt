@@ -113,6 +113,16 @@ interface ApiService {
     @POST("api/users/edit")
     suspend fun editUser(@Body body: JsonObject): ApiResponse<JsonElement>
 
+    @GET("api/index/wawaweise")
+    suspend fun getWawaWise(): okhttp3.ResponseBody
+
+    @GET("ad_click")
+    suspend fun adClick(
+        @Query("group") group: String,
+        @Query("link") link: String,
+        @Query("task") task: Int = 1,
+    ): okhttp3.ResponseBody
+
     @POST("api/account/logout")
     suspend fun logout(): ApiResponse<JsonElement>
 

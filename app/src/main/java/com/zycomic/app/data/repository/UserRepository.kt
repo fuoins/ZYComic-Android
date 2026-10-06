@@ -224,6 +224,30 @@ object UserRepository {
         return getWelfare()
     }
 
+    private suspend fun getAdLinks(): List<String> {
+        val html = api.getWawaWise().string()
+        return Regex("https?://s\\.chmsrv\\.com/click\\.php\\?d=[^\"'\\s<>]+").findAll(html).map { it.value }.toList()
+    }
+
+    private suspend fun clickAd(link: String) {
+        val encoded = java.net.URLEncoder.encode(link, "UTF-8")
+        api.adClick(group = "ad_wawaweise", link = encoded, task = 1)
+    }
+
+    suspend fun claimAdBonus(): Int {
+        val links = getAdLinks()
+        if (links.isEmpty()) throw IOException("未获取到广告链接")
+        val pointBefore = getWelfare()?.user_data?.point ?: 0
+        repeat(5) { i ->
+            clickAd(links[i % links.size])
+            kotlinx.coroutines.delay((1000..2000).random().toLong())
+        }
+        val pointAfter = getWelfare()?.user_data?.point ?: 0
+        val diff = pointAfter - pointBefore
+        if (diff <= 0) throw IOException("领取失败，积分未增加")
+        return diff
+    }
+
     /** 积分明细分页。 */
     suspend fun getPointLogs(page: Int): List<PointLog> {
         val resp = api.pointLogs(page)

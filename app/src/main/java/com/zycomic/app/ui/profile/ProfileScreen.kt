@@ -239,8 +239,8 @@ fun ProfileScreen(
                         scope.launch {
                             rewarding = true
                             showRewardDialog = false
-                            runCatching { UserRepository.getWelfare() }
-                                .onSuccess { Toast.makeText(context, "领取成功", Toast.LENGTH_SHORT).show() }
+                            runCatching { UserRepository.claimAdBonus() }
+                                .onSuccess { Toast.makeText(context, "领取成功，+$it积分", Toast.LENGTH_SHORT).show() }
                                 .onFailure { Toast.makeText(context, it.message ?: "领取失败", Toast.LENGTH_SHORT).show() }
                             rewarding = false
                         }
