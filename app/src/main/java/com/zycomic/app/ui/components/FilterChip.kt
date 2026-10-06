@@ -29,9 +29,9 @@ import androidx.compose.ui.unit.dp
 fun FilterChip(
     text: String,
     selected: Boolean,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
     bold: Boolean = false,
+    onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(percent = 50)
     val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
@@ -62,8 +62,8 @@ fun FilterChip(
 fun OutlinedFilterChip(
     text: String,
     selected: Boolean,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(percent = 50)
     val interaction = remember { MutableInteractionSource() }
