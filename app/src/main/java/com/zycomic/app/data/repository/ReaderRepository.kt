@@ -235,9 +235,10 @@ object ReaderRepository {
             }
         }
         return chapterContent.piclist.map { path ->
-            // piclist 可能已经是完整 URL（https://domain/...），直接使用；否则拼接域名
             if (path.startsWith("http://") || path.startsWith("https://")) {
-                path
+                if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
+                    path.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+                } else path
             } else {
                 val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"
                 "https://$domain$sep$path"

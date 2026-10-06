@@ -36,7 +36,12 @@ fun coverUrl(manga: Manga): String {
  */
 fun coverUrl(raw: String): String {
     if (raw.isBlank()) return ""
-    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
+            return raw.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+        }
+        return raw
+    }
     val host = if (RouteManager.useFastestImgForAll) RouteManager.fastestImgDomain ?: RouteManager.imgHost else RouteManager.imgHost
     val sep = if (raw.startsWith("/")) "" else "/"
     return "https://$host$sep$raw"
