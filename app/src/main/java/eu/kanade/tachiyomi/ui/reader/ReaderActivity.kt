@@ -659,7 +659,7 @@ class ReaderActivity : BaseActivity() {
                                     }
                                 },
                                 enabled = !imgTesting,
-                            ) { Text(if (imgTesting) "测速中..." else "测速") }
+                            ) { Text(if (imgTesting) "测速中..." else "重新测速") }
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = { showImgSourceDialog = false }) { Text("取消") }
                         }

@@ -191,6 +191,16 @@ fun AppContent() {
     val browseVm = remember { BrowseViewModel() }
     val libraryVm = remember { LibraryViewModel(mode = 0) }
     val historyVm = remember { HistoryViewModel() }
+    androidx.activity.compose.BackHandler(
+        enabled = detailBookId != null || showSearch || loginOpen || settingsDialog != null,
+    ) {
+        when {
+            settingsDialog != null -> settingsDialog = null
+            detailBookId != null -> detailBookId = null
+            showSearch -> { showSearch = false }
+            loginOpen -> loginOpen = false
+        }
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.navigationBars,
