@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.text.SelectionContainer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -267,7 +268,7 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { showAdDebug = null },
             title = { Text("调试信息") },
-            text = { androidx.compose.foundation.text.SelectionContainer { Text(dbg, style = MaterialTheme.typography.bodySmall) } },
+            text = { SelectionContainer { Text(dbg, style = MaterialTheme.typography.bodySmall) } },
             confirmButton = { TextButton(onClick = { showAdDebug = null }) { Text("关闭") } },
         )
     }
