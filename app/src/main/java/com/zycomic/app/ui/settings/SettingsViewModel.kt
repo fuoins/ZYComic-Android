@@ -253,15 +253,21 @@ class SettingsViewModel {
             imgDelays.value = imgs
             RouteManager.setLastDelays(lines, imgs)
 
-            // 只自动选最快线路，图源不自动选（打开章节时用服务端推荐的 _CURRENT_IMG_DOMAIN）
             val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+            val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
 
             if (bestLine != null) {
                 RouteManager.setLine(bestLine)
                 currentLineIndex.value = bestLine
+            }
+            if (bestImg != null && bestImg != RouteManager.imgIndex) {
+                RouteManager.setImgHost(bestImg)
+                currentImgIndex.value = bestImg
+            }
+            if (bestLine != null || bestImg != null) {
                 NetworkModule.rebuild()
             }
-            (bestLine ?: RouteManager.lineIndex) to RouteManager.imgIndex
+            (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
         } finally {
             autoSelecting.value = false
         }
