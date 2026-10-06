@@ -65,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.WelfareData
+import com.zycomic.app.data.dto.SignDay
 import com.zycomic.app.data.repository.UserRepository
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
@@ -427,7 +428,7 @@ private fun SignCalendarSection(
         val n = currentMonthLd.plusMonths(1)
         String.format("%04d-%02d-01", n.year, n.monthValue)
     }
-    val consecutive = welfare?.user_data?.consecutiveDays ?: 0
+    val consecutive = welfare?.consecutive_sign?.takeIf { it > 0 } ?: welfare?.user_data?.consecutiveDays ?: 0
     val point = welfare?.user_data?.point ?: 0
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -463,7 +464,7 @@ private fun SignCalendarSection(
         Spacer(Modifier.height(12.dp))
 
         Row(modifier = Modifier.fillMaxWidth()) {
-            listOf("日", "一", "二", "三", "四", "五", "六").forEach { day ->
+            listOf("一", "二", "三", "四", "五", "六", "日").forEach { day ->
                 Text(
                     day,
                     style = MaterialTheme.typography.bodySmall,
@@ -499,28 +500,12 @@ private fun SignCalendarSection(
                 modifier = Modifier.padding(16.dp),
             )
             else -> {
-                val leadingBlanks = remember(welfare) {
-                    val prev = welfare.prev_date.takeIf { it.isNotEmpty() }
-                    if (prev != null) {
-                        runCatching { (LocalDate.parse(prev).dayOfWeek.value % 7 + 1) % 7 }.getOrDefault(0)
-                    } else {
-                        runCatching { LocalDate.parse(welfare.sign_list.first().date).dayOfWeek.value % 7 }.getOrDefault(0)
-                    }
-                }
-                val days = welfare.sign_list
-                val firstRowCount = (7 - leadingBlanks).coerceAtMost(days.size)
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    repeat(leadingBlanks) { Spacer(modifier = Modifier.weight(1f)) }
-                    days.take(firstRowCount).forEach { day ->
-                        SignDayCell(date = day.date, signed = day.signed, isToday = day.date == today)
-                    }
-                }
-                days.drop(firstRowCount).chunked(7).forEach { week ->
+                welfare.sign_list.chunked(7).forEach { week ->
                     Row(modifier = Modifier.fillMaxWidth()) {
                         week.forEach { day ->
-                            SignDayCell(date = day.date, signed = day.signed, isToday = day.date == today)
+                            SignDayCell(day = day, isToday = day.date == today)
                         }
-                        repeat(7 - week.size) { Spacer(modifier = Modifier.weight(1f)) }
+                        repeat(7 - week.size) { Box(modifier = Modifier.weight(1f)) }
                     }
                 }
             }
@@ -558,18 +543,23 @@ private fun SignCalendarSection(
 
 /** 签到日历中的单个日期格子。 */
 @Composable
-private fun SignDayCell(date: String, signed: Boolean, isToday: Boolean) {
-    val dayNum = try {
-        LocalDate.parse(date).dayOfMonth
-    } catch (_: Exception) {
-        0
-    }
+private fun SignDayCell(day: SignDay, isToday: Boolean) {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
+            .weight(1f)
             .padding(4.dp),
         contentAlignment = Alignment.Center,
     ) {
+        if (day.isPlaceholder) {
+            Box(Modifier.size(32.dp))
+            return@Box
+        }
+        val bg = when {
+            day.isSigned -> MaterialTheme.colorScheme.primary
+            day.isMissed -> MaterialTheme.colorScheme.surfaceVariant
+            day.isFuture -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        }
         Box(
             modifier = Modifier
                 .size(32.dp)
@@ -578,16 +568,13 @@ private fun SignDayCell(date: String, signed: Boolean, isToday: Boolean) {
                     if (isToday) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
                     else Modifier,
                 )
-                .background(
-                    if (signed) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant,
-                ),
+                .background(bg),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                if (signed) "✓" else dayNum.toString(),
+                if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (signed) MaterialTheme.colorScheme.onPrimary
+                color = if (day.isSigned) MaterialTheme.colorScheme.onPrimary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

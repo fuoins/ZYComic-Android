@@ -22,6 +22,7 @@ data class WelfareData(
     val sign_list: List<SignDay> = emptyList(),
     val prev_date: String = "",
     val next_date: String = "",
+    val consecutive_sign: Int = 0,
     @Serializable(with = BooleanOrIntSerializer::class)
     val ad_bonus: Boolean = false,
     @Serializable(with = BooleanOrIntSerializer::class)
@@ -38,9 +39,15 @@ data class WelfareUserData(
 @Serializable
 data class SignDay(
     val date: String = "",
-    @Serializable(with = BooleanOrIntSerializer::class)
-    val signed: Boolean = false,
-)
+    val status: String = "",
+    val index: String? = null,
+) {
+    val isSigned: Boolean get() = status == "signedin"
+    val isMissed: Boolean get() = status == "signednot"
+    val isFuture: Boolean get() = status == "signedyet"
+    val isPlaceholder: Boolean get() = status.isEmpty()
+    val dayNum: Int? get() = index?.toIntOrNull()
+}
 
 /** 积分明细项 */
 @Serializable
