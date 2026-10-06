@@ -43,7 +43,7 @@ fun LoginOverlay(onClose: () -> Unit) {
 }
 
 @Composable
-fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {}) {
+fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () -> Unit = {}) {
     val mode by vm.mode.collectAsState()
     val username by vm.username.collectAsState()
     val password by vm.password.collectAsState()
