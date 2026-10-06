@@ -503,7 +503,7 @@ private fun SignCalendarSection(
                 welfare.sign_list.chunked(7).forEach { week ->
                     Row(modifier = Modifier.fillMaxWidth()) {
                         week.forEach { day ->
-                            SignDayCell(day = day, isToday = day.date == today)
+                            Box(modifier = Modifier.weight(1f)) { SignDayCell(day = day, isToday = day.date == today) }
                         }
                         repeat(7 - week.size) { Box(modifier = Modifier.weight(1f)) }
                     }
@@ -546,7 +546,6 @@ private fun SignCalendarSection(
 private fun SignDayCell(day: SignDay, isToday: Boolean) {
     Box(
         modifier = Modifier
-            .weight(1f)
             .padding(4.dp),
         contentAlignment = Alignment.Center,
     ) {
