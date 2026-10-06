@@ -274,7 +274,8 @@ fun AppContent() {
                 )
             }
         }
-    } else {
+    }
+} else {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator()
