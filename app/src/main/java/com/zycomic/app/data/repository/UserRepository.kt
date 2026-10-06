@@ -235,12 +235,17 @@ object UserRepository {
         api.adClick(group = "ad_wawaweise", link = encoded, task = 1)
     }
 
+    class AdDebugException(val debug: String) : IOException("广告链接提取失败")
+
     suspend fun claimAdBonus(): Int {
         val pointBefore = getUserInfo().point
         val html = api.getWawaWise().string()
         val helper = com.zycomic.app.net.AdClickHelper(appCtx)
+        val debug = StringBuilder("html前200: " + html.take(200))
         repeat(5) {
-            val link = helper.getAdLink(html) ?: throw IOException("广告链接提取失败")
+            val r = helper.getAdLink(html)
+            debug.append("\n[click${it + 1}] ").append(r.debug)
+            val link = r.link ?: throw AdDebugException(debug.toString())
             clickAd(link)
             kotlinx.coroutines.delay(1000)
         }

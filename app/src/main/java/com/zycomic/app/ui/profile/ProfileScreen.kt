@@ -86,6 +86,7 @@ fun ProfileScreen(
     var showPointLogs by remember { mutableStateOf(false) }
     var showChangePwd by remember { mutableStateOf(false) }
     var showRewardDialog by remember { mutableStateOf(false) }
+    var showAdDebug by remember { mutableStateOf<String?>(null) }
     var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -241,7 +242,13 @@ fun ProfileScreen(
                             showRewardDialog = false
                             runCatching { UserRepository.claimAdBonus() }
                                 .onSuccess { Toast.makeText(context, "领取成功，+${it}积分", Toast.LENGTH_SHORT).show() }
-                                .onFailure { Toast.makeText(context, it.message ?: "领取失败", Toast.LENGTH_SHORT).show() }
+                                .onFailure {
+                                    if (it is UserRepository.AdDebugException) {
+                                        showAdDebug = it.debug
+                                    } else {
+                                        Toast.makeText(context, it.message ?: "领取失败", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             rewarding = false
                         }
                     },
@@ -253,6 +260,15 @@ fun ProfileScreen(
             dismissButton = {
                 TextButton(onClick = { showRewardDialog = false }) { Text("取消") }
             },
+        )
+    }
+
+    showAdDebug?.let { dbg ->
+        AlertDialog(
+            onDismissRequest = { showAdDebug = null },
+            title = { Text("调试信息") },
+            text = { androidx.compose.foundation.text.SelectionContainer { Text(dbg, style = MaterialTheme.typography.bodySmall) } },
+            confirmButton = { TextButton(onClick = { showAdDebug = null }) { Text("关闭") } },
         )
     }
 }
