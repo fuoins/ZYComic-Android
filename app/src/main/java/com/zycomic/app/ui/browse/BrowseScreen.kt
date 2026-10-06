@@ -278,11 +278,11 @@ private fun BrowseTabContent(
     onLongClick: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
 ) {
-    val mangas by vm.mangas.collectAsState()
-    val loading by vm.loading.collectAsState()
-    val appending by vm.appending.collectAsState()
-    val hasMore by vm.hasMore.collectAsState()
-    val error by vm.error.collectAsState()
+    val mangas by vm.mangasForTab(page).collectAsState()
+    val loading by vm.loadingForTab(page).collectAsState()
+    val appending by vm.appendingForTab(page).collectAsState()
+    val hasMore by vm.hasMoreForTab(page).collectAsState()
+    val error by vm.errorForTab(page).collectAsState()
 
     // 每个tab独立的滚动状态，避免切换tab时内容重叠
     val gridStates = remember { Array(3) { LazyGridState() } }
@@ -292,8 +292,8 @@ private fun BrowseTabContent(
 
     LaunchedEffect(gridState.canScrollForward, mangas.size) {
         val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading) {
-            vm.loadMore()
+        if (page == vm.mainTab.value && mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading) {
+            vm.loadMore(page)
         }
     }
 

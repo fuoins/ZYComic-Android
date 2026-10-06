@@ -50,6 +50,12 @@ class BrowseViewModel {
     val error: StateFlow<String?> get() = cur.error
     val hasMore: StateFlow<Boolean> get() = cur.hasMore
 
+    fun mangasForTab(tab: Int): StateFlow<List<Manga>> = tabStates[tab].mangas
+    fun loadingForTab(tab: Int): StateFlow<Boolean> = tabStates[tab].loading
+    fun appendingForTab(tab: Int): StateFlow<Boolean> = tabStates[tab].appending
+    fun hasMoreForTab(tab: Int): StateFlow<Boolean> = tabStates[tab].hasMore
+    fun errorForTab(tab: Int): StateFlow<String?> = tabStates[tab].error
+
     // ---- 分类筛选状态 ----
     val gender = MutableStateFlow(2)            // 默认 2 一般向
     val selectedTags = MutableStateFlow<Set<String>>(emptySet()) // 空=全部
@@ -219,15 +225,14 @@ class BrowseViewModel {
         currentJob = scope.launch { doLoad(reset = true) }
     }
 
-    fun loadMore() {
-        val ts = cur
+    fun loadMore(tab: Int) {
+        val ts = tabStates[tab]
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
-        currentJob = scope.launch { doLoad(reset = false) }
+        currentJob = scope.launch { doLoad(reset = false, tab = tab) }
     }
 
-    private suspend fun doLoad(reset: Boolean) {
-        val ts = cur
-        val tab = mainTab.value
+    private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
+        val ts = tabStates[tab]
         // 自增请求序号；用于判断本次结果是否已被更新的请求取代
         val reqId = requestSeq.incrementAndGet()
         if (reset) {
