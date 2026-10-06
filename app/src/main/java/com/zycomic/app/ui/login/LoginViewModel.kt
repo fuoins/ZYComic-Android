@@ -70,7 +70,7 @@ class LoginViewModel {
         val p = password.value
         val e = email.value.trim()
         val code = authCode.value.trim()
-        if (!u.matches(Regex("^[a-zA-Z0-9]{6,32}$"))) { _error.value = "账号仅限英文数字, 6-32位"; return }
+        if (u.isEmpty()) { _error.value = "请输入账号"; return }
         if (p.isEmpty() || p != confirmPassword.value) { _error.value = "两次密码不一致"; return }
         if (e.isEmpty()) { _error.value = "请输入邮箱"; return }
         if (code.isEmpty()) { _error.value = "请输入邮箱验证码"; return }

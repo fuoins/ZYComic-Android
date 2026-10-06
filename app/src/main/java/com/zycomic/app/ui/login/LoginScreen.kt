@@ -70,7 +70,6 @@ fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {})
         Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(value = username, onValueChange = { vm.username.value = it }, label = { Text("账号") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        if (mode == 1) Text("账号不能用中文，仅限英文与数字，长度6-32个字", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(value = password, onValueChange = { vm.password.value = it }, label = { Text("密码") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
 
