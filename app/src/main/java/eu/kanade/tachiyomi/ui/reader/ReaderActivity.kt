@@ -542,6 +542,7 @@ class ReaderActivity : BaseActivity() {
                         else -> "${d}ms"
                     }
                 }
+                @Composable
                 fun delayColor(domain: String): androidx.compose.ui.graphics.Color {
                     val idx = allDomains.indexOfFirst { it.equals(domain, true) }
                     val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
