@@ -35,6 +35,7 @@ class SettingsViewModel {
     val currentLineIndex = MutableStateFlow(RouteManager.lineIndex)
     val currentImgIndex = MutableStateFlow(RouteManager.imgIndex)
     val autoSelectEnabled = MutableStateFlow(RouteManager.autoSelectEnabled)
+    val useFastestImgForAll = MutableStateFlow(RouteManager.useFastestImgForAll)
     /** 手动测速进行中（设置页"重新测速"按钮） */
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
@@ -154,6 +155,12 @@ class SettingsViewModel {
         RouteManager.setAutoSelectEnabled(v)
         autoSelectEnabled.value = v
         toast.value = if (v) "已开启自动选线" else "已关闭自动选线（手动模式）"
+    }
+
+    fun setUseFastestImgForAll(v: Boolean) {
+        RouteManager.setUseFastestImgForAll(v)
+        useFastestImgForAll.value = v
+        toast.value = if (v) "已开启：封面和章节用测速最快图源" else "已关闭：用服务端推荐图源"
     }
 
     /** 切换图源：更新 imgHost 并清除 Coil 缓存，避免旧图源图片/封面被缓存命中。 */

@@ -128,6 +128,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadImgIndex()
         // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）
         com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
+        // 恢复"封面/章节用测速最快图源"偏好
+        com.zycomic.app.net.RouteManager.loadUseFastestImgForAll()
         // 合并本地缓存的服务端下发线路（只增不减）
         com.zycomic.app.net.RouteManager.loadServerLinesFromPrefs()
         // 合并持久化的图源列表

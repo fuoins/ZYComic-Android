@@ -225,8 +225,14 @@ object ReaderRepository {
      * @return 完整图片 URL 列表
      */
     fun getImageUrls(chapterContent: ChapterContent): List<String> {
-        val domain = chapterContent.currentImgDomain.ifBlank {
-            chapterContent.imgDomains.firstOrNull() ?: return emptyList()
+        val domain = if (RouteManager.useFastestImgForAll) {
+            RouteManager.fastestImgDomain ?: chapterContent.currentImgDomain.ifBlank {
+                chapterContent.imgDomains.firstOrNull() ?: return emptyList()
+            }
+        } else {
+            chapterContent.currentImgDomain.ifBlank {
+                chapterContent.imgDomains.firstOrNull() ?: return emptyList()
+            }
         }
         return chapterContent.piclist.map { path ->
             // piclist 可能已经是完整 URL（https://domain/...），直接使用；否则拼接域名

@@ -26,10 +26,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
@@ -117,6 +122,7 @@ import exh.util.mangaType
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableSet
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -525,6 +531,26 @@ class ReaderActivity : BaseActivity() {
                 val allDomains = com.zycomic.app.net.RouteManager.imgDomains
                 val otherDomains = allDomains.filterNot { d -> chapterDomains.any { it.equals(d, true) } }
                 val currentDomain = com.zycomic.app.net.RouteManager.imgHost
+                var imgTesting by remember { mutableStateOf(false) }
+                val scope = rememberCoroutineScope()
+                fun delayOf(domain: String): String {
+                    val idx = allDomains.indexOfFirst { it.equals(domain, true) }
+                    val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
+                    return when {
+                        d == null -> "--"
+                        d == Long.MAX_VALUE -> "超时"
+                        else -> "${d}ms"
+                    }
+                }
+                fun delayColor(domain: String): androidx.compose.ui.graphics.Color {
+                    val idx = allDomains.indexOfFirst { it.equals(domain, true) }
+                    val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
+                    return when {
+                        d == null || d == Long.MAX_VALUE -> MaterialTheme.colorScheme.onSurfaceVariant
+                        d < 300 -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                }
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
                     title = { Text("切换图源") },
@@ -539,17 +565,22 @@ class ReaderActivity : BaseActivity() {
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                             chapterDomains.forEach { domain ->
-                                val isSelected = domain == currentDomain
-                                TextButton(
-                                    onClick = {
-                                        showImgSourceDialog = false
-                                        switchImgSource(domain)
-                                    },
+                                val isSelected = domain.equals(currentDomain, true)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clickable {
+                                            showImgSourceDialog = false
+                                            switchImgSource(domain)
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                 ) {
                                     Text(
                                         text = if (isSelected) "● $domain" else "○ $domain",
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
                                     )
+                                    Text(delayOf(domain), style = MaterialTheme.typography.bodySmall, color = delayColor(domain))
                                 }
                             }
                             if (chapterDomains.isEmpty()) {
@@ -562,24 +593,65 @@ class ReaderActivity : BaseActivity() {
                                 modifier = Modifier.padding(top = 8.dp),
                             )
                             otherDomains.forEach { domain ->
-                                val isSelected = domain == currentDomain
-                                TextButton(
-                                    onClick = {
-                                        showImgSourceDialog = false
-                                        switchImgSource(domain)
-                                    },
+                                val isSelected = domain.equals(currentDomain, true)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clickable {
+                                            showImgSourceDialog = false
+                                            switchImgSource(domain)
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                 ) {
                                     Text(
                                         text = if (isSelected) "● $domain" else "○ $domain",
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
                                     )
+                                    Text(delayOf(domain), style = MaterialTheme.typography.bodySmall, color = delayColor(domain))
                                 }
                             }
                         }
                     },
                     confirmButton = {
-                        TextButton(onClick = { showImgSourceDialog = false }) {
-                            Text("取消")
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = {
+                                    imgTesting = true
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgHosts()
+                                            com.zycomic.app.net.RouteManager.setLastDelays(com.zycomic.app.net.RouteManager.lastLineDelays, delays)
+                                            val fastest = delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+                                            if (fastest != null && fastest != com.zycomic.app.net.RouteManager.imgIndex) {
+                                                com.zycomic.app.net.RouteManager.setImgHost(fastest)
+                                                com.zycomic.app.net.NetworkModule.rebuild()
+                                                com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+                                                launch(Dispatchers.Main) {
+                                                    showImgSourceDialog = false
+                                                    Toast.makeText(this@ReaderActivity, "已切换到最快图源", Toast.LENGTH_SHORT).show()
+                                                    val intent = intent
+                                                    finish()
+                                                    startActivity(intent)
+                                                }
+                                            } else {
+                                                launch(Dispatchers.Main) {
+                                                    imgTesting = false
+                                                    Toast.makeText(this@ReaderActivity, "测速完成，当前已是最快", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            launch(Dispatchers.Main) {
+                                                imgTesting = false
+                                                Toast.makeText(this@ReaderActivity, "测速失败", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                },
+                                enabled = !imgTesting,
+                            ) { Text(if (imgTesting) "测速中..." else "测速") }
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { showImgSourceDialog = false }) { Text("取消") }
                         }
                     },
                 )

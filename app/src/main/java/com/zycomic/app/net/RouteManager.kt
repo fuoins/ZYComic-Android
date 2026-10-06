@@ -332,6 +332,35 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
+    // ---- 封面/章节统一用测速最快图源 ----
+    @Volatile
+    var useFastestImgForAll: Boolean = false
+        private set
+
+    fun loadUseFastestImgForAll() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            useFastestImgForAll = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .getBoolean("use_fastest_img_for_all", false)
+        } catch (_: Exception) {}
+    }
+
+    fun setUseFastestImgForAll(v: Boolean) {
+        useFastestImgForAll = v
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("use_fastest_img_for_all", v).apply()
+        } catch (_: Exception) {}
+    }
+
+    /** 从 lastImgDelays 取测速最快的图源域名，无数据返回 null。 */
+    val fastestImgDomain: String?
+        get() {
+            val idx = lastImgDelays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key ?: return null
+            return imgDomains.getOrNull(idx)
+        }
+
     /** 临时切换到下一条线路（不持久化）。 */
     fun selectNextLine() {
         lineIndex = (lineIndex + 1) % lineHosts.size

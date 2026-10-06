@@ -111,7 +111,7 @@ object ManwaSource : HttpSource() {
         val raw = dto.picx.ifBlank { dto.pic }
         if (raw.isBlank()) return ""
         if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
-        val host = RouteManager.imgHost
+        val host = if (RouteManager.useFastestImgForAll) RouteManager.fastestImgDomain ?: RouteManager.imgHost else RouteManager.imgHost
         val sep = if (raw.startsWith("/")) "" else "/"
         return "https://$host$sep$raw"
     }

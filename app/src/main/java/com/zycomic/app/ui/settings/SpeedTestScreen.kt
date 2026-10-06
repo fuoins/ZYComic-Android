@@ -39,6 +39,7 @@ fun SpeedTestScreen(
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
+    val useFastestImg by vm.useFastestImgForAll.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
 
     Scaffold(
@@ -78,6 +79,23 @@ fun SpeedTestScreen(
                             )
                         }
                         Switch(checked = autoSel, onCheckedChange = { vm.setAutoSelectEnabled(it) })
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("封面和章节用测速最快图源", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (useFastestImg) "已开启：封面和章节图片都用测速最快图源"
+                                else "已关闭：封面用当前图源，章节用服务端推荐",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = useFastestImg, onCheckedChange = { vm.setUseFastestImgForAll(it) })
                     }
                 }
                 item {
