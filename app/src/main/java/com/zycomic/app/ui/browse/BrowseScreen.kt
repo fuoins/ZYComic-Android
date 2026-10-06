@@ -477,7 +477,7 @@ private fun BrowseFilterDialog(
                     2 -> RankFilter(vm)
                 }
             } else {
-                DisplayFilter(vm)
+                DisplayFilter(vm, orientation)
             }
         }
     }
@@ -556,7 +556,7 @@ private fun RankFilter(vm: BrowseViewModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DisplayFilter(vm: BrowseViewModel) {
+private fun DisplayFilter(vm: BrowseViewModel, orientation: Int) {
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
 
@@ -578,7 +578,6 @@ private fun DisplayFilter(vm: BrowseViewModel) {
     }
 }
 
-@Composable
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagSelectDialog(vm: BrowseViewModel, onDismiss: () -> Unit) {

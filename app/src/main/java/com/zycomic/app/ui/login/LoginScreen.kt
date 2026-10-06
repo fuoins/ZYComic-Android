@@ -36,6 +36,13 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.FilterChip
 
 @Composable
+fun LoginOverlay(onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
+        LoginScreen(onClose = onClose)
+    }
+}
+
+@Composable
 fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {}) {
     val mode by vm.mode.collectAsState()
     val username by vm.username.collectAsState()
