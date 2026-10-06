@@ -75,6 +75,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalContext
+import tachiyomi.presentation.core.util.drawHorizontalScrollbar
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -458,54 +459,19 @@ fun MangaDetailScreen(
                         )
                     } else {
                         val lazyRowState = rememberLazyListState()
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            LazyRow(
-                                state = lazyRowState,
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                    horizontal = 16.dp,
-                                    vertical = 8.dp,
-                                ),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                items(d.loveList) { m ->
-                                    RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
-                                }
-                            }
-                            // 横向滚动指示条：用 layoutInfo 实测 item 宽度，避免硬编码导致跳动
-                            val li = lazyRowState.layoutInfo
-                            val scrollProgress = when {
-                                !lazyRowState.canScrollForward -> 1f
-                                li.visibleItemsInfo.isEmpty() || li.totalItemsCount <= 1 -> 1f
-                                else -> {
-                                    val first = li.visibleItemsInfo.first()
-                                    val avgItem = li.visibleItemsInfo.map { it.size }.average().toFloat()
-                                    val viewport = (li.viewportEndOffset - li.viewportStartOffset).toFloat()
-                                    val maxScroll = avgItem * 10 - viewport
-                                    if (maxScroll <= 0f) {
-                                        1f
-                                    } else {
-                                        val scrolled = first.index * avgItem - first.offset
-                                        (scrolled / maxScroll).coerceIn(0f, 1f)
-                                    }
-                                }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 24.dp, vertical = 4.dp)
-                                    .height(3.dp)
-                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(0.3f)
-                                        .align(Alignment.CenterStart)
-                                        .offset(x = (scrollProgress * 0.7f * 100).coerceIn(0f, 70f).dp)
-                                        .background(MaterialTheme.colorScheme.primary),
-                                )
+                        LazyRow(
+                            state = lazyRowState,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 16.dp,
+                                vertical = 8.dp,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .drawHorizontalScrollbar(lazyRowState),
+                        ) {
+                            items(d.loveList) { m ->
+                                RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
                             }
                         }
                     }
