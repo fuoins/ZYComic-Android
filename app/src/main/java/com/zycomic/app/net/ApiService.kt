@@ -98,7 +98,13 @@ interface ApiService {
     suspend fun login(@Body body: LoginRequest): ApiResponse<User>
 
     @POST("api/account/register")
-    suspend fun register(@Body body: LoginRequest): ApiResponse<User>
+    suspend fun register(@Body body: com.zycomic.app.data.dto.RegisterRequest): ApiResponse<User>
+
+    @POST("api/account/sendAuth")
+    suspend fun sendAuth(@Body body: com.zycomic.app.data.dto.SendAuthRequest): ApiResponse<kotlinx.serialization.json.JsonElement>
+
+    @GET("api/captcha")
+    suspend fun getCaptcha(): okhttp3.ResponseBody
 
     @POST("api/account/logout")
     suspend fun logout(): ApiResponse<JsonElement>

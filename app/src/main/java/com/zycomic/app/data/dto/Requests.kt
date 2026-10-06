@@ -7,6 +7,22 @@ import kotlinx.serialization.SerialName
 data class LoginRequest(
     val username: String,
     val password: String,
+    val captcha: String = "",
+)
+
+@Serializable
+data class RegisterRequest(
+    val username: String,
+    val password: String,
+    val email: String,
+    val auth_code: String,
+)
+
+@Serializable
+data class SendAuthRequest(
+    val email: String,
+    val type: String,
+    val username: String,
 )
 
 /**

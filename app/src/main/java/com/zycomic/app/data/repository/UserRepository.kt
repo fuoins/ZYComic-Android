@@ -89,8 +89,8 @@ object UserRepository {
     /**
      * 登录：先调 /account/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow 并持久化。
      */
-    suspend fun login(username: String, password: String): User {
-        val loginResp = api.login(LoginRequest(username, password))
+    suspend fun login(username: String, password: String, captcha: String = ""): User {
+        val loginResp = api.login(LoginRequest(username, password, captcha))
         if (loginResp.code != 1) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
 
         // 登录后手动写入 uid cookie（服务端可能不自动设置，后续请求必须携带）
@@ -113,17 +113,22 @@ object UserRepository {
     /**
      * 注册：调用 /account/register。成功后自动登录态由 cookie 维持。
      */
-    suspend fun register(username: String, password: String, email: String): User {
-        // 注册接口当前 DTO 仅支持 username/password；email 参数保留以兼容未来扩展
-        val resp = api.register(LoginRequest(username, password))
+    suspend fun register(username: String, password: String, email: String, authCode: String): User {
+        val resp = api.register(com.zycomic.app.data.dto.RegisterRequest(username, password, email, authCode))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "注册失败" })
 
-        // 注册成功后拉取用户信息
         val info = getUserInfo()
         _userFlow.value = info
         saveUserInfoLocal(info)
         return info
     }
+
+    suspend fun sendAuth(email: String, username: String) {
+        val resp = api.sendAuth(com.zycomic.app.data.dto.SendAuthRequest(email, "register", username))
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "发送验证码失败" })
+    }
+
+    suspend fun getCaptcha(): ByteArray = api.getCaptcha().bytes()
 
     /**
      * 登出：先调用服务端登出 API，再清除全局 cookie 和本地用户信息，userFlow 置 null。
