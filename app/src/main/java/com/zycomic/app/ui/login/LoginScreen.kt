@@ -87,7 +87,7 @@ fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {})
                     Image(
                         bitmap = BitmapFactory.decodeByteArray(it, 0, it.size).asImageBitmap(),
                         contentDescription = "验证码",
-                        modifier = Modifier.width(100.dp).height(40.dp).let { it.then(androidx.compose.foundation.Modifier.clickable(onClick = { vm.refreshCaptcha() })) },
+                        modifier = Modifier.width(100.dp).height(40.dp).androidx.compose.foundation.clickable { vm.refreshCaptcha() },
                     )
                 }
                 OutlinedTextField(value = captchaInput, onValueChange = { vm.captchaInput.value = it }, label = { Text("验证码") }, singleLine = true, modifier = Modifier.weight(1f))

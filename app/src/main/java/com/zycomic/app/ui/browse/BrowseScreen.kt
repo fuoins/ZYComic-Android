@@ -241,6 +241,7 @@ fun BrowseScreen(
         BrowseFilterDialog(
             vm = vm,
             currentTab = mainTab,
+            orientation = orientation,
             onDismiss = { showFilterDialog = false },
             onOpenTagDialog = { showTagDialog = true },
         )
@@ -457,6 +458,7 @@ private fun MangaGridItem(
 private fun BrowseFilterDialog(
     vm: BrowseViewModel,
     currentTab: Int,
+    orientation: Int,
     onDismiss: () -> Unit,
     onOpenTagDialog: () -> Unit,
 ) {
