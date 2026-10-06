@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.FilterChip
+import androidx.compose.foundation.clickable
 
 @Composable
 fun LoginOverlay(onClose: () -> Unit) {
@@ -87,7 +88,7 @@ fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {})
                     Image(
                         bitmap = BitmapFactory.decodeByteArray(it, 0, it.size).asImageBitmap(),
                         contentDescription = "验证码",
-                        modifier = Modifier.width(100.dp).height(40.dp).androidx.compose.foundation.clickable { vm.refreshCaptcha() },
+                        modifier = Modifier.width(100.dp).height(40.dp).clickable { vm.refreshCaptcha() },
                     )
                 }
                 OutlinedTextField(value = captchaInput, onValueChange = { vm.captchaInput.value = it }, label = { Text("验证码") }, singleLine = true, modifier = Modifier.weight(1f))
