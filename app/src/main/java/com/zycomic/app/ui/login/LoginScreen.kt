@@ -72,8 +72,8 @@ fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {})
         Text("ZYComic", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip("登录", mode == 0) { vm.mode.value = 0 }
-            FilterChip("注册", mode == 1) { vm.mode.value = 1 }
+            FilterChip("登录", selected = mode == 0) { vm.mode.value = 0 }
+            FilterChip("注册", selected = mode == 1) { vm.mode.value = 1 }
         }
         Spacer(Modifier.height(24.dp))
 

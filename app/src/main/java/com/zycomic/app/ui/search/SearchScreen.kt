@@ -136,9 +136,9 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     com.zycomic.app.ui.components.FilterSection("显示模式") {
-                        com.zycomic.app.ui.components.FilterChip("紧凑网格", displayMode == 0) { vm.setDisplayMode(0) }
-                        com.zycomic.app.ui.components.FilterChip("舒适网格", displayMode == 1) { vm.setDisplayMode(1) }
-                        com.zycomic.app.ui.components.FilterChip("仅封面网格", displayMode == 2) { vm.setDisplayMode(2) }
+                        com.zycomic.app.ui.components.FilterChip("紧凑网格", selected = displayMode == 0) { vm.setDisplayMode(0) }
+                        com.zycomic.app.ui.components.FilterChip("舒适网格", selected = displayMode == 1) { vm.setDisplayMode(1) }
+                        com.zycomic.app.ui.components.FilterChip("仅封面网格", selected = displayMode == 2) { vm.setDisplayMode(2) }
                     }
                     com.zycomic.app.ui.components.FilterSection("每行数量") {
                         Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
