@@ -237,12 +237,13 @@ object UserRepository {
     suspend fun claimAdBonus(): Int {
         val links = getAdLinks()
         if (links.isEmpty()) throw IOException("未获取到广告链接")
-        val pointBefore = getWelfare()?.user_data?.point ?: 0
+        val pointBefore = getUserInfo().point
         repeat(5) { i ->
             clickAd(links[i % links.size])
             kotlinx.coroutines.delay((1000..2000).random().toLong())
         }
-        val pointAfter = getWelfare()?.user_data?.point ?: 0
+        getWelfare()
+        val pointAfter = getUserInfo().point
         val diff = pointAfter - pointBefore
         if (diff <= 0) throw IOException("领取失败，积分未增加")
         return diff
