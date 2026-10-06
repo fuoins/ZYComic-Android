@@ -21,15 +21,15 @@ object RouteManager {
 
     // ---- 8 条线路 ----
     val LINE_HOSTS: List<String> = listOf(
-        "https://mseeowpm.online",   // 1
-        "https://mseeowpm.cc",       // 2
-        "http://mseeowpm.pro",       // 3
-        "http://mseeowpm2.cc",       // 4
-        "https://mseeowpma.cc",      // 5
-        "http://mseeowpm1.xyz",      // 6
+        "https://mseeowpm.online",
+        "https://mseeowpm.cc",
+        "http://mseeowpm.pro",
+        "http://mseeowpm2.cc",
+        "https://mseeowpma.cc",
+        "http://mseeowpm1.xyz",
+        "https://etmdcw.cn",
     )
 
-    // ---- 6 个图源域名 ----
     val IMG_DOMAINS: List<String> = listOf(
         "newmwimserv5.cc",
         "mwappimgs.cc",
@@ -37,14 +37,16 @@ object RouteManager {
         "mwfimsvfast40.cc",
         "newmwimserv4.cc",
         "newmwimserv6.cc",
+        "newmwimserv14.cc",
+        "newmwimserv15.cc",
     )
 
     // ---- 动态域名列表（开发者配置更新后同步）----
     /** 当前生效的线路列表（测速和请求用这个，不用硬编码 LINE_HOSTS） */
     @Volatile var lineHosts: List<String> = LINE_HOSTS
         private set
-    /** 当前生效的图源域名列表（测速用这个，不用硬编码 IMG_DOMAINS） */
-    @Volatile var imgDomains: List<String> = IMG_DOMAINS
+    /** 当前生效的图源域名列表：硬编码基底 + 章节接口运行时追加 */
+    var imgDomains: List<String> by mutableStateOf(IMG_DOMAINS)
         private set
 
     /**

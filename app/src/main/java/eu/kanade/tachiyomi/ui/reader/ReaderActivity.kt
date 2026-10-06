@@ -520,21 +520,29 @@ class ReaderActivity : BaseActivity() {
 
             // 图源切换对话框
             if (showImgSourceDialog) {
-                val imgDomains = com.zycomic.app.data.repository.ReaderRepository.currentImgDomains
+                val chapterDomains = com.zycomic.app.data.repository.ReaderRepository.currentImgDomains
+                val allDomains = com.zycomic.app.net.RouteManager.imgDomains
+                val otherDomains = allDomains.filterNot { d -> chapterDomains.any { it.equals(d, true) } }
                 val currentDomain = com.zycomic.app.net.RouteManager.imgHost
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
                     title = { Text("切换图源") },
                     text = {
                         androidx.compose.foundation.layout.Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            imgDomains.forEachIndexed { index, domain ->
+                            Text(
+                                "章节图源",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                            chapterDomains.forEach { domain ->
                                 val isSelected = domain == currentDomain
                                 TextButton(
                                     onClick = {
                                         showImgSourceDialog = false
-                                        switchImgSource(index, domain)
+                                        switchImgSource(domain)
                                     },
                                 ) {
                                     Text(
@@ -543,8 +551,28 @@ class ReaderActivity : BaseActivity() {
                                     )
                                 }
                             }
-                            if (imgDomains.isEmpty()) {
-                                Text("暂无图源信息")
+                            if (chapterDomains.isEmpty()) {
+                                Text("暂无章节图源信息", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text(
+                                "非章节图源(有可能能看)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                            otherDomains.forEach { domain ->
+                                val isSelected = domain == currentDomain
+                                TextButton(
+                                    onClick = {
+                                        showImgSourceDialog = false
+                                        switchImgSource(domain)
+                                    },
+                                ) {
+                                    Text(
+                                        text = if (isSelected) "● $domain" else "○ $domain",
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
                             }
                         }
                     },
@@ -582,11 +610,14 @@ class ReaderActivity : BaseActivity() {
     }
 
     /**
-     * 切换图源：更新 RouteManager + 重建网络 + 清空缓存 + 重启 Activity 重新加载图片。
+     * 切换图源：确保域名在列表中 → setImgHost → 重建网络 → 清缓存 → 重启 Activity。
      */
-    private fun switchImgSource(index: Int, domain: String) {
+    private fun switchImgSource(domain: String) {
         try {
-            com.zycomic.app.net.RouteManager.setImgHost(index)
+            val rm = com.zycomic.app.net.RouteManager
+            if (rm.imgDomains.none { it.equals(domain, true) }) rm.updateImgDomains(listOf(domain))
+            val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }
+            rm.setImgHost(idx)
             com.zycomic.app.net.NetworkModule.rebuild()
             // 清空章节缓存，强制重新拉取并用新图源拼接URL
             com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
