@@ -344,7 +344,7 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    fun setUseFastestImgForAll(v: Boolean) {
+    fun updateUseFastestImgForAll(v: Boolean) {
         useFastestImgForAll = v
         try {
             val ctx = DevConfig.appContext ?: return

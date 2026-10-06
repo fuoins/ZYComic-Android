@@ -158,7 +158,7 @@ class SettingsViewModel {
     }
 
     fun setUseFastestImgForAll(v: Boolean) {
-        RouteManager.setUseFastestImgForAll(v)
+        RouteManager.updateUseFastestImgForAll(v)
         useFastestImgForAll.value = v
         toast.value = if (v) "已开启：封面和章节用测速最快图源" else "已关闭：用服务端推荐图源"
     }
