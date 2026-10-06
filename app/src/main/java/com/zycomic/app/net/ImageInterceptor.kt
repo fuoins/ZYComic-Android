@@ -17,17 +17,22 @@ class ImageInterceptor : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
-        val url = original.url.toString()
-        if (!isImageRequest(url)) return chain.proceed(original)
+        val originalUrl = original.url.toString()
+        if (!isImageRequest(originalUrl)) return chain.proceed(original)
 
-        val cached = ImageCacheManager.get(url)
+        val fetchUrl = if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
+            originalUrl.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+        } else originalUrl
+
+        val cached = ImageCacheManager.get(originalUrl)
         if (cached != null) {
             val bytes = cached.readBytes()
-            val out = decryptIfNeeded(bytes, url)
+            val out = decryptIfNeeded(bytes, originalUrl)
             return buildResponse(original, out)
         }
 
         val imgReq = original.newBuilder()
+            .url(fetchUrl)
             .header("User-Agent", ManwaInterceptor.UA)
             .header(HEADER_X_REQUESTED_WITH, VALUE_X_REQUESTED_WITH)
             .header("Accept", "*/*")
@@ -39,11 +44,11 @@ class ImageInterceptor : Interceptor {
         val raw = try { body.source().readByteArray() } catch (_: Exception) { return response }
 
         try {
-            ImageCacheManager.putStream(url).use { it.write(raw) }
-            ImageCacheManager.commit(url)
+            ImageCacheManager.putStream(originalUrl).use { it.write(raw) }
+            ImageCacheManager.commit(originalUrl)
         } catch (_: Exception) {}
 
-        val out = decryptIfNeeded(raw, url)
+        val out = decryptIfNeeded(raw, originalUrl)
         return buildResponse(original, out)
     }
 

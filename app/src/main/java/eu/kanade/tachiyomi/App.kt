@@ -315,7 +315,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     override fun newImageLoader(context: Context): ImageLoader {
         return ImageLoader.Builder(this).apply {
-            val callFactoryLazy = lazy { Injekt.get<NetworkHelper>().client }
+            val callFactoryLazy = lazy {
+                Injekt.get<NetworkHelper>().client.newBuilder()
+                    .addInterceptor(com.zycomic.app.net.FastestImgInterceptor())
+                    .build()
+            }
             components {
                 // NetworkFetcher.Factory
                 add(OkHttpNetworkFetcherFactory(callFactoryLazy::value))

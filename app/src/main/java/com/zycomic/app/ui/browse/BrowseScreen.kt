@@ -400,7 +400,7 @@ private fun MangaGridItem(
                 .clip(RoundedCornerShape(8.dp)),
         ) {
             AsyncImage(
-                model = manga.picx ?: manga.pic ?: "",
+                model = com.zycomic.app.ui.components.coverUrl(manga.picx ?: manga.pic ?: ""),
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
