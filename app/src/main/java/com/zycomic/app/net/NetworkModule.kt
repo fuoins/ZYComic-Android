@@ -153,6 +153,7 @@ object NetworkModule {
             .proxy(Proxy.NO_PROXY)
             .connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(3, TimeUnit.SECONDS)
+            .callTimeout(3, TimeUnit.SECONDS)
             .enableTrustAll()
             .dns(RuleDns)
             .sslSocketFactory(SniRemovingSocketFactory(sslContext.socketFactory), trustAllManager)
