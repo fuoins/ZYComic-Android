@@ -481,7 +481,7 @@ fun MangaDetailScreen(
                                     val first = li.visibleItemsInfo.first()
                                     val avgItem = li.visibleItemsInfo.map { it.size }.average().toFloat()
                                     val viewport = (li.viewportEndOffset - li.viewportStartOffset).toFloat()
-                                    val maxScroll = avgItem * li.totalItemsCount - viewport
+                                    val maxScroll = avgItem * 10 - viewport
                                     if (maxScroll <= 0f) {
                                         1f
                                     } else {

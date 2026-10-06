@@ -33,7 +33,7 @@ data class FavoriteRequest(
 data class BatchFavoriteRequest(
     /** 逗号分隔的 book_id 字符串，如 "1,2,3" */
     val ids: String,
-    val action: String = "del",
+    val action: String,
 )
 
 /**
