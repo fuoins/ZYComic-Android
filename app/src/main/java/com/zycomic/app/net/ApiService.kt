@@ -104,7 +104,7 @@ interface ApiService {
     @POST("api/account/sendAuth")
     suspend fun sendAuth(@Body body: com.zycomic.app.data.dto.SendAuthRequest): ApiResponse<kotlinx.serialization.json.JsonElement>
 
-    @GET("api/captcha")
+    @GET("api/account/captcha")
     suspend fun getCaptcha(): okhttp3.ResponseBody
 
     @POST("api/account/forgetPwd")

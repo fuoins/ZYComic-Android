@@ -60,6 +60,9 @@ class ManwaInterceptor : Interceptor {
 
         val response = chain.proceed(authed)
 
+        val contentType = response.body?.contentType()?.toString().orEmpty()
+        if (isBinaryResponse(contentType, chain.request().url.toString())) return response
+
         // 读取响应体（接口响应体积小，可安全 string()）
         val rawBody = response.body?.string().orEmpty()
         val trimmed = rawBody.trim()
@@ -85,5 +88,14 @@ class ManwaInterceptor : Interceptor {
         return url.contains("/static/upload") ||
             url.contains(".webp") || url.contains(".jpg") ||
             url.contains(".png") || url.contains(".gif")
+    }
+
+    private fun isBinaryResponse(contentType: String, url: String): Boolean {
+        val ct = contentType.lowercase()
+        return ct.startsWith("image/") ||
+            ct.contains("octet-stream") ||
+            ct.contains("application/pdf") ||
+            url.contains("/api/account/captcha") ||
+            url.contains("captcha")
     }
 }
