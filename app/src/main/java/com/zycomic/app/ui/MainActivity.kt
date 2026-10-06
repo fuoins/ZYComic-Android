@@ -392,28 +392,6 @@ fun AppContent() {
             },
         )
     }
-    }
-
-    // ---- 启动测速全屏加载层 ----
-    if (speedTesting) {
-        Dialog(
-            onDismissRequest = {},
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Color.White)
-                    androidx.compose.foundation.layout.Spacer(Modifier.padding(8.dp))
-                    Text("正在测速选择最快线路...", color = Color.White)
-                }
-            }
-        }
-    }
 }
 
 /**
