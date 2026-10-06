@@ -1,5 +1,8 @@
 package com.zycomic.app.ui.browse
 
+import com.zycomic.app.ui.components.FilterChip
+import com.zycomic.app.ui.components.FilterSection
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -116,6 +119,8 @@ fun BrowseScreen(
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
     val folders by vm.folders.collectAsState()
+    val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
+    androidx.compose.runtime.LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
 
     var showFilterDialog by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
@@ -219,7 +224,7 @@ fun BrowseScreen(
                     vm = vm,
                     displayMode = displayMode,
                     gridColumns = gridColumns,
-                    onGridColumnsChange = { vm.setGridColumns(it) },
+                    onGridColumnsChange = { vm.setGridColumns(it, orientation) },
                     selectionMode = selectionMode,
                     selectedIds = selectedIds,
                     onOpenManga = onOpenManga,
@@ -565,7 +570,7 @@ private fun DisplayFilter(vm: BrowseViewModel) {
         Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
         androidx.compose.material3.Slider(
             value = gridColumns.toFloat(),
-            onValueChange = { vm.setGridColumns(it.toInt()) },
+            onValueChange = { vm.setGridColumns(it.toInt(), orientation) },
             valueRange = 0f..10f,
             steps = 9,
             modifier = Modifier.fillMaxWidth(),
@@ -574,33 +579,6 @@ private fun DisplayFilter(vm: BrowseViewModel) {
 }
 
 @Composable
-private fun FilterSection(title: String, content: @Composable () -> Unit) {
-    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit, bold: Boolean = false) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
-        )
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagSelectDialog(vm: BrowseViewModel, onDismiss: () -> Unit) {

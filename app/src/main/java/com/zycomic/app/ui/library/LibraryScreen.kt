@@ -114,6 +114,8 @@ fun LibraryScreen(
     val selectedIds by vm.selectedIds.collectAsState()
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
+    val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
+    androidx.compose.runtime.LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
 
@@ -895,6 +897,8 @@ private fun FilterDialog(
     val onlyUpdated by vm.onlyUpdatedFilter.collectAsState()
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
+    val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
+    androidx.compose.runtime.LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
 
@@ -1017,7 +1021,7 @@ private fun FilterDialog(
                             }
                             Slider(
                                 value = gridColumns.toFloat(),
-                                onValueChange = { vm.setGridColumns(it.toInt()) },
+                                onValueChange = { vm.setGridColumns(it.toInt(), orientation) },
                                 valueRange = 0f..10f,
                                 steps = 9,
                             )

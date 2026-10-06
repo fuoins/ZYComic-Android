@@ -62,7 +62,9 @@ class LibraryViewModel(val mode: Int = 2) {
     val onlyUpdatedFilter = MutableStateFlow(false) // false=关闭只显示更新 / true=只显示更新（客户端筛选）
     // 显示模式：0=紧凑网格 1=舒适网格 2=仅封面网格 3=列表1(封面+标题) 4=列表2(历史样式) 5=列表3(当前样式,默认)（持久化）
     val displayMode = MutableStateFlow(prefs.getInt("library_display_mode", 5))
-    val gridColumns = MutableStateFlow(prefs.getInt("library_grid_columns", 3)) // 网格列数，0=自动，1-10
+    val gridColumns = MutableStateFlow(3)
+
+    init { migrateGridColumnsIfNeeded("library") }
     val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
     val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
 
@@ -231,10 +233,21 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
         prefs.edit().putInt("library_display_mode", m).apply()
     }
 
+    fun loadGridColumnsForOrientation(orientation: Int) {
+        val k = if (orientation == 2) "library_grid_columns_landscape" else "library_grid_columns_portrait"
+        gridColumns.value = prefs.getInt(k, 3)
+    }
     /** 设置网格列数，0=自动，1-10。 */
-    fun setGridColumns(n: Int) {
+    fun setGridColumns(n: Int, orientation: Int) {
         gridColumns.value = n
-        prefs.edit().putInt("library_grid_columns", n).apply()
+        val k = if (orientation == 2) "library_grid_columns_landscape" else "library_grid_columns_portrait"
+        prefs.edit().putInt(k, n).apply()
+    }
+    private fun migrateGridColumnsIfNeeded(page: String) {
+        val old = prefs.getInt("${page}_grid_columns", -1)
+        if (old >= 0 && !prefs.contains("${page}_grid_columns_portrait")) {
+            prefs.edit().putInt("${page}_grid_columns_portrait", old).remove("${page}_grid_columns").apply()
+        }
     }
 
     /** 切换封面左上角未读完标记显示。 */

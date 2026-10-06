@@ -73,6 +73,8 @@ fun SearchScreen(
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
     var showModeMenu by remember { mutableStateOf(false) }
+    val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
+    LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
     val gridState = rememberLazyGridState()
 
     LaunchedEffect(Unit) {
@@ -131,33 +133,20 @@ fun SearchScreen(
                 DropdownMenu(
                     expanded = showModeMenu,
                     onDismissRequest = { showModeMenu = false },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("紧凑网格") },
-                        onClick = { vm.setDisplayMode(0); showModeMenu = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("舒适网格") },
-                        onClick = { vm.setDisplayMode(1); showModeMenu = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("仅封面网格") },
-                        onClick = { vm.setDisplayMode(2); showModeMenu = false },
-                    )
-                    // 每行数量
-                    Row(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("每行 $gridColumns", modifier = Modifier.padding(end = 8.dp))
+                    com.zycomic.app.ui.components.FilterSection("显示模式") {
+                        com.zycomic.app.ui.components.FilterChip("紧凑网格", displayMode == 0) { vm.setDisplayMode(0) }
+                        com.zycomic.app.ui.components.FilterChip("舒适网格", displayMode == 1) { vm.setDisplayMode(1) }
+                        com.zycomic.app.ui.components.FilterChip("仅封面网格", displayMode == 2) { vm.setDisplayMode(2) }
+                    }
+                    com.zycomic.app.ui.components.FilterSection("每行数量") {
+                        Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
                         androidx.compose.material3.Slider(
                             value = gridColumns.toFloat(),
-                            onValueChange = { vm.setGridColumns(it.toInt()) },
-                            valueRange = 2f..6f,
-                            steps = 3,
-                            modifier = Modifier.weight(1f),
+                            onValueChange = { vm.setGridColumns(it.toInt(), orientation) },
+                            valueRange = 0f..10f,
+                            steps = 9,
                         )
                     }
                 }

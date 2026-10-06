@@ -35,16 +35,31 @@ class SearchViewModel {
 
     // ---- 显示模式（持久化）----
     val displayMode = MutableStateFlow(prefs.getInt("search_display_mode", 1)) // 默认舒适网格
-    val gridColumns = MutableStateFlow(prefs.getInt("search_grid_columns", 3))  // 默认每行3
+    val gridColumns = MutableStateFlow(3)
+
+    init { migrateGridColumnsIfNeeded("search") }
 
     fun setDisplayMode(mode: Int) {
         displayMode.value = mode
         prefs.edit().putInt("search_display_mode", mode).apply()
     }
 
-    fun setGridColumns(cols: Int) {
+    fun loadGridColumnsForOrientation(orientation: Int) {
+        val k = if (orientation == 2) "search_grid_columns_landscape" else "search_grid_columns_portrait"
+        gridColumns.value = prefs.getInt(k, 3)
+    }
+
+    fun setGridColumns(cols: Int, orientation: Int) {
         gridColumns.value = cols
-        prefs.edit().putInt("search_grid_columns", cols).apply()
+        val k = if (orientation == 2) "search_grid_columns_landscape" else "search_grid_columns_portrait"
+        prefs.edit().putInt(k, cols).apply()
+    }
+
+    private fun migrateGridColumnsIfNeeded(page: String) {
+        val old = prefs.getInt("${page}_grid_columns", -1)
+        if (old >= 0 && !prefs.contains("${page}_grid_columns_portrait")) {
+            prefs.edit().putInt("${page}_grid_columns_portrait", old).remove("${page}_grid_columns").apply()
+        }
     }
 
     private var currentPage = 1
