@@ -53,12 +53,26 @@ class LoginViewModel {
         }
     }
 
+    fun emailLogin() {
+        val e = email.value.trim()
+        val code = authCode.value.trim()
+        if (e.isEmpty() || code.isEmpty()) { _error.value = "请输入邮箱和验证码"; return }
+        scope.launch {
+            _loading.value = true; _error.value = null
+            try { UserRepository.emailLogin(e, code); success.value = true }
+            catch (ex: Exception) { _error.value = ex.message ?: "登录失败" }
+            finally { _loading.value = false }
+        }
+    }
+
     fun sendAuthCode() {
         val e = email.value.trim()
         if (e.isEmpty()) { _error.value = "请输入邮箱"; return }
+        val m = mode.value
         scope.launch {
             try {
-                UserRepository.sendAuth(e, username.value.trim())
+                if (m == 1) UserRepository.sendAuth(e, "forget")
+                else UserRepository.sendAuth(e, "register", username.value.trim())
                 authCountdown.value = 60
                 scope.launch { repeat(60) { delay(1000); authCountdown.value-- } }
             } catch (ex: Exception) { _error.value = ex.message ?: "发送失败" }

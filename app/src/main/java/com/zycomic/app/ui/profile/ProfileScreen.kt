@@ -47,6 +47,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -79,6 +82,7 @@ fun ProfileScreen(
     val context = LocalContext.current
     val user by UserRepository.userFlow.collectAsState()
     var showPointLogs by remember { mutableStateOf(false) }
+    var showChangePwd by remember { mutableStateOf(false) }
     var showRewardDialog by remember { mutableStateOf(false) }
     var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -149,6 +153,13 @@ fun ProfileScreen(
                 }
                 item {
                     TextPreferenceWidget(
+                        title = "修改密码",
+                        icon = Icons.Outlined.Lock,
+                        onPreferenceClick = { showChangePwd = true },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
                         title = "退出登录",
                         icon = Icons.Outlined.Logout,
                         onPreferenceClick = {
@@ -182,6 +193,36 @@ fun ProfileScreen(
 
     if (showPointLogs) {
         PointLogsOverlay(onClose = { showPointLogs = false })
+    }
+
+    if (showChangePwd) {
+        var pwd1 by remember { mutableStateOf("") }
+        var pwd2 by remember { mutableStateOf("") }
+        var pwdErr by remember { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { showChangePwd = false },
+            title = { Text("修改密码") },
+            text = {
+                Column {
+                    OutlinedTextField(value = pwd1, onValueChange = { pwd1 = it }, label = { Text("新密码") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(value = pwd2, onValueChange = { pwd2 = it }, label = { Text("确认新密码") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    pwdErr?.let { Text(it, color = Color(0xFFE53935)) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (pwd1.isEmpty() || pwd1 != pwd2) { pwdErr = "两次密码不一致"; return@TextButton }
+                    scope.launch {
+                        try {
+                            UserRepository.changePassword(pwd1)
+                            showChangePwd = false
+                            Toast.makeText(context, "密码修改成功，请重新登录", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) { pwdErr = e.message ?: "修改失败" }
+                    }
+                }) { Text("确认") }
+            },
+            dismissButton = { TextButton(onClick = { showChangePwd = false }) { Text("取消") } },
+        )
     }
 
     if (showRewardDialog) {

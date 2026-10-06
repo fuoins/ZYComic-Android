@@ -25,6 +25,12 @@ data class SendAuthRequest(
     val username: String,
 )
 
+@Serializable
+data class ForgetPwdRequest(
+    val email: String,
+    val auth_token: String,
+)
+
 /**
  * 单本收藏操作请求体（POST api/detail/favorite）。
  * 注意：addFavorite 传 val=0，removeFavorite 传 val=1（不要写反）。

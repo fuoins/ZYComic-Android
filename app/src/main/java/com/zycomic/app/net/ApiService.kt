@@ -106,6 +106,12 @@ interface ApiService {
     @GET("api/captcha")
     suspend fun getCaptcha(): okhttp3.ResponseBody
 
+    @POST("api/account/forgetPwd")
+    suspend fun forgetPwd(@Body body: com.zycomic.app.data.dto.ForgetPwdRequest): ApiResponse<User>
+
+    @POST("api/users/edit")
+    suspend fun editUser(@Body body: JsonObject): ApiResponse<JsonElement>
+
     @POST("api/account/logout")
     suspend fun logout(): ApiResponse<JsonElement>
 

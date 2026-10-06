@@ -123,9 +123,31 @@ object UserRepository {
         return info
     }
 
-    suspend fun sendAuth(email: String, username: String) {
-        val resp = api.sendAuth(com.zycomic.app.data.dto.SendAuthRequest(email, "register", username))
+    suspend fun sendAuth(email: String, type: String, username: String = "") {
+        val resp = api.sendAuth(com.zycomic.app.data.dto.SendAuthRequest(email, type, username))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "发送验证码失败" })
+    }
+
+    suspend fun emailLogin(email: String, authToken: String): User {
+        val resp = api.forgetPwd(com.zycomic.app.data.dto.ForgetPwdRequest(email, authToken))
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "登录失败" })
+        resp.data?.uid?.takeIf { it.isNotEmpty() && it != "0" }?.let {
+            NetworkModule.cookieJar.add("uid", it, RouteManager.lineHost)
+        }
+        val info = getUserInfo()
+        _userFlow.value = info
+        saveUserInfoLocal(info)
+        return info
+    }
+
+    suspend fun changePassword(newPassword: String) {
+        val resp = api.editUser(kotlinx.serialization.json.buildJsonObject {
+            put("password", newPassword)
+        })
+        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "修改密码失败" })
+        NetworkModule.cookieJar.clear()
+        clearUserInfoLocal()
+        _userFlow.value = null
     }
 
     suspend fun getCaptcha(): ByteArray = api.getCaptcha().bytes()
