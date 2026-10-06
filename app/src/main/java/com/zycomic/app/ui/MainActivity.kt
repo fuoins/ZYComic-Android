@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
@@ -72,6 +74,7 @@ import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -148,10 +151,6 @@ fun AppContent() {
 
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
-    // 底部导航各页面 ViewModel（Activity scope，切换 tab 不销毁）
-    val browseVm = remember { BrowseViewModel() }
-    val libraryVm = remember { LibraryViewModel(mode = 0) }
-    val historyVm = remember { HistoryViewModel() }
     var speedTesting by remember { mutableStateOf(true) }
 
     // 设置子页面 Dialog 状态
@@ -159,12 +158,12 @@ fun AppContent() {
     var showGayConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val (li, ii) = settingsVm.autoSelectFastest()
+        val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
         speedTesting = false
-        if (li == -1 && ii == -1) {
-            Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "已选择线路${li + 1} + 图源${ii + 1}", Toast.LENGTH_SHORT).show()
+        when {
+            result == null -> Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show()
+            result.first == -1 -> Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
+            else -> Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -189,6 +188,9 @@ fun AppContent() {
 
     // 测速完成前不渲染底层页面，避免页面用默认线路发起请求
     if (!speedTesting) {
+    val browseVm = remember { BrowseViewModel() }
+    val libraryVm = remember { LibraryViewModel(mode = 0) }
+    val historyVm = remember { HistoryViewModel() }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.navigationBars,
@@ -270,6 +272,14 @@ fun AppContent() {
                     onOpenDataStorage = openDataStorage,
                     onOpenAbout = openAbout,
                 )
+            }
+        }
+    } else {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("正在选择最快线路...", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

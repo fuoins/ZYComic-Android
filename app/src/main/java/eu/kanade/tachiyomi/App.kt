@@ -147,29 +147,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         ProcessLifecycleOwner.get().lifecycleScope.launch {
             com.zycomic.app.data.repository.UserRepository.verifyLogin()
         }
-        // 后台测速选线 + 图源测速（fire-and-forget，不阻塞 UI；每日首次强制重测）
-        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
-            if (!com.zycomic.app.net.RouteManager.isSpeedTestToday()) {
-                try {
-                    val lineDelays = com.zycomic.app.net.SpeedTester.testAllLines()
-                    com.zycomic.app.net.RouteManager.setLastDelays(lineDelays, com.zycomic.app.net.RouteManager.lastImgDelays)
-                    val fastestLine = com.zycomic.app.net.SpeedTester.selectFastestLine(lineDelays)
-                    if (com.zycomic.app.net.RouteManager.autoSelectEnabled && fastestLine != com.zycomic.app.net.RouteManager.lineIndex) {
-                        com.zycomic.app.net.RouteManager.setLine(fastestLine)
-                        com.zycomic.app.net.NetworkModule.rebuild()
-                    }
-                    com.zycomic.app.net.RouteManager.saveLastFastestLine(fastestLine)
-
-                    val imgDelays = com.zycomic.app.net.SpeedTester.testAllImgHosts()
-                    com.zycomic.app.net.RouteManager.setLastDelays(com.zycomic.app.net.RouteManager.lastLineDelays, imgDelays)
-                    val fastestImg = imgDelays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key ?: 0
-                    if (com.zycomic.app.net.RouteManager.autoSelectEnabled && fastestImg != com.zycomic.app.net.RouteManager.imgIndex) {
-                        com.zycomic.app.net.RouteManager.setImgHost(fastestImg)
-                    }
-                } catch (_: Exception) {}
-                com.zycomic.app.net.RouteManager.markSpeedTestToday()
-            }
-        }
         // 后台从 Trello 拉取线路（只增不减），有新线路则增量测速选最快
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             try {
