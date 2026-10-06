@@ -468,15 +468,18 @@ fun MangaDetailScreen(
                                     RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
                                 }
                             }
-                            // 横向滚动指示条：按 item 真实宽度估算，滚到底 thumb 到最右
-                            val itemStep = 104f
+                            // 横向滚动指示条：用 layoutInfo 实测 item 宽度，避免硬编码导致跳动
                             val li = lazyRowState.layoutInfo
-                            val viewportWidth = (li.viewportEndOffset - li.viewportStartOffset).toFloat()
-                            val scrollProgress = if (d.loveList.size <= 1) 0f else {
-                                val scrolled = lazyRowState.firstVisibleItemIndex * itemStep +
-                                    lazyRowState.firstVisibleItemScrollOffset
-                                val maxScroll = (d.loveList.size * itemStep - viewportWidth + 16f).coerceAtLeast(1f)
-                                (scrolled / maxScroll).coerceIn(0f, 1f)
+                            val scrollProgress = when {
+                                li.visibleItemsInfo.isEmpty() || li.totalItemsCount <= 1 -> 0f
+                                else -> {
+                                    val first = li.visibleItemsInfo.first()
+                                    val avgItem = li.visibleItemsInfo.map { it.size }.average().toFloat()
+                                    val viewport = (li.viewportEndOffset - li.viewportStartOffset).toFloat()
+                                    val scrolled = first.index * avgItem - first.offset
+                                    val maxScroll = (avgItem * li.totalItemsCount - viewport).coerceAtLeast(1f)
+                                    (scrolled / maxScroll).coerceIn(0f, 1f)
+                                }
                             }
                             Box(
                                 modifier = Modifier

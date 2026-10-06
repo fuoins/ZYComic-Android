@@ -67,10 +67,10 @@ object FavoriteRepository {
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "收藏失败" })
     }
 
-    /** 取消收藏：val=1。 */
+    /** 取消收藏：val=1 + action=del。 */
     suspend fun removeFavorite(bookId: Int) {
         checkLoggedIn()
-        val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId))
+        val resp = api.favorite(FavoriteRequest(`val` = 1, bookId = bookId, action = "del"))
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "取消收藏失败" })
     }
 

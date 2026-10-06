@@ -22,6 +22,7 @@ data class FavoriteRequest(
     val bookId: Int,
     @SerialName("folder_id")
     val folderId: Int = 0,
+    val action: String? = null,
 )
 
 /**
