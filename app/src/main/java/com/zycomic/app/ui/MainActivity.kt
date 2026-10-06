@@ -60,7 +60,6 @@ import com.zycomic.app.ui.manga.MangaDetailOverlay
 import com.zycomic.app.ui.profile.ProfileScreen
 import com.zycomic.app.ui.search.SearchOverlay
 import com.zycomic.app.ui.settings.AboutScreen
-import com.zycomic.app.ui.settings.AdvancedSettingsScreen
 import com.zycomic.app.ui.settings.DataStorageScreen
 import com.zycomic.app.ui.settings.SettingsMainScreen
 import com.zycomic.app.ui.settings.SettingsViewModel
@@ -118,7 +117,7 @@ class MainActivity : ComponentActivity() {
 
 /** 设置子页面 Dialog 标识 */
 private enum class SettingsDialog {
-    Appearance, Reader, TagBlock, SpeedTest, DataStorage, Advanced, About
+    Appearance, Reader, TagBlock, SpeedTest, DataStorage, About
 }
 
 @Composable
@@ -185,7 +184,6 @@ fun AppContent() {
     val openTagBlock = { settingsDialog = SettingsDialog.TagBlock }
     val openSpeedTest = { settingsDialog = SettingsDialog.SpeedTest }
     val openDataStorage = { settingsDialog = SettingsDialog.DataStorage }
-    val openAdvanced = { settingsDialog = SettingsDialog.Advanced }
     val openAbout = { settingsDialog = SettingsDialog.About }
     val blockGayTags = { showGayConfirm = true }
 
@@ -270,7 +268,6 @@ fun AppContent() {
                     onBlockGayTags = blockGayTags,
                     onOpenSpeedTest = openSpeedTest,
                     onOpenDataStorage = openDataStorage,
-                    onOpenAdvanced = openAdvanced,
                     onOpenAbout = openAbout,
                 )
             }
@@ -352,18 +349,6 @@ fun AppContent() {
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 DataStorageScreen(onClose = { settingsDialog = null })
-            }
-        }
-        SettingsDialog.Advanced -> {
-            Dialog(
-                onDismissRequest = { settingsDialog = null },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-            ) {
-                AdvancedSettingsScreen(
-                    vm = settingsVm,
-                    onClose = { settingsDialog = null },
-                    onOpenSpeedTest = { settingsDialog = SettingsDialog.SpeedTest },
-                )
             }
         }
         SettingsDialog.About -> {

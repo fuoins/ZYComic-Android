@@ -119,6 +119,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         DevConfig.init(this)
         DevConfig.migrateProxyDefaultIfNeeded()
         com.zycomic.app.net.ImageCacheManager.init(this)
+        runCatching {
+            if (getSharedPreferences("zycomic_data", android.content.Context.MODE_PRIVATE)
+                    .getBoolean("auto_clear_chapter_cache", true)
+            ) DevConfig.clearImageCaches()
+        }
         // 加载持久化的图源索引
         com.zycomic.app.net.RouteManager.loadImgIndex()
         // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）

@@ -49,7 +49,6 @@ fun SettingsMainScreen(
     onBlockGayTags: () -> Unit,
     onOpenSpeedTest: () -> Unit,
     onOpenDataStorage: () -> Unit,
-    onOpenAdvanced: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -125,14 +124,6 @@ fun SettingsMainScreen(
                     title = "数据与存储",
                     icon = Icons.Outlined.Storage,
                     onPreferenceClick = onOpenDataStorage,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "高级",
-                    subtitle = "开发者配置、本地代理",
-                    icon = Icons.Outlined.Code,
-                    onPreferenceClick = onOpenAdvanced,
                 )
             }
             item { HorizontalDivider() }

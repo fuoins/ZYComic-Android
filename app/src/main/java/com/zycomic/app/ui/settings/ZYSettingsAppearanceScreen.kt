@@ -53,10 +53,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
 
         return listOf(
             getThemeGroup(uiPreferences = uiPreferences),
-            getMangaInfoThemeGroup(uiPreferences = uiPreferences),
-            getDisplayGroup(uiPreferences = uiPreferences),
-            getNavbarGroup(uiPreferences = uiPreferences),
-            // Fork 分组已移除
         )
     }
 
