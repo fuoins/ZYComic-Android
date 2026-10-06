@@ -259,10 +259,15 @@ object ReaderRepository {
      * 获取章节页面 URL：先查缓存，未命中则拉取章节内容并拼接 URL，写入缓存。
      */
     suspend fun getChapterPages(chapterId: String): List<String> {
-        chapterCache.get(chapterId)?.let { return it }
+        // 开启"用测速最快图源"时绕过缓存，每次用当前最快域名重新拼接
+        if (!RouteManager.useFastestImgForAll) {
+            chapterCache.get(chapterId)?.let { return it }
+        }
         val content = getChapterContent(chapterId)
         val urls = getImageUrls(content)
-        chapterCache.put(chapterId, urls)
+        if (!RouteManager.useFastestImgForAll) {
+            chapterCache.put(chapterId, urls)
+        }
         return urls
     }
 

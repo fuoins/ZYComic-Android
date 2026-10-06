@@ -84,7 +84,12 @@ internal class HttpPageLoader(
      */
     override suspend fun getPages(): List<ReaderPage> {
         val pages = try {
-            chapterCache.getPageListFromCache(chapter.chapter.toDomainChapter()!!)
+            // 开启"用测速最快图源"时绕过磁盘页面缓存，每次用最新最快域名重新构造
+            if (com.zycomic.app.net.RouteManager.useFastestImgForAll) {
+                source.getPageList(chapter.chapter)
+            } else {
+                chapterCache.getPageListFromCache(chapter.chapter.toDomainChapter()!!)
+            }
         } catch (e: Throwable) {
             if (e is CancellationException) {
                 throw e
