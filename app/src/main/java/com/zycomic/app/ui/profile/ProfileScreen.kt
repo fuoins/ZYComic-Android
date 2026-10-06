@@ -413,10 +413,14 @@ private fun SignCalendarSection(
     onReload: (String) -> Unit,
 ) {
     val today = remember { LocalDate.now().toString() }
-    val firstDate = welfare?.sign_list?.firstOrNull()?.date
-    val currentMonthLd = remember(firstDate) {
-        firstDate?.let { runCatching { LocalDate.parse(it).withDayOfMonth(1) }.getOrNull() }
-            ?: LocalDate.now().withDayOfMonth(1)
+    val currentMonthLd = remember(welfare) {
+        welfare?.current_month?.takeIf { it > 0 }?.let { m ->
+            LocalDate.now().withMonth(m).withDayOfMonth(1)
+        } ?: run {
+            welfare?.sign_list?.firstOrNull { it.status.isNotEmpty() }?.date?.let {
+                runCatching { LocalDate.parse(it).withDayOfMonth(1) }.getOrNull()
+            }
+        } ?: LocalDate.now().withDayOfMonth(1)
     }
     val monthText = "${currentMonthLd.year}年${currentMonthLd.monthValue}月"
     val currentMonthStr = String.format("%04d-%02d-01", currentMonthLd.year, currentMonthLd.monthValue)
@@ -564,8 +568,11 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
                 .size(32.dp)
                 .clip(CircleShape)
                 .then(
-                    if (isToday) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                    else Modifier,
+                    if (isToday) Modifier.border(
+                        1.5.dp,
+                        if (day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                        CircleShape,
+                    ) else Modifier,
                 )
                 .background(bg),
             contentAlignment = Alignment.Center,

@@ -22,6 +22,7 @@ data class WelfareData(
     val sign_list: List<SignDay> = emptyList(),
     val prev_date: String = "",
     val next_date: String = "",
+    val current_month: Int = 0,
     val consecutive_sign: Int = 0,
     @Serializable(with = BooleanOrIntSerializer::class)
     val ad_bonus: Boolean = false,
