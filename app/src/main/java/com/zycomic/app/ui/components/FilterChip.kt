@@ -42,11 +42,7 @@ fun FilterChip(
         modifier = modifier
             .clip(shape)
             .background(bg)
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            )
+            .clickable(interaction, indication = null) { onClick() }
             .padding(horizontal = 8.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
