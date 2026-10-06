@@ -443,7 +443,7 @@ fun MangaDetailScreen(
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier
                             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                            .onGloballyPositioned { recommendY = it.positionOnScreen().y.toInt() },
+                            .onGloballyPositioned { recommendY = it.positionInParent().y.toInt() },
                     )
                     if (d.loveList.isEmpty()) {
                         Text(
@@ -471,14 +471,18 @@ fun MangaDetailScreen(
                             // 横向滚动指示条：用 layoutInfo 实测 item 宽度，避免硬编码导致跳动
                             val li = lazyRowState.layoutInfo
                             val scrollProgress = when {
-                                li.visibleItemsInfo.isEmpty() || li.totalItemsCount <= 1 -> 0f
+                                li.visibleItemsInfo.isEmpty() || li.totalItemsCount <= 1 -> 1f
                                 else -> {
                                     val first = li.visibleItemsInfo.first()
                                     val avgItem = li.visibleItemsInfo.map { it.size }.average().toFloat()
                                     val viewport = (li.viewportEndOffset - li.viewportStartOffset).toFloat()
-                                    val scrolled = first.index * avgItem - first.offset
-                                    val maxScroll = (avgItem * li.totalItemsCount - viewport).coerceAtLeast(1f)
-                                    (scrolled / maxScroll).coerceIn(0f, 1f)
+                                    val maxScroll = avgItem * li.totalItemsCount - viewport
+                                    if (maxScroll <= 0f) {
+                                        1f
+                                    } else {
+                                        val scrolled = first.index * avgItem - first.offset
+                                        (scrolled / maxScroll).coerceIn(0f, 1f)
+                                    }
                                 }
                             }
                             Box(
