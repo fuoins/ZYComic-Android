@@ -71,6 +71,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalContext
@@ -443,7 +444,10 @@ fun MangaDetailScreen(
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier
                             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                            .onGloballyPositioned { recommendY = it.boundsInParent().top.toInt() },
+                            .onGloballyPositioned { coordinates ->
+                                val parent = coordinates.parentLayoutCoordinates
+                                if (parent != null) recommendY = parent.localPositionOf(coordinates, Offset.Zero).y.toInt()
+                            },
                     )
                     if (d.loveList.isEmpty()) {
                         Text(
