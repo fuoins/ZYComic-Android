@@ -142,7 +142,7 @@ object UserRepository {
 
     suspend fun changePassword(newPassword: String) {
         val resp = api.editUser(kotlinx.serialization.json.buildJsonObject {
-            put("password", newPassword)
+            put("password", kotlinx.serialization.json.JsonPrimitive(newPassword))
         })
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "修改密码失败" })
         NetworkModule.cookieJar.clear()

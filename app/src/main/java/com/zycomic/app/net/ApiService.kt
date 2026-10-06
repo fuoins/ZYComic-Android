@@ -14,6 +14,7 @@ import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.ListData
 import com.zycomic.app.data.dto.LoginRequest
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.NewestResponse
 import com.zycomic.app.data.dto.PointLogResponse
