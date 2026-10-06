@@ -85,15 +85,21 @@ fun LoginScreen(vm: LoginViewModel = LoginViewModel(), onClose: () -> Unit = {})
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     captchaImage?.let { bytes ->
-                        Image(
-                            bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size).asImageBitmap(),
-                            contentDescription = "验证码",
-                            modifier = Modifier.width(100.dp).height(40.dp).clickable { vm.refreshCaptcha() },
-                        )
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let { bmp ->
+                            Image(
+                                bitmap = bmp,
+                                contentDescription = "验证码",
+                                modifier = Modifier.width(100.dp).height(40.dp).clickable { vm.refreshCaptcha() },
+                            )
+                        }
                     } ?: Box(
-                        modifier = Modifier.width(100.dp).height(40.dp).background(MaterialTheme.colorScheme.surfaceVariant).clickable { vm.refreshCaptcha() },
+                        modifier = Modifier.width(100.dp).height(40.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                            .clickable { vm.refreshCaptcha() },
                         contentAlignment = Alignment.Center,
-                    ) { Text("点击刷新", style = MaterialTheme.typography.bodySmall) }
+                    ) {
+                        Text("点击刷新", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     OutlinedTextField(value = captchaInput, onValueChange = { vm.captchaInput.value = it }, label = { Text("验证码") }, singleLine = true, modifier = Modifier.weight(1f))
                 }
             }
