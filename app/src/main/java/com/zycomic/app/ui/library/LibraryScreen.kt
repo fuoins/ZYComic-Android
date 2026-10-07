@@ -208,7 +208,7 @@ fun LibraryScreen(
                         } else {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 AppBarTitle("收藏")
-                                com.zycomic.app.data.repository.FavoriteRepository.limitInfo?.let {
+                                com.zycomic.app.data.repository.FavoriteRepository.limitInfo.value?.let {
                                     Spacer(Modifier.width(8.dp))
                                     Text("已收藏 ${it.current}/${it.max}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }

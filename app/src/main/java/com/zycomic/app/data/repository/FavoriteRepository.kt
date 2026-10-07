@@ -10,8 +10,7 @@ import com.zycomic.app.net.NetworkModule
 import java.io.IOException
 
 object FavoriteRepository {
-    var limitInfo: FavoriteLimitInfo? by androidx.compose.runtime.mutableStateOf<FavoriteLimitInfo?>(null)
-        private set
+    val limitInfo = androidx.compose.runtime.mutableStateOf<FavoriteLimitInfo?>(null)
 
     private val api get() = NetworkModule.api
 
@@ -46,7 +45,7 @@ object FavoriteRepository {
             showOnlyUpdated = showOnlyUpdated,
         )
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
-        limitInfo = resp.data?.favorite_limit_info
+        limitInfo.value = resp.data?.favorite_limit_info
         return resp.data?.list ?: emptyList()
     }
 
