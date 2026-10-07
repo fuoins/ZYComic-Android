@@ -346,7 +346,11 @@ private fun BrowseTabContent(
                     }
                     if (appending) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
-                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { Text("加载中...") }
+                            Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     } else if (!hasMore && mangas.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {

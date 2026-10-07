@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
@@ -161,6 +162,17 @@ fun ProfileScreen(
                         title = if (rewarding) "领取中..." else "每日奖励破解领取",
                         icon = Icons.Outlined.Code,
                         onPreferenceClick = { if (!rewarding) showRewardDialog = true },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = "刷新",
+                        icon = Icons.Outlined.Refresh,
+                        onPreferenceClick = {
+                            scope.launch {
+                                try { UserRepository.getUserInfo(); android.widget.Toast.makeText(androidx.compose.ui.platform.LocalContext.current, "已刷新", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+                            }
+                        },
                     )
                 }
                 item {
@@ -293,7 +305,7 @@ fun ProfileScreen(
             title = { Text("奖励破解中") },
             text = {
                 Column {
-                    LinearProgressIndicator(progress = if (t > 0) c.toFloat() / t else 0f, modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator({ if (t > 0) c.toFloat() / t else 0f }, modifier = Modifier.fillMaxWidth().height(6.dp))
                     Spacer(Modifier.height(12.dp))
                     Text(adMsg, style = MaterialTheme.typography.bodyMedium)
                 }
