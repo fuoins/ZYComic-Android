@@ -208,9 +208,11 @@ fun LibraryScreen(
                         } else {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 AppBarTitle("收藏")
-                                com.zycomic.app.data.repository.FavoriteRepository.limitInfo.value?.let {
+                                val user by com.zycomic.app.data.repository.UserRepository.userFlow.collectAsState()
+                                user?.let {
+                                    val max = when { it.level >= 5 -> 3500; it.level == 4 -> 2500; it.level == 3 -> 1500; it.level == 2 -> 800; it.level == 1 -> 300; else -> 0 }
                                     Spacer(Modifier.width(8.dp))
-                                    Text("已收藏 ${it.current}/${it.max}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("已收藏 ${it.favoriteCount}/$max", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
