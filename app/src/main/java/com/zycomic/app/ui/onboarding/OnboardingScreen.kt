@@ -73,7 +73,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             }
         }
     }) { pd ->
-        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().padding(pd)) { page ->
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().padding(pd), userScrollEnabled = !(pager.currentPage == 1 && user == null)) { page ->
             when (page) {
                 0 -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
