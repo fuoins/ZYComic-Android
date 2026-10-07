@@ -4,9 +4,14 @@ import com.zycomic.app.data.dto.BatchFavoriteRequest
 import com.zycomic.app.data.dto.FavoriteFolderRequest
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.FavoriteRequest
+import com.zycomic.app.data.dto.FavoriteLimitInfo
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.net.NetworkModule
 import java.io.IOException
+
+object FavoriteRepository {
+    var limitInfo: FavoriteLimitInfo? = null
+        private set
 
 /**
  * 收藏仓库：收藏列表 / 单本收藏操作 / 批量操作 / 收藏分类文件夹。
@@ -55,6 +60,7 @@ object FavoriteRepository {
             showOnlyUpdated = showOnlyUpdated,
         )
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "获取收藏列表失败" })
+        limitInfo = resp.data?.favorite_limit_info
         return resp.data?.list ?: emptyList()
     }
 

@@ -204,7 +204,13 @@ fun LibraryScreen(
                                 singleLine = true,
                             )
                         } else {
-                            AppBarTitle("收藏")
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                AppBarTitle("收藏")
+                                com.zycomic.app.data.repository.FavoriteRepository.limitInfo?.let {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("已收藏 ${it.current}/${it.max}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
                         }
                     },
                     actions = {

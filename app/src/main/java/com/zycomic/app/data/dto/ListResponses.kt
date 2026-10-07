@@ -65,6 +65,13 @@ class ListDataSerializer<T>(
 @Serializable(with = ListDataSerializer::class)
 data class ListData<T>(
     val list: List<T> = emptyList(),
+    val favorite_limit_info: FavoriteLimitInfo? = null,
+)
+
+@Serializable
+data class FavoriteLimitInfo(
+    val current: Int = 0,
+    val max: Int = 0,
 )
 
 /** 排行榜响应：data={list:[...]} */

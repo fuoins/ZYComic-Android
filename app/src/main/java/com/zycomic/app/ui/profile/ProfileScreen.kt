@@ -52,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -131,7 +132,7 @@ fun ProfileScreen(
                         }
                         Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
                             Text(
-                                user!!.nickname.ifBlank { "未设置昵称" },
+                                user!!.nickname.ifBlank { user!!.username.ifBlank { "未登录" } },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onBackground,
                             )
@@ -149,13 +150,13 @@ fun ProfileScreen(
             if (user != null) {
                 item {
                     TextPreferenceWidget(
-                        title = "积分明细",
+                        title = "积分明细(仔细看等级划分)",
                         onPreferenceClick = { showPointLogs = true },
                     )
                 }
                 item {
                     TextPreferenceWidget(
-                        title = if (rewarding) "领取中..." else "奖励破解领取",
+                        title = if (rewarding) "领取中..." else "每日奖励破解领取",
                         icon = Icons.Outlined.Code,
                         onPreferenceClick = { if (!rewarding) showRewardDialog = true },
                     )
@@ -431,26 +432,28 @@ private fun LevelExpandSection() {
         }
         if (expanded) {
             Spacer(Modifier.height(8.dp))
+            Text("★等级功能:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
             listOf(
-                "Lv1: 0-500",
-                "Lv2: 501-3000",
-                "Lv3: 3001-6000",
-                "Lv4: 6001-10000",
-                "Lv5: 10001+",
-            ).forEach {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 2.dp),
-                )
-            }
-            Text(
-                "等级和积分仅开发者对接口的设置,属于自用功能,无视即可",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+                "积分300解锁编辑昵称和头像",
+                "Lv1: 收藏数量300本",
+                "Lv2: 收藏数量800本",
+                "Lv3: 漫画章节抢先看、可额外观看隐藏漫画。收藏数量1500本",
+                "Lv4: 收藏数量2500本",
+                "Lv5: 收藏数量3500本",
+            ).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 1.dp)) }
+            Spacer(Modifier.height(8.dp))
+            Text("★签到规则(登录就算签到):", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+            listOf(
+                "·每日签到可以领10积分",
+                "·连续不中断签到第7天可领30积分",
+                "·连续不中断签到第14天可领40积分",
+                "·连续不中断签到第30天可领70积分",
+                "·满30天后重新再累积计算",
+                "·一天没签到扣10积分",
+            ).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 1.dp)) }
+            Spacer(Modifier.height(8.dp))
+            Text("★每日奖励(已破解点击就领):", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+            Text("·每日完成奖励任务可领10积分", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     HorizontalDivider()

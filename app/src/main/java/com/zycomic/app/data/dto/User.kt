@@ -12,6 +12,7 @@ data class User(
     @kotlinx.serialization.SerialName("favorite_count")
     val favoriteCount: Int = 0,
     val nickname: String = "",
+    val username: String = "",
 )
 
 /**
