@@ -128,10 +128,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         .toImmutableMap(),
                     title = stringResource(KMR.strings.pref_custom_theme_style),
                     enabled = appTheme == AppTheme.CUSTOM,
-                    onValueChanged = {
-                        (context as? Activity)?.let { ActivityCompat.recreate(it) }
-                        true
-                    },
+                    onValueChanged = { true },
                 ),
                 Preference.PreferenceItem.SwitchPreference(
                     preference = amoledPref,
