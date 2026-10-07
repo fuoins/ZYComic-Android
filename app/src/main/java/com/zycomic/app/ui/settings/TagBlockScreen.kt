@@ -50,17 +50,6 @@ fun TagBlockScreen(
     vm: SettingsViewModel,
     onClose: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val filterEnabled by vm.filterEnabled.collectAsState()
-    val blockedTags by vm.blockedTags.collectAsState()
-
-    var showAddDialog by remember { mutableStateOf(false) }
-    var showRemoveDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        vm.loadBlockedTags()
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -73,29 +62,42 @@ fun TagBlockScreen(
             )
         },
     ) { contentPadding ->
-        ScrollbarLazyColumn(contentPadding = contentPadding) {
-            item {
-                SwitchPreferenceWidget(
-                    title = "过滤屏蔽标签",
-                    subtitle = "对屏蔽的标签漫画进行隐藏(正常会显示404)。建议登录后配合gay标签一键屏蔽使用。开启后部分分类会有大量屏蔽内容，为凑够布局会多获取几页，加载变慢属正常现象。建议选择[一般向]或[禁漫]或[搜索]，[排行]基本都是gay标签内容。如果你点击[BL向]只有两本属于正常，因为获取十页全屏蔽了。",
-                    checked = filterEnabled,
-                    onCheckedChanged = { vm.setFilterEnabled(it) },
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "添加屏蔽标签",
-                    subtitle = "搜索标签后多选加入屏蔽列表",
-                    onPreferenceClick = { showAddDialog = true },
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "删除屏蔽标签",
-                    subtitle = "已屏蔽 ${blockedTags.size} 个标签",
-                    onPreferenceClick = { showRemoveDialog = true },
-                )
-            }
+        TagBlockContent(vm = vm, modifier = Modifier.padding(contentPadding))
+    }
+}
+
+@Composable
+fun TagBlockContent(vm: SettingsViewModel, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val filterEnabled by vm.filterEnabled.collectAsState()
+    val blockedTags by vm.blockedTags.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showRemoveDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { vm.loadBlockedTags() }
+
+    ScrollbarLazyColumn(modifier = modifier) {
+        item {
+            SwitchPreferenceWidget(
+                title = "过滤屏蔽标签",
+                subtitle = "对屏蔽的标签漫画进行隐藏(正常会显示404)。建议登录后配合gay标签一键屏蔽使用。",
+                checked = filterEnabled,
+                onCheckedChanged = { vm.setFilterEnabled(it) },
+            )
+        }
+        item {
+            TextPreferenceWidget(
+                title = "添加屏蔽标签",
+                subtitle = "搜索标签后多选加入屏蔽列表",
+                onPreferenceClick = { showAddDialog = true },
+            )
+        }
+        item {
+            TextPreferenceWidget(
+                title = "删除屏蔽标签",
+                subtitle = "已屏蔽 ${blockedTags.size} 个标签",
+                onPreferenceClick = { showRemoveDialog = true },
+            )
         }
     }
 

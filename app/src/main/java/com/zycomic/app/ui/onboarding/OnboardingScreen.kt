@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.login.LoginScreen
+import com.zycomic.app.ui.settings.SettingsViewModel
+import com.zycomic.app.ui.settings.TagBlockContent
 import kotlinx.coroutines.launch
 
 @Composable
@@ -101,14 +104,18 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     }
                 }
                 1 -> Box(Modifier.fillMaxSize()) { LoginScreen(onClose = {}) }
-                2 -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("标签设置", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = { com.zycomic.app.ui.settings.SettingsViewModel().blockGayTags() }) { Text("gay标签一键屏蔽") }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = { android.widget.Toast.makeText(context, "请在设置中管理屏蔽标签", android.widget.Toast.LENGTH_SHORT).show() }) { Text("过滤屏蔽标签") }
-                    Spacer(Modifier.height(16.dp))
-                    Text("登录后建议点击gay标签一键屏蔽一次，会把所有的gay标签屏蔽掉，有些遗漏的是因为会影响其他正常漫画的观看，所以会有部分gay漫画仍然显示", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                2 -> {
+                    val vm = remember { SettingsViewModel() }
+                    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Spacer(Modifier.height(16.dp))
+                        Text("标签设置", style = MaterialTheme.typography.headlineSmall)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { vm.blockGayTags() }) { Text("gay标签一键屏蔽") }
+                        Spacer(Modifier.height(8.dp))
+                        Text("登录后建议点击gay标签一键屏蔽一次，会把所有的gay标签屏蔽掉，有些遗漏的是因为会影响其他正常漫画的观看，所以会有部分gay漫画仍然显示", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(16.dp))
+                        TagBlockContent(vm = vm, modifier = Modifier.fillMaxWidth().weight(1f))
+                    }
                 }
             }
         }
