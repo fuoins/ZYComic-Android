@@ -92,6 +92,11 @@ fun ProfileScreen(
     var showRewardDialog by remember { mutableStateOf(false) }
     var showAdDebug by remember { mutableStateOf<String?>(null) }
     var adProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    androidx.activity.compose.BackHandler(enabled = showPointLogs) { showPointLogs = false }
+    androidx.activity.compose.BackHandler(enabled = showChangePwd) { showChangePwd = false }
+    androidx.activity.compose.BackHandler(enabled = showRewardDialog) { showRewardDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showAdDebug != null) { showAdDebug = null }
+    androidx.activity.compose.BackHandler(enabled = adProgress != null) { adProgress = null }
     var adMsg by remember { mutableStateOf("") }
     var adDone by remember { mutableStateOf(false) }
     var adResultOk by remember { mutableStateOf<Int?>(null) }
