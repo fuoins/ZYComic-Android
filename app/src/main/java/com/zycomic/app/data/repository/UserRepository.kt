@@ -250,7 +250,7 @@ object UserRepository {
             clickAd(link)
             kotlinx.coroutines.delay(2000)
         }
-        val resp = api.claimAdBonus(com.zycomic.app.data.dto.AdBonusRequest())
+        val resp = api.claimAdBonus(com.zycomic.app.data.dto.AdBonusRequest(action = "ad_bonus"))
         if (resp.code != 1 || resp.data?.status != "success") {
             throw IOException(resp.data?.msg?.ifEmpty { resp.msg.ifEmpty { "领取失败" } } ?: "领取失败")
         }

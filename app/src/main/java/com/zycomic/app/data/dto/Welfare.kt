@@ -79,7 +79,7 @@ data class PointLogData(
 
 @Serializable
 data class AdBonusRequest(
-    val action: String = "ad_bonus",
+    val action: String,
 )
 
 @Serializable
