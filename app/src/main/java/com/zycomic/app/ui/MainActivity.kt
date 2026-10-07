@@ -158,7 +158,7 @@ fun AppContent() {
     var showGayConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
+        val result = withTimeoutOrNull(15000) { settingsVm.autoSelectFastest() }
         speedTesting = false
         when {
             result == null -> Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show()
