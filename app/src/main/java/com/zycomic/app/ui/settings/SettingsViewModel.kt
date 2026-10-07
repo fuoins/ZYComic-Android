@@ -179,6 +179,7 @@ class SettingsViewModel {
 
     /** 方案B域名级测速：RuleDns client 直接 GET，不逐 IP。 */
     private suspend fun measureLineDomain(lineUrl: String): Long = withContext(Dispatchers.IO) {
+        android.util.Log.d("SpeedTest", "measureLine start url=$lineUrl")
         val ts = System.currentTimeMillis().toString()
         val url = "$lineUrl/api/index/index?facility=android&deviceid=${ManwaInterceptor.DEVICE_ID}&timestamp=$ts"
         val req = Request.Builder()
@@ -196,21 +197,28 @@ class SettingsViewModel {
         val start = System.nanoTime()
         try {
             NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
-            (System.nanoTime() - start) / 1_000_000
-        } catch (_: Exception) {
+            val d = (System.nanoTime() - start) / 1_000_000
+            android.util.Log.d("SpeedTest", "measureLine done url=$lineUrl delay=${d}ms")
+            d
+        } catch (e: Exception) {
+            android.util.Log.d("SpeedTest", "measureLine fail url=$lineUrl err=${e.message}")
             Long.MAX_VALUE
         }
     }
 
     private suspend fun measureImgDomain(domain: String): Long = withContext(Dispatchers.IO) {
+        android.util.Log.d("SpeedTest", "measureImg start domain=$domain")
         val req = Request.Builder().url("https://$domain/").get()
             .header("User-Agent", ManwaInterceptor.UA)
             .build()
         val start = System.nanoTime()
         try {
             NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
-            (System.nanoTime() - start) / 1_000_000
-        } catch (_: Exception) {
+            val d = (System.nanoTime() - start) / 1_000_000
+            android.util.Log.d("SpeedTest", "measureImg done domain=$domain delay=${d}ms")
+            d
+        } catch (e: Exception) {
+            android.util.Log.d("SpeedTest", "measureImg fail domain=$domain err=${e.message}")
             Long.MAX_VALUE
         }
     }
