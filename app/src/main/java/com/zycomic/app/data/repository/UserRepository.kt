@@ -248,7 +248,7 @@ object UserRepository {
             debug.append("\n[click${it + 1}] ").append(r.debug)
             val link = r.link ?: throw AdDebugException(debug.toString())
             clickAd(link)
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(2000)
         }
         val resp = api.claimAdBonus(com.zycomic.app.data.dto.AdBonusRequest())
         if (resp.code != 1 || resp.data?.status != "success") {

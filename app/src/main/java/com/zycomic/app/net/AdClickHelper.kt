@@ -22,19 +22,30 @@ class AdClickHelper(private val context: Context) {
                     Handler(Looper.getMainLooper()).postDelayed({
                         val js = """
                             (function() {
-                                var links = [];
+                                var result = {links: [], attrs: [], scripts: []};
                                 document.querySelectorAll('a').forEach(function(a) {
-                                    if (a.href && a.href.indexOf('manwa.me') < 0 && a.href.indexOf('javascript') < 0 && a.href.indexOf('#') < 0) {
-                                        links.push(a.href);
+                                    if (a.href && a.href.indexOf('manwa.me') < 0 && a.href.indexOf('javascript') !== 0) result.links.push(a.href);
+                                    for (var i = 0; i < a.attributes.length; i++) {
+                                        var attr = a.attributes[i];
+                                        if (attr.name.indexOf('data-') === 0 || attr.value.indexOf('chmsrv') >= 0 || attr.value.indexOf('click.php') >= 0) {
+                                            result.attrs.push(attr.name + '=' + attr.value);
+                                        }
                                     }
                                 });
-                                if (links.length > 0) return links[0];
-                                return 'NO_EXTERNAL_LINK|total=' + document.querySelectorAll('a').length;
+                                document.querySelectorAll('script').forEach(function(s) {
+                                    if (s.textContent && (s.textContent.indexOf('chmsrv') >= 0 || s.textContent.indexOf('click.php') >= 0)) {
+                                        result.scripts.push(s.textContent.substring(0, 200));
+                                    }
+                                });
+                                var ch = result.links.find(function(h){ return h.indexOf('chmsrv') >= 0 || h.indexOf('click.php') >= 0; });
+                                if (ch) return ch;
+                                if (result.links.length > 0) return result.links[0];
+                                return 'NO_LINK|' + JSON.stringify(result).substring(0, 500);
                             })()
                         """.trimIndent()
                         webView.evaluateJavascript(js) { r ->
                             val v = r?.trim('"')?.takeIf { it != "null" && it.isNotEmpty() }
-                            val link = v?.takeIf { !it.startsWith("NO_EXTERNAL_LINK") }
+                            val link = v?.takeIf { !it.startsWith("NO_LINK") }
                             cont.resume(Result(link, v ?: "null"))
                             webView.destroy()
                         }

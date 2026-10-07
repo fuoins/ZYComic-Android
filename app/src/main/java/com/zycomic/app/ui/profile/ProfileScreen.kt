@@ -584,11 +584,13 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
             return@Box
         }
         val bg = when {
+            isToday -> MaterialTheme.colorScheme.primary
             day.isSigned -> MaterialTheme.colorScheme.primary
             day.isMissed -> MaterialTheme.colorScheme.surfaceVariant
             day.isFuture -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
             else -> MaterialTheme.colorScheme.surfaceVariant
         }
+        val fg = if (isToday || day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier
@@ -600,8 +602,7 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
                 Text(
                     if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (day.isSigned) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = fg,
                 )
             }
             if (isToday) Spacer(Modifier.height(3.dp).width(16.dp).background(MaterialTheme.colorScheme.primary))
