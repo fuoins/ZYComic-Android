@@ -10,9 +10,7 @@ import kotlin.coroutines.resume
 
 class AdClickHelper(private val context: Context) {
 
-    data class Result(val link: String?, val debug: String)
-
-    suspend fun getAdLink(html: String): Result = suspendCancellableCoroutine { cont ->
+    suspend fun getAllAdLinks(html: String): List<String> = suspendCancellableCoroutine { cont ->
         Handler(Looper.getMainLooper()).post {
             val webView = WebView(context)
             webView.settings.javaScriptEnabled = true
@@ -28,17 +26,20 @@ class AdClickHelper(private val context: Context) {
                                         links.push(a.href);
                                     }
                                 });
-                                if (links.length > 0) return links[0];
-                                return 'NO_EXTERNAL_LINK|total=' + document.querySelectorAll('a').length;
+                                return JSON.stringify(links);
                             })()
                         """.trimIndent()
                         webView.evaluateJavascript(js) { r ->
-                            val v = r?.trim('"')?.takeIf { it != "null" && it.isNotEmpty() }
-                            val link = v?.takeIf { !it.startsWith("NO_EXTERNAL_LINK") }
-                            cont.resume(Result(link, v ?: "null"))
+                            try {
+                                val arr = org.json.JSONArray(r?.removePrefix("\"")?.removeSuffix("\"") ?: "[]")
+                                val list = (0 until arr.length()).map { arr.getString(it) }
+                                cont.resume(list)
+                            } catch (_: Exception) {
+                                cont.resume(emptyList())
+                            }
                             webView.destroy()
                         }
-                    }, 4000)
+                    }, 3000)
                 }
             }
             webView.loadDataWithBaseURL("https://manwa.me/", html, "text/html", "UTF-8", null)

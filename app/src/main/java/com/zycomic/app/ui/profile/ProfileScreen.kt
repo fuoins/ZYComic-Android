@@ -41,6 +41,7 @@ import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -87,6 +88,11 @@ fun ProfileScreen(
     var showChangePwd by remember { mutableStateOf(false) }
     var showRewardDialog by remember { mutableStateOf(false) }
     var showAdDebug by remember { mutableStateOf<String?>(null) }
+    var adProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var adMsg by remember { mutableStateOf("") }
+    var adDone by remember { mutableStateOf(false) }
+    var adResultOk by remember { mutableStateOf<Int?>(null) }
+    var adErr by remember { mutableStateOf<String?>(null) }
     var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -240,15 +246,21 @@ fun ProfileScreen(
                         scope.launch {
                             rewarding = true
                             showRewardDialog = false
-                            runCatching { UserRepository.claimAdBonus() }
-                                .onSuccess { Toast.makeText(context, "领取成功，+${it}积分", Toast.LENGTH_SHORT).show() }
-                                .onFailure {
-                                    if (it is UserRepository.AdDebugException) {
-                                        showAdDebug = it.debug
-                                    } else {
-                                        Toast.makeText(context, it.message ?: "领取失败", Toast.LENGTH_SHORT).show()
-                                    }
+                            adProgress = 0 to 5
+                            adMsg = "准备中..."
+                            adDone = false
+                            runCatching {
+                                UserRepository.claimAdBonus { c, t, m ->
+                                    adProgress = c to t
+                                    adMsg = m
                                 }
+                            }.onSuccess {
+                                adResultOk = it
+                            }.onFailure {
+                                if (it is UserRepository.AdDebugException) showAdDebug = it.debug
+                                else adErr = it.message ?: "领取失败"
+                            }
+                            adDone = true
                             rewarding = false
                         }
                     },
@@ -269,6 +281,30 @@ fun ProfileScreen(
             title = { Text("调试信息") },
             text = { OutlinedTextField(value = dbg, onValueChange = {}, readOnly = true, modifier = Modifier.fillMaxWidth().height(200.dp), textStyle = MaterialTheme.typography.bodySmall) },
             confirmButton = { TextButton(onClick = { showAdDebug = null }) { Text("关闭") } },
+        )
+    }
+
+    adProgress?.let { (c, t) ->
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("奖励破解中") },
+            text = {
+                Column {
+                    LinearProgressIndicator(progress = if (t > 0) c.toFloat() / t else 0f, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(12.dp))
+                    Text(adMsg, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = adDone,
+                    onClick = {
+                        adResultOk?.let { Toast.makeText(context, "领取成功，+${it}积分", Toast.LENGTH_SHORT).show() }
+                        adErr?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                        adProgress = null; adResultOk = null; adErr = null
+                    },
+                ) { Text("完成") }
+            },
         )
     }
 }
