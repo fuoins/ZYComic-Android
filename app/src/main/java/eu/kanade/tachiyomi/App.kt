@@ -115,11 +115,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     override fun onCreate() {
         super<Application>.onCreate()
 
-        runCatching {
-            val m = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_theme_mode_key", "SYSTEM")
-            androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(when (m) { "DARK" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES; "LIGHT" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO; else -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM })
-        }
-
         // 初始化开发者配置
         DevConfig.init(this)
         DevConfig.migrateProxyDefaultIfNeeded()
