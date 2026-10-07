@@ -556,6 +556,16 @@ private fun SignCalendarSection(
                 Spacer(Modifier.width(4.dp))
                 Text("未签到", style = MaterialTheme.typography.bodySmall)
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .width(12.dp)
+                        .height(3.dp)
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("今日", style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
     HorizontalDivider()
@@ -579,19 +589,22 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
             day.isFuture -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
             else -> MaterialTheme.colorScheme.surfaceVariant
         }
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(bg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (day.isSigned) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(bg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (day.isSigned) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (isToday) Spacer(Modifier.height(3.dp).width(16.dp).background(if (day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
         }
     }
 }
