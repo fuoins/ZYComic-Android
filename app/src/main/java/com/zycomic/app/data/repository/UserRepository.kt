@@ -245,11 +245,11 @@ object UserRepository {
         if (needed > 0) {
             val raw = api.getWawaWise().string()
             val html = try { org.json.JSONObject(raw).getString("data") } catch (_: Exception) { raw }
-            val helper = com.zycomic.app.net.AdClickHelper(appCtx)
+            val links = com.zycomic.app.net.AdClickHelper(appCtx).getAllAdLinks(html)
+            if (links.isEmpty()) throw AdDebugException("html前200: " + html.take(200))
             repeat(needed) { i ->
                 onProgress(i + 1, needed, "点击广告 ${i + 1}/$needed")
-                val r = helper.getAdLink(html)
-                r.link?.let { clickAd(it) } ?: throw AdDebugException(r.debug + "\nhtml前200: " + html.take(200))
+                clickAd(links[i % links.size])
                 kotlinx.coroutines.delay(500)
             }
         }
