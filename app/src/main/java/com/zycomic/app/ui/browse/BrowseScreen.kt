@@ -130,6 +130,9 @@ fun BrowseScreen(
     var showFilterDialog by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showTagDialog) { showTagDialog = false }
 
     LaunchedEffect(selectionMode) {
         if (selectionMode) vm.loadFolders()
