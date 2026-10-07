@@ -1,5 +1,7 @@
 package com.zycomic.app.ui.onboarding
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -40,7 +43,13 @@ fun OnboardingScreen(onDone: () -> Unit) {
     LaunchedEffect(user) { if (pager.currentPage == 1 && user != null) { kotlinx.coroutines.delay(500); pager.animateScrollToPage(2) } }
 
     Scaffold(bottomBar = {
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Column {
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+                repeat(3) { i ->
+                    Box(Modifier.padding(4.dp).size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (pager.currentPage == i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)).clickable { scope.launch { pager.animateScrollToPage(i) } })
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             if (pager.currentPage > 0) OutlinedButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } }) { Text("上一步") }
             else Spacer(Modifier)
             Button(onClick = {
@@ -53,6 +62,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 }
             }, enabled = pager.currentPage != 1 || user != null) {
                 Text(when (pager.currentPage) { 0 -> "下一步"; 1 -> "下一步"; else -> "完成" })
+            }
             }
         }
     }) { pd ->
