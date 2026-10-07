@@ -94,6 +94,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
                             SegmentedButton(checked = cur == m, onCheckedChange = { prefs.edit().putString("pref_theme_mode_key", m).apply(); eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(eu.kanade.domain.ui.model.ThemeMode.valueOf(m)) }, shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text(label) }
                         }
                     }
+                    Spacer(Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("纯黑AMOLED", modifier = Modifier.weight(1f))
+                        androidx.compose.material3.Switch(checked = prefs.getBoolean("pref_theme_dark_amoled_key", false), onCheckedChange = { prefs.edit().putBoolean("pref_theme_dark_amoled_key", it).apply() })
+                    }
                 }
                 1 -> Box(Modifier.fillMaxSize()) { LoginScreen(onClose = {}) }
                 2 -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
