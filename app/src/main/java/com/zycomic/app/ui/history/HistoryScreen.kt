@@ -104,6 +104,9 @@ fun HistoryScreen(
     var showBatchDelete by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showFavoriteConfirm by remember { mutableStateOf<HistoryItem?>(null) }
+    androidx.activity.compose.BackHandler(enabled = showBatchDelete) { showBatchDelete = false }
+    androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showFavoriteConfirm != null) { showFavoriteConfirm = null }
     var singleDeleteTarget by remember { mutableStateOf<HistoryItem?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
 

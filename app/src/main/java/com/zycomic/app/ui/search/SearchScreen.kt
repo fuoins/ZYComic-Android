@@ -73,6 +73,7 @@ fun SearchScreen(
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
     var showModeMenu by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showModeMenu) { showModeMenu = false }
     val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
     val gridState = rememberLazyGridState()

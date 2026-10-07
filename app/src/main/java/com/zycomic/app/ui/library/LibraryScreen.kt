@@ -137,6 +137,10 @@ fun LibraryScreen(
     var showMoveDialog by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showMoveDialog) { showMoveDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showRemoveConfirm) { showRemoveConfirm = false }
+    androidx.activity.compose.BackHandler(enabled = showNewFolderDialog) { showNewFolderDialog = false }
     var renameTarget by remember { mutableStateOf<Folder?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
 

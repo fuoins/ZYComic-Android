@@ -57,6 +57,9 @@ fun SettingsScreen() {
     var showGayConfirm by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showGayConfirm) { showGayConfirm = false }
+    androidx.activity.compose.BackHandler(enabled = showAddDialog) { showAddDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showRemoveDialog) { showRemoveDialog = false }
 
     LaunchedEffect(Unit) {
         vm.loadAllTags()
