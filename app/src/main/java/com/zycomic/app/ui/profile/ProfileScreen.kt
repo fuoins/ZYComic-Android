@@ -584,21 +584,21 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
                 .size(32.dp)
                 .clip(CircleShape)
                 .then(
-                    if (isToday) Modifier.border(
-                        1.5.dp,
-                        if (day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                        CircleShape,
-                    ) else Modifier,
+                    if (isToday && !day.isSigned) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    else Modifier,
                 )
                 .background(bg),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (day.isSigned) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (day.isSigned) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (isToday) Spacer(Modifier.height(2.dp).width(14.dp).background(if (day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+            }
         }
     }
 }

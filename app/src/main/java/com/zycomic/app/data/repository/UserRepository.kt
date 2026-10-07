@@ -239,7 +239,8 @@ object UserRepository {
 
     suspend fun claimAdBonus(): Int {
         val pointBefore = getUserInfo().point
-        val html = api.getWawaWise().string()
+        val raw = api.getWawaWise().string()
+        val html = try { org.json.JSONObject(raw).getString("data") } catch (_: Exception) { raw }
         val helper = com.zycomic.app.net.AdClickHelper(appCtx)
         val debug = StringBuilder("html前200: " + html.take(200))
         repeat(5) {
