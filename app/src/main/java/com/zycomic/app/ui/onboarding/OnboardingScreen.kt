@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.login.LoginScreen
@@ -40,6 +41,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
     val pager = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
     val user by UserRepository.userFlow.collectAsState()
+    val context = LocalContext.current
     LaunchedEffect(user) { if (pager.currentPage == 1 && user != null) { kotlinx.coroutines.delay(500); pager.animateScrollToPage(2) } }
 
     Scaffold(bottomBar = {
@@ -70,8 +72,16 @@ fun OnboardingScreen(onDone: () -> Unit) {
             when (page) {
                 0 -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("外观设置", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(16.dp))
-                    Text("在系统设置或后续设置页中调整深色模式与主题色", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    Text("后续也可在设置中修改", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(24.dp))
+                    val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                    val cur = prefs.getString("pref_theme_mode_key", "SYSTEM") ?: "SYSTEM"
+                    androidx.compose.material3.MultiChoiceSegmentedButtonRow {
+                        listOf("跟随系统" to "SYSTEM", "浅色" to "LIGHT", "深色" to "DARK").forEach { (label, m) ->
+                            androidx.compose.material3.SegmentedButton(selected = cur == m, onClick = { prefs.edit().putString("pref_theme_mode_key", m).apply(); eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(eu.kanade.domain.ui.model.ThemeMode.valueOf(m)) }) { Text(label) }
+                        }
+                    }
                 }
                 1 -> Box(Modifier.fillMaxSize()) { LoginScreen(onClose = {}) }
                 2 -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
