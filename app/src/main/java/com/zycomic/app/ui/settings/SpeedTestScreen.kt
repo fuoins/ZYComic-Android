@@ -1,12 +1,16 @@
 package com.zycomic.app.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -23,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.RouteManager
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -62,6 +67,18 @@ fun SpeedTestScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+
+            val logs by vm.speedTestLogs.collectAsState()
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("测速日志", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                androidx.compose.material3.TextButton(onClick = {
+                    val cm = LocalContext.current.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("speedtest", logs.joinToString("\n")))
+                }) { Text("复制") }
+            }
+            Column(Modifier.fillMaxWidth().height(200.dp).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)) {
+                logs.forEach { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(2.dp)) }
+            }
 
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
                 item {
