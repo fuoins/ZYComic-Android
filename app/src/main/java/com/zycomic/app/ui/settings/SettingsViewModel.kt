@@ -42,6 +42,8 @@ class SettingsViewModel {
     val autoSelecting = MutableStateFlow(false)
     /** 线路延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
     val lineDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastLineDelays)
+    val speedTestLogs = MutableStateFlow<List<String>>(emptyList())
+    private fun log(msg: String) { log(msg); speedTestLogs.value = speedTestLogs.value + msg }
     /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
     val imgDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastImgDelays)
     val configUpdateTime = MutableStateFlow("未更新")
@@ -179,7 +181,7 @@ class SettingsViewModel {
 
     /** 方案B域名级测速：RuleDns client 直接 GET，不逐 IP。 */
     private suspend fun measureLineDomain(lineUrl: String): Long = withContext(Dispatchers.IO) {
-        android.util.Log.d("SpeedTest", "measureLine start url=$lineUrl")
+        log("measureLine start url=$lineUrl")
         val ts = System.currentTimeMillis().toString()
         val url = "$lineUrl/api/index/index?facility=android&deviceid=${ManwaInterceptor.DEVICE_ID}&timestamp=$ts"
         val req = Request.Builder()
@@ -198,16 +200,16 @@ class SettingsViewModel {
         try {
             NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
             val d = (System.nanoTime() - start) / 1_000_000
-            android.util.Log.d("SpeedTest", "measureLine done url=$lineUrl delay=${d}ms")
+            log("measureLine done url=$lineUrl delay=${d}ms")
             d
         } catch (e: Exception) {
-            android.util.Log.d("SpeedTest", "measureLine fail url=$lineUrl err=${e.message}")
+            log("measureLine fail url=$lineUrl err=${e.message}")
             Long.MAX_VALUE
         }
     }
 
     private suspend fun measureImgDomain(domain: String): Long = withContext(Dispatchers.IO) {
-        android.util.Log.d("SpeedTest", "measureImg start domain=$domain")
+        log("measureImg start domain=$domain")
         val req = Request.Builder().url("https://$domain/").get()
             .header("User-Agent", ManwaInterceptor.UA)
             .build()
@@ -215,23 +217,23 @@ class SettingsViewModel {
         try {
             NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
             val d = (System.nanoTime() - start) / 1_000_000
-            android.util.Log.d("SpeedTest", "measureImg done domain=$domain delay=${d}ms")
+            log("measureImg done domain=$domain delay=${d}ms")
             d
         } catch (e: Exception) {
-            android.util.Log.d("SpeedTest", "measureImg fail domain=$domain err=${e.message}")
+            log("measureImg fail domain=$domain err=${e.message}")
             Long.MAX_VALUE
         }
     }
 
     private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
-        android.util.Log.d("SpeedTest", "runMeasure start, lines=${com.zycomic.app.net.RouteManager.lineHosts.size}, imgs=${com.zycomic.app.net.RouteManager.imgDomains.size}")
+        log("runMeasure start, lines=${com.zycomic.app.net.RouteManager.lineHosts.size}, imgs=${com.zycomic.app.net.RouteManager.imgDomains.size}")
         val lineResults = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
             async { index to measureLineDomain(lineUrl) }
         }.awaitAll().toMap()
         val imgResults = RouteManager.imgDomains.mapIndexed { index, domain ->
             async { index to measureImgDomain(domain) }
         }.awaitAll().toMap()
-        android.util.Log.d("SpeedTest", "runMeasure done, lines=$lineResults, imgs=$imgResults")
+        log("runMeasure done, lines=$lineResults, imgs=$imgResults")
         lineResults to imgResults
     }
 
@@ -256,7 +258,8 @@ class SettingsViewModel {
      * 全部失败：保持当前线路，返回 (-1, -1)。
      */
     suspend fun autoSelectFastest(): Pair<Int, Int> {
-        android.util.Log.d("SpeedTest", "autoSelectFastest start")
+        speedTestLogs.value = emptyList()
+        log("autoSelectFastest start")
         autoSelecting.value = true
         return try {
             val (lines, imgs) = runMeasure()
@@ -279,7 +282,7 @@ class SettingsViewModel {
                 NetworkModule.rebuild()
             }
             val r = (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
-            android.util.Log.d("SpeedTest", "autoSelectFastest done, bestLine=${r.first}, bestImg=${r.second}")
+            log("autoSelectFastest done, bestLine=${r.first}, bestImg=${r.second}")
             r
         } finally {
             autoSelecting.value = false
