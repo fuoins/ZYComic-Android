@@ -156,12 +156,13 @@ fun AppContent() {
     var showGayConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        android.util.Log.d("SpeedTest", "speed test launched")
         val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
         speedTesting = false
         when {
-            result == null -> Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show()
+            result == null -> { android.util.Log.d("SpeedTest", "speed test timeout"); Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show() }
             result.first == -1 -> Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
-            else -> Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
+            else -> { android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}"); Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show() }
         }
     }
 

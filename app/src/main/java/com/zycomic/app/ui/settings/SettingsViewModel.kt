@@ -224,12 +224,14 @@ class SettingsViewModel {
     }
 
     private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
+        android.util.Log.d("SpeedTest", "runMeasure start, lines=${com.zycomic.app.net.RouteManager.lineHosts.size}, imgs=${com.zycomic.app.net.RouteManager.imgDomains.size}")
         val lineResults = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
             async { index to measureLineDomain(lineUrl) }
         }.awaitAll().toMap()
         val imgResults = RouteManager.imgDomains.mapIndexed { index, domain ->
             async { index to measureImgDomain(domain) }
         }.awaitAll().toMap()
+        android.util.Log.d("SpeedTest", "runMeasure done, lines=$lineResults, imgs=$imgResults")
         lineResults to imgResults
     }
 
@@ -254,6 +256,7 @@ class SettingsViewModel {
      * 全部失败：保持当前线路，返回 (-1, -1)。
      */
     suspend fun autoSelectFastest(): Pair<Int, Int> {
+        android.util.Log.d("SpeedTest", "autoSelectFastest start")
         autoSelecting.value = true
         return try {
             val (lines, imgs) = runMeasure()
@@ -275,7 +278,9 @@ class SettingsViewModel {
             if (bestLine != null || bestImg != null) {
                 NetworkModule.rebuild()
             }
-            (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
+            val r = (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
+            android.util.Log.d("SpeedTest", "autoSelectFastest done, bestLine=${r.first}, bestImg=${r.second}")
+            r
         } finally {
             autoSelecting.value = false
         }
