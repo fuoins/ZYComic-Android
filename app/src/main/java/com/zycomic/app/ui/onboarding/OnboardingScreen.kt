@@ -104,6 +104,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 2 -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("标签设置", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(16.dp))
+                    Button(onClick = { com.zycomic.app.ui.settings.SettingsViewModel().blockGayTags() }) { Text("gay标签一键屏蔽") }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { }) { Text("过滤屏蔽标签") }
+                    Spacer(Modifier.height(16.dp))
                     Text("登录后建议点击gay标签一键屏蔽一次，会把所有的gay标签屏蔽掉，有些遗漏的是因为会影响其他正常漫画的观看，所以会有部分gay漫画仍然显示", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
