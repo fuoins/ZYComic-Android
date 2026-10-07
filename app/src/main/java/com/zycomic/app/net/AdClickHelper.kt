@@ -12,8 +12,9 @@ class AdClickHelper(private val context: Context) {
 
     data class Result(val link: String?, val debug: String)
 
-    suspend fun getAllAdLinks(html: String): List<String> =
+    suspend fun getAllAdLinks(html: String, onStatus: (String) -> Unit = {}): List<String> =
         kotlinx.coroutines.withTimeoutOrNull(8000) {
+            onStatus("加载广告中...")
             suspendCancellableCoroutine { cont ->
                 Handler(Looper.getMainLooper()).post {
                     val webView = WebView(context)
@@ -36,7 +37,9 @@ class AdClickHelper(private val context: Context) {
                                 webView.evaluateJavascript(js) { r ->
                                     try {
                                         val arr = org.json.JSONArray(r?.removePrefix("\"")?.removeSuffix("\"") ?: "[]")
-                                        cont.resume((0 until arr.length()).map { arr.getString(it) })
+                                        val l = (0 until arr.length()).map { arr.getString(it) }
+                                        onStatus("已获取${l.size}个广告链接")
+                                        cont.resume(l)
                                     } catch (_: Exception) { cont.resume(emptyList()) }
                                     webView.destroy()
                                 }
