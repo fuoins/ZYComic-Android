@@ -50,12 +50,10 @@ include(":domain")
 include(":i18n")
 // KMK -->
 include(":i18n-kmk")
-include(":flagkit")
 // KMK <--
 // SY -->
 include(":i18n-sy")
 // SY <--
-include(":macrobenchmark")
 include(":presentation-core")
 include(":presentation-widget")
 include(":source-api")

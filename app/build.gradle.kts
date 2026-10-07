@@ -242,7 +242,6 @@ dependencies {
     implementation(libs.palette.ktx)
     implementation(libs.haze)
     implementation(compose.colorpicker)
-    implementation(projects.flagkit)
     // KMK <--
 
     // Logging
