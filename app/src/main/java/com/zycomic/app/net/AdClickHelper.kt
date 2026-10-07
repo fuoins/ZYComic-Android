@@ -26,25 +26,29 @@ class AdClickHelper(private val context: Context) {
                                 val js = """
                                     (function() {
                                         var links = [];
-                                        var hrefs = [];
+                                        var allHrefs = [];
                                         document.querySelectorAll('a').forEach(function(a) {
-                                            hrefs.push(a.href);
+                                            allHrefs.push(a.href);
                                             if (a.href && a.href.indexOf('manwa.me') < 0 && a.href.indexOf('javascript') < 0 && a.href.indexOf('#') < 0) {
                                                 links.push(a.href);
                                             }
                                         });
-                                        return JSON.stringify({links: links, total: hrefs.length, hrefs: hrefs.slice(0,10)});
+                                        if (links.length > 0) return 'OK|' + links.join('|||');
+                                        return 'EMPTY|' + allHrefs.length + '|' + allHrefs.slice(0,10).join('|||');
                                     })()
                                 """.trimIndent()
                                 webView.evaluateJavascript(js) { r ->
+                                    val v = r?.trim('"')?.takeIf { it != "null" && it.isNotEmpty() }.orEmpty()
                                     try {
-                                        val o = org.json.JSONObject(r?.removePrefix("\"")?.removeSuffix("\"") ?: "{}")
-                                        val arr = o.getJSONArray("links")
-                                        val l = (0 until arr.length()).map { arr.getString(it) }
-                                        val dbg = if (l.isEmpty()) "NO_LINKS|total=" + o.optInt("total") + "|hrefs=" + o.optJSONArray("hrefs")?.join(";") else ""
-                                        onStatus("已获取${l.size}个广告链接")
-                                        cont.resume(Result(l, dbg))
-                                    } catch (_: Exception) { cont.resume(Result(emptyList(), "parse_err:" + r)) }
+                                        if (v.startsWith("OK|")) {
+                                            val l = v.removePrefix("OK|").split("|||").filter { it.isNotBlank() }
+                                            onStatus("已获取${l.size}个广告链接")
+                                            cont.resume(Result(l, ""))
+                                        } else {
+                                            val parts = v.split("|")
+                                            cont.resume(Result(emptyList(), "NO_LINKS|total=" + parts.getOrNull(1) + "|hrefs=" + parts.getOrNull(2)))
+                                        }
+                                    } catch (_: Exception) { cont.resume(Result(emptyList(), "parse_err:" + v)) }
                                     webView.destroy()
                                 }
                             }, 6000)

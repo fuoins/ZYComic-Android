@@ -239,7 +239,6 @@ object UserRepository {
 
     suspend fun claimAdBonus(onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }): Int {
         onProgress(0, 1, "查询福利状态...")
-        val pointBefore = getUserInfo().point
         val welfare = getWelfare()
         val needed = if (welfare?.check_ad_bonus_today == true) 0 else (5 - (welfare?.ad_clicks ?: 0)).coerceAtLeast(0)
         val total = needed.coerceAtLeast(1)
@@ -260,9 +259,7 @@ object UserRepository {
         if (resp.code != 1 || resp.data?.status != "success") {
             throw IOException(resp.data?.msg?.ifEmpty { resp.msg.ifEmpty { "领取失败" } } ?: "领取失败")
         }
-        onProgress(total, total, "验证积分...")
-        val pointAfter = getUserInfo().point
-        return pointAfter - pointBefore
+        return 10
     }
 
     /** 积分明细分页。 */

@@ -51,8 +51,8 @@ class LoginViewModel {
             catch (e: Exception) {
                 val isCaptcha = (e.message ?: "").contains("验证码")
                 captchaInput.value = ""
-                if (isCaptcha) { _error.value = "验证码错误，请刷新图片后重试"; refreshCaptcha() }
-                else { _error.value = e.message ?: "登录失败" }
+                _error.value = if (isCaptcha) "验证码错误，请刷新图片后重试" else (e.message ?: "登录失败")
+                refreshCaptcha()
             }
             finally { _loading.value = false }
         }
