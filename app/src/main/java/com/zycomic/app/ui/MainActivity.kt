@@ -149,7 +149,6 @@ fun AppContent() {
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
     var speedTesting by remember { mutableStateOf(true) }
-    var showOnboarding by remember { mutableStateOf(androidx.preference.PreferenceManager.getDefaultSharedPreferences(context).getBoolean("onboarding_complete", false).not()) }
 
     // 设置子页面 Dialog 状态
     var settingsDialog by remember { mutableStateOf<SettingsDialog?>(null) }
@@ -295,13 +294,6 @@ fun AppContent() {
                 Text("正在选择最快线路...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    }
-
-    if (!speedTesting && showOnboarding) {
-        com.zycomic.app.ui.onboarding.OnboardingScreen(onDone = {
-            androidx.preference.PreferenceManager.getDefaultSharedPreferences(context).edit().putBoolean("onboarding_complete", true).apply()
-            showOnboarding = false
-        })
     }
 
     // ---- 详情覆盖层 ----
