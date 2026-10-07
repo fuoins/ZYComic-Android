@@ -29,7 +29,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -136,7 +135,7 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
         }
 
         Spacer(Modifier.height(16.dp))
-        error?.let { Text(it, color = Color(0xFFE53935), modifier = Modifier.padding(bottom = 8.dp)) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) }
         Button(
             onClick = { when (mode) { 0 -> vm.login(); 1 -> vm.emailLogin(); else -> vm.register() } },
             enabled = !loading,
