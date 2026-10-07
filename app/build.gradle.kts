@@ -137,8 +137,6 @@ dependencies {
     implementation(projects.data)
     implementation(projects.domain)
     implementation(projects.presentationCore)
-    implementation(projects.presentationWidget)
-    implementation(projects.telemetry)
 
     // Compose
     implementation(compose.activity)

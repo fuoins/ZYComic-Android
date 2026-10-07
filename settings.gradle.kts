@@ -55,7 +55,5 @@ include(":i18n-kmk")
 include(":i18n-sy")
 // SY <--
 include(":presentation-core")
-include(":presentation-widget")
 include(":source-api")
 include(":source-local")
-include(":telemetry")
