@@ -315,7 +315,7 @@ private fun BrowseTabContent(
                 contentPadding = PaddingValues(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(6) {
+                items((if (gridColumns > 0) gridColumns else 3) * 3) {
                     Column(Modifier.padding(6.dp)) {
                         Box(Modifier.fillMaxWidth().height(180.dp).background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(8.dp)))
                         Spacer(Modifier.height(6.dp))
