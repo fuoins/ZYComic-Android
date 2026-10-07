@@ -54,9 +54,10 @@ fun AboutScreen(
             }
             item {
                 TextPreferenceWidget(
-                    title = "开源许可",
+                    title = "开源地址",
+                    subtitle = "https://github.com/fuoins/ZYComic-Android",
                     onPreferenceClick = {
-                        Toast.makeText(context, "即将上线", Toast.LENGTH_SHORT).show()
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/fuoins/ZYComic-Android")))
                     },
                 )
             }
