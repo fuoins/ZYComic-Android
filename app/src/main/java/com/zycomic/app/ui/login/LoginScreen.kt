@@ -84,11 +84,9 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
         }
         Spacer(Modifier.height(16.dp))
         val tabs = listOf("账号登录", "邮箱登录", "注册")
-        ScrollableTabRow(
+        TabRow(
             selectedTabIndex = mode,
-            indicator = { TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(it[mode]), color = MaterialTheme.colorScheme.primary) },
             containerColor = MaterialTheme.colorScheme.surface,
-            edgePadding = 0.dp,
         ) {
             tabs.forEachIndexed { i, t ->
                 Tab(selected = mode == i, onClick = { vm.mode.value = i }, text = {
