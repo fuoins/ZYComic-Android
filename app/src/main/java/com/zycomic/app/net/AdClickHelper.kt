@@ -50,3 +50,4 @@ class AdClickHelper(private val context: Context) {
                 }
             }
         } ?: emptyList()
+}

@@ -10,7 +10,7 @@ import com.zycomic.app.net.NetworkModule
 import java.io.IOException
 
 object FavoriteRepository {
-    var limitInfo: FavoriteLimitInfo? by androidx.compose.runtime.mutableStateOf(null)
+    var limitInfo: FavoriteLimitInfo? by androidx.compose.runtime.mutableStateOf<FavoriteLimitInfo?>(null)
         private set
 
     private val api get() = NetworkModule.api
