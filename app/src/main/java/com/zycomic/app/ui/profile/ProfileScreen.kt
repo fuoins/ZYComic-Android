@@ -604,7 +604,7 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (isToday) Spacer(Modifier.height(3.dp).width(16.dp).background(if (day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+            if (isToday) Spacer(Modifier.height(3.dp).width(16.dp).background(MaterialTheme.colorScheme.primary))
         }
     }
 }
