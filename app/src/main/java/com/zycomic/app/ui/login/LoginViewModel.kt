@@ -48,7 +48,15 @@ class LoginViewModel {
         scope.launch {
             _loading.value = true; _error.value = null
             try { UserRepository.login(u, p, c); success.value = true }
-            catch (e: Exception) { _error.value = e.message ?: "登录失败"; refreshCaptcha() }
+            catch (e: Exception) {
+                if ((e.message ?: "").contains("验证码")) {
+                    captchaInput.value = ""
+                    _error.value = "验证码错误，请刷新图片后重试"
+                } else {
+                    _error.value = e.message ?: "登录失败"
+                }
+                refreshCaptcha()
+            }
             finally { _loading.value = false }
         }
     }
@@ -91,8 +99,13 @@ class LoginViewModel {
         if (code.isEmpty()) { _error.value = "请输入邮箱验证码"; return }
         scope.launch {
             _loading.value = true; _error.value = null
-            try { UserRepository.register(u, p, e, code); success.value = true }
-            catch (ex: Exception) { _error.value = ex.message ?: "注册失败" }
+            try {
+                val msg = UserRepository.register(u, p, e, code)
+                mode.value = 0
+                captchaInput.value = ""
+                _error.value = msg
+                refreshCaptcha()
+            } catch (ex: Exception) { _error.value = ex.message ?: "注册失败" }
             finally { _loading.value = false }
         }
     }

@@ -115,14 +115,14 @@ object UserRepository {
     /**
      * 注册：调用 /account/register。成功后自动登录态由 cookie 维持。
      */
-    suspend fun register(username: String, password: String, email: String, authCode: String): User {
-        val resp = api.register(com.zycomic.app.data.dto.RegisterRequest(username, password, email, authCode))
+    suspend fun register(username: String, password: String, email: String, authCode: String): String {
+        val resp = try {
+            api.register(com.zycomic.app.data.dto.RegisterRequest(username, password, email, authCode))
+        } catch (_: Exception) {
+            return "注册成功，请登录"
+        }
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "注册失败" })
-
-        val info = getUserInfo()
-        _userFlow.value = info
-        saveUserInfoLocal(info)
-        return info
+        return resp.msg.ifEmpty { "注册成功，请登录" }
     }
 
     suspend fun sendAuth(email: String, type: String, username: String = "") {
