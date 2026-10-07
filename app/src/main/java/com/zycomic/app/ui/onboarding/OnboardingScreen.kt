@@ -26,6 +26,7 @@ import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -89,8 +90,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     Spacer(Modifier.height(24.dp))
                     val cur = prefs.getString("pref_theme_mode_key", "SYSTEM") ?: "SYSTEM"
                     MultiChoiceSegmentedButtonRow {
-                        listOf("跟随系统" to "SYSTEM", "浅色" to "LIGHT", "深色" to "DARK").forEach { (label, m) ->
-                            SegmentedButton(selected = cur == m, onClick = { prefs.edit().putString("pref_theme_mode_key", m).apply(); eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(eu.kanade.domain.ui.model.ThemeMode.valueOf(m)) }) { Text(label) }
+                        listOf("跟随系统" to "SYSTEM", "浅色" to "LIGHT", "深色" to "DARK").forEachIndexed { i, (label, m) ->
+                            SegmentedButton(checked = cur == m, onCheckedChange = { prefs.edit().putString("pref_theme_mode_key", m).apply(); eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(eu.kanade.domain.ui.model.ThemeMode.valueOf(m)) }, shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text(label) }
                         }
                     }
                 }
