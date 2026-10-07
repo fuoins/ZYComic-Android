@@ -69,10 +69,11 @@ fun SpeedTestScreen(
             )
 
             val logs by vm.speedTestLogs.collectAsState()
+            val ctx = LocalContext.current
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("测速日志", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 androidx.compose.material3.TextButton(onClick = {
-                    val cm = LocalContext.current.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("speedtest", logs.joinToString("\n")))
                 }) { Text("复制") }
             }
