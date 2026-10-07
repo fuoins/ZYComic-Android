@@ -90,7 +90,6 @@ class MainActivity : ComponentActivity() {
 
         // 根据 UiPreferences 设置 Activity XML 主题（浅色/深色/AMOLED）
         val uiPreferences = Injekt.get<UiPreferences>()
-        eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(uiPreferences.themeMode().get())
         ThemingDelegate.getThemeResIds(
             uiPreferences.appTheme().get(),
             uiPreferences.themeDarkAmoled().get(),
