@@ -278,17 +278,7 @@ fun LibraryScreen(
                 modifier = Modifier.padding(contentPadding),
             )
             else -> {
-                PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        vm.refreshFavorites()
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    LaunchedEffect(loading) {
-                        if (!loading) isRefreshing = false
-                    }
+                Box(modifier = Modifier.fillMaxSize()) {
                 if (displayMode <= 2) {
                 // 网格模式：0=紧凑 1=舒适 2=仅封面
                 val columns = if (gridColumns > 0) gridColumns else if (displayMode == 1) 2 else 3

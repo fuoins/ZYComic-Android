@@ -250,7 +250,8 @@ object UserRepository {
             repeat(needed) { i ->
                 onProgress(i + 1, total, "点击广告 ${i + 1}/$total")
                 val r = helper.getAdLink(html)
-                r.link?.let { clickAd(it) } ?: throw AdDebugException("ad_clicks=${welfare?.ad_clicks}, bonus_ready=${welfare?.check_ad_bonus_today}\n${r.debug}\nhtml前200: " + html.take(200))
+                val link = r.link ?: helper.getAdLink(html).link
+                link?.let { clickAd(it) } ?: throw AdDebugException("ad_clicks=${welfare?.ad_clicks}, bonus_ready=${welfare?.check_ad_bonus_today}\n${r.debug}\nhtml前200: " + html.take(200))
                 kotlinx.coroutines.delay(500)
             }
         }

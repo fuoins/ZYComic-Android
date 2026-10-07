@@ -151,6 +151,7 @@ fun ProfileScreen(
                 item {
                     TextPreferenceWidget(
                         title = "积分明细(仔细看等级划分)",
+                        icon = androidx.compose.material.icons.Icons.Outlined.Star,
                         onPreferenceClick = { showPointLogs = true },
                     )
                 }

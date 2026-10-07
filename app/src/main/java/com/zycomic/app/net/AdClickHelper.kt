@@ -13,37 +13,41 @@ class AdClickHelper(private val context: Context) {
     data class Result(val link: String?, val debug: String)
 
     suspend fun getAdLink(html: String): Result =
-        suspendCancellableCoroutine { cont ->
-            Handler(Looper.getMainLooper()).post {
-                val webView = WebView(context)
-                webView.settings.javaScriptEnabled = true
-                webView.settings.domStorageEnabled = true
-                webView.webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView, url: String) {
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            val js = """
-                                (function() {
-                                    var links = [];
-                                    var all = [];
-                                    document.querySelectorAll('a').forEach(function(a) {
-                                        all.push(a.href);
-                                        if (a.href && a.href.indexOf('manwa.me') < 0 && a.href.indexOf('javascript') < 0 && a.href.indexOf('#') < 0) {
-                                            links.push(a.href);
-                                        }
-                                    });
-                                    if (links.length > 0) return links[0];
-                                    return 'NO_LINK|total=' + all.length + '|hrefs=' + all.slice(0,10).join(',');
-                                })()
-                            """.trimIndent()
-                            webView.evaluateJavascript(js) { r ->
-                                val v = r?.trim('"')?.takeIf { it != "null" && it.isNotEmpty() }.orEmpty()
-                                cont.resume(Result(v.takeIf { !it.startsWith("NO_LINK") }, v))
-                                webView.destroy()
-                            }
-                        }, 4000)
+        kotlinx.coroutines.withTimeoutOrNull(8000) {
+            suspendCancellableCoroutine { cont ->
+                Handler(Looper.getMainLooper()).post {
+                    val webView = WebView(context)
+                    webView.settings.javaScriptEnabled = true
+                    webView.settings.domStorageEnabled = true
+                    webView.onResume()
+                    webView.resumeTimers()
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, url: String) {
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                val js = """
+                                    (function() {
+                                        var links = [];
+                                        var all = [];
+                                        document.querySelectorAll('a').forEach(function(a) {
+                                            all.push(a.href);
+                                            if (a.href && a.href.indexOf('manwa.me') < 0 && a.href.indexOf('javascript') < 0 && a.href.indexOf('#') < 0) {
+                                                links.push(a.href);
+                                            }
+                                        });
+                                        if (links.length > 0) return links[0];
+                                        return 'NO_LINK|total=' + all.length + '|hrefs=' + all.slice(0,10).join(',');
+                                    })()
+                                """.trimIndent()
+                                webView.evaluateJavascript(js) { r ->
+                                    val v = r?.trim('"')?.takeIf { it != "null" && it.isNotEmpty() }.orEmpty()
+                                    cont.resume(Result(v.takeIf { !it.startsWith("NO_LINK") }, v))
+                                    webView.destroy()
+                                }
+                            }, 4000)
+                        }
                     }
+                    webView.loadDataWithBaseURL("https://manwa.me/", html, "text/html", "UTF-8", null)
                 }
-                webView.loadDataWithBaseURL("https://manwa.me/", html, "text/html", "UTF-8", null)
             }
-        }
+        } ?: Result(null, "TIMEOUT")
 }
