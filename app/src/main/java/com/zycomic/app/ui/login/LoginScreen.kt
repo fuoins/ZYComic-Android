@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -45,18 +47,15 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun LoginOverlay(onClose: () -> Unit) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 400.dp)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(24.dp),
-            ) {
-                LoginScreen(onClose = onClose)
-            }
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(24.dp),
+    ) {
+        LoginScreen(onClose = onClose)
     }
 }
 
