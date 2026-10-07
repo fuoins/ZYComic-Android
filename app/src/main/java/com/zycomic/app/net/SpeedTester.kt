@@ -5,7 +5,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
 
 object SpeedTester {
@@ -13,9 +12,7 @@ object SpeedTester {
     private suspend fun measure(req: Request): Long = withContext(Dispatchers.IO) {
         val start = System.nanoTime()
         try {
-            withTimeoutOrNull(5000) {
-                NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
-            } ?: return@withContext Long.MAX_VALUE
+            NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
             (System.nanoTime() - start) / 1_000_000
         } catch (_: Exception) {
             Long.MAX_VALUE
