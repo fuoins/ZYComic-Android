@@ -165,12 +165,13 @@ fun ProfileScreen(
                     )
                 }
                 item {
+                    val ctx = LocalContext.current
                     TextPreferenceWidget(
                         title = "刷新",
                         icon = Icons.Outlined.Refresh,
                         onPreferenceClick = {
                             scope.launch {
-                                try { UserRepository.getUserInfo(); android.widget.Toast.makeText(androidx.compose.ui.platform.LocalContext.current, "已刷新", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+                                try { UserRepository.getUserInfo(); android.widget.Toast.makeText(ctx, "已刷新", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
                             }
                         },
                     )
