@@ -1,7 +1,9 @@
 package com.zycomic.app.ui.onboarding
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,6 +77,12 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     Text("后续也可在设置中修改", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(24.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        listOf(0xFFDF0090.toInt(), 0xFF6750A4.toInt(), 0xFF00658E.toInt(), 0xFF3F5F3F.toInt(), 0xFF8E0000.toInt()).forEach { c ->
+                            val cur = prefs.getInt("pref_color_theme", 0xFFDF0090.toInt())
+                            Box(Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color(c)).then(if (cur == c) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape) else Modifier).clickable { prefs.edit().putInt("pref_color_theme", c).apply() })
+                        }
+                    }
                     val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
                     val cur = prefs.getString("pref_theme_mode_key", "SYSTEM") ?: "SYSTEM"
                     androidx.compose.material3.MultiChoiceSegmentedButtonRow {
