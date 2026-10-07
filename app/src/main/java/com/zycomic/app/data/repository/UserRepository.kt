@@ -238,23 +238,27 @@ object UserRepository {
     class AdDebugException(val debug: String) : IOException("广告链接提取失败")
 
     suspend fun claimAdBonus(onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }): Int {
-        onProgress(0, 5, "获取广告链接...")
+        onProgress(0, 5, "查询状态...")
         val pointBefore = getUserInfo().point
-        val raw = api.getWawaWise().string()
-        val html = try { org.json.JSONObject(raw).getString("data") } catch (_: Exception) { raw }
-        val links = com.zycomic.app.net.AdClickHelper(appCtx).getAllAdLinks(html)
-        if (links.isEmpty()) throw AdDebugException("html前200: " + html.take(200) + "\n无外部链接")
-        repeat(5) { i ->
-            onProgress(i + 1, 5, "点击广告 ${i + 1}/5")
-            clickAd(links[i % links.size])
-            kotlinx.coroutines.delay(500)
+        val welfare = getWelfare()
+        val needed = if (welfare?.check_ad_bonus_today == true) 0 else (5 - (welfare?.ad_clicks ?: 0)).coerceAtLeast(0)
+        if (needed > 0) {
+            val raw = api.getWawaWise().string()
+            val html = try { org.json.JSONObject(raw).getString("data") } catch (_: Exception) { raw }
+            val helper = com.zycomic.app.net.AdClickHelper(appCtx)
+            repeat(needed) { i ->
+                onProgress(i + 1, needed, "点击广告 ${i + 1}/$needed")
+                val r = helper.getAdLink(html)
+                r.link?.let { clickAd(it) } ?: throw AdDebugException(r.debug + "\nhtml前200: " + html.take(200))
+                kotlinx.coroutines.delay(500)
+            }
         }
-        onProgress(5, 5, "领取奖励...")
+        onProgress(needed, needed, "领取奖励...")
         val resp = api.claimAdBonus(com.zycomic.app.data.dto.AdBonusRequest(action = "ad_bonus"))
         if (resp.code != 1 || resp.data?.status != "success") {
             throw IOException(resp.data?.msg?.ifEmpty { resp.msg.ifEmpty { "领取失败" } } ?: "领取失败")
         }
-        onProgress(5, 5, "验证积分...")
+        onProgress(needed, needed, "验证积分...")
         val pointAfter = getUserInfo().point
         return pointAfter - pointBefore
     }

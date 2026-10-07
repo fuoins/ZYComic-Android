@@ -28,6 +28,7 @@ data class WelfareData(
     val ad_bonus: Boolean = false,
     @Serializable(with = BooleanOrIntSerializer::class)
     val check_ad_bonus_today: Boolean = false,
+    val ad_clicks: Int = 0,
 )
 
 @Serializable

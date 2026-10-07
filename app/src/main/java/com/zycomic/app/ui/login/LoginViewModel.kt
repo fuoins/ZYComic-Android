@@ -49,13 +49,10 @@ class LoginViewModel {
             _loading.value = true; _error.value = null
             try { UserRepository.login(u, p, c); success.value = true }
             catch (e: Exception) {
-                if ((e.message ?: "").contains("验证码")) {
-                    captchaInput.value = ""
-                    _error.value = "验证码错误，请刷新图片后重试"
-                } else {
-                    _error.value = e.message ?: "登录失败"
-                }
-                refreshCaptcha()
+                val isCaptcha = (e.message ?: "").contains("验证码")
+                captchaInput.value = ""
+                if (isCaptcha) { _error.value = "验证码错误，请刷新图片后重试"; refreshCaptcha() }
+                else { _error.value = e.message ?: "登录失败" }
             }
             finally { _loading.value = false }
         }
