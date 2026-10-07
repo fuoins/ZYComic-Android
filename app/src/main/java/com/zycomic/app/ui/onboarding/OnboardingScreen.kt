@@ -37,6 +37,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
     val pager = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
     val user by UserRepository.userFlow.collectAsState()
+    LaunchedEffect(user) { if (pager.currentPage == 1 && user != null) { kotlinx.coroutines.delay(500); pager.animateScrollToPage(2) } }
 
     Scaffold(bottomBar = {
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
