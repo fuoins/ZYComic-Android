@@ -305,7 +305,19 @@ private fun BrowseTabContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
-            loading && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("加载中...") }
+            loading && mangas.isEmpty() -> LazyVerticalGrid(
+                columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                contentPadding = PaddingValues(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(6) {
+                    Column(Modifier.padding(6.dp)) {
+                        Box(Modifier.fillMaxWidth().height(180.dp).background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(8.dp)))
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.fillMaxWidth(0.8f).height(12.dp).background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(4.dp)))
+                    }
+                }
+            }
             error != null && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
