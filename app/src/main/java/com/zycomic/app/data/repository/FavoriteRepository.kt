@@ -13,20 +13,6 @@ object FavoriteRepository {
     var limitInfo: FavoriteLimitInfo? = null
         private set
 
-/**
- * 收藏仓库：收藏列表 / 单本收藏操作 / 批量操作 / 收藏分类文件夹。
- *
- * 注意：
- * - order=1 实际是更新时间排序，order=2 实际是收藏时间排序（反直觉）。
- * - order_type: 0=降序, 1=升序。
- * - addFavorite 传 val=0，removeFavorite 传 val=1（不要写反）。
- * - book_id / folder_id 均为数字。
- * - 移动收藏夹用 POST api/detail/favorite（val=0, book_id, folder_id），循环调用，不是 favorite_folder。
- * - 创建收藏夹 action=moveToFolder（不是 addFolder），只传 folder_name。
- * - 所有收藏操作前必须检查 [UserRepository.isLoggedIn]。
- */
-object FavoriteRepository {
-
     private val api get() = NetworkModule.api
 
     // ==================== 收藏列表 ====================
