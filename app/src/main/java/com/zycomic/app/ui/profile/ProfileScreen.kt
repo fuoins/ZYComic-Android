@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.outlined.Label
@@ -151,7 +152,7 @@ fun ProfileScreen(
                 item {
                     TextPreferenceWidget(
                         title = "积分明细(仔细看等级划分)",
-                        icon = androidx.compose.material.icons.Icons.Outlined.Star,
+                        icon = Icons.Filled.Star,
                         onPreferenceClick = { showPointLogs = true },
                     )
                 }
