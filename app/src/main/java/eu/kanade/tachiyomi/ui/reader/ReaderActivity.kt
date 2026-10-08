@@ -466,8 +466,11 @@ class ReaderActivity : BaseActivity() {
                         onDismissRequest = onDismissRequest,
                         screenModel = settingsScreenModel,
                         chapters = chapters,
-                        onClickChapter = {
-                            viewModel.loadNewChapterFromDialog(it)
+                        onClickChapter = { c ->
+                            lifecycleScope.launch {
+                                viewModel.loadNewChapterFromDialog(c)
+                                moveToPageIndex(0)
+                            }
                             onDismissRequest()
                         },
                         onBookmark = { chapter ->

@@ -3,6 +3,8 @@ package com.zycomic.app.ui.search
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,8 +31,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCompact
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,8 +54,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
+import eu.kanade.presentation.components.TabbedDialog
+import eu.kanade.presentation.components.TabbedDialogPaddings
+import kotlinx.collections.immutable.persistentListOf
 
 @Composable
 fun SearchScreen(
@@ -72,8 +76,8 @@ fun SearchScreen(
 
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
-    var showModeMenu by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler(enabled = showModeMenu) { showModeMenu = false }
+    var showDisplaySheet by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showDisplaySheet) { showDisplaySheet = false }
     val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
     val gridState = rememberLazyGridState()
@@ -119,38 +123,16 @@ fun SearchScreen(
                     onSearch = { vm.doSearch() },
                 ),
             )
-            // 显示模式切换
-            Box {
-                IconButton(onClick = { showModeMenu = true }) {
-                    Icon(
-                        when (displayMode) {
-                            0 -> Icons.Filled.ViewCompact
-                            1 -> Icons.Filled.GridView
-                            else -> Icons.Filled.ViewAgenda
-                        },
-                        contentDescription = "显示模式",
-                    )
-                }
-                DropdownMenu(
-                    expanded = showModeMenu,
-                    onDismissRequest = { showModeMenu = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    com.zycomic.app.ui.components.FilterSection("显示模式") {
-                        com.zycomic.app.ui.components.FilterChip("紧凑网格", selected = displayMode == 0) { vm.setDisplayMode(0) }
-                        com.zycomic.app.ui.components.FilterChip("舒适网格", selected = displayMode == 1) { vm.setDisplayMode(1) }
-                        com.zycomic.app.ui.components.FilterChip("仅封面网格", selected = displayMode == 2) { vm.setDisplayMode(2) }
-                    }
-                    com.zycomic.app.ui.components.FilterSection("每行数量") {
-                        Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
-                        androidx.compose.material3.Slider(
-                            value = gridColumns.toFloat(),
-                            onValueChange = { vm.setGridColumns(it.toInt(), orientation) },
-                            valueRange = 0f..10f,
-                            steps = 9,
-                        )
-                    }
-                }
+            // 显示模式切换：点击弹出底部"显示"设置弹窗
+            IconButton(onClick = { showDisplaySheet = true }) {
+                Icon(
+                    when (displayMode) {
+                        0 -> Icons.Filled.ViewCompact
+                        1 -> Icons.Filled.GridView
+                        else -> Icons.Filled.ViewAgenda
+                    },
+                    contentDescription = "显示模式",
+                )
             }
         }
         HorizontalDivider()
@@ -162,7 +144,7 @@ fun SearchScreen(
                 mangas.isEmpty() && !loading && keyword.isNotBlank() -> EmptyView("没有搜索到「$keyword」")
                 mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")
                 else -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(gridColumns.coerceIn(2, 6)),
+                    columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
                     state = gridState,
                     contentPadding = PaddingValues(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -186,6 +168,29 @@ fun SearchScreen(
                         )
                     }
                 }
+            }
+        }
+    }
+
+    // "显示"设置底部弹窗（与分类页 TabbedDialog 同款）
+    if (showDisplaySheet) {
+        TabbedDialog(
+            onDismissRequest = { showDisplaySheet = false },
+            tabTitles = persistentListOf("显示"),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(TabbedDialogPaddings.Horizontal),
+            ) {
+                DisplaySettingsSection(
+                    displayMode = displayMode,
+                    gridColumns = gridColumns,
+                    orientation = orientation,
+                    onSetDisplayMode = vm::setDisplayMode,
+                    onSetGridColumns = { vm.setGridColumns(it, orientation) },
+                )
             }
         }
     }

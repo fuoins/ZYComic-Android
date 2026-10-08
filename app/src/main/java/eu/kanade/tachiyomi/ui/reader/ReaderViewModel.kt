@@ -584,11 +584,9 @@ class ReaderViewModel @JvmOverloads constructor(
         }
     }
 
-    fun loadNewChapterFromDialog(chapter: Chapter) {
-        viewModelScope.launchIO {
-            val newChapter = chapterList.firstOrNull { it.chapter.id == chapter.id } ?: return@launchIO
-            loadAdjacent(newChapter)
-        }
+    suspend fun loadNewChapterFromDialog(chapter: Chapter) {
+        val newChapter = chapterList.firstOrNull { it.chapter.id == chapter.id } ?: return
+        loadAdjacent(newChapter)
     }
 
     /**

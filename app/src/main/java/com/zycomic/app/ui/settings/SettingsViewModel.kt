@@ -10,13 +10,16 @@ import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.Request
 
 class SettingsViewModel {
@@ -177,8 +180,8 @@ class SettingsViewModel {
 
     // ==================== HTTP 测速 ====================
 
-    /** 方案B域名级测速：RuleDns client 直接 GET，不逐 IP。 */
-    private suspend fun measureLineDomain(lineUrl: String): Long = withContext(Dispatchers.IO) {
+    /** 方案B域名级测速：RuleDns client 直接 GET，不逐 IP。协程层 3s 硬超时（F2），超时/异常返回 Long.MAX_VALUE。 */
+    private suspend fun measureLineDomain(lineUrl: String): Long {
         android.util.Log.d("SpeedTest", "measureLine start url=$lineUrl")
         val ts = System.currentTimeMillis().toString()
         val url = "$lineUrl/api/index/index?facility=android&deviceid=${ManwaInterceptor.DEVICE_ID}&timestamp=$ts"
@@ -195,28 +198,37 @@ class SettingsViewModel {
             .header("Connection", "keep-alive")
             .build()
         val start = System.nanoTime()
-        try {
-            NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
-            val d = (System.nanoTime() - start) / 1_000_000
-            android.util.Log.d("SpeedTest", "measureLine done url=$lineUrl delay=${d}ms")
-            d
+        return try {
+            withTimeout(3000) {
+                withContext(Dispatchers.IO) {
+                    NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
+                    val d = (System.nanoTime() - start) / 1_000_000
+                    android.util.Log.d("SpeedTest", "measureLine done url=$lineUrl delay=${d}ms")
+                    d
+                }
+            }
         } catch (e: Exception) {
+            // 含 withTimeout 的 TimeoutCancellationException（系统 DNS 卡住）与 OkHttp 异常
             android.util.Log.d("SpeedTest", "measureLine fail url=$lineUrl err=${e.message}")
             Long.MAX_VALUE
         }
     }
 
-    private suspend fun measureImgDomain(domain: String): Long = withContext(Dispatchers.IO) {
+    private suspend fun measureImgDomain(domain: String): Long {
         android.util.Log.d("SpeedTest", "measureImg start domain=$domain")
         val req = Request.Builder().url("https://$domain/").get()
             .header("User-Agent", ManwaInterceptor.UA)
             .build()
         val start = System.nanoTime()
-        try {
-            NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
-            val d = (System.nanoTime() - start) / 1_000_000
-            android.util.Log.d("SpeedTest", "measureImg done domain=$domain delay=${d}ms")
-            d
+        return try {
+            withTimeout(3000) {
+                withContext(Dispatchers.IO) {
+                    NetworkModule.newSpeedTestClient().newCall(req).execute().use { it.body?.bytes() }
+                    val d = (System.nanoTime() - start) / 1_000_000
+                    android.util.Log.d("SpeedTest", "measureImg done domain=$domain delay=${d}ms")
+                    d
+                }
+            }
         } catch (e: Exception) {
             android.util.Log.d("SpeedTest", "measureImg fail domain=$domain err=${e.message}")
             Long.MAX_VALUE
@@ -224,65 +236,115 @@ class SettingsViewModel {
     }
 
     private suspend fun runMeasure(): Pair<Map<Int, Long>, Map<Int, Long>> = coroutineScope {
-        android.util.Log.d("SpeedTest", "runMeasure start, lines=${com.zycomic.app.net.RouteManager.lineHosts.size}, imgs=${com.zycomic.app.net.RouteManager.imgDomains.size}")
-        val lineResults = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
-            async { index to measureLineDomain(lineUrl) }
-        }.awaitAll().toMap()
-        val imgResults = RouteManager.imgDomains.mapIndexed { index, domain ->
-            async { index to measureImgDomain(domain) }
-        }.awaitAll().toMap()
+        android.util.Log.d("SpeedTest", "runMeasure start, lines=${RouteManager.lineHosts.size}, imgs=${RouteManager.imgDomains.size}")
+        // F1：先清空，随后每条结果完成即增量发布（不可变 copy + 原子 update），UI 逐条刷新
+        lineDelays.value = emptyMap()
+        imgDelays.value = emptyMap()
+
+        val lineJobs = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
+            async {
+                val v = measureLineDomain(lineUrl)
+                lineDelays.update { it + (index to v) }
+                index to v
+            }
+        }
+        val imgJobs = RouteManager.imgDomains.mapIndexed { index, domain ->
+            async {
+                val v = measureImgDomain(domain)
+                imgDelays.update { it + (index to v) }
+                index to v
+            }
+        }
+        val lineResults = lineJobs.awaitAll().toMap()
+        val imgResults = imgJobs.awaitAll().toMap()
         android.util.Log.d("SpeedTest", "runMeasure done, lines=$lineResults, imgs=$imgResults")
         lineResults to imgResults
     }
 
-    /** 设置页"重新测速"按钮：仅测速展示，不自动切换线路。 */
+    /** 设置页"重新测速"按钮：测速后自动选最快、重建网络并 Toast（P1）。 */
     fun runSpeedTest() {
         scope.launch {
             testing.value = true
             try {
-                val (lines, imgs) = runMeasure()
-                lineDelays.value = lines
-                imgDelays.value = imgs
-                RouteManager.setLastDelays(lines, imgs)
+                val (bestLine, bestImg) = measureAndSelectFastest()
+                val hasLine = bestLine >= 0 && RouteManager.lastLineDelays[bestLine]?.let { it < Long.MAX_VALUE } == true
+                toast.value = if (hasLine) {
+                    "已选择线路 ${bestLine + 1}、图源 ${bestImg + 1}"
+                } else {
+                    "测速失败，使用当前线路"
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("SpeedTest", "runSpeedTest failed", e)
+                toast.value = "测速异常：${e.message ?: "请稍后重试"}"
             } finally {
+                // F3 兜底：任何缺失 key 统一补"超时"，杜绝"--"
+                fillMissingAsTimeout()
                 testing.value = false
             }
         }
     }
 
     /**
-     * App 启动自动测速 + 自动选择最快线路/图源。
+     * P1：测速 + 自动选择最快线路/图源的共享主体（启动自动测速与设置页"重新测速"复用）。
      * 成功：调用 RouteManager.setLine/setImgHost 并重建网络，返回 (最快线路索引, 最快图源索引)。
      * 全部失败：保持当前线路，返回 (-1, -1)。
+     */
+    private suspend fun measureAndSelectFastest(): Pair<Int, Int> {
+        val (lines, imgs) = runMeasure()
+        lineDelays.value = lines
+        imgDelays.value = imgs
+        RouteManager.setLastDelays(lines, imgs)
+
+        val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+        val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
+
+        if (bestLine != null) {
+            RouteManager.setLine(bestLine)
+            currentLineIndex.value = bestLine
+        }
+        if (bestImg != null && bestImg != RouteManager.imgIndex) {
+            RouteManager.setImgHost(bestImg)
+            currentImgIndex.value = bestImg
+        }
+        if (bestLine != null || bestImg != null) {
+            NetworkModule.rebuild()
+        }
+        val r = (bestLine ?: -1) to (bestImg ?: -1)
+        android.util.Log.d("SpeedTest", "measureAndSelectFastest done, bestLine=${r.first}, bestImg=${r.second}")
+        return r
+    }
+
+    /**
+     * App 启动自动测速 + 自动选择最快线路/图源。
      */
     suspend fun autoSelectFastest(): Pair<Int, Int> {
         android.util.Log.d("SpeedTest", "autoSelectFastest start")
         autoSelecting.value = true
         return try {
-            val (lines, imgs) = runMeasure()
-            lineDelays.value = lines
-            imgDelays.value = imgs
-            RouteManager.setLastDelays(lines, imgs)
-
-            val bestLine = lines.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-            val bestImg = imgs.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-
-            if (bestLine != null) {
-                RouteManager.setLine(bestLine)
-                currentLineIndex.value = bestLine
-            }
-            if (bestImg != null && bestImg != RouteManager.imgIndex) {
-                RouteManager.setImgHost(bestImg)
-                currentImgIndex.value = bestImg
-            }
-            if (bestLine != null || bestImg != null) {
-                NetworkModule.rebuild()
-            }
-            val r = (bestLine ?: RouteManager.lineIndex) to (bestImg ?: RouteManager.imgIndex)
-            android.util.Log.d("SpeedTest", "autoSelectFastest done, bestLine=${r.first}, bestImg=${r.second}")
-            r
+            measureAndSelectFastest()
         } finally {
+            // F3：被 8s 整体超时取消时，NonCancellable 中保留已增量发布的结果，缺失 key 补"超时"
+            withContext(NonCancellable) {
+                fillMissingAsTimeout()
+            }
             autoSelecting.value = false
+        }
+    }
+
+    /**
+     * F3：对当前线路/图源列表中缺失延迟 key 的 index 统一补 Long.MAX_VALUE（显示"超时"），杜绝"--"。
+     * StateFlow Map 用不可变 copy + 原子 update，保证线程安全。
+     */
+    fun fillMissingAsTimeout() {
+        lineDelays.update { cur ->
+            val m = cur.toMutableMap()
+            RouteManager.lineHosts.indices.forEach { if (it !in m) m[it] = Long.MAX_VALUE }
+            m
+        }
+        imgDelays.update { cur ->
+            val m = cur.toMutableMap()
+            RouteManager.imgDomains.indices.forEach { if (it !in m) m[it] = Long.MAX_VALUE }
+            m
         }
     }
 

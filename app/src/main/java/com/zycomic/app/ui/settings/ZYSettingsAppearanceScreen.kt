@@ -18,7 +18,6 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.domain.ui.model.TabletUiMode
 import eu.kanade.domain.ui.model.ThemeMode
-import eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.SearchableSettings
 import eu.kanade.presentation.more.settings.screen.appearance.AppCustomThemeColorPickerScreen
@@ -83,7 +82,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             value = themeMode,
                             onItemClick = {
                                 themeModePref.set(it)
-                                setAppCompatDelegateThemeMode(it)
                             },
                         )
 

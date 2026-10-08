@@ -73,6 +73,8 @@ import androidx.compose.runtime.collectAsState
 import coil3.compose.AsyncImage
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.ui.components.DisplaySettingsSection
+import com.zycomic.app.ui.components.MangaGridSkeleton
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
@@ -313,19 +315,10 @@ private fun BrowseTabContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
-            loading && mangas.isEmpty() -> LazyVerticalGrid(
-                columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
-                contentPadding = PaddingValues(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items((if (gridColumns > 0) gridColumns else 3) * 3) {
-                    Column(Modifier.padding(6.dp)) {
-                        Box(Modifier.fillMaxWidth().height(180.dp).background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(8.dp)))
-                        Spacer(Modifier.height(6.dp))
-                        Box(Modifier.fillMaxWidth(0.8f).height(12.dp).background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(4.dp)))
-                    }
-                }
-            }
+            loading && mangas.isEmpty() -> MangaGridSkeleton(
+                columns = if (gridColumns > 0) gridColumns else 3,
+                displayMode = displayMode,
+            )
             error != null && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
@@ -580,28 +573,18 @@ private fun RankFilter(vm: BrowseViewModel) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DisplayFilter(vm: BrowseViewModel, orientation: Int) {
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
 
-    FilterSection("显示模式") {
-        listOf(0 to "紧凑网格", 1 to "舒适网格", 2 to "仅封面网格").forEach { (v, label) ->
-            FilterChip(text = label, selected = displayMode == v, onClick = { vm.setDisplayMode(v) })
-        }
-    }
-
-    FilterSection("每行数量") {
-        Text(if (gridColumns == 0) "自动" else gridColumns.toString(), modifier = Modifier.padding(end = 8.dp))
-        androidx.compose.material3.Slider(
-            value = gridColumns.toFloat(),
-            onValueChange = { vm.setGridColumns(it.toInt(), orientation) },
-            valueRange = 0f..10f,
-            steps = 9,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    DisplaySettingsSection(
+        displayMode = displayMode,
+        gridColumns = gridColumns,
+        orientation = orientation,
+        onSetDisplayMode = vm::setDisplayMode,
+        onSetGridColumns = { vm.setGridColumns(it, orientation) },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
