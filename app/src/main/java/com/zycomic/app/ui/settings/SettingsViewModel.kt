@@ -287,6 +287,8 @@ class SettingsViewModel {
     }
 
     companion object {
+        @Volatile
+        var autoTestDone: Boolean = false
         /** 硬编码的女性向/gay标签列表（129个），一键屏蔽用。 */
         val GAY_TAGS = listOf(
             "女性向", "腹黑攻", "傲娇受", "执著攻", "忠犬攻", "ABO", "诱受‧袭受", "美人受",

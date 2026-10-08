@@ -101,7 +101,7 @@ class MainActivity : BaseActivity() {
                     LocalTextStyle provides MaterialTheme.typography.bodySmall,
                     LocalContentColor provides MaterialTheme.colorScheme.onBackground,
                 ) {
-                    AppContent()
+                    AppContent(isLaunch = savedInstanceState == null)
                 }
             }
         }
@@ -116,7 +116,7 @@ private enum class SettingsDialog {
 }
 
 @Composable
-fun AppContent() {
+fun AppContent(isLaunch: Boolean) {
     val context = LocalContext.current
 
     // edge-to-edge 系统栏适配：根据背景亮度决定状态栏图标明暗
@@ -131,7 +131,7 @@ fun AppContent() {
         )
     }
 
-    var bottomTab by remember { mutableIntStateOf(0) } // 0分类 1书架 2历史 3我的 4设置
+    var bottomTab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) } // 0分类 1书架 2历史 3我的 4设置
 
     // 覆盖层状态
     var detailBookId by remember { mutableStateOf<String?>(null) }
@@ -143,20 +143,25 @@ fun AppContent() {
 
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
-    var speedTesting by remember { mutableStateOf(true) }
+    var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
 
     // 设置子页面 Dialog 状态
     var settingsDialog by remember { mutableStateOf<SettingsDialog?>(null) }
     var showGayConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        android.util.Log.d("SpeedTest", "speed test launched")
-        val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
-        speedTesting = false
-        when {
-            result == null -> { android.util.Log.d("SpeedTest", "speed test timeout"); Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show() }
-            result.first == -1 -> Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
-            else -> { android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}"); Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show() }
+        if (isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) {
+            android.util.Log.d("SpeedTest", "speed test launched")
+            val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
+            com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone = true
+            speedTesting = false
+            when {
+                result == null -> { android.util.Log.d("SpeedTest", "speed test timeout"); Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show() }
+                result.first == -1 -> Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
+                else -> { android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}"); Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show() }
+            }
+        } else {
+            speedTesting = false
         }
     }
 
