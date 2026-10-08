@@ -4,7 +4,7 @@ import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
-import androidx.activity.ComponentActivity
+import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -83,18 +83,13 @@ import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
-class MainActivity : ComponentActivity() {
+class MainActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(Injekt.get<eu.kanade.domain.ui.UiPreferences>().themeMode().get())
         super.onCreate(savedInstanceState)
 
-        // 根据 UiPreferences 设置 Activity XML 主题（浅色/深色/AMOLED）
-        val uiPreferences = Injekt.get<UiPreferences>()
-        ThemingDelegate.getThemeResIds(
-            uiPreferences.appTheme().get(),
-            uiPreferences.themeDarkAmoled().get(),
-        ).forEach { setTheme(it) }
+        // 根据 UiPreferences 设置 Activity XML 主题（由 BaseActivity.onCreate 统一处理）
 
         com.zycomic.app.net.RouteManager.applyDefaultConfig()
         com.zycomic.app.net.NetworkModule.init(this)
@@ -131,7 +126,7 @@ fun AppContent() {
     LaunchedEffect(isSystemInDarkTheme, statusBarBg) {
         val lightStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.BLACK)
         val darkStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
-        (context as ComponentActivity).enableEdgeToEdge(
+        (context as android.app.Activity).enableEdgeToEdge(
             statusBarStyle = if (statusBarBg.luminance() > 0.5f) lightStyle else darkStyle,
             navigationBarStyle = if (isSystemInDarkTheme) darkStyle else lightStyle,
         )
