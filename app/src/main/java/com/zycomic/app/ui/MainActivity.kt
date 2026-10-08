@@ -125,7 +125,7 @@ fun AppContent() {
     LaunchedEffect(isSystemInDarkTheme, statusBarBg) {
         val lightStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.BLACK)
         val darkStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
-        (context as android.app.Activity).enableEdgeToEdge(
+        (context as androidx.activity.ComponentActivity).enableEdgeToEdge(
             statusBarStyle = if (statusBarBg.luminance() > 0.5f) lightStyle else darkStyle,
             navigationBarStyle = if (isSystemInDarkTheme) darkStyle else lightStyle,
         )
