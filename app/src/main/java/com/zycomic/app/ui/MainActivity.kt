@@ -86,6 +86,7 @@ import uy.kohesive.injekt.api.get
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode(Injekt.get<eu.kanade.domain.ui.UiPreferences>().themeMode().get())
         super.onCreate(savedInstanceState)
 
         // 根据 UiPreferences 设置 Activity XML 主题（浅色/深色/AMOLED）

@@ -82,8 +82,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         AppThemeModePreferenceWidget(
                             value = themeMode,
                             onItemClick = {
-                                themeModePref.set(it)
                                 setAppCompatDelegateThemeMode(it)
+                                themeModePref.set(it)
                             },
                         )
 
