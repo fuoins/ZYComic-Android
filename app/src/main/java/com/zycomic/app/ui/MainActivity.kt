@@ -146,7 +146,11 @@ fun AppContent(isLaunch: Boolean) {
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
 
     // 设置子页面 Dialog 状态
-    var settingsDialog by remember { mutableStateOf<SettingsDialog?>(null) }
+    val settingsDialogSaver = androidx.compose.runtime.saveable.Saver<SettingsDialog?, String>(
+        save = { it?.name },
+        restore = { runCatching { SettingsDialog.valueOf(it) }.getOrNull() },
+    )
+    var settingsDialog by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = settingsDialogSaver) { mutableStateOf<SettingsDialog?>(null) }
     var showGayConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {

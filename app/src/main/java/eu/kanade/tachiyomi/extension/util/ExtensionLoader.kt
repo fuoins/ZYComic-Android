@@ -127,16 +127,7 @@ internal object ExtensionLoader {
     fun loadExtensions(context: Context): List<LoadResult> {
         val pkgManager = context.packageManager
 
-        val installedPkgs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pkgManager.getInstalledPackages(PackageManager.PackageInfoFlags.of(PACKAGE_FLAGS.toLong()))
-        } else {
-            pkgManager.getInstalledPackages(PACKAGE_FLAGS)
-        }
-
-        val sharedExtPkgs = installedPkgs
-            .asSequence()
-            .filter { isPackageAnExtension(it) }
-            .map { ExtensionInfo(packageInfo = it, isShared = true) }
+        val sharedExtPkgs = emptySequence<ExtensionInfo>()
 
         val privateExtPkgs = getPrivateExtensionDir(context)
             .listFiles()

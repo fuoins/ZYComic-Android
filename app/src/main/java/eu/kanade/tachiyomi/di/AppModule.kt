@@ -196,11 +196,7 @@ class AppModule(val app: Application) : InjektModule {
         ContextCompat.getMainExecutor(app).execute {
             get<NetworkHelper>()
 
-            get<SourceManager>()
-
             get<Database>()
-
-            get<DownloadManager>()
 
             // SY -->
             get<GetCustomMangaInfo>()
