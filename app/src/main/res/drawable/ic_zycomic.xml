@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ZYComic 品牌标识：取自 ic_launcher_foreground 的字母 Z 路径，紧凑视口便于在关于页/我的页直接展示。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="120"
+    android:viewportHeight="132">
+    <path
+        android:name="letter_z"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M0,0 L120,0 L120,36 L42,96 L120,96 L120,132 L0,132 L0,96 L78,36 L0,36 Z" />
+</vector>
