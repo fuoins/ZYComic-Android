@@ -35,8 +35,10 @@ data class FavoriteItem(
  */
 @Serializable
 data class HistoryItem(
+    // 服务端历史记录"行主键"，仅用于列表展示/去重，删除接口不用它。
     @Serializable(with = StringOrIntSerializer::class)
     val id: String = "",
+    // 漫画 id（封面路径 /book/id/<bookId>/ 与之相等）；删除 ids=、进详情/阅读、收藏都用它。
     @SerialName("book_id")
     @Serializable(with = StringOrIntSerializer::class)
     val bookId: String = "",

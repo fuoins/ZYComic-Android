@@ -141,7 +141,7 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     private val _historyHasMore = MutableStateFlow(true)
     val historyHasMore: StateFlow<Boolean> = _historyHasMore.asStateFlow()
     val historySelectionMode = MutableStateFlow(false)
-    val historySelectedIds = MutableStateFlow<Set<String>>(emptySet())   // 历史记录 id 集合
+    val historySelectedIds = MutableStateFlow<Set<String>>(emptySet())   // bookId（漫画 id）集合
 
     val needLogin = MutableStateFlow(false)
     val user = UserRepository.userFlow
@@ -425,15 +425,15 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     fun enterHistorySelection() { historySelectionMode.value = true; historySelectedIds.value = emptySet() }
     fun exitHistorySelection() { historySelectionMode.value = false; historySelectedIds.value = emptySet() }
-    fun toggleHistorySelect(id: String) {
+    fun toggleHistorySelect(bookId: String) {
         val s = historySelectedIds.value.toMutableSet()
-        if (!s.add(id)) s.remove(id)
+        if (!s.add(bookId)) s.remove(bookId)
         historySelectedIds.value = s
     }
 
-    /** 全选已加载出的历史；若已全选则取消全选 */
+    /** 全选已加载出的历史；若已全选则取消全选（按 bookId）。 */
     fun toggleSelectAllLoadedHistory() {
-        val all = _history.value.map { it.id }.toSet()
+        val all = _history.value.map { it.bookId }.toSet()
         historySelectedIds.value = if (historySelectedIds.value == all) emptySet() else all
     }
 
@@ -442,9 +442,10 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
         if (ids.isEmpty()) return
         scope.launch {
             try {
+                // 删除接口 ids 传漫画 id（bookId），逗号合并单次请求
                 HistoryRepository.deleteHistory(ids.joinToString(","))
                 // 删除后从列表移除
-                _history.value = _history.value.filterNot { it.id in ids }
+                _history.value = _history.value.filterNot { it.bookId in ids }
                 exitHistorySelection()
             } catch (_: Exception) {}
         }

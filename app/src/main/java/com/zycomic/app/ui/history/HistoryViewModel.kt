@@ -13,7 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asStateFlow()
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -24,7 +24,12 @@ import kotlinx.coroutines.launch
  * - 分页加载：[refreshHistory] / [loadMoreHistory]
  * - 本地搜索：[searchQuery] 与 [history] 组合出 [filteredHistory]
  * - 多选：[selectionMode] / [selectedIds]，支持全选 / 反选（均作用于当前筛选结果）
- * - 删除：[deleteSingle] / [deleteSelected]，ids 为历史记录 id（逗号分隔）
+ * - 删除：[deleteSingle] / [deleteSelected]
+ *
+ * 关键 id 语义（以服务端历史列表解密为准）：
+ * - [HistoryItem.id] 是服务端"历史记录行主键"，仅用于列表展示/去重，**不参与删除**；
+ * - [HistoryItem.bookId] 是漫画 id，删除接口 `ids=`、进详情/阅读、收藏都用它。
+ * 因此多选集合 [selectedIds] 存的是 **bookId**；删除时把 bookId 用英文逗号拼成单次请求。
  */
 class HistoryViewModel {
 
@@ -58,11 +63,20 @@ class HistoryViewModel {
             initialValue = emptyList(),
         )
 
-    // ---- 多选 ----
+    // ---- 多选（集合内存 bookId）----
     private val _selectionMode = MutableStateFlow(false)
     val selectionMode: StateFlow<Boolean> = _selectionMode.asStateFlow()
     private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
     val selectedIds: StateFlow<Set<String>> = _selectedIds.asStateFlow()
+
+    // ---- 删除进行中（防重复点击）----
+    private val _deleting = MutableStateFlow(false)
+    val deleting: StateFlow<Boolean> = _deleting.asStateFlow()
+
+    // ---- 一次性提示（Toast）----
+    private val _toast = MutableStateFlow<String?>(null)
+    val toast: StateFlow<String?> = _toast.asStateFlow()
+    fun consumeToast() { _toast.value = null }
 
     // ---- 登录态 ----
     val user = UserRepository.userFlow
@@ -122,7 +136,7 @@ class HistoryViewModel {
         _searchQuery.value = query
     }
 
-    // ---------- 多选 ----------
+    // ---------- 多选（参数均为 bookId）----------
     fun enterSelection() {
         _selectionMode.value = true
         _selectedIds.value = emptySet()
@@ -133,60 +147,88 @@ class HistoryViewModel {
         _selectedIds.value = emptySet()
     }
 
-    fun toggleSelect(id: String) {
+    fun toggleSelect(bookId: String) {
         val s = _selectedIds.value.toMutableSet()
-        if (!s.add(id)) s.remove(id)
+        if (!s.add(bookId)) s.remove(bookId)
         _selectedIds.value = s
     }
 
-    /** 长按进入多选时，同时选中当前项。 */
-    fun enterSelectionAndSelect(id: String) {
+    /** 长按进入多选时，同时选中当前项（bookId）。 */
+    fun enterSelectionAndSelect(bookId: String) {
         _selectionMode.value = true
-        _selectedIds.value = setOf(id)
+        _selectedIds.value = setOf(bookId)
     }
 
-    /** 全选当前筛选结果中的所有项。 */
+    /** 全选当前筛选结果中的所有项（按 bookId）。 */
     fun selectAll() {
-        _selectedIds.value = filteredHistory.value.map { it.id }.toSet()
+        _selectedIds.value = filteredHistory.value.map { it.bookId }.toSet()
     }
 
-    /** 在当前筛选结果范围内反选。 */
+    /** 在当前筛选结果范围内反选（按 bookId）。 */
     fun invertSelection() {
         val current = _selectedIds.value.toMutableSet()
         filteredHistory.value.forEach {
-            if (!current.add(it.id)) current.remove(it.id)
+            if (!current.add(it.bookId)) current.remove(it.bookId)
         }
         _selectedIds.value = current
     }
 
+    /** 乐观地从本地列表移除指定 bookId（保留滚动位置），并同步清理选择集合。 */
+    private fun removeLocally(bookIds: Set<String>) {
+        _history.value = _history.value.filterNot { it.bookId in bookIds }
+        _selectedIds.value = _selectedIds.value - bookIds
+    }
+
     // ---------- 删除 ----------
-    /** 删除单条历史（id 为历史记录 id）。成功后重新加载确保与服务端一致。 */
-    fun deleteSingle(id: String) {
+    /**
+     * 删除单条历史，参数为漫画 id（bookId）。
+     * 先乐观移除本地行（保留滚动位）；服务端成功即一致，失败则刷新回滚并提示。
+     */
+    fun deleteSingle(bookId: String) {
+        if (_deleting.value) return
         scope.launch {
+            _deleting.value = true
+            removeLocally(setOf(bookId))
             try {
-                HistoryRepository.deleteHistory(id)
-                refreshHistory()
+                HistoryRepository.deleteHistory(bookId)
+                _toast.value = "已删除"
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
+                refreshHistory()
             } catch (e: Exception) {
                 Log.e(TAG, "删除单条历史失败", e)
+                _toast.value = "删除失败，请稍后重试"
+                refreshHistory()
+            } finally {
+                _deleting.value = false
             }
         }
     }
 
-    /** 批量删除选中的历史，成功后重新加载确保与服务端一致。 */
+    /**
+     * 批量删除选中历史：把选中的 bookId 用英文逗号合并成**单次请求**。
+     * 先乐观移除，失败则刷新回滚并提示。
+     */
     fun deleteSelected() {
-        val ids = _selectedIds.value
-        if (ids.isEmpty()) return
+        val bookIds = _selectedIds.value
+        if (bookIds.isEmpty() || _deleting.value) return
         scope.launch {
+            _deleting.value = true
+            val count = bookIds.size
+            removeLocally(bookIds)
+            exitSelection()
             try {
-                HistoryRepository.deleteHistory(ids.joinToString(","))
-                exitSelection()
-                refreshHistory()
+                HistoryRepository.deleteHistory(bookIds.joinToString(","))
+                _toast.value = "已删除 $count 条"
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
+                refreshHistory()
             } catch (e: Exception) {
                 Log.e(TAG, "批量删除历史失败", e)
+                _toast.value = "删除失败，请稍后重试"
+                refreshHistory()
+            } finally {
+                _deleting.value = false
             }
         }
     }
@@ -195,34 +237,38 @@ class HistoryViewModel {
     private val _folders = MutableStateFlow<List<Folder>>(emptyList())
     val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
 
-    /** 收藏单条（bookId 为漫画 ID）。 */
+    /** 收藏单本（bookId 为漫画 ID）。 */
     fun favoriteSingle(bookId: String) {
         scope.launch {
             try {
                 FavoriteRepository.addFavorite(bookId.toInt())
+                _toast.value = "已加入收藏"
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "收藏失败", e)
+                _toast.value = "收藏失败，请稍后重试"
             }
         }
     }
 
-    /** 批量收藏选中的历史记录到指定收藏夹（按 bookId 去重）。 */
+    /** 批量收藏选中的历史记录到指定收藏夹（选中集合即 bookId，去重）。 */
     fun favoriteSelected(folderId: Int = 0) {
         val ids = _selectedIds.value
         if (ids.isEmpty()) return
         scope.launch {
             try {
                 val bookIds = _history.value
-                    .filter { it.id in ids }
+                    .filter { it.bookId in ids }
                     .map { it.bookId }
                     .distinct()
                 bookIds.forEach { FavoriteRepository.addFavorite(it.toInt(), folderId) }
+                _toast.value = "已加入收藏"
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
                 Log.e(TAG, "批量收藏失败", e)
+                _toast.value = "收藏失败，请稍后重试"
             }
         }
     }

@@ -93,9 +93,19 @@ fun HistoryScreen(
     val searchQuery by vm.searchQuery.collectAsState()
     val selectionMode by vm.selectionMode.collectAsState()
     val selectedIds by vm.selectedIds.collectAsState()
+    val deleting by vm.deleting.collectAsState()
+    val toast by vm.toast.collectAsState()
 
     LaunchedEffect(vm.needLogin) {
         vm.needLogin.collect { if (it) onRequireLogin() }
+    }
+
+    // 一次性 Toast 提示（删除/收藏成败）
+    LaunchedEffect(toast) {
+        toast?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            vm.consumeToast()
+        }
     }
 
     // 多选模式下按返回键 = 退出多选
@@ -214,7 +224,7 @@ fun HistoryScreen(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable(enabled = selectedIds.isNotEmpty()) { showBatchDelete = true }
+                            .clickable(enabled = selectedIds.isNotEmpty() && !deleting) { showBatchDelete = true }
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -281,15 +291,15 @@ fun HistoryScreen(
                     ) {
                         HistoryItemRow(
                             item = item,
-                            selected = item.id in selectedIds,
+                            selected = item.bookId in selectedIds,
                             selectionMode = selectionMode,
                             onClickRow = {
-                                if (selectionMode) vm.toggleSelect(item.id)
+                                if (selectionMode) vm.toggleSelect(item.bookId)
                                 else onOpenManga(item.bookId)
                             },
                             onLongClickRow = {
-                                if (selectionMode) vm.toggleSelect(item.id)
-                                else vm.enterSelectionAndSelect(item.id)
+                                if (selectionMode) vm.toggleSelect(item.bookId)
+                                else vm.enterSelectionAndSelect(item.bookId)
                             },
                             onClickCover = { onOpenManga(item.bookId) },
                             onClickFavorite = { showFavoriteConfirm = item },
@@ -323,29 +333,20 @@ fun HistoryScreen(
             title = { Text("删除确认") },
             text = { Text("确定删除这条阅读历史？") },
             confirmButton = {
-                Text(
-                    text = "确定删除",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(
-                            onClick = {
-                                vm.deleteSingle(target.id)
-                                singleDeleteTarget = null
-                            },
-                        )
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                androidx.compose.material3.TextButton(
+                    enabled = !deleting,
+                    onClick = {
+                        vm.deleteSingle(target.bookId)
+                        singleDeleteTarget = null
+                    },
+                ) {
+                    Text("确定删除", color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = {
-                Text(
-                    text = "取消",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(onClick = { singleDeleteTarget = null })
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                androidx.compose.material3.TextButton(onClick = { singleDeleteTarget = null }) {
+                    Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             },
         )
     }
@@ -357,29 +358,19 @@ fun HistoryScreen(
             title = { Text("收藏确认") },
             text = { Text("确定收藏《${target.bookName}》到全部收藏夹？") },
             confirmButton = {
-                Text(
-                    text = "确定收藏",
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(
-                            onClick = {
-                                vm.favoriteSingle(target.bookId)
-                                showFavoriteConfirm = null
-                            },
-                        )
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        vm.favoriteSingle(target.bookId)
+                        showFavoriteConfirm = null
+                    },
+                ) {
+                    Text("确定收藏", color = MaterialTheme.colorScheme.primary)
+                }
             },
             dismissButton = {
-                Text(
-                    text = "取消",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(onClick = { showFavoriteConfirm = null })
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                androidx.compose.material3.TextButton(onClick = { showFavoriteConfirm = null }) {
+                    Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             },
         )
     }
@@ -391,29 +382,20 @@ fun HistoryScreen(
             title = { Text("删除确认") },
             text = { Text("确定删除选中的 ${selectedIds.size} 条阅读历史？") },
             confirmButton = {
-                Text(
-                    text = "确定删除",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(
-                            onClick = {
-                                vm.deleteSelected()
-                                showBatchDelete = false
-                            },
-                        )
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                androidx.compose.material3.TextButton(
+                    enabled = !deleting,
+                    onClick = {
+                        vm.deleteSelected()
+                        showBatchDelete = false
+                    },
+                ) {
+                    Text("确定删除", color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = {
-                Text(
-                    text = "取消",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .combinedClickable(onClick = { showBatchDelete = false })
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                androidx.compose.material3.TextButton(onClick = { showBatchDelete = false }) {
+                    Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             },
         )
     }
@@ -564,19 +546,22 @@ private fun HistoryItemRow(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        IconButton(onClick = onClickFavorite) {
-            Icon(
-                imageVector = Icons.Outlined.FavoriteBorder,
-                contentDescription = "收藏",
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        }
-        IconButton(onClick = onClickDelete) {
-            Icon(
-                imageVector = Icons.Outlined.Delete,
-                contentDescription = "删除",
-                tint = MaterialTheme.colorScheme.onSurface,
-            )
+        // 多选模式下隐藏行内"收藏/删除"，避免误触单条操作（统一走底部批量栏）
+        if (!selectionMode) {
+            IconButton(onClick = onClickFavorite) {
+                Icon(
+                    imageVector = Icons.Outlined.FavoriteBorder,
+                    contentDescription = "收藏",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            IconButton(onClick = onClickDelete) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = "删除",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
