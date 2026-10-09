@@ -2,7 +2,6 @@ package com.zycomic.app.ui.settings
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -15,13 +14,10 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -63,13 +59,6 @@ fun SettingsMainScreen(
             ) {
                 TopAppBar(
                     title = { Text("设置") },
-                    actions = {
-                        IconButton(onClick = {
-                            Toast.makeText(context, "搜索功能即将上线", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Icon(Icons.Outlined.Search, contentDescription = "搜索")
-                        }
-                    },
                     scrollBehavior = scrollBehavior,
                 )
             }
