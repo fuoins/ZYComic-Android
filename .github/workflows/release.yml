@@ -103,8 +103,11 @@ jobs:
           esac
           APKSIGNER="$(find "$ANDROID_HOME" -name apksigner -type f 2>/dev/null | sort -V | tail -1)"
           test -n "$APKSIGNER" || { echo "::error::未找到 apksigner"; exit 1; }
-          "$APKSIGNER" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
-          grep -q "Signer #1 certificate (SHA-256 digest)" "$RUNNER_TEMP/certs.txt"
+          # 直接执行（不经过管道），签名无效时 apksigner 非零退出会在 set -e 下使本步失败
+          "$APKSIGNER" verify --print-certs "$APK" > "$RUNNER_TEMP/certs.txt"
+          cat "$RUNNER_TEMP/certs.txt"
+          # 兼容不同 build-tools 版本的证书摘要输出措辞
+          grep -qiE "SHA-256 digest" "$RUNNER_TEMP/certs.txt"
           OUT="ZYComic-${{ steps.t.outputs.ver }}-arm64-v8a.apk"
           cp "$APK" "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
