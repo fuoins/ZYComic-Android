@@ -1,0 +1,151 @@
+name: Release APK
+
+# 推送 v* 标签时：做 final(R8+shrinkResources) 签名构建，并创建【草稿】GitHub Release、上传已签名 APK。
+# 草稿不会自动发布，需在网页手动点 Publish。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '手动重跑：目标 tag（如 v1.0.0）'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      MINIFY_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            **/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Setup SDK (auto install platforms + licenses)
+        continue-on-error: true
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            echo "android-36 platform missing, downloading platform-36_r02.zip ..."
+            TMP_DIR="$(mktemp -d)"
+            curl -fsSL -o "$TMP_DIR/platform-36.zip" "https://dl.google.com/android/repository/platform-36_r02.zip"
+            unzip -q "$TMP_DIR/platform-36.zip" -d "$ANDROID_HOME/platforms"
+          fi
+          test -d "$ANDROID_HOME/platforms/android-36" && echo "android-36 platform ready"
+
+      - name: Resolve tag
+        id: t
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          test -n "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "将发布 $TAG"
+
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "::error::缺少 KEYSTORE_BASE64 secret"; exit 1; }
+          KS="$RUNNER_TEMP/zycomic-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KS"
+          test -s "$KS"
+          echo "KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK (final, arm64-v8a)
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/zycomic-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_minifyEnabled: '1'
+          ORG_GRADLE_PROJECT_abi: 'arm64-v8a'
+        run: |
+          ./gradlew :app:assembleRelease --console=plain \
+            -Dorg.gradle.jvmargs="-Xmx4g" \
+            --build-cache
+
+      - name: Verify signature and rename APK
+        id: pkg
+        run: |
+          set -e
+          APK="$(ls app/build/outputs/apk/release/*arm64-v8a*.apk | head -1)"
+          echo "构建产物: $APK"
+          case "$APK" in
+            *-unsigned.apk) echo "::error::产物为未签名 APK，签名配置未生效"; exit 1 ;;
+          esac
+          APKSIGNER="$(find "$ANDROID_HOME" -name apksigner -type f 2>/dev/null | sort -V | tail -1)"
+          test -n "$APKSIGNER" || { echo "::error::未找到 apksigner"; exit 1; }
+          "$APKSIGNER" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
+          grep -q "Signer #1 certificate (SHA-256 digest)" "$RUNNER_TEMP/certs.txt"
+          OUT="ZYComic-${{ steps.t.outputs.ver }}-arm64-v8a.apk"
+          cp "$APK" "$OUT"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          ls -lh "$OUT"
+
+      - name: Write release notes
+        run: |
+          cat > notes.md <<'EOF'
+          ZYComic 1.0.0 首个正式版
+
+          ZYComic 是一款安卓漫画阅读器：复用 komikku（mihon/tachiyomi 系）成熟阅读器内核与
+          Compose UI 框架，接入 manwa 线路与图源，界面为自研实现。
+
+          功能特性
+          - 内置 9 条线路、76 个图源与 85 条 DNS 直连规则，SNI 自动派生，弱网环境可直连
+          - 线路/图源一键测速，按延迟从快到慢排序，支持自动选择最快线路与图源
+          - 阅读器内可切换章节/非章节图源，长列表分组排序、可滚动并带滚动条
+          - 线路、图源与 ruledns 支持远程更新（HTTPS 拉取 + 严格校验 + 版本化），
+            启动自动检查一次，测速页可手动检查更新
+          - 书架/历史/收藏、阅读进度记录与续读
+          - 修复历史记录单删与多选删除（多 id 单次合并请求、删除后列表即时刷新、操作反馈与防重复点击）
+          - 品牌与关于页改为 ZYComic
+
+          构建与安装
+          - 正式 release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）
+          - 仅支持 arm64-v8a（64 位真机）
+          - 若此前安装过未签名测试版（包名 com.zycomic.app），请先卸载再安装本版（签名不同）；
+            调试版 com.zycomic.app.dev 不受影响
+
+          开源许可
+          - 基于 Apache-2.0 项目 komikku/mihon/tachiyomi，保留相应版权与许可声明
+          EOF
+          echo "notes 已生成"
+
+      - name: Create draft GitHub Release and upload APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.t.outputs.tag }}" "${{ steps.pkg.outputs.out }}" \
+            --title "ZYComic ${{ steps.t.outputs.tag }}" \
+            --notes-file notes.md \
+            --draft \
+            --target "$GITHUB_SHA"
+          echo "草稿 Release 已创建（未发布）"

@@ -29,6 +29,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release 签名：仅当 CI/本地注入了 KEYSTORE_PATH（且文件存在）与口令时才启用；
+    // 未提供时 signingConfig 为 null，保持出未签名包的原有行为（日常 build.yml/本地不受影响）。
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_PATH")
+                ?: (project.findProperty("KEYSTORE_PATH") as String?)
+            if (ksPath != null && file(ksPath).exists()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                    ?: (project.findProperty("KEYSTORE_PASSWORD") as String?)
+                keyAlias = System.getenv("KEY_ALIAS")
+                    ?: (project.findProperty("KEY_ALIAS") as String?)
+                keyPassword = System.getenv("KEY_PASSWORD")
+                    ?: (project.findProperty("KEY_PASSWORD") as String?)
+            }
+        }
+    }
+
     buildTypes {
         val debug by getting {
             applicationIdSuffix = ".dev"
@@ -42,6 +60,9 @@ android {
             isShrinkResources = !minifyOff
 
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
+
+            // 有 release keystore 时签名，否则为 null（未签名）
+            signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = true)}\"")
         }
