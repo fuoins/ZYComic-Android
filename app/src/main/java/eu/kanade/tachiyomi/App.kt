@@ -114,6 +114,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 初始化开发者配置
         DevConfig.init(this)
         DevConfig.migrateProxyDefaultIfNeeded()
+        DevConfig.mergeBaselineConfigIfNeeded()
         com.zycomic.app.net.ImageCacheManager.init(this)
         runCatching {
             if (getSharedPreferences("zycomic_data", android.content.Context.MODE_PRIVATE)
