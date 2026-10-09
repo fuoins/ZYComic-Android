@@ -41,7 +41,6 @@ fun SpeedTestScreen(
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
-    val updateTime by vm.configUpdateTime.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
 
@@ -79,12 +78,6 @@ fun SpeedTestScreen(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
-            Text(
-                "网络配置更新时间：$updateTime",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,

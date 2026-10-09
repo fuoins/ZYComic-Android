@@ -48,7 +48,6 @@ class SettingsViewModel {
     val lineDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastLineDelays)
     /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
     val imgDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastImgDelays)
-    val configUpdateTime = MutableStateFlow("未更新")
 
     /** 远程 ruledns 手动检查进行中 */
     val remoteChecking = MutableStateFlow(false)

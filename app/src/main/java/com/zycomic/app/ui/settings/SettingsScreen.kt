@@ -52,7 +52,6 @@ fun SettingsScreen() {
     val imgDelays by vm.imgDelays.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
-    val updateTime by vm.configUpdateTime.collectAsState()
 
     var showGayConfirm by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -123,8 +122,6 @@ fun SettingsScreen() {
         // ===== 测速日志 =====
         SectionTitle("测速日志")
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text("网络配置更新时间：$updateTime", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
             // 展开状态：key = "line_0" / "img_0"
             var expandedHosts by remember { mutableStateOf<Set<String>>(emptySet()) }
 
