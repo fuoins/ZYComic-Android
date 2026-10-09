@@ -27,12 +27,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.AlertDialog
@@ -556,20 +559,49 @@ class ReaderActivity : BaseActivity() {
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 }
+                // 仅用于展示排序：两组各自按测速延迟升序（快→慢），未测(null)/超时(MAX)沉底；
+                // 并列时按域名在全量图源列表中的原始顺序稳定。点击切换仍传域名，不改变切换行为。
+                fun imgRank(domain: String): Long {
+                    val idx = allDomains.indexOfFirst { it.equals(domain, true) }
+                    if (idx < 0) return Long.MAX_VALUE
+                    val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
+                    return if (d == null || d == Long.MAX_VALUE) Long.MAX_VALUE else d
+                }
+                fun imgStableIndex(domain: String): Int =
+                    allDomains.indexOfFirst { it.equals(domain, true) }.let { if (it < 0) Int.MAX_VALUE else it }
+                val chapterSorted = chapterDomains.sortedWith(compareBy({ imgRank(it) }, { imgStableIndex(it) }))
+                val otherSorted = otherDomains.sortedWith(compareBy({ imgRank(it) }, { imgStableIndex(it) }))
+                val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
                     title = { Text("切换图源") },
                     text = {
-                        androidx.compose.foundation.layout.Column(
+                        ScrollbarLazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = dialogMaxHeight),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            Text(
-                                "章节图源",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                            chapterDomains.forEach { domain ->
+                            item {
+                                Text(
+                                    "两组均按测速延迟升序，未测/超时项排在最后",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
+                            item {
+                                Text(
+                                    "章节图源",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
+                            if (chapterSorted.isEmpty()) {
+                                item { Text("暂无章节图源信息", style = MaterialTheme.typography.bodySmall) }
+                            } else {
+                                items(chapterSorted) { domain ->
                                 val isSelected = domain.equals(currentDomain, true)
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
@@ -587,17 +619,17 @@ class ReaderActivity : BaseActivity() {
                                     )
                                     Text(delayOf(domain), style = MaterialTheme.typography.bodySmall, color = delayColor(domain))
                                 }
+                                }
                             }
-                            if (chapterDomains.isEmpty()) {
-                                Text("暂无章节图源信息", style = MaterialTheme.typography.bodySmall)
+                            item {
+                                Text(
+                                    "非章节图源(有可能能看)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
                             }
-                            Text(
-                                "非章节图源(有可能能看)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
-                            otherDomains.forEach { domain ->
+                            items(otherSorted) { domain ->
                                 val isSelected = domain.equals(currentDomain, true)
                                 Row(
                                     modifier = Modifier.fillMaxWidth()

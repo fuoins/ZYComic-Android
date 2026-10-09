@@ -21,6 +21,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -41,6 +42,26 @@ fun SpeedTestScreen(
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
+
+    // 仅用于展示：线路、图源两组各自按测速延迟升序（快→慢）。
+    // 未测(null)/超时(MAX_VALUE)统一沉底，并列时按原始 index 稳定排序；
+    // 排序结果的元素仍是“原始 index”，点击/选中/Toast 等交互全部沿用原 index，不受排序影响。
+    val lineOrder = remember(lineDelays) {
+        RouteManager.lineHosts.indices.sortedWith(
+            compareBy(
+                { idx -> lineDelays[idx]?.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE },
+                { idx -> idx },
+            ),
+        )
+    }
+    val imgOrder = remember(imgDelays) {
+        RouteManager.imgDomains.indices.sortedWith(
+            compareBy(
+                { idx -> imgDelays[idx]?.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE },
+                { idx -> idx },
+            ),
+        )
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -99,9 +120,17 @@ fun SpeedTestScreen(
                     }
                 }
                 item {
+                    Text(
+                        "按测速延迟升序（快→慢），未测/超时项排在最后",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+                    )
+                }
+                item {
                     Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(RouteManager.lineHosts.size) { index ->
+                items(lineOrder) { index ->
                     SpeedRow(
                         index = index,
                         host = RouteManager.lineHosts[index].removePrefix("https://").removePrefix("http://").substringBefore('/'),
@@ -114,7 +143,7 @@ fun SpeedTestScreen(
                 item {
                     Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(RouteManager.imgDomains.size) { index ->
+                items(imgOrder) { index ->
                     SpeedRow(
                         index = index,
                         host = RouteManager.imgDomains[index],
