@@ -65,6 +65,14 @@ jobs:
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-googletv-license"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
+          # 兜底：预装 SDK 若缺少 compileSdk/targetSdk 所需的 android-36 平台，则下载补齐
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            echo "android-36 platform missing, downloading platform-36_r02.zip ..."
+            TMP_DIR="$(mktemp -d)"
+            curl -fsSL -o "$TMP_DIR/platform-36.zip" "https://dl.google.com/android/repository/platform-36_r02.zip"
+            unzip -q "$TMP_DIR/platform-36.zip" -d "$ANDROID_HOME/platforms"
+          fi
+          test -d "$ANDROID_HOME/platforms/android-36" && echo "android-36 platform ready"
 
       - name: Build APK
         env:
@@ -81,6 +89,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-apk
+          name: zycomic-apk
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
