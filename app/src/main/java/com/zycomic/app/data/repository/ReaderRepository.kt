@@ -133,23 +133,13 @@ object ReaderRepository {
                     return@withContext
                 }
 
-                // 3. 添加到 DevConfig rule + sni
+                // 3. 添加到 DevConfig rule（SNI 由 lines+sources∪rule 派生，无需单独写 sni）
                 val currentConfig = DevConfig.getConfigJson()
                 val root = JSONObject(currentConfig)
                 val ruleObj = root.optJSONObject("rule") ?: JSONObject()
                 ruleObj.put(domain, org.json.JSONArray(ips))
                 root.put("rule", ruleObj)
-
-                val sniArr = root.optJSONArray("sni") ?: org.json.JSONArray()
-                val sniSet = mutableSetOf<String>()
-                for (i in 0 until sniArr.length()) {
-                    sniSet.add(sniArr.getString(i))
-                }
-                sniSet.add(domain)
-                root.put("sni", org.json.JSONArray(sniSet.toList()))
-
-                val newConfig = root.toString()
-                DevConfig.applyConfig(newConfig)
+                DevConfig.applyConfig(root.toString())
                 Log.d(TAG, "新图源 $domain 已添加到配置（${ips.size}个IP）")
 
                 // 4. 更新 RouteManager 图源列表并切换
@@ -173,13 +163,10 @@ object ReaderRepository {
         }
     }
 
-    /** 添加新图源到 RouteManager 并切换。 */
+    /** 添加新图源（章节运行时图源）到 RouteManager 并切换。 */
     private fun addNewImgDomainToRouteManager(domain: String) {
-        val currentList = RouteManager.imgDomains.toMutableList()
-        if (!currentList.contains(domain)) {
-            currentList.add(domain)
-            RouteManager.updateImgDomains(currentList)
-        }
+        // 章节接口/DoH 学到的图源进章节集，远程基线刷新不会清除
+        RouteManager.addChapterImgDomain(domain)
         val index = RouteManager.imgDomains.indexOf(domain)
         if (index >= 0 && RouteManager.imgIndex != index) {
             RouteManager.setImgHost(index)

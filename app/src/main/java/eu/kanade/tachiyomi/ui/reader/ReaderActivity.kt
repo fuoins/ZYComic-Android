@@ -733,7 +733,7 @@ class ReaderActivity : BaseActivity() {
     private fun switchImgSource(domain: String) {
         try {
             val rm = com.zycomic.app.net.RouteManager
-            if (rm.imgDomains.none { it.equals(domain, true) }) rm.updateImgDomains(listOf(domain))
+            if (rm.imgDomains.none { it.equals(domain, true) }) rm.addChapterImgDomain(domain)
             val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }
             rm.setImgHost(idx)
             com.zycomic.app.net.NetworkModule.rebuild()

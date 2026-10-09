@@ -7,7 +7,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -26,8 +25,10 @@ object RouteManager {
     val LINE_HOSTS: List<String> = listOf(
         "https://mseeowpm.online",
         "https://mseeowpm.cc",
+        "https://mseeowpm2.cc",
+        "https://mseeowpm3.cc",
+        "https://mseeowpm4.cc",
         "http://mseeowpm.pro",
-        "http://mseeowpm2.cc",
         "https://mseeowpma.cc",
         "http://mseeowpm1.xyz",
         "https://etmdcw.cn",
@@ -89,6 +90,26 @@ object RouteManager {
         "mwfimsvfast38.cc",
         "mwfimsvfast39.cc",
         "mwfimsvfast40.cc",
+        "mwfimsvfast41.cc",
+        "mwfimsvfast42.cc",
+        "mwfimsvfast43.cc",
+        "mwfimsvfast44.cc",
+        "mwfimsvfast45.cc",
+        "mwfimsvfast46.cc",
+        "mwfimsvfast47.cc",
+        "mwfimsvfast48.cc",
+        "mwfimsvfast49.cc",
+        "mwfimsvfast50.cc",
+        "mwfimsvfast51.cc",
+        "mwfimsvfast52.cc",
+        "mwfimsvfast53.cc",
+        "mwfimsvfast54.cc",
+        "mwfimsvfast55.cc",
+        "mwfimsvfast56.cc",
+        "mwfimsvfast57.cc",
+        "mwfimsvfast58.cc",
+        "mwfimsvfast59.cc",
+        "mwfimsvfast60.cc",
         "mwappimgs.cc",
     )
 
@@ -96,9 +117,26 @@ object RouteManager {
     /** 当前生效的线路列表（测速和请求用这个，不用硬编码 LINE_HOSTS） */
     @Volatile var lineHosts: List<String> = LINE_HOSTS
         private set
-    /** 当前生效的图源域名列表：硬编码基底 + 章节接口运行时追加 */
+    // 基础图源（内置 IMG_DOMAINS ∪ 远程/基线 sources）
+    @Volatile private var baselineImgDomains: List<String> = IMG_DOMAINS
+    // 章节接口 / DoH 运行时学到的图源（远程刷新不会清除）
+    @Volatile private var chapterImgDomains: List<String> = emptyList()
+
+    /** 当前生效的图源域名列表：基础图源 + 章节运行时图源（去重拼接，基础在前） */
     var imgDomains: List<String> by mutableStateOf(IMG_DOMAINS)
         private set
+
+    /** 按基础集 + 章节集重算 imgDomains，并尽量保持当前选中图源。 */
+    private fun rebuildImgDomains() {
+        val out = LinkedHashSet<String>()
+        baselineImgDomains.forEach { out.add(it.trim()) }
+        chapterImgDomains.forEach { out.add(it.trim()) }
+        val merged = out.toList()
+        val cur = imgDomains.getOrNull(imgIndex)
+        imgDomains = merged
+        val kept = cur?.let { c -> merged.indexOfFirst { it.equals(c, ignoreCase = true) } }?.takeIf { it >= 0 }
+        imgIndex = kept ?: imgIndex.coerceIn(0, merged.lastIndex)
+    }
 
     /**
      * 根据 customRule 的 keys 更新线路和图源域名列表。
@@ -137,33 +175,67 @@ object RouteManager {
         }
     }
 
-    /** 更新图源列表：以硬编码 IMG_DOMAINS 为基底合并追加，去重并持久化。 */
-    fun updateImgDomains(domains: List<String>) {
-        val merged = IMG_DOMAINS.toMutableList()
-        domains.forEach { d -> if (merged.none { it.equals(d, ignoreCase = true) }) merged.add(d) }
-        imgDomains = merged
-        persistImgDomains(merged)
+    /** 远程/基线基础图源：sources 在前，内置 IMG_DOMAINS 缺失补尾（内置永不删），持久化并重算。 */
+    fun setBaselineImgDomains(sources: List<String>) {
+        val out = LinkedHashSet<String>()
+        sources.forEach { d -> d.trim().takeIf { it.isNotBlank() }?.let { out.add(it) } }
+        IMG_DOMAINS.forEach { out.add(it) }
+        baselineImgDomains = out.toList()
+        persistStringList("baseline_img_domains", baselineImgDomains)
+        rebuildImgDomains()
     }
 
-    /** 启动时读持久化的图源列表并合并。 */
+    /** 章节接口/DoH 运行时学到的图源：加入章节集并持久化，远程刷新不会清除。 */
+    fun addChapterImgDomain(domain: String) {
+        val d = domain.trim()
+        if (d.isNotBlank() && chapterImgDomains.none { it.equals(d, ignoreCase = true) }) {
+            chapterImgDomains = chapterImgDomains + d
+            persistStringList("chapter_img_domains", chapterImgDomains)
+            rebuildImgDomains()
+        } else {
+            rebuildImgDomains()
+        }
+    }
+
+    /**
+     * 启动时恢复图源：基础集 baseline_img_domains（缺省回退内置），章节集 chapter_img_domains；
+     * 并对旧版本做一次性拆分迁移 img_split_v1：旧 img_domains 中不属于内置的条目归入章节集。
+     */
     fun loadImgDomainsFromPrefs() {
         try {
             val ctx = DevConfig.appContext ?: return
-            val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .getString("img_domains", null) ?: return
-            val arr = org.json.JSONArray(raw)
-            val list = ArrayList<String>(arr.length())
-            for (i in 0 until arr.length()) list.add(arr.getString(i))
-            updateImgDomains(list)
+            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            baselineImgDomains = prefs.getString("baseline_img_domains", null)?.let(::toStringList)
+                ?.takeIf { it.isNotEmpty() } ?: IMG_DOMAINS
+            chapterImgDomains = prefs.getString("chapter_img_domains", null)?.let(::toStringList) ?: emptyList()
+            if (!prefs.getBoolean("img_split_v1", false)) {
+                prefs.getString("img_domains", null)?.let(::toStringList)?.forEach { d ->
+                    if (IMG_DOMAINS.none { it.equals(d, ignoreCase = true) } &&
+                        chapterImgDomains.none { it.equals(d, ignoreCase = true) }
+                    ) {
+                        chapterImgDomains = chapterImgDomains + d
+                    }
+                }
+                persistStringList("chapter_img_domains", chapterImgDomains)
+                prefs.edit().putBoolean("img_split_v1", true).apply()
+            }
+            rebuildImgDomains()
         } catch (_: Exception) {}
     }
 
-    private fun persistImgDomains(domains: List<String>) {
+    private fun persistStringList(key: String, list: List<String>) {
         try {
             val ctx = DevConfig.appContext ?: return
             ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putString("img_domains", org.json.JSONArray(domains).toString()).apply()
+                .edit().putString(key, org.json.JSONArray(list).toString()).apply()
         } catch (_: Exception) {}
+    }
+
+    private fun toStringList(raw: String): List<String> = try {
+        val arr = org.json.JSONArray(raw)
+        List(arr.length()) { arr.getString(it) }
+    } catch (_: Exception) {
+        emptyList()
     }
 
     private fun normalizeLine(url: String): String {
@@ -175,6 +247,13 @@ object RouteManager {
         url.trim().removePrefix("http://").removePrefix("https://").removeSuffix("/")
 
     private fun sameLine(a: String, b: String): Boolean = lineKey(a) == lineKey(b)
+
+    /**
+     * Trello 专用入口（在 ruledns 远程更新之后执行的兜底来源）。
+     * 严格"只增量补充线路"：只按 host 去重新增，已存在（含 ruledns 已托管）的线路一律跳过；
+     * 不得覆盖/删除已有线路，不得改 rule/SNI，不得改图源。返回本次新增的线路。
+     */
+    fun appendTrelloLinesOnly(serverLines: List<String>): List<String> = appendServerLines(serverLines)
 
     /** 服务端线路追加：只增不减去重，不覆盖硬编码线路。返回本次新增的线路。 */
     fun appendServerLines(serverLines: List<String>): List<String> {
@@ -195,17 +274,19 @@ object RouteManager {
         return added
     }
 
+    /** 读取本地缓存的 Trello 补充线路（不修改当前列表）。 */
+    private fun readPersistedServerLines(): List<String> = try {
+        val ctx = DevConfig.appContext ?: return emptyList()
+        val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            .getString("server_lines", null) ?: return emptyList()
+        toStringList(raw)
+    } catch (_: Exception) {
+        emptyList()
+    }
+
     /** 启动时读本地缓存的服务端线路并合并。 */
     fun loadServerLinesFromPrefs() {
-        try {
-            val ctx = DevConfig.appContext ?: return
-            val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .getString("server_lines", null) ?: return
-            val arr = org.json.JSONArray(raw)
-            val list = ArrayList<String>(arr.length())
-            for (i in 0 until arr.length()) list.add(arr.getString(i))
-            appendServerLines(list)
-        } catch (_: Exception) {}
+        appendServerLines(readPersistedServerLines())
     }
 
     private fun persistServerLines(lines: List<String>) {
@@ -437,13 +518,36 @@ object RouteManager {
         }
     }
 
-    /** 设置自定义 rule（开发者配置） */
+    /** 直接设置自定义 rule（DNS 直连映射），不在此做分类；分类由 applyBaseLists / 旧格式兜底负责。 */
     fun setCustomRule(rule: Map<String, List<String>>) {
         customRule = rule
+    }
+
+    /** 旧格式（无 lines/sources）兜底：按域名后缀猜测并增量追加线路/图源。 */
+    fun applyLegacyClassification(rule: Map<String, List<String>>) {
         updateDomainsFromRule(rule)
     }
 
-    /** 设置 SNI 绕过域名列表 */
+    /**
+     * 应用显式（远程/基线）线路与图源分类（绕过后缀猜测）：
+     * 线路 = 远程 lines（保留各自 http/https）在前 + 内置 LINE_HOSTS 缺失补尾 + Trello 持久化补充线路；
+     * 图源基础集 = sources + 内置 IMG_DOMAINS（章节运行时图源由 chapterImgDomains 另存，不在此处理）。
+     * 尽量保持当前选中线路/图源。
+     */
+    fun applyBaseLists(lineUrls: List<String>, sourceDomains: List<String>) {
+        val ordered = LinkedHashSet<String>()
+        lineUrls.forEach { u -> normalizeLine(u).takeIf { it.isNotBlank() }?.let { ordered.add(it) } }
+        LINE_HOSTS.forEach { ordered.add(it) }
+        readPersistedServerLines().forEach { u -> if (ordered.none { sameLine(it, u) }) ordered.add(u) }
+        val newLines = ordered.toList()
+        val curLine = lineHosts.getOrNull(lineIndex)
+        lineHosts = newLines
+        val keptLine = curLine?.let { c -> newLines.indexOfFirst { sameLine(it, c) } }?.takeIf { it >= 0 }
+        lineIndex = keptLine ?: lineIndex.coerceIn(0, newLines.lastIndex)
+        setBaselineImgDomains(sourceDomains)
+    }
+
+    /** 设置 SNI 绕过域名列表（由 lines+sources 派生，调用方负责计算） */
     fun setSniDomains(domains: Set<String>) {
         sniDomains = domains
     }
@@ -466,17 +570,100 @@ object RouteManager {
     /** 默认配置 JSON（应用启动时加载）。 */
     const val DEFAULT_CONFIG_JSON = """
 {
+  "version": 1,
+  "updated_at": "2026-10-09T13:54:37+08:00",
   "port": 7891,
+  "lines": [
+    "https://mseeowpm.online",
+    "https://mseeowpm.cc",
+    "https://mseeowpm2.cc",
+    "https://mseeowpm3.cc",
+    "https://mseeowpm4.cc",
+    "http://mseeowpm.pro",
+    "https://mseeowpma.cc",
+    "http://mseeowpm1.xyz",
+    "https://etmdcw.cn"
+  ],
+  "sources": [
+    "newmwtuyuan1.cc",
+    "newmwtuyuan2.cc",
+    "newmwtuyuan3.cc",
+    "newmwtuyuan4.cc",
+    "newmwtuyuan5.cc",
+    "newmwimserv1.cc",
+    "newmwimserv2.cc",
+    "newmwimserv3.cc",
+    "newmwimserv4.cc",
+    "newmwimserv5.cc",
+    "newmwimserv6.cc",
+    "newmwimserv7.cc",
+    "newmwimserv8.cc",
+    "newmwimserv9.cc",
+    "newmwimserv10.cc",
+    "newmwimserv11.cc",
+    "newmwimserv12.cc",
+    "newmwimserv13.cc",
+    "newmwimserv14.cc",
+    "newmwimserv15.cc",
+    "newmwimserv16.cc",
+    "mwfimsvfast2.cc",
+    "mwfimsvfast5.cc",
+    "mwfimsvfast9.cc",
+    "mwfimsvfast10.cc",
+    "mwfimsvfast11.cc",
+    "mwfimsvfast12.cc",
+    "mwfimsvfast13.cc",
+    "mwfimsvfast14.cc",
+    "mwfimsvfast15.cc",
+    "mwfimsvfast16.cc",
+    "mwfimsvfast17.cc",
+    "mwfimsvfast18.cc",
+    "mwfimsvfast19.cc",
+    "mwfimsvfast20.cc",
+    "mwfimsvfast21.cc",
+    "mwfimsvfast22.cc",
+    "mwfimsvfast23.cc",
+    "mwfimsvfast24.cc",
+    "mwfimsvfast25.cc",
+    "mwfimsvfast26.cc",
+    "mwfimsvfast27.cc",
+    "mwfimsvfast28.cc",
+    "mwfimsvfast29.cc",
+    "mwfimsvfast30.cc",
+    "mwfimsvfast31.cc",
+    "mwfimsvfast32.cc",
+    "mwfimsvfast33.cc",
+    "mwfimsvfast34.cc",
+    "mwfimsvfast35.cc",
+    "mwfimsvfast36.cc",
+    "mwfimsvfast37.cc",
+    "mwfimsvfast38.cc",
+    "mwfimsvfast39.cc",
+    "mwfimsvfast40.cc",
+    "mwfimsvfast41.cc",
+    "mwfimsvfast42.cc",
+    "mwfimsvfast43.cc",
+    "mwfimsvfast44.cc",
+    "mwfimsvfast45.cc",
+    "mwfimsvfast46.cc",
+    "mwfimsvfast47.cc",
+    "mwfimsvfast48.cc",
+    "mwfimsvfast49.cc",
+    "mwfimsvfast50.cc",
+    "mwfimsvfast51.cc",
+    "mwfimsvfast52.cc",
+    "mwfimsvfast53.cc",
+    "mwfimsvfast54.cc",
+    "mwfimsvfast55.cc",
+    "mwfimsvfast56.cc",
+    "mwfimsvfast57.cc",
+    "mwfimsvfast58.cc",
+    "mwfimsvfast59.cc",
+    "mwfimsvfast60.cc",
+    "mwappimgs.cc"
+  ],
   "rule": {
     "mseeowpm.online": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm.pro": [
       "207.57.165.154",
       "207.57.165.187",
       "207.57.165.198",
@@ -493,6 +680,30 @@ object RouteManager {
       "207.57.166.161"
     ],
     "mseeowpm2.cc": [
+      "207.57.165.154",
+      "207.57.165.187",
+      "207.57.165.198",
+      "207.57.165.208",
+      "207.57.165.251",
+      "207.57.166.161"
+    ],
+    "mseeowpm3.cc": [
+      "207.57.165.154",
+      "207.57.165.187",
+      "207.57.165.198",
+      "207.57.165.208",
+      "207.57.165.251",
+      "207.57.166.161"
+    ],
+    "mseeowpm4.cc": [
+      "207.57.165.154",
+      "207.57.165.187",
+      "207.57.165.198",
+      "207.57.165.208",
+      "207.57.165.251",
+      "207.57.166.161"
+    ],
+    "mseeowpm.pro": [
       "207.57.165.154",
       "207.57.165.187",
       "207.57.165.198",
@@ -524,11 +735,6 @@ object RouteManager {
       "207.57.165.251",
       "207.57.166.161"
     ],
-    "mwappimgs.cc": [
-      "204.77.223.249",
-      "207.32.217.51",
-      "207.32.217.75"
-    ],
     "newmwtuyuan1.cc": [
       "104.238.220.203",
       "172.93.103.134",
@@ -552,6 +758,102 @@ object RouteManager {
     ],
     "newmwtuyuan5.cc": [
       "162.255.119.231"
+    ],
+    "newmwimserv1.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv2.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv3.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv4.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv5.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv6.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv7.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv8.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv9.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv10.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv11.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv12.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv13.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv14.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv15.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "newmwimserv16.cc": [
+      "104.238.220.203",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
     ],
     "mwfimsvfast2.cc": [
       "104.21.72.208",
@@ -742,168 +1044,140 @@ object RouteManager {
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv1.cc": [
+    "mwfimsvfast41.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv2.cc": [
+    "mwfimsvfast42.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast43.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast44.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast45.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast46.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast47.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv3.cc": [
+    "mwfimsvfast48.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast49.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv4.cc": [
+    "mwfimsvfast50.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv5.cc": [
+    "mwfimsvfast51.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv6.cc": [
+    "mwfimsvfast52.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv7.cc": [
+    "mwfimsvfast53.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv8.cc": [
+    "mwfimsvfast54.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv9.cc": [
+    "mwfimsvfast55.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv10.cc": [
+    "mwfimsvfast56.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast57.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv11.cc": [
+    "mwfimsvfast58.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv12.cc": [
+    "mwfimsvfast59.cc": [
+      "104.238.220.203",
+      "104.238.221.230",
+      "172.93.103.134",
+      "172.96.141.5",
+      "172.96.161.195"
+    ],
+    "mwfimsvfast60.cc": [
       "104.238.220.203",
       "172.93.103.134",
       "172.96.141.5",
       "172.96.161.195"
     ],
-    "newmwimserv13.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv14.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv15.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv16.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
+    "mwappimgs.cc": [
+      "204.77.223.249",
+      "207.32.217.51",
+      "207.32.217.75"
     ]
-  },
-  "sni": [
-    "mseeowpm.online",
-    "mseeowpm.pro",
-    "mseeowpm.cc",
-    "mseeowpm2.cc",
-    "mseeowpma.cc",
-    "mseeowpm1.xyz",
-    "etmdcw.cn",
-    "mwappimgs.cc",
-    "newmwtuyuan1.cc",
-    "newmwtuyuan2.cc",
-    "newmwtuyuan3.cc",
-    "newmwtuyuan4.cc",
-    "newmwtuyuan5.cc",
-    "mwfimsvfast2.cc",
-    "mwfimsvfast5.cc",
-    "mwfimsvfast9.cc",
-    "mwfimsvfast10.cc",
-    "mwfimsvfast11.cc",
-    "mwfimsvfast12.cc",
-    "mwfimsvfast13.cc",
-    "mwfimsvfast14.cc",
-    "mwfimsvfast15.cc",
-    "mwfimsvfast16.cc",
-    "mwfimsvfast17.cc",
-    "mwfimsvfast18.cc",
-    "mwfimsvfast19.cc",
-    "mwfimsvfast20.cc",
-    "mwfimsvfast21.cc",
-    "mwfimsvfast22.cc",
-    "mwfimsvfast23.cc",
-    "mwfimsvfast24.cc",
-    "mwfimsvfast25.cc",
-    "mwfimsvfast26.cc",
-    "mwfimsvfast27.cc",
-    "mwfimsvfast28.cc",
-    "mwfimsvfast29.cc",
-    "mwfimsvfast30.cc",
-    "mwfimsvfast31.cc",
-    "mwfimsvfast32.cc",
-    "mwfimsvfast33.cc",
-    "mwfimsvfast34.cc",
-    "mwfimsvfast35.cc",
-    "mwfimsvfast36.cc",
-    "mwfimsvfast37.cc",
-    "mwfimsvfast38.cc",
-    "mwfimsvfast39.cc",
-    "mwfimsvfast40.cc",
-    "newmwimserv1.cc",
-    "newmwimserv2.cc",
-    "newmwimserv3.cc",
-    "newmwimserv4.cc",
-    "newmwimserv5.cc",
-    "newmwimserv6.cc",
-    "newmwimserv7.cc",
-    "newmwimserv8.cc",
-    "newmwimserv9.cc",
-    "newmwimserv10.cc",
-    "newmwimserv11.cc",
-    "newmwimserv12.cc",
-    "newmwimserv13.cc",
-    "newmwimserv14.cc",
-    "newmwimserv15.cc",
-    "newmwimserv16.cc"
-  ]
+  }
 }
     """
 
@@ -915,21 +1189,26 @@ object RouteManager {
         try {
             val json = Json { ignoreUnknownKeys = true }
             val root = json.parseToJsonElement(DEFAULT_CONFIG_JSON).jsonObject
+            fun strList(key: String): List<String> =
+                root[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
 
-            // 解析 rule
-            val ruleObj = root["rule"]?.jsonObject ?: emptyMap()
             val ruleMap = mutableMapOf<String, List<String>>()
-            ruleObj.forEach { (domain, arr) ->
-                val ips = arr.jsonArray.map { it.jsonPrimitive.content }
-                ruleMap[domain] = ips
+            root["rule"]?.jsonObject?.forEach { (domain, arr) ->
+                ruleMap[domain] = arr.jsonArray.map { it.jsonPrimitive.content }
             }
-
-            // 解析 sni
-            val sniArr = root["sni"]?.jsonArray ?: JsonArray(emptyList())
-            val sniSet = sniArr.map { it.jsonPrimitive.content }.toSet()
+            val lines = strList("lines")
+            val sources = strList("sources")
 
             setCustomRule(ruleMap)
-            setSniDomains(sniSet)
+            if (lines.isNotEmpty() && sources.isNotEmpty()) {
+                // 新规范：显式 lines/sources 分类
+                applyBaseLists(lines, sources)
+            } else {
+                // 旧格式兜底：后缀猜测
+                applyLegacyClassification(ruleMap)
+            }
+            // SNI 由受管主机派生（含运行时学到的额外 rule 主机），不再读取独立 sni
+            setSniDomains(ruleMap.keys - "dns.google")
         } catch (e: Exception) {
             android.util.Log.e("RouteManager", "applyDefaultConfig failed", e)
         }
