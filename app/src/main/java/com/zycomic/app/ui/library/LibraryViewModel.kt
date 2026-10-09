@@ -8,8 +8,10 @@ import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -149,6 +151,9 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     private var favPage = 1
     private var historyPage = 1
 
+    /** 当前在途的收藏加载任务（重置或加载更多），刷新时取消旧任务，避免旧分页串入。 */
+    private var favJob: Job? = null
+
     init {
         if (mode == 0 || mode == 2) {
             loadFolders()
@@ -258,12 +263,17 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     // ---------- 收藏列表 ----------
     fun refreshFavorites() {
-        scope.launch { loadFav(reset = true) }
+        // 取消上一次在途的收藏加载（含加载更多），避免切收藏夹/筛选/刷新时旧分页追加进新列表
+        favJob?.cancel()
+        favJob = scope.launch { loadFav(reset = true) }
     }
 
     fun loadMoreFavorites() {
         if (_favLoading.value || _favAppending.value || !_favHasMore.value) return
-        scope.launch { loadFav(reset = false) }
+        if (!UserRepository.isLoggedIn) return
+        // 在发起协程前【同步】置位，消除快速 fling 时同一页被并发拉取两次的窗口
+        _favAppending.value = true
+        favJob = scope.launch { loadFav(reset = false) }
     }
 
     private suspend fun loadFav(reset: Boolean) {
@@ -282,15 +292,22 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
                 isFullVersion = isFullVersion.value,
             )
             favPage++
-            _favItems.value = if (reset) list else _favItems.value + list
+            // 按 bookId 去重（保留首次出现顺序），兜住同页并发重复、服务端分页重叠、同一漫画在多个收藏夹
+            _favItems.value = if (reset) {
+                list.distinctBy { it.bookId }
+            } else {
+                (_favItems.value + list).distinctBy { it.bookId }
+            }
             if (list.isEmpty()) _favHasMore.value = false
         } catch (_: NotLoggedInException) {
             needLogin.value = true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "加载收藏失败", e)
         } finally {
-            _favLoading.value = false
-            _favAppending.value = false
+            // 只清自己这一模式的标志，避免被取消的追加任务误清重置任务的 loading 标志
+            if (reset) _favLoading.value = false else _favAppending.value = false
         }
     }
 
