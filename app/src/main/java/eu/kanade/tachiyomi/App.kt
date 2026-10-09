@@ -146,11 +146,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         ProcessLifecycleOwner.get().lifecycleScope.launch {
             com.zycomic.app.data.repository.UserRepository.verifyLogin()
         }
-        // 后台从 Trello 拉取线路（只增不减），有新线路则增量测速选最快
+        // 启动进入主界面（每进程一次，异步非阻塞）：先拉远程 ruledns；无论成功/未更新/失败，
+        // 随后都再执行 Trello 拉取。Trello 严格只增量补充线路（不覆盖 ruledns 线路/IP、
+        // 不改图源/rule/SNI、不删除），有新增线路则增量测速选最快。
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            // 1) 远程 ruledns（内部已做 HTTPS 校验/ETag/版本/回退，失败静默保留当前配置）
+            runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }
+            // 2) Trello 始终执行，仅作为线路兜底补充来源
             try {
                 val lines = com.zycomic.app.net.TrelloConfigFetcher.fetchLines()
-                val added = com.zycomic.app.net.RouteManager.appendServerLines(lines)
+                val added = com.zycomic.app.net.RouteManager.appendTrelloLinesOnly(lines)
                 if (added.isNotEmpty()) {
                     val delays = com.zycomic.app.net.RouteManager.lastLineDelays.toMutableMap()
                     added.forEach { url ->

@@ -42,6 +42,8 @@ fun SpeedTestScreen(
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
     val updateTime by vm.configUpdateTime.collectAsState()
+    val remoteChecking by vm.remoteChecking.collectAsState()
+    val remoteInfo by vm.remoteInfo.collectAsState()
 
     // 仅用于展示：线路、图源两组各自按测速延迟升序（快→慢）。
     // 未测(null)/超时(MAX_VALUE)统一沉底，并列时按原始 index 稳定排序；
@@ -83,6 +85,23 @@ fun SpeedTestScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    remoteInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    enabled = !remoteChecking,
+                    onClick = { vm.checkRemoteConfig() },
+                ) {
+                    Text(if (remoteChecking) "检查中…" else "检查更新")
+                }
+            }
 
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
                 item {

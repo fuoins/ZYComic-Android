@@ -7,6 +7,7 @@ import com.zycomic.app.net.Crypto
 import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.ManwaInterceptor
 import com.zycomic.app.net.NetworkModule
+import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +49,48 @@ class SettingsViewModel {
     /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
     val imgDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastImgDelays)
     val configUpdateTime = MutableStateFlow("未更新")
+
+    /** 远程 ruledns 手动检查进行中 */
+    val remoteChecking = MutableStateFlow(false)
+    /** 远程配置版本/更新时间/错误的汇总文案 */
+    val remoteInfo = MutableStateFlow(buildRemoteInfo())
+
+    /** 重新读取远程配置状态文案（版本/更新时间/错误）。 */
+    fun refreshRemoteInfo() {
+        remoteInfo.value = buildRemoteInfo()
+    }
+
+    private fun buildRemoteInfo(): String {
+        val v = DevConfig.remoteVersion()
+        val updated = DevConfig.remoteUpdatedAt()
+        val err = DevConfig.remoteError()
+        val parts = mutableListOf<String>()
+        parts += if (v > 0) "远程配置 v$v" else "当前为内置配置"
+        if (!updated.isNullOrBlank()) parts += "更新于 $updated"
+        if (!err.isNullOrBlank()) parts += "上次错误：$err"
+        return parts.joinToString("　")
+    }
+
+    /** 测速页"检查更新"：手动拉取远程 ruledns（成功/未更新/失败均 Toast）。 */
+    fun checkRemoteConfig() {
+        scope.launch {
+            remoteChecking.value = true
+            try {
+                val r = RemoteConfigFetcher.checkAndApply(manual = true)
+                toast.value = when (r.outcome) {
+                    RemoteConfigFetcher.Outcome.APPLIED -> "网络配置已更新（v${r.version}）"
+                    RemoteConfigFetcher.Outcome.NOT_CHANGED -> "网络配置已是最新"
+                    RemoteConfigFetcher.Outcome.FAILED -> "更新失败：${r.message}"
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "checkRemoteConfig failed", e)
+                toast.value = "更新失败：${e.message ?: "请稍后重试"}"
+            } finally {
+                remoteChecking.value = false
+                refreshRemoteInfo()
+            }
+        }
+    }
 
     // 屏蔽标签弹窗提交状态
     val addingBlacklist = MutableStateFlow(false)
