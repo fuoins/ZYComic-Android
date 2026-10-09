@@ -1,206 +1,72 @@
 <div align="center">
 
-<a href="https://komikku-app.github.io">
-  <img width=200px height=200px src="./.github/readme-images/app-icon.png"/>
-</a><br/>
-<a href="https://trendshift.io/repositories/13696" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13696" alt="komikku-app%2Fkomikku | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
- <h1 align="center"> Komikku </h1>
+<h1 align="center">ZYComic</h1>
 
-| Releases | Preview |
-|----------|---------|
-| <div align="center"> [![GitHub downloads](https://img.shields.io/github/downloads/komikku-app/komikku/latest/total?label=Latest%20Downloads&labelColor=27303D&color=0D1117&logo=github&logoColor=FFFFFF&style=flat)](https://github.com/komikku-app/komikku/releases/latest) [![GitHub downloads](https://img.shields.io/github/downloads/komikku-app/komikku/total?label=Total%20Downloads&labelColor=27303D&color=0D1117&logo=github&logoColor=FFFFFF&style=flat)](https://github.com/komikku-app/komikku/releases) [![Stable build](https://img.shields.io/github/actions/workflow/status/komikku-app/komikku/build_release.yml?labelColor=27303D&label=Stable&labelColor=06599d&color=043b69)](https://github.com/komikku-app/komikku/actions/workflows/build_release.yml) | <div align="center"> [![GitHub downloads](https://img.shields.io/github/downloads/komikku-app/komikku-preview/latest/total?label=Latest%20Downloads&labelColor=27303D&color=0D1117&logo=github&logoColor=FFFFFF&style=flat)](https://github.com/komikku-app/komikku-preview/releases/latest) [![GitHub downloads](https://img.shields.io/github/downloads/komikku-app/komikku-preview/total?label=Total%20Downloads&labelColor=27303D&color=0D1117&logo=github&logoColor=FFFFFF&style=flat)](https://github.com/komikku-app/komikku-preview/releases) [![Preview build](https://img.shields.io/github/actions/workflow/status/komikku-app/komikku-preview/build_app.yml?labelColor=27303D&label=Preview&labelColor=2c2c47&color=1c1c39)](https://github.com/komikku-app/komikku-preview/actions/workflows/build_app.yml) |
+<p>一款安卓在线漫画阅读器，内置 manwa 线路与图源。</p>
 
-*Requires Android 8.0 or higher.*
+<p>
+  <img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" />
+  <img alt="Platform: Android" src="https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg" />
+  <img alt="ABI: arm64-v8a" src="https://img.shields.io/badge/ABI-arm64--v8a-lightgrey.svg" />
+</p>
 
-[![Discord](https://img.shields.io/discord/1242381704459452488.svg?label=&labelColor=6A7EC2&color=7389D8&logo=discord&logoColor=FFFFFF)](https://discord.gg/85jB7V5AJR)
-[![CI](https://img.shields.io/github/actions/workflow/status/komikku-app/komikku/build_push.yml?labelColor=27303D&label=CI)](https://github.com/komikku-app/komikku/actions/workflows/build_push.yml)
-[![License: Apache-2.0](https://img.shields.io/github/license/komikku-app/komikku?labelColor=27303D&color=0877d2)](/LICENSE)
-[![Translation status](https://img.shields.io/weblate/progress/komikku-app?labelColor=27303D&color=946300)](https://hosted.weblate.org/engage/komikku-app/)
+</div>
 
-## Download
+<!--
+截图占位：后续把 ZYComic 自己的图标 / 截图放到 .github/readme-images/ 后，在此引用，例如：
+<img src="./.github/readme-images/screens.png" alt="ZYComic 截图" />
+（在提供正式素材前不引用任何图片，避免展示上游 komikku 的旧图。）
+-->
 
-[![Stable](https://img.shields.io/github/release/komikku-app/komikku.svg?maxAge=3600&label=Stable&labelColor=06599d&color=043b69)](https://github.com/komikku-app/komikku/releases/latest)
-[![Preview](https://img.shields.io/github/v/release/komikku-app/komikku-preview.svg?maxAge=3600&label=Preview&labelColor=2c2c47&color=1c1c39)](https://github.com/komikku-app/komikku-preview/releases/latest)
+---
 
-*Requires Android 8.0 or higher.*
+## 简介
 
-[![Sponsor me on GitHub](https://custom-icon-badges.demolab.com/badge/-Sponsor-ea4aaa?style=for-the-badge&logo=heart&logoColor=white)](https://github.com/sponsors/cuong-tran "Sponsor me on GitHub")
+ZYComic 是一款 Android 在线漫画 App：
 
-<div align="left">
-A free and open source manga reader which is based off TachiyomiSY & Mihon/Tachiyomi. This fork is meant to provide new & useful features while regularly take features/updates from Mihon or other forks like SY, J2K and Neko...
+- **线路**：同一后端的多个可切换域名，内置延迟测速与故障切换，切换线路时同步登录态（Cookie）。
+- **图源**：对接 manwa 后端的加密图片接口，由客户端解密后阅读。
+- **阅读器**：复用成熟的 komikku（Tachiyomi / Mihon 系）阅读器内核，支持条漫（Webtoon 上下滚动）、左/右翻页、双页、双击/双指缩放、大图分块与丰富的阅读设置。
+- **界面**：基于 Jetpack Compose + Material 3 自研主界面（浏览 / 书架 / 历史 / 搜索 / 我的 / 设置）。
 
-![screenshots of app](./.github/readme-images/screens.png)
+## 功能特性
 
-<div align="left">
+- 多线路手动 / 自动切换、延迟测速、故障自动转移
+- 漫画浏览、搜索、排行、最新更新、分类标签
+- 收藏与收藏夹、阅读历史（支持单条与多选删除）
+- 内置图源，加密图片客户端解密阅读
+- 强大阅读器：条漫 / 分页 / 双页、缩放、导航区自定义、阅读偏好
+- 外观主题、标签屏蔽、数据与存储管理
 
-## Features
+## 运行环境
 
-### Komikku's unique features:
-- `Suggestions` automatically showing source-website's recommendations / suggestions / related to current entry for all sources.
-- `Hidden categories` to hide yours things from *nosy* people.
-- `Auto theme color` based on each entry's cover for entry View & Reader.
-- `App custom theme` with `Color palettes` for endless color lover.
-- `Bulk-favorite` multiple entries all at once.
-- Source & Language icon on Library & various places. (Some language flags are not really accurate)
-- `Feed` now supports **all** sources, with more items (20 for now).
-- Fast browsing (for who with large library experiencing slow loading)
-- Grouped entries in Update tab (inspired by J2K).
-- Update notification with manga cover.
-- Auto `2-way sync` progress with trackers.
-- Chips for `Saved search` in source browse
-- `Panorama cover` showing wide cover in full.
-- `Merge multiple` library entries together at same time.
-- `Range-selection` for Migration.
-- Ability to `enable/disable repo`, with icon.
-- `Update Error` screen & migrating them away.
-- `to-be-updated` screen: which entries are going to be checked with smart-update?
-- `Search for sources` & Quick NSFW sources filter in Extensions, Browse & Migration screen.
-- `Feed` backup/restore/sync/re-order.
-- Long-click to add/remove single entry to/from library, everywhere.
-- Docking Read/Resume button to left/right.
-- In-app progress banner shows Library syncing / Backup restoring / Library updating progress.
-- Auto-install app update.
-- Configurable interval to refresh entries from downloaded storage.
-- Forked from SY so everything from SY.
-- Always up-to-date with Mihon & SY
-- More app themes & better UI, improvements...
+- Android 8.0（API 26）及以上
+- 当前仅提供 `arm64-v8a`（覆盖主流真机）
 
+## 下载与构建
 
-<details>
-  <summary>Features from Mihon / Tachiyomi</summary>
+- 正式版本计划通过 GitHub [Releases](https://github.com/fuoins/ZYComic-Android/releases) 发布（含签名 APK）；当前阶段产物默认**未签名**，安装分发前需自行签名。
+- 本项目通过 **GitHub Actions** 构建，支持手动触发的「快速构建（quick）」与「完美构建（final）」两种模式，当前目标 ABI 为 `arm64-v8a`。
+- 本地源码构建需 JDK 17、Android SDK Platform 36：
 
-#### All up-to-date features from Mihon / Tachiyomi (original), include:
+```bash
+git clone --recursive https://github.com/fuoins/ZYComic-Android.git
+cd ZYComic-Android
+./gradlew assembleRelease
+```
 
-* Online reading from a variety of sources
-* Local reading of downloaded content
-* A configurable reader with multiple viewers, reading directions and other settings.
-* Tracker support: [MyAnimeList](https://myanimelist.net/), [AniList](https://anilist.co/), [Kitsu](https://kitsu.app/), [MangaUpdates](https://mangaupdates.com), [Shikimori](https://shikimori.one), [Bangumi](https://bgm.tv/)
-* Categories to organize your library
-* Light and dark themes
-* Schedule updating your library for new chapters
-* Create backups locally to read offline or to your desired cloud service
-* Continue reading button in library
+## 技术栈
 
-</details>
+Kotlin · Jetpack Compose · Material 3 · Voyager · Coil 3 · SQLDelight（SQLCipher）· OkHttp / Retrofit · Injekt。
 
-<details>
-  <summary>Features from Tachiyomi SY</summary>
+## 开源许可与归属
 
-#### All features from TachiyomiSY:
-* Feed tab, where you can easily view the latest entries or saved search from multiple sources at same time.
-* Automatic webtoon detection, allowing the reader to switch to webtoon mode automatically when viewing one
-* Manga recommendations, uses MAL and Anilist, as well as Neko Similar Manga for Mangadex manga (Thanks to Az, She11Shocked, Carlos, and Goldbattle)
-* Lewd filter, hide the lewd manga in your library when you want to
-* Tracking filter, filter your tracked manga so you can see them or see non-tracked manga, made by She11Shocked
-* Search tracking status in library, made by She11Shocked
-* Custom categories for sources, liked the pinned sources, but you can make your own versions and put any sources in them
-* Manga info edit
-* Manga Cover view + share and save
-* Dynamic Categories, view the library in multiple ways
-* Smart background for reading modes like LTR or Vertical, changes the background based on the page color
-* Force disable webtoon zoom
-* Hentai features enable/disable, in advanced settings
-* Quick clean titles
-* Source migration, migrate all your manga from one source to another
-* Saving searches
-* Autoscroll
-* Page preload customization
-* Customize image cache size
-* Batch import of custom sources and featured extensions
-* Advanced source settings page, searching, enable/disable all
-* Click tag for local search, long click tag for global search
-* Merge multiple of the same manga from different sources
-* Drag and drop library sorting
-* Library search engine, includes exclude, quotes as absolute, and a bunch of other ways to search
-* New E-Hentai/ExHentai features, such as language settings and watched list settings
-* Enhanced views for internal and integrated sources
-* Enhanced usability for internal and delegated sources
+ZYComic 的阅读器内核与 UI 框架基于开源项目 **komikku**（其又源自 TachiyomiSY 与 Mihon / Tachiyomi），相关代码遵循 **Apache License 2.0**。
 
-Custom sources:
-* E-Hentai/ExHentai
+- 本项目同样以 Apache License 2.0 开源，详见 [LICENSE](./LICENSE)。
+- 已按许可要求保留上游版权声明与许可文件；本项目与 komikku / Tachiyomi / Mihon 无官方关联，亦不使用其商标。
 
-Additional features for some extensions, features include custom description, opening in app, batch add to library, and a bunch of other things based on the source:
-* 8Muses (EroMuse)
-* Mangadex
-* NHentai
-* Puruin
-* LANraragi
+## 仓库
 
-</details>
-
-## Issues, Feature Requests and Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
-
-<details><summary>Issues</summary>
-
-[Website](https://komikku-app.github.io/)
-
-1. **Before reporting a new issue, take a look at the [FAQ](https://komikku-app.github.io/docs/faq/general), the [changelog](https://github.com/komikku-app/komikku/releases) and the already opened [issues](https://github.com/komikku-app/komikku/issues).**
-2. If you are unsure, ask here: [![Discord](https://img.shields.io/discord/1242381704459452488.svg?label=&labelColor=6A7EC2&color=7389D8&logo=discord&logoColor=FFFFFF)](https://discord.gg/85jB7V5AJR)
-
-</details>
-
-<details><summary>Bugs</summary>
-
-* Include version (More → About → Version)
- * If not latest, try updating, it may have already been solved
- * Preview version is equal to the number of commits as seen on the main page
-* Include steps to reproduce (if not obvious from description)
-* Include screenshot (if needed)
-* If it could be device-dependent, try reproducing on another device (if possible)
-* Don't group unrelated requests into one issue
-
-Use the [issue forms](https://github.com/komikku-app/komikku/issues/new/choose) to submit a bug.
-
-</details>
-
-<details><summary>Feature Requests</summary>
-
-* Write a detailed issue, explaining what it should do or how.
-* Include screenshot (if needed).
-</details>
-
-<details><summary>Contributing</summary>
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
-</details>
-
-<details><summary>Code of Conduct</summary>
-
-See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
-</details>
-
-<div align="center">
-
-### Credits
-
-Thank you to all the people who have contributed!
-
-<a href="https://github.com/komikku-app/komikku/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=komikku-app/komikku" alt="Komikku app contributors" title="Komikku app contributors" width="800"/>
-</a>
-
-![Visitor Count](https://count.getloli.com/get/@komikku-app?theme=capoo-2)
-
-### Disclaimer
-
-The developer(s) of this application does not have any affiliation with the content providers available, and this application hosts zero content.
-
-<div align="left">
-
-## License
-
-    Copyright 2015 Javier Tomás
-
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
+- 源码仓库：<https://github.com/fuoins/ZYComic-Android>
+- 作者：fuoins
