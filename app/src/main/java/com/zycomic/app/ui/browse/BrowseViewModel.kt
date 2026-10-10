@@ -319,9 +319,25 @@ class BrowseViewModel {
 
     // ==================== Tab 管理（预设持久化） ====================
 
-    /** 仅内置特殊页（最近更新）受保护不可删；内置筛选预设与自定义项均可删（可恢复默认）。 */
-    fun isProtected(item: BrowseTabItem): Boolean =
-        item.kind == TabKind.SPECIAL && item.builtin
+    /**
+     * 最新更新/gay排行均以 builtin=false 的可添加预设存在，3 个内置热门筛选 tab 也可删（靠恢复默认找回），
+     * 故当前没有受保护 tab。
+     */
+    fun isProtected(item: BrowseTabItem): Boolean = false
+
+    /** 拖动排序：把 [from] 项移动到 [to]，按 id 校正选中下标并持久化；顶部顺序实时变化。 */
+    fun moveTab(from: Int, to: Int) {
+        if (from == to) return
+        if (from !in tabs.indices || to !in tabs.indices) return
+        val selectedId = tabs.getOrNull(mainTab.value)?.id
+        val moved = tabs.removeAt(from)
+        tabs.add(to, moved)
+        persist()
+        if (selectedId != null) {
+            val ni = tabs.indexOfFirst { it.id == selectedId }
+            if (ni >= 0) mainTab.value = ni
+        }
+    }
 
     fun isNameTaken(name: String, ignoreId: String? = null): Boolean {
         val n = name.trim()
@@ -380,6 +396,25 @@ class BrowseViewModel {
             filter = snapshot,
         )
         tabs.add(item)
+        persist()
+        goTo(tabs.lastIndex)
+        return true
+    }
+
+    fun canAddLatest(): Boolean = tabs.none { it.pageType == BrowsePageType.LATEST }
+
+    /** 添加「最新更新」特殊 tab，固定 id，仅可添加一次。 */
+    fun addLatestTab(): Boolean {
+        if (!canAddLatest()) return false
+        tabs.add(
+            BrowseTabItem(
+                id = BrowseTabStore.ID_LATEST_ADD,
+                name = BrowseTabStore.LATEST_NAME,
+                kind = TabKind.SPECIAL,
+                builtin = false,
+                pageType = BrowsePageType.LATEST,
+            ),
+        )
         persist()
         goTo(tabs.lastIndex)
         return true

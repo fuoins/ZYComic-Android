@@ -9,7 +9,7 @@ object BrowseTabStore {
     private const val PREFS = "zycomic_browse_tabs"
     private const val KEY_TABS = "tabs_json"
     private const val KEY_SEED = "seed_version"
-    private const val SEED_VERSION = 1
+    private const val SEED_VERSION = 2
 
     private lateinit var prefs: android.content.SharedPreferences
 
@@ -17,11 +17,18 @@ object BrowseTabStore {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
-    // ---- 内置默认 tab（受保护的内置项） ----
+    // ---- 内置默认 tab（3 个筛选型热门） ----
     const val ID_GENERAL = "builtin_general"
     const val ID_JINMAN = "builtin_jinman"
     const val ID_REXUE = "builtin_rexue"
-    const val ID_LATEST = "builtin_latest"
+
+    /** v1 内置「最近更新」的旧 id，仅用于 v1→v2 迁移时识别并移除。 */
+    private const val ID_LATEST_V1 = "builtin_latest"
+
+    /** 最新更新（最近更新）作为可添加的特殊预设，固定 id，保证只可添加一次。 */
+    const val ID_LATEST_ADD = "custom_latest"
+    const val LATEST_NAME = "最新更新"
+
     /** gay排行（整体排行）作为可添加的特殊预设，固定 id，保证只可添加一次。 */
     const val ID_RANKING = "custom_ranking"
     const val RANKING_NAME = "gay排行"
@@ -48,27 +55,29 @@ object BrowseTabStore {
             builtin = true,
             filter = FilterSnapshot(gender = 2, tags = listOf("热血"), area = 0, end = 0, st = 2),
         ),
-        BrowseTabItem(
-            id = ID_LATEST,
-            name = "最近更新",
-            kind = TabKind.SPECIAL,
-            builtin = true,
-            pageType = BrowsePageType.LATEST,
-        ),
     )
 
-    /** 读取 tab 列表；首次/版本不符时种子化并持久化。解析失败也回退默认。 */
+    /** 读取 tab 列表；首次/版本不符时种子化或迁移并持久化。解析失败回退默认。 */
     fun load(): List<BrowseTabItem> {
         val seeded = prefs.getInt(KEY_SEED, 0)
         val raw = prefs.getString(KEY_TABS, null)
-        if (seeded == SEED_VERSION && !raw.isNullOrBlank()) {
+
+        if (!raw.isNullOrBlank()) {
             runCatching {
                 val arr = JSONArray(raw)
-                val list = List(arr.length()) { BrowseTabItem.fromJson(arr.getJSONObject(it)) }
-                // 至少要有一个 tab，且内置最近更新必须存在
-                if (list.isNotEmpty() && list.any { it.id == ID_LATEST }) return list
+                var list = List(arr.length()) { BrowseTabItem.fromJson(arr.getJSONObject(it)) }
+                if (seeded == 1) {
+                    // v1→v2：仅移除内置「最近更新」，保留用户自定义与已添加的 gay排行。
+                    list = list.filterNot { it.id == ID_LATEST_V1 }
+                }
+                if (list.isNotEmpty()) {
+                    save(list)
+                    prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
+                    return list
+                }
             }
         }
+
         val def = defaultTabs()
         save(def)
         prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
