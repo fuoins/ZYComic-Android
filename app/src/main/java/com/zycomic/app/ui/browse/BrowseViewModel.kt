@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.browse
 
+import androidx.compose.runtime.mutableStateListOf
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
@@ -20,15 +21,22 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/** 分类页 ViewModel（普通类，由 remember 持有）。三个 tab 独立数据。 */
+/**
+ * 分类页 ViewModel（普通类，由 remember 持有）。
+ * Tab 列表可由用户增删改并持久化；每个 FILTER tab 持有独立列表状态，
+ * 筛选默认值来自预设 [BrowseTabItem.filter]；「重新筛选」的改动仅为当次会话临时态，不回存预设。
+ */
 class BrowseViewModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    // ---- 主 Tab：0 分类 / 1 最近更新 / 2 排行 ----
+    // ---- 可持久化的有序 Tab 列表（Compose 可观察） ----
+    val tabs = mutableStateListOf<BrowseTabItem>().apply { addAll(BrowseTabStore.load()) }
+
+    /** 当前选中 tab 的下标。 */
     val mainTab = MutableStateFlow(0)
 
-    /** 单个 tab 的列表状态 */
+    /** 单个 tab 的列表状态，按 tab id 存放。 */
     private class TabState {
         val mangas = MutableStateFlow<List<Manga>>(emptyList())
         val loading = MutableStateFlow(false)
@@ -36,45 +44,41 @@ class BrowseViewModel {
         val error = MutableStateFlow<String?>(null)
         val hasMore = MutableStateFlow(true)
         var currentPage = 1
-        var loaded = false  // 该 tab 是否已经加载过数据
+        var loaded = false
     }
 
-    private val tabStates = Array(3) { TabState() }
+    private val stateById = HashMap<String, TabState>()
 
-    /** 当前 tab 的状态（随 mainTab 变化） */
-    private val cur: TabState get() = tabStates[mainTab.value]
+    private fun stateFor(page: Int): TabState {
+        val id = tabs[page].id
+        return stateById.getOrPut(id) { TabState() }
+    }
 
-    val mangas: StateFlow<List<Manga>> get() = cur.mangas
-    val loading: StateFlow<Boolean> get() = cur.loading
-    val appending: StateFlow<Boolean> get() = cur.appending
-    val error: StateFlow<String?> get() = cur.error
-    val hasMore: StateFlow<Boolean> get() = cur.hasMore
+    private val cur: TabState get() = stateFor(mainTab.value)
 
-    fun mangasForTab(tab: Int): StateFlow<List<Manga>> = tabStates[tab].mangas
-    fun loadingForTab(tab: Int): StateFlow<Boolean> = tabStates[tab].loading
-    fun appendingForTab(tab: Int): StateFlow<Boolean> = tabStates[tab].appending
-    fun hasMoreForTab(tab: Int): StateFlow<Boolean> = tabStates[tab].hasMore
-    fun errorForTab(tab: Int): StateFlow<String?> = tabStates[tab].error
+    fun mangasForTab(tab: Int): StateFlow<List<Manga>> = stateFor(tab).mangas
+    fun loadingForTab(tab: Int): StateFlow<Boolean> = stateFor(tab).loading
+    fun appendingForTab(tab: Int): StateFlow<Boolean> = stateFor(tab).appending
+    fun hasMoreForTab(tab: Int): StateFlow<Boolean> = stateFor(tab).hasMore
+    fun errorForTab(tab: Int): StateFlow<String?> = stateFor(tab).error
 
-    // ---- 分类筛选状态 ----
-    val gender = MutableStateFlow(2)            // 默认 2 一般向
-    val selectedTags = MutableStateFlow<Set<String>>(emptySet()) // 空=全部
-    val area = MutableStateFlow(0)
-    val end = MutableStateFlow(0)
-    val st = MutableStateFlow(2)                // 默认 2 收藏
-    val filterExpanded = MutableStateFlow(true)
+    // ---- 当前 FILTER tab 的会话临时筛选（进入 tab 时从预设拷贝，切走再回会重置，不持久化） ----
+    val curFilter = MutableStateFlow(
+        tabs.getOrNull(0)?.filter?.copy() ?: FilterSnapshot(),
+    )
 
-    // 全部标签（内置，"更多"弹窗）
     val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
 
-    // ---- 最近更新 ----
+    // ---- 最近更新（SPECIAL: LATEST） ----
     val newestDate = MutableStateFlow("")       // ""=7天
     val newestNums = MutableStateFlow(0)
 
-    // ---- 排行子 Tab：0 人气 / 1 新番 / 2 完结 ----
+    // ---- 排行（SPECIAL: RANKING）子类型：0 人气 / 1 新番 / 2 完结 ----
     val rankType = MutableStateFlow(0)
 
-    // ---- 显示模式：0紧凑网格 1舒适网格(默认) 2仅封面网格 ----（持久化）
+    val filterExpanded = MutableStateFlow(true)
+
+    // ---- 显示模式：0紧凑 1舒适(默认) 2仅封面 ----（持久化）
     val displayMode = MutableStateFlow(prefs.getInt("browse_display_mode", 1))
     val gridColumns = MutableStateFlow(3)
 
@@ -110,30 +114,31 @@ class BrowseViewModel {
     private val _foldersLoading = MutableStateFlow(false)
     val foldersLoading: StateFlow<Boolean> = _foldersLoading.asStateFlow()
 
-    // ---- 登录状态 ----
     val user = UserRepository.userFlow
 
-    /** 请求序号：每次自增，用于丢弃过期请求的结果（竞态防护）。 */
     private val requestSeq = java.util.concurrent.atomic.AtomicLong(0)
-
-    /** 当前加载任务：启动新请求前取消旧的，避免旧页面残留。 */
     private var currentJob: Job? = null
 
-    /** 日期选项：7天 + 今天 + 前6天。 */
     val dateOptions: List<Pair<String, String>> = buildDateOptions()
 
     init {
-        // 初始化时只加载第一个 tab（分类），其他 tab 切换时再加载
+        bindFilterFor(0)
         refresh()
+    }
+
+    /** 进入某个 FILTER tab 时，把会话筛选重置为该 tab 的预设默认值。 */
+    private fun bindFilterFor(page: Int) {
+        val item = tabs.getOrNull(page) ?: return
+        if (item.kind == TabKind.FILTER) {
+            curFilter.value = item.filter?.copy() ?: FilterSnapshot()
+        }
     }
 
     fun selectMainTab(tab: Int) {
         if (mainTab.value == tab) return
         mainTab.value = tab
-        // 切换到该 tab 时，如果还没加载过数据，自动加载
-        if (!tabStates[tab].loaded) {
-            refresh()
-        }
+        bindFilterFor(tab)
+        if (!stateFor(tab).loaded) refresh()
     }
 
     fun selectRankType(type: Int) {
@@ -142,24 +147,31 @@ class BrowseViewModel {
         refresh()
     }
 
-    fun selectGender(v: Int) { gender.value = v; refresh() }
-    fun selectArea(v: Int) { area.value = v; refresh() }
-    fun selectEnd(v: Int) { end.value = v; refresh() }
-    fun selectSt(v: Int) { st.value = v; refresh() }
+    // ---- 「重新筛选」：仅改当前 tab 的会话临时筛选，不写回预设 ----
+    fun selectGender(v: Int) { curFilter.value = curFilter.value.copy(gender = v); refresh() }
+    fun selectArea(v: Int) { curFilter.value = curFilter.value.copy(area = v); refresh() }
+    fun selectEnd(v: Int) { curFilter.value = curFilter.value.copy(end = v); refresh() }
+    fun selectSt(v: Int) { curFilter.value = curFilter.value.copy(st = v); refresh() }
     fun toggleFilterExpanded() { filterExpanded.value = !filterExpanded.value }
 
     fun toggleTag(tag: String) {
-        val curTags = selectedTags.value.toMutableSet()
-        if (!curTags.add(tag)) curTags.remove(tag)
-        selectedTags.value = curTags
+        val f = curFilter.value
+        val set = f.tags.toMutableSet()
+        if (!set.add(tag)) set.remove(tag)
+        curFilter.value = f.copy(tags = set.toList())
         refresh()
     }
 
-    fun clearTags() { selectedTags.value = emptySet(); refresh() }
+    fun clearTags() { curFilter.value = curFilter.value.copy(tags = emptyList()); refresh() }
 
-    /** 从"更多"弹窗直接设置完整选择集合。 */
     fun setSelectedTags(tags: Set<String>) {
-        selectedTags.value = tags
+        curFilter.value = curFilter.value.copy(tags = tags.toList())
+        refresh()
+    }
+
+    /** 用一份完整快照替换当前 tab 的会话临时筛选并刷新（「重新筛选」面板用）。 */
+    fun applyTempFilter(snapshot: FilterSnapshot) {
+        curFilter.value = snapshot
         refresh()
     }
 
@@ -193,15 +205,12 @@ class BrowseViewModel {
         }
     }
 
-    /** 添加选中漫画到全部收藏夹（folder_id=0） */
     fun addToAllFolders(onDone: (Boolean, String) -> Unit) {
         val ids = selectedIds.value.toList()
         if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
         scope.launch {
             try {
-                ids.forEach { id ->
-                    FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, 0)
-                }
+                ids.forEach { id -> FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, 0) }
                 onDone(true, "已添加 ${ids.size} 本到全部收藏夹")
             } catch (e: Exception) {
                 onDone(false, e.message ?: "收藏失败")
@@ -209,15 +218,12 @@ class BrowseViewModel {
         }
     }
 
-    /** 添加选中漫画到指定收藏夹 */
     fun addToFolder(folderId: String, onDone: (Boolean, String) -> Unit) {
         val ids = selectedIds.value.toList()
         if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
         scope.launch {
             try {
-                ids.forEach { id ->
-                    FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, folderId.toIntOrNull() ?: 0)
-                }
+                ids.forEach { id -> FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, folderId.toIntOrNull() ?: 0) }
                 onDone(true, "已添加 ${ids.size} 本到收藏夹")
             } catch (e: Exception) {
                 onDone(false, e.message ?: "收藏失败")
@@ -225,35 +231,35 @@ class BrowseViewModel {
         }
     }
 
-    /** 从详情页标签点击返回：选中该标签并切到分类 Tab。 */
+    /** 从详情页标签点击返回：定位到第一个 FILTER tab，并把该标签作为当次临时筛选。 */
     fun applyPendingTag(tag: String) {
-        mainTab.value = 0
-        selectedTags.value = setOf(tag)
+        val idx = tabs.indexOfFirst { it.kind == TabKind.FILTER }.coerceAtLeast(0)
+        mainTab.value = idx
+        bindFilterFor(idx)
+        curFilter.value = (tabs[idx].filter ?: FilterSnapshot()).copy(tags = listOf(tag))
         refresh()
     }
 
     fun refresh() {
-        // 取消旧任务，启动新请求前确保只有一个加载任务
         currentJob?.cancel()
         currentJob = scope.launch { doLoad(reset = true) }
     }
 
     fun loadMore(tab: Int) {
-        val ts = tabStates[tab]
+        val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         currentJob = scope.launch { doLoad(reset = false, tab = tab) }
     }
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
-        val ts = tabStates[tab]
-        // 自增请求序号；用于判断本次结果是否已被更新的请求取代
+        val ts = stateFor(tab)
+        val item = tabs[tab]
         val reqId = requestSeq.incrementAndGet()
         if (reset) {
             ts.currentPage = 1
             ts.hasMore.value = true
             ts.loading.value = true
             ts.error.value = null
-            // 重置时先清空列表，避免旧数据残留
             ts.mangas.value = emptyList()
         } else {
             ts.appending.value = true
@@ -264,17 +270,23 @@ class BrowseViewModel {
 
             val rawLoader: suspend (Int) -> List<Manga> = { p ->
                 lastInvoked = p
-                when (tab) {
-                    1 -> MangaRepository.getNewest(p, newestDate.value, 30).first
-                    2 -> MangaRepository.getRank(rankType.value, p)
-                    else -> MangaRepository.getClasses(
-                        page = p,
-                        gender = gender.value,
-                        tag = selectedTags.value.joinToString(","),
-                        area = area.value,
-                        end = end.value,
-                        st = st.value,
-                    )
+                when (item.kind) {
+                    TabKind.SPECIAL -> when (item.pageType) {
+                        BrowsePageType.LATEST -> MangaRepository.getNewest(p, newestDate.value, 30).first
+                        BrowsePageType.RANKING -> MangaRepository.getRank(rankType.value, p)
+                        else -> MangaRepository.getNewest(p, newestDate.value, 30).first
+                    }
+                    TabKind.FILTER -> {
+                        val f = curFilter.value
+                        MangaRepository.getClasses(
+                            page = p,
+                            gender = f.gender,
+                            tag = f.tags.joinToString(","),
+                            area = f.area,
+                            end = f.end,
+                            st = f.st,
+                        )
+                    }
                 }
             }
 
@@ -284,11 +296,10 @@ class BrowseViewModel {
                 rawLoader(ts.currentPage)
             }
 
-            // 竞态防护：期间若有更新的请求，丢弃本次结果
             if (reqId != requestSeq.get()) return
             ts.currentPage = lastInvoked + 1
 
-            if (tab == 1 && reset) {
+            if (item.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.LATEST && reset) {
                 newestNums.value = MangaRepository.getNewest(1, newestDate.value, 30).second
             }
 
@@ -296,16 +307,116 @@ class BrowseViewModel {
             ts.loaded = true
             if (result.isEmpty()) ts.hasMore.value = false
         } catch (e: Exception) {
-            // 过期请求的异常不更新 UI
             if (reqId != requestSeq.get()) return
             if (reset) ts.error.value = e.message ?: "加载失败"
         } finally {
-            // 仅当仍是最新请求时才复位加载态，避免旧任务覆盖新任务的状态
             if (reqId == requestSeq.get()) {
                 ts.loading.value = false
                 ts.appending.value = false
             }
         }
+    }
+
+    // ==================== Tab 管理（预设持久化） ====================
+
+    /** 仅内置特殊页（最近更新）受保护不可删；内置筛选预设与自定义项均可删（可恢复默认）。 */
+    fun isProtected(item: BrowseTabItem): Boolean =
+        item.kind == TabKind.SPECIAL && item.builtin
+
+    fun isNameTaken(name: String, ignoreId: String? = null): Boolean {
+        val n = name.trim()
+        return tabs.any { it.id != ignoreId && it.name == n }
+    }
+
+    private fun persist() = BrowseTabStore.save(tabs.toList())
+
+    fun renameTab(id: String, name: String): Boolean {
+        val i = tabs.indexOfFirst { it.id == id }
+        if (i < 0) return false
+        val n = name.trim()
+        if (n.isEmpty() || isNameTaken(n, id)) return false
+        tabs[i] = tabs[i].copy(name = n)
+        persist()
+        return true
+    }
+
+    /** 修改某个 FILTER tab 的默认筛选（仅管理面板调用），并即时刷新当前页。 */
+    fun updateTabDefaultFilter(id: String, snapshot: FilterSnapshot) {
+        val i = tabs.indexOfFirst { it.id == id }
+        if (i < 0 || tabs[i].kind != TabKind.FILTER) return
+        tabs[i] = tabs[i].copy(filter = snapshot)
+        persist()
+        if (mainTab.value == i) {
+            curFilter.value = snapshot.copy()
+            refresh()
+        }
+    }
+
+    fun deleteTab(id: String) {
+        val i = tabs.indexOfFirst { it.id == id }
+        if (i < 0 || isProtected(tabs[i])) return
+        tabs.removeAt(i)
+        stateById.remove(id)
+        if (tabs.isEmpty()) tabs.addAll(BrowseTabStore.defaultTabs())
+        persist()
+        val target = when {
+            i < mainTab.value -> mainTab.value - 1
+            i == mainTab.value -> 0
+            else -> mainTab.value
+        }.coerceIn(0, tabs.lastIndex)
+        mainTab.value = target
+        bindFilterFor(target)
+        if (!stateFor(target).loaded) refresh()
+    }
+
+    fun addFilterTab(name: String, snapshot: FilterSnapshot): Boolean {
+        val n = name.trim()
+        if (n.isEmpty() || isNameTaken(n)) return false
+        val item = BrowseTabItem(
+            id = "custom_${System.currentTimeMillis()}",
+            name = n,
+            kind = TabKind.FILTER,
+            builtin = false,
+            filter = snapshot,
+        )
+        tabs.add(item)
+        persist()
+        goTo(tabs.lastIndex)
+        return true
+    }
+
+    fun canAddRanking(): Boolean = tabs.none { it.pageType == BrowsePageType.RANKING }
+
+    /** 添加「gay排行」（整体排行）特殊 tab，固定 id，仅可添加一次。 */
+    fun addRankingTab(): Boolean {
+        if (!canAddRanking()) return false
+        tabs.add(
+            BrowseTabItem(
+                id = BrowseTabStore.ID_RANKING,
+                name = BrowseTabStore.RANKING_NAME,
+                kind = TabKind.SPECIAL,
+                builtin = false,
+                pageType = BrowsePageType.RANKING,
+            ),
+        )
+        persist()
+        goTo(tabs.lastIndex)
+        return true
+    }
+
+    fun resetToDefaults() {
+        tabs.clear()
+        stateById.clear()
+        tabs.addAll(BrowseTabStore.reset())
+        mainTab.value = 0
+        bindFilterFor(0)
+        refresh()
+    }
+
+    private fun goTo(index: Int) {
+        mainTab.value = index
+        bindFilterFor(index)
+        if (!stateFor(index).loaded) refresh()
     }
 
     private fun buildDateOptions(): List<Pair<String, String>> {
@@ -336,6 +447,7 @@ class BrowseViewModel {
         private lateinit var prefs: android.content.SharedPreferences
         fun init(context: android.content.Context) {
             prefs = context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
+            BrowseTabStore.init(context)
         }
     }
 }

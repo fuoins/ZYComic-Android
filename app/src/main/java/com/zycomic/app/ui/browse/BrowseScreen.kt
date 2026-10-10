@@ -42,11 +42,13 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
@@ -70,9 +72,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
 import coil3.compose.AsyncImage
-import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
@@ -88,8 +90,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.material.Scaffold
-import tachiyomi.presentation.core.components.material.TabText
-import tachiyomi.presentation.core.components.material.TabText
 
 @Composable
 fun BrowseScreen(
@@ -110,9 +110,11 @@ fun BrowseScreen(
     }
 
     val mainTab by vm.mainTab.collectAsState()
-    val pagerState = rememberPagerState(pageCount = { 3 })
-    LaunchedEffect(mainTab) {
-        if (pagerState.currentPage != mainTab) pagerState.animateScrollToPage(mainTab)
+    val tabs = vm.tabs
+    val pagerState = rememberPagerState(pageCount = { tabs.size.coerceAtLeast(1) })
+    LaunchedEffect(mainTab, tabs.size) {
+        val target = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
+        if (pagerState.currentPage != target) pagerState.animateScrollToPage(target)
     }
     // 监听用户左右滑动切换页面，同步到 ViewModel 并触发请求
     LaunchedEffect(pagerState) {
@@ -134,9 +136,11 @@ fun BrowseScreen(
     var showFolderDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
+    var showManageSheet by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
     androidx.activity.compose.BackHandler(enabled = showTagDialog) { showTagDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showManageSheet) { showManageSheet = false }
 
     LaunchedEffect(selectionMode) {
         if (selectionMode) vm.loadFolders()
@@ -170,7 +174,7 @@ fun BrowseScreen(
                                 AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                 AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = onOpenSearch),
                                 AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
-                                AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
+                                AppBar.Action(title = "重新筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
                                 AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
                             ),
                         )
@@ -216,14 +220,31 @@ fun BrowseScreen(
                     end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
                 ),
         ) {
-            PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
-                listOf("分类", "最近更新", "排行").forEachIndexed { index, title ->
-                    Tab(
-                        selected = pagerState.currentPage == index,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(index); vm.selectMainTab(index) } },
-                        text = { TabText(text = title) },
-                        unselectedContentColor = MaterialTheme.colorScheme.onSurface,
-                    )
+            // 可横向滑动的紧凑 Tab 列表（占满剩余宽度）+ 最右固定「管理」按钮
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ScrollableTabRow(
+                    selectedTabIndex = pagerState.currentPage.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
+                    modifier = Modifier.weight(1f),
+                    edgePadding = 0.dp,
+                    divider = {},
+                ) {
+                    tabs.forEachIndexed { index, item ->
+                        Tab(
+                            selected = pagerState.currentPage == index,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(index); vm.selectMainTab(index) } },
+                            text = {
+                                Text(
+                                    text = item.name,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                )
+                            },
+                            unselectedContentColor = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                IconButton(onClick = { showManageSheet = true }) {
+                    Icon(Icons.Outlined.Tune, contentDescription = "管理")
                 }
             }
 
@@ -252,6 +273,11 @@ fun BrowseScreen(
     // 使用说明对话框
     if (showGuideDialog) {
         BrowseGuideDialog(onDismiss = { showGuideDialog = false })
+    }
+
+    // Tab 管理面板
+    if (showManageSheet) {
+        TabManageSheet(vm = vm, onDismiss = { showManageSheet = false })
     }
 
     // 筛选对话框
@@ -308,9 +334,8 @@ private fun BrowseTabContent(
     val hasMore by vm.hasMoreForTab(page).collectAsState()
     val error by vm.errorForTab(page).collectAsState()
 
-    // 每个tab独立的滚动状态，避免切换tab时内容重叠
-    val gridStates = remember { Array(3) { LazyGridState() } }
-    val gridState = gridStates[page]
+    // 每个 tab 页独立的滚动状态（动态 tab 数量，按 page 记忆）
+    val gridState = remember(page) { LazyGridState() }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -498,10 +523,13 @@ private fun BrowseFilterDialog(
                 .padding(TabbedDialogPaddings.Horizontal),
         ) {
             if (page == 0) {
-                when (currentTab) {
-                    0 -> CategoryFilter(vm, onOpenTagDialog)
-                    1 -> NewestFilter(vm)
-                    2 -> RankFilter(vm)
+                val item = vm.tabs.getOrNull(currentTab)
+                when {
+                    item == null -> CategoryFilter(vm, onOpenTagDialog)
+                    item.kind == TabKind.FILTER -> CategoryFilter(vm, onOpenTagDialog)
+                    item.pageType == BrowsePageType.RANKING -> RankFilter(vm)
+                    item.pageType == BrowsePageType.LATEST -> NewestFilter(vm)
+                    else -> CategoryFilter(vm, onOpenTagDialog)
                 }
             } else {
                 DisplayFilter(vm, orientation)
@@ -510,45 +538,15 @@ private fun BrowseFilterDialog(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CategoryFilter(vm: BrowseViewModel, onOpenTagDialog: () -> Unit) {
-    val gender by vm.gender.collectAsState()
-    val selectedTags by vm.selectedTags.collectAsState()
-    val area by vm.area.collectAsState()
-    val end by vm.end.collectAsState()
-    val st by vm.st.collectAsState()
-
-    FilterSection("性向") {
-        BrowseViewModel.GENDERS.forEach { (v, label) ->
-            FilterChip(text = label, selected = gender == v, onClick = { vm.selectGender(v) })
-        }
-    }
-    FilterSection("标签") {
-        FilterChip(text = "全部", selected = selectedTags.isEmpty(), onClick = { vm.clearTags() })
-        AllTags.PINNED_TAGS.forEach { tag ->
-            FilterChip(text = tag, selected = selectedTags.contains(tag), onClick = { vm.toggleTag(tag) })
-        }
-        selectedTags.filter { it !in AllTags.PINNED_TAGS }.take(3).forEach { tag ->
-            FilterChip(text = tag, selected = true, onClick = { vm.toggleTag(tag) })
-        }
-        FilterChip(text = "更多", selected = false, bold = true, onClick = onOpenTagDialog)
-    }
-    FilterSection("地区") {
-        BrowseViewModel.AREAS.forEach { (v, label) ->
-            FilterChip(text = label, selected = area == v, onClick = { vm.selectArea(v) })
-        }
-    }
-    FilterSection("状态") {
-        BrowseViewModel.ENDS.forEach { (v, label) ->
-            FilterChip(text = label, selected = end == v, onClick = { vm.selectEnd(v) })
-        }
-    }
-    FilterSection("排序方式") {
-        BrowseViewModel.STS.forEach { (v, label) ->
-            FilterChip(text = label, selected = st == v, onClick = { vm.selectSt(v) })
-        }
-    }
+    // 「重新筛选」绑定当前 tab 的会话临时筛选，改动当次有效、不回存预设
+    val f by vm.curFilter.collectAsState()
+    FilterSnapshotEditor(
+        snapshot = f,
+        onChange = { vm.applyTempFilter(it) },
+        onOpenTagDialog = onOpenTagDialog,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -595,64 +593,15 @@ private fun DisplayFilter(vm: BrowseViewModel, orientation: Int) {
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagSelectDialog(vm: BrowseViewModel, onDismiss: () -> Unit) {
-    val allTags = AllTags.LIST
-    val current by vm.selectedTags.collectAsState()
-    var keyword by remember { mutableStateOf("") }
-    var temp by remember { mutableStateOf(current) }
-
-    val filtered = remember(keyword, allTags) {
-        if (keyword.isBlank()) allTags else allTags.filter { it.contains(keyword, ignoreCase = true) }
-    }
-
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("选择标签", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            androidx.compose.material3.OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                singleLine = true,
-                placeholder = { Text("搜索标签") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    filtered.forEach { tag ->
-                        FilterChip(
-                            text = tag,
-                            selected = temp.contains(tag),
-                            onClick = { temp = if (temp.contains(tag)) temp - tag else temp + tag },
-                        )
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { temp = emptySet() }) { Text("重置") }
-                Box(modifier = Modifier.weight(1f))
-                androidx.compose.material3.Button(onClick = { vm.setSelectedTags(temp); onDismiss() }) { Text("确定") }
-            }
-        }
-    }
+    // 委托给通用受控标签选择器；确定结果写入当前 tab 的会话临时筛选
+    val f by vm.curFilter.collectAsState()
+    TagPickerDialog(
+        initial = f.tags.toSet(),
+        onDismiss = onDismiss,
+        onConfirm = { set -> vm.setSelectedTags(set); onDismiss() },
+    )
 }
 
 @Composable
