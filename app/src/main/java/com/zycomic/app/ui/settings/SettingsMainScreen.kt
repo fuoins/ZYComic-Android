@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
-import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
@@ -41,8 +39,6 @@ import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 fun SettingsMainScreen(
     onOpenAppearance: () -> Unit,
     onOpenReader: () -> Unit,
-    onOpenTagBlock: () -> Unit,
-    onBlockGayTags: () -> Unit,
     onOpenSpeedTest: () -> Unit,
     onOpenDataStorage: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -81,23 +77,6 @@ fun SettingsMainScreen(
                     title = "阅读器",
                     icon = Icons.AutoMirrored.Outlined.ChromeReaderMode,
                     onPreferenceClick = onOpenReader,
-                )
-            }
-            item { HorizontalDivider() }
-            item {
-                TextPreferenceWidget(
-                    title = "标签屏蔽",
-                    subtitle = "管理屏蔽的标签",
-                    icon = Icons.Outlined.Bookmark,
-                    onPreferenceClick = onOpenTagBlock,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "gay标签一键屏蔽",
-                    subtitle = "自动屏蔽所有女性向/gay标签（${SettingsViewModel.GAY_TAGS.size}个）",
-                    icon = Icons.Outlined.Block,
-                    onPreferenceClick = onBlockGayTags,
                 )
             }
             item { HorizontalDivider() }

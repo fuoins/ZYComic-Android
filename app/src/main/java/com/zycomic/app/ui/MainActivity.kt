@@ -336,8 +336,6 @@ fun AppContent(
                 4 -> SettingsMainScreen(
                     onOpenAppearance = openAppearance,
                     onOpenReader = openReader,
-                    onOpenTagBlock = openTagBlock,
-                    onBlockGayTags = blockGayTags,
                     onOpenSpeedTest = openSpeedTest,
                     onOpenDataStorage = openDataStorage,
                     onOpenAbout = openAbout,
