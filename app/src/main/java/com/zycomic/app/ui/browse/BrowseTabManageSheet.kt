@@ -469,7 +469,7 @@ private fun FilterSnapshot.summary(): String {
     val e = BrowseViewModel.ENDS.firstOrNull { it.first == end }?.second ?: "全部"
     val s = BrowseViewModel.STS.firstOrNull { it.first == st }?.second ?: "收藏"
     val t = if (tags.isEmpty()) "无标签" else tags.joinToString("、")
-    return "$g · 标签：$t · $a · $e · $s排序"
+    return "$g · 标签：$t · $a · $e · ${s}排序"
 }
 
 /**
