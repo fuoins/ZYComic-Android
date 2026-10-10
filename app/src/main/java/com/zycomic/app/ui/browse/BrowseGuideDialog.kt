@@ -215,7 +215,7 @@ private fun GuideSection(
             if (warning) {
                 Spacer(Modifier.size(4.dp))
                 Icon(
-                    Icons.Outlined.WarningAmber,
+                    Icons.Outlined.Warning,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.error,
