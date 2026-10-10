@@ -193,6 +193,11 @@ fun AppContent(
     val settingsVm = remember { SettingsViewModel() }
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
 
+    // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
+    var onboardingDone by remember {
+        mutableStateOf(com.zycomic.app.ui.onboarding.OnboardingPrefs.isDone(context))
+    }
+
     // 设置子页面 Dialog 状态
     val settingsDialogSaver = androidx.compose.runtime.saveable.Saver<SettingsDialog?, String>(
         save = { it?.name },
@@ -240,8 +245,9 @@ fun AppContent(
     val openAbout = { settingsDialog = SettingsDialog.About }
     val blockGayTags = { requireLogin { showGayConfirm = true } }
 
-    // 测速完成前不渲染底层页面，避免页面用默认线路发起请求
-    if (!speedTesting) {
+    // 测速完成前不渲染底层页面，避免页面用默认线路发起请求；
+    // 测速结束后若首启向导未完成，则先全屏进入向导，完成后才进主界面
+    if (!speedTesting && onboardingDone) {
     val browseVm = remember { BrowseViewModel() }
     val libraryVm = remember { LibraryViewModel(mode = 0) }
     val historyVm = remember { HistoryViewModel() }
@@ -335,11 +341,21 @@ fun AppContent(
                     onOpenSpeedTest = openSpeedTest,
                     onOpenDataStorage = openDataStorage,
                     onOpenAbout = openAbout,
+                    onReplayOnboarding = {
+                        com.zycomic.app.ui.onboarding.OnboardingPrefs.setDone(context, false)
+                        onboardingDone = false
+                    },
                 )
             }
         }
     }
-} else {
+} else if (!speedTesting) {
+        // 测速已结束但首启向导未完成：全屏进入 3 页向导
+        com.zycomic.app.ui.onboarding.OnboardingHost(
+            settingsVm = settingsVm,
+            onFinish = { onboardingDone = true },
+        )
+    } else {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 48.dp)) {
                 Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

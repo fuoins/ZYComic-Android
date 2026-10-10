@@ -46,6 +46,7 @@ fun SettingsMainScreen(
     onOpenSpeedTest: () -> Unit,
     onOpenDataStorage: () -> Unit,
     onOpenAbout: () -> Unit,
+    onReplayOnboarding: () -> Unit,
 ) {
     val context = LocalContext.current
     val topBarState = rememberTopAppBarState()
@@ -130,6 +131,14 @@ fun SettingsMainScreen(
                 )
             }
             item { HorizontalDivider() }
+            item {
+                TextPreferenceWidget(
+                    title = "新手引导",
+                    subtitle = "重新查看使用说明",
+                    icon = Icons.Outlined.Info,
+                    onPreferenceClick = onReplayOnboarding,
+                )
+            }
             item {
                 TextPreferenceWidget(
                     title = "关于",
