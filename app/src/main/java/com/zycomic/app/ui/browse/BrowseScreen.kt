@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -132,6 +133,7 @@ fun BrowseScreen(
     var showFilterDialog by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
+    var showGuideDialog by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
     androidx.activity.compose.BackHandler(enabled = showTagDialog) { showTagDialog = false }
@@ -165,6 +167,7 @@ fun BrowseScreen(
                     actions = {
                         AppBarActions(
                             persistentListOf(
+                                AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                 AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = onOpenSearch),
                                 AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                 AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
@@ -244,6 +247,11 @@ fun BrowseScreen(
                 )
             }
         }
+    }
+
+    // 使用说明对话框
+    if (showGuideDialog) {
+        BrowseGuideDialog(onDismiss = { showGuideDialog = false })
     }
 
     // 筛选对话框
