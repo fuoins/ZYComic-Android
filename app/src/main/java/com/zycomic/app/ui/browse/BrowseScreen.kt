@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -48,8 +50,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -171,10 +171,9 @@ fun BrowseScreen(
                     actions = {
                         AppBarActions(
                             persistentListOf(
-                                AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                 AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = onOpenSearch),
                                 AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
-                                AppBar.Action(title = "重新筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
+                                AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                 AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
                             ),
                         )
@@ -220,27 +219,64 @@ fun BrowseScreen(
                     end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
                 ),
         ) {
-            // 可横向滑动的紧凑 Tab 列表（占满剩余宽度）+ 最右固定「管理」按钮
+            // 可横向滑动的自定义紧凑 Tab 行（选中 tab 紧后内嵌「重新筛选」）+ 最右固定「管理」
+            val tabRowState = rememberLazyListState()
+            LaunchedEffect(pagerState.currentPage, tabs.size) {
+                // 选中 tab 后插入的筛选图标 lazy 下标 = currentPage+1；滚动使其露出，不与固定管理按钮重叠
+                runCatching {
+                    tabRowState.animateScrollToItem((pagerState.currentPage + 1).coerceAtMost(tabs.size))
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ScrollableTabRow(
-                    selectedTabIndex = pagerState.currentPage.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
+                LazyRow(
+                    state = tabRowState,
                     modifier = Modifier.weight(1f),
-                    edgePadding = 0.dp,
-                    divider = {},
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     tabs.forEachIndexed { index, item ->
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(index); vm.selectMainTab(index) } },
-                            text = {
+                        item(key = "tab_${item.id}") {
+                            val selected = pagerState.currentPage == index
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage(index)
+                                            vm.selectMainTab(index)
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp),
+                            ) {
                                 Text(
                                     text = item.name,
                                     fontSize = 13.sp,
                                     maxLines = 1,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    // 字体到上边界 0dp、到下方指示条 0.5dp
+                                    modifier = Modifier.padding(top = 0.dp, bottom = 0.5.dp),
                                 )
-                            },
-                            unselectedContentColor = MaterialTheme.colorScheme.onSurface,
-                        )
+                                Box(
+                                    modifier = Modifier
+                                        .width(24.dp)
+                                        .height(3.dp)
+                                        .then(
+                                            if (selected) Modifier.background(MaterialTheme.colorScheme.primary) else Modifier,
+                                        ),
+                                )
+                            }
+                        }
+                        if (index == pagerState.currentPage) {
+                            item(key = "filter_affordance") {
+                                IconButton(onClick = { showFilterDialog = true }) {
+                                    Icon(
+                                        Icons.Outlined.FilterList,
+                                        contentDescription = "重新筛选",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 IconButton(onClick = { showManageSheet = true }) {
