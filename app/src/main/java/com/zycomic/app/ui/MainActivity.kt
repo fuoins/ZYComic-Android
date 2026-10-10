@@ -1,5 +1,6 @@
 package com.zycomic.app.ui
 
+import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.widget.Toast
@@ -85,10 +86,16 @@ import uy.kohesive.injekt.api.get
 
 class MainActivity : BaseActivity() {
 
+    // 最近一次由桌面快捷方式请求打开的底部 tab；-1 表示普通启动/已消费，不改变默认页。
+    private var shortcutTab by mutableIntStateOf(-1)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // 根据 UiPreferences 设置 Activity XML 主题（由 BaseActivity.onCreate 统一处理）
+
+        // 桌面快捷方式冷启动直达对应底部 tab
+        shortcutTab = intent?.shortcutTab() ?: -1
 
         com.zycomic.app.net.RouteManager.applyDefaultConfig()
         com.zycomic.app.net.NetworkModule.init(this)
@@ -101,13 +108,39 @@ class MainActivity : BaseActivity() {
                     LocalTextStyle provides MaterialTheme.typography.bodySmall,
                     LocalContentColor provides MaterialTheme.colorScheme.onBackground,
                 ) {
-                    AppContent(isLaunch = savedInstanceState == null)
+                    AppContent(
+                        isLaunch = savedInstanceState == null,
+                        shortcutTab = shortcutTab,
+                        onShortcutTabConsumed = { shortcutTab = -1 },
+                    )
                 }
             }
         }
 
         // 登录态已在 App.kt 启动时处理（本地恢复+后台刷新）
     }
+
+    // 桌面快捷方式热启动/重复点击：singleTop 下回调，切到对应底部 tab
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.shortcutTab()?.let { shortcutTab = it }
+    }
+}
+
+// ==================== 桌面快捷方式（launcher shortcuts）→ 底部 tab ====================
+private const val SHORTCUT_CATEGORY_BROWSE = "com.zycomic.app.shortcut.CATEGORY"
+private const val SHORTCUT_CATEGORY_SHELF = "com.zycomic.app.shortcut.SHELF"
+private const val SHORTCUT_CATEGORY_HISTORY = "com.zycomic.app.shortcut.HISTORY"
+private const val SHORTCUT_CATEGORY_MINE = "com.zycomic.app.shortcut.MINE"
+
+/** 由快捷方式 intent 的自定义 category 映射到底部 tab；普通启动返回 null（不改变默认页）。 */
+private fun Intent.shortcutTab(): Int? = when {
+    hasCategory(SHORTCUT_CATEGORY_BROWSE) -> 0 // 分类
+    hasCategory(SHORTCUT_CATEGORY_SHELF) -> 1 // 书架
+    hasCategory(SHORTCUT_CATEGORY_HISTORY) -> 2 // 历史
+    hasCategory(SHORTCUT_CATEGORY_MINE) -> 3 // 我的
+    else -> null
 }
 
 /** 设置子页面 Dialog 标识 */
@@ -116,7 +149,11 @@ private enum class SettingsDialog {
 }
 
 @Composable
-fun AppContent(isLaunch: Boolean) {
+fun AppContent(
+    isLaunch: Boolean,
+    shortcutTab: Int,
+    onShortcutTabConsumed: () -> Unit,
+) {
     val context = LocalContext.current
 
     // edge-to-edge 系统栏适配：根据背景亮度决定状态栏图标明暗
@@ -131,7 +168,17 @@ fun AppContent(isLaunch: Boolean) {
         )
     }
 
-    var bottomTab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) } // 0分类 1书架 2历史 3我的 4设置
+    var bottomTab by androidx.compose.runtime.saveable.rememberSaveable {
+        // 0分类 1书架 2历史 3我的 4设置；冷启动若来自桌面快捷方式则直达对应 tab
+        mutableIntStateOf(shortcutTab.takeIf { it in 0..3 } ?: 0)
+    }
+    // 热启动点击快捷方式：切到目标 tab 后消费，避免重组/旋转误跳
+    LaunchedEffect(shortcutTab) {
+        if (shortcutTab in 0..3) {
+            bottomTab = shortcutTab
+            onShortcutTabConsumed()
+        }
+    }
 
     // 覆盖层状态
     var detailBookId by remember { mutableStateOf<String?>(null) }
