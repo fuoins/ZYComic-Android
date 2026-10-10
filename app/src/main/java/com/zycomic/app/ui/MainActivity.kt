@@ -230,11 +230,15 @@ fun AppContent(
     // 统一的打开回调
     val openAppearance = { settingsDialog = SettingsDialog.Appearance }
     val openReader = { settingsDialog = SettingsDialog.Reader }
-    val openTagBlock = { settingsDialog = SettingsDialog.TagBlock }
+    // 标签屏蔽 / 一键屏蔽为账号级功能：未登录统一 Toast 并打开登录页
+    val requireLogin: (() -> Unit) -> Unit = { action ->
+        if (!com.zycomic.app.util.LoginGate.ensureLogin(context)) loginOpen = true else action()
+    }
+    val openTagBlock = { requireLogin { settingsDialog = SettingsDialog.TagBlock } }
     val openSpeedTest = { settingsDialog = SettingsDialog.SpeedTest }
     val openDataStorage = { settingsDialog = SettingsDialog.DataStorage }
     val openAbout = { settingsDialog = SettingsDialog.About }
-    val blockGayTags = { showGayConfirm = true }
+    val blockGayTags = { requireLogin { showGayConfirm = true } }
 
     // 测速完成前不渲染底层页面，避免页面用默认线路发起请求
     if (!speedTesting) {
