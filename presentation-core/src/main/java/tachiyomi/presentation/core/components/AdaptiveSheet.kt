@@ -55,6 +55,7 @@ fun AdaptiveSheet(
     enableSwipeDismiss: Boolean,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    dismissOnScrim: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -77,7 +78,7 @@ fun AdaptiveSheet(
                 .clickable(
                     interactionSource = null,
                     indication = null,
-                    onClick = internalOnDismissRequest,
+                    onClick = if (dismissOnScrim) internalOnDismissRequest else { -> },
                 )
                 .fillMaxSize()
                 .alpha(alpha),
@@ -127,7 +128,7 @@ fun AdaptiveSheet(
                 .clickable(
                     interactionSource = null,
                     indication = null,
-                    onClick = internalOnDismissRequest,
+                    onClick = if (dismissOnScrim) internalOnDismissRequest else { -> },
                 )
                 .fillMaxSize()
                 .onSizeChanged {

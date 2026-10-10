@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.ui.components.FilterChip
@@ -239,13 +240,19 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
     var editing by remember { mutableStateOf<BrowseTabItem?>(null) }
     var adding by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
+    var deletingItem by remember { mutableStateOf<BrowseTabItem?>(null) }
     var tagPicker by remember { mutableStateOf<Pair<Set<String>, (Set<String>) -> Unit>?>(null) }
 
     val listState = rememberLazyListState()
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
     val handleZone = with(LocalDensity.current) { 44.dp.toPx() }
 
-    AdaptiveSheet(onDismissRequest = onDismiss) {
+    // 禁用下滑关闭与遮罩关闭，避免与长按拖动排序冲突；仅右上角 ❌ 与系统返回键关闭。
+    AdaptiveSheet(
+        onDismissRequest = onDismiss,
+        enableSwipeDismiss = false,
+        dismissOnScrim = false,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -316,7 +323,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                             IconButton(onClick = { renaming = item }) { Icon(Icons.Outlined.Edit, contentDescription = "改名") }
                             IconButton(onClick = { editing = item }) { Icon(Icons.Outlined.FilterList, contentDescription = "编辑默认筛选") }
                         }
-                        IconButton(onClick = { vm.deleteTab(item.id) }) { Icon(Icons.Outlined.Delete, contentDescription = "删除") }
+                        IconButton(onClick = { deletingItem = item }) { Icon(Icons.Outlined.Delete, contentDescription = "删除") }
                         Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                             Icon(Icons.Outlined.DragHandle, contentDescription = "拖动排序", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -373,6 +380,24 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
             }
         }
+    }
+
+    // ---- 删除确认 ----
+    deletingItem?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deletingItem = null },
+            title = { Text("删除 tab") },
+            text = { Text("删除 tab「${item.name}」？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deleteTab(item.id)
+                    deletingItem = null
+                }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deletingItem = null }) { Text("取消") } },
+        )
     }
 
     // ---- 改名 ----

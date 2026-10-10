@@ -70,26 +70,28 @@ fun AdaptiveSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     enableSwipeDismiss: Boolean = true,
+    dismissOnScrim: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val isTabletUi = isTabletUi()
 
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = dialogProperties,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = true,
+            dismissOnClickOutside = dismissOnScrim,
+            dismissOnBackPress = true,
+        ),
     ) {
         AdaptiveSheetImpl(
             modifier = modifier,
             isTabletUi = isTabletUi,
             enableSwipeDismiss = enableSwipeDismiss,
+            dismissOnScrim = dismissOnScrim,
             onDismissRequest = onDismissRequest,
         ) {
             content()
         }
     }
 }
-
-private val dialogProperties = DialogProperties(
-    usePlatformDefaultWidth = false,
-    decorFitsSystemWindows = true,
-)
