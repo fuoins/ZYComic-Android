@@ -26,7 +26,10 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ViewCompact
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Info
@@ -34,6 +37,8 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -167,57 +172,56 @@ fun BrowseGuideContent(
         )
         GuideSection(
             index = 3,
-            title = "分类与筛选",
+            title = "筛选与标签管理",
             paragraphs = listOf(
                 listOf(
-                    Node.K("分类", GuideIcon.Vec(Icons.Filled.Home)),
-                    Node.T("页顶栏的"),
-                    Node.K("筛选", GuideIcon.Vec(Icons.Outlined.FilterList)),
-                    Node.T("里，"),
-                    Node.K("分类", GuideIcon.Vec(Icons.Filled.Home)),
-                    Node.T("、"),
-                    Node.K("最近更新", GuideIcon.Vec(Icons.Outlined.Schedule)),
-                    Node.T("、"),
-                    Node.K("排行", GuideIcon.Res(R.drawable.ic_leaderboard_24dp)),
-                    Node.T("三个标签页各有自己的筛选条件，而"),
-                    Node.K("显示", GuideIcon.Vec(Icons.Filled.ViewCompact)),
-                    Node.T("标签页为各页共用。"),
+                    Node.T("当前选中 tab 栏右侧有"),
+                    Node.K("筛选按钮", GuideIcon.Vec(Icons.Outlined.FilterList)),
+                    Node.T("，可进行"),
+                    Node.K("重新筛选", GuideIcon.Vec(Icons.Outlined.FilterList)),
+                    Node.T("，"),
+                    Node.B("不会影响该 tab 本身的默认筛选值"),
+                    Node.T("。"),
                 ),
                 listOf(
-                    Node.K("分类", GuideIcon.Vec(Icons.Filled.Home)),
-                    Node.T("的性向默认是"),
+                    Node.K("Tab 标签管理", GuideIcon.Vec(Icons.Outlined.Tune)),
+                    Node.T("可以增加自己的预设标签，以及"),
+                    Node.K("删除", GuideIcon.Vec(Icons.Outlined.Delete)),
+                    Node.T("、"),
+                    Node.K("改名", GuideIcon.Vec(Icons.Outlined.Edit)),
+                    Node.T("。"),
+                ),
+                listOf(
+                    Node.T("普通读者建议只选"),
                     Node.K("一般向", GuideIcon.Vec(Icons.Outlined.PersonOutline)),
-                    Node.T("，普通读者建议只选"),
-                    Node.K("一般向", GuideIcon.Vec(Icons.Outlined.PersonOutline)),
-                    Node.T("或"),
+                    Node.T("和"),
                     Node.K("禁漫", GuideIcon.Vec(Icons.Outlined.Lock)),
-                    Node.T("；标签区点击"),
+                    Node.T("，不要选"),
+                    Node.K("全部", GuideIcon.Vec(Icons.Outlined.SelectAll)),
+                    Node.T("和"),
+                    Node.K("其他向", GuideIcon.Vec(Icons.AutoMirrored.Outlined.HelpOutline)),
+                    Node.T("。"),
+                ),
+                listOf(
+                    Node.T("标签区点击"),
                     Node.K("更多", GuideIcon.Vec(Icons.Filled.ExpandMore)),
-                    Node.T("可展开完整标签列表。"),
+                    Node.T("可展开完整标签。"),
                 ),
             ),
         )
         GuideSection(
             index = 4,
-            title = "排行榜与排序",
-            warning = true,
+            title = "gay排行榜与最新更新",
             paragraphs = listOf(
                 listOf(
-                    Node.K("排行", GuideIcon.Res(R.drawable.ic_leaderboard_24dp)),
-                    Node.T("（人气榜 / 新番榜 / 完结榜）内容大多带被屏蔽标签；开启过滤后，为凑满一屏会"),
-                    Node.B("连续多翻几页"),
-                    Node.T("，可能看起来加载较慢——这通常"),
-                    Node.B("不是"),
-                    Node.K("线路", GuideIcon.Res(R.drawable.ic_route_24dp)),
-                    Node.T("或"),
-                    Node.K("图源", GuideIcon.Res(R.drawable.ic_image_24dp)),
-                    Node.T("的问题，如无特别需要可以不看排行榜。"),
-                ),
-                listOf(
-                    Node.K("分类", GuideIcon.Vec(Icons.Filled.Home)),
-                    Node.T("列表默认按"),
-                    Node.K("收藏", GuideIcon.Vec(Icons.Filled.Star)),
-                    Node.T("排序（收藏量优先）。"),
+                    Node.K("gay排行榜", GuideIcon.Res(R.drawable.ic_leaderboard_24dp)),
+                    Node.T("与"),
+                    Node.K("最新更新", GuideIcon.Vec(Icons.Outlined.Schedule)),
+                    Node.T("是内置 tab，但"),
+                    Node.B("默认不添加"),
+                    Node.T("（不一定常用到）；需要时可在"),
+                    Node.K("Tab 管理", GuideIcon.Vec(Icons.Outlined.Tune)),
+                    Node.T("里自行添加。"),
                 ),
             ),
         )
