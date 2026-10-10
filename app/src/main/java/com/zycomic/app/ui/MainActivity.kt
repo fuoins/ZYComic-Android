@@ -129,17 +129,18 @@ class MainActivity : BaseActivity() {
 }
 
 // ==================== 桌面快捷方式（launcher shortcuts）→ 底部 tab ====================
-private const val SHORTCUT_CATEGORY_BROWSE = "com.zycomic.app.shortcut.CATEGORY"
-private const val SHORTCUT_CATEGORY_SHELF = "com.zycomic.app.shortcut.SHELF"
-private const val SHORTCUT_CATEGORY_HISTORY = "com.zycomic.app.shortcut.HISTORY"
-private const val SHORTCUT_CATEGORY_MINE = "com.zycomic.app.shortcut.MINE"
+// 静态快捷方式用唯一 action 区分（action 一定会随启动 Intent 回传；内嵌 category/extra 不保证）。
+private const val ACTION_OPEN_CATEGORY = "com.zycomic.app.action.OPEN_CATEGORY"
+private const val ACTION_OPEN_SHELF = "com.zycomic.app.action.OPEN_SHELF"
+private const val ACTION_OPEN_HISTORY = "com.zycomic.app.action.OPEN_HISTORY"
+private const val ACTION_OPEN_MINE = "com.zycomic.app.action.OPEN_MINE"
 
-/** 由快捷方式 intent 的自定义 category 映射到底部 tab；普通启动返回 null（不改变默认页）。 */
-private fun Intent.shortcutTab(): Int? = when {
-    hasCategory(SHORTCUT_CATEGORY_BROWSE) -> 0 // 分类
-    hasCategory(SHORTCUT_CATEGORY_SHELF) -> 1 // 书架
-    hasCategory(SHORTCUT_CATEGORY_HISTORY) -> 2 // 历史
-    hasCategory(SHORTCUT_CATEGORY_MINE) -> 3 // 我的
+/** 由快捷方式 intent 的 action 映射到底部 tab；普通启动(MAIN)/其它 VIEW 深度链接返回 null（走默认页）。 */
+private fun Intent.shortcutTab(): Int? = when (action) {
+    ACTION_OPEN_CATEGORY -> 0 // 分类
+    ACTION_OPEN_SHELF -> 1 // 书架
+    ACTION_OPEN_HISTORY -> 2 // 历史
+    ACTION_OPEN_MINE -> 3 // 我的
     else -> null
 }
 

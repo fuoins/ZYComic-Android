@@ -8,11 +8,9 @@
         android:shortcutLongLabel="@string/shortcut_browse"
         android:shortcutShortLabel="@string/shortcut_browse">
         <intent
-            android:action="android.intent.action.VIEW"
+            android:action="com.zycomic.app.action.OPEN_CATEGORY"
             android:targetClass="com.zycomic.app.ui.MainActivity"
-            android:targetPackage="com.zycomic.app">
-            <category android:name="com.zycomic.app.shortcut.CATEGORY" />
-        </intent>
+            android:targetPackage="com.zycomic.app" />
     </shortcut>
     <!-- 书架（底部 tab 1） -->
     <shortcut
@@ -23,11 +21,9 @@
         android:shortcutLongLabel="@string/shortcut_library"
         android:shortcutShortLabel="@string/shortcut_library">
         <intent
-            android:action="android.intent.action.VIEW"
+            android:action="com.zycomic.app.action.OPEN_SHELF"
             android:targetClass="com.zycomic.app.ui.MainActivity"
-            android:targetPackage="com.zycomic.app">
-            <category android:name="com.zycomic.app.shortcut.SHELF" />
-        </intent>
+            android:targetPackage="com.zycomic.app" />
     </shortcut>
     <!-- 历史（底部 tab 2） -->
     <shortcut
@@ -38,11 +34,9 @@
         android:shortcutLongLabel="@string/shortcut_history"
         android:shortcutShortLabel="@string/shortcut_history">
         <intent
-            android:action="android.intent.action.VIEW"
+            android:action="com.zycomic.app.action.OPEN_HISTORY"
             android:targetClass="com.zycomic.app.ui.MainActivity"
-            android:targetPackage="com.zycomic.app">
-            <category android:name="com.zycomic.app.shortcut.HISTORY" />
-        </intent>
+            android:targetPackage="com.zycomic.app" />
     </shortcut>
     <!-- 我的（底部 tab 3） -->
     <shortcut
@@ -53,10 +47,8 @@
         android:shortcutLongLabel="@string/shortcut_profile"
         android:shortcutShortLabel="@string/shortcut_profile">
         <intent
-            android:action="android.intent.action.VIEW"
+            android:action="com.zycomic.app.action.OPEN_MINE"
             android:targetClass="com.zycomic.app.ui.MainActivity"
-            android:targetPackage="com.zycomic.app">
-            <category android:name="com.zycomic.app.shortcut.MINE" />
-        </intent>
+            android:targetPackage="com.zycomic.app" />
     </shortcut>
 </shortcuts>
