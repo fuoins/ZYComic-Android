@@ -75,6 +75,14 @@ class BrowseViewModel {
 
     // ---- 排行（SPECIAL: RANKING）子类型：0 人气 / 1 新番 / 2 完结 ----
     val rankType = MutableStateFlow(0)
+    private var rankTypeInitialized = false
+    fun initDefaultRankType(default: Int) {
+        if (!rankTypeInitialized) { rankType.value = default; rankTypeInitialized = true }
+    }
+    fun applyDefaultRankType(t: Int) {
+        rankTypeInitialized = true
+        if (rankType.value != t) { rankType.value = t; refresh() }
+    }
 
     val filterExpanded = MutableStateFlow(true)
 

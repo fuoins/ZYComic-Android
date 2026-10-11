@@ -120,6 +120,8 @@ fun BrowseScreen(
         val target = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
         if (pagerState.currentPage != target) pagerState.animateScrollToPage(target)
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) { vm.initDefaultRankType(SpecialTabPrefs.getRankType(context)) }
     // 监听用户左右滑动切换页面，同步到 ViewModel 并触发请求
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }

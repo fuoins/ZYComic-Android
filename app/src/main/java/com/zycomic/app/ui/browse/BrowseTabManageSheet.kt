@@ -231,6 +231,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
     var confirmReset by remember { mutableStateOf(false) }
     var deletingItem by remember { mutableStateOf<BrowseTabItem?>(null) }
     var tagPicker by remember { mutableStateOf<Pair<Set<String>, (Set<String>) -> Unit>?>(null) }
+    var editingSpecial by remember { mutableStateOf<BrowseTabItem?>(null) }
 
     val listState = rememberLazyListState()
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
@@ -347,6 +348,9 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                             IconButton(onClick = { renaming = item }) { Icon(Icons.Outlined.Edit, contentDescription = "改名") }
                             IconButton(onClick = { editing = item }) { Icon(Icons.Outlined.FilterList, contentDescription = "编辑默认筛选") }
                         }
+                        if (item.kind == TabKind.SPECIAL) {
+                            IconButton(onClick = { editingSpecial = item }) { Icon(Icons.Outlined.Edit, contentDescription = "编辑默认值") }
+                        }
                         IconButton(onClick = { deletingItem = item }) { Icon(Icons.Outlined.Delete, contentDescription = "删除") }
                         Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                             Icon(Icons.Outlined.DragHandle, contentDescription = "拖动排序", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -462,9 +466,101 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             onConfirm = { set -> cb(set); tagPicker = null },
         )
     }
+    editingSpecial?.let { sp ->
+        if (sp.pageType == BrowsePageType.YUZONG_RANK) {
+            com.zycomic.app.platform.YuzongDefaultDialog(
+                initialName = sp.name,
+                onRename = { nm -> vm.renameTab(sp.id, nm); true },
+                onDismiss = { editingSpecial = null },
+            )
+        } else {
+            SpecialTabEditDialog(item = sp, vm = vm, onDismiss = { editingSpecial = null })
+        }
+    }
 }
 
-// ==================== D. 自定义 tab 表单（重设计） ====================
+@Composable
+private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDismiss: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var name by remember(item.id) { mutableStateOf(item.name) }
+    var rank by remember(item.id) { mutableStateOf(SpecialTabPrefs.getRankType(ctx)) }
+    val trimmed = name.trim()
+    val nameError = when {
+        trimmed.isEmpty() -> "名称不能为空"
+        vm.isNameTaken(trimmed, item.id) -> "名称已存在"
+        else -> null
+    }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxHeight(0.8f).widthIn(max = 460.dp).fillMaxWidth(),
+            ) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Tune, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("编辑 tab", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "关闭") }
+                    }
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        singleLine = true,
+                        isError = nameError != null,
+                        supportingText = { nameError?.let { e -> Text(e) } },
+                        label = { Text("tab 名称") },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    )
+                    when (item.pageType) {
+                        BrowsePageType.RANKING -> {
+                            Text("默认榜型", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
+                            FlowRow(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                listOf(0 to "人气榜", 1 to "新番榜", 2 to "完结榜").forEach { (v, label) ->
+                                    com.zycomic.app.ui.components.FilterChip(text = label, selected = rank == v) { rank = v }
+                                }
+                            }
+                        }
+                        BrowsePageType.LATEST -> Text(
+                            "最新更新默认展示近 7 天总览，默认值无需修改（仅可改名）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                        else -> {}
+                    }
+                    Spacer(Modifier.weight(1f))
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = onDismiss) { Text("取消") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(enabled = nameError == null, onClick = {
+                            if (item.pageType == BrowsePageType.RANKING) {
+                                SpecialTabPrefs.setRankType(ctx, rank)
+                                vm.applyDefaultRankType(rank)
+                            }
+                            if (trimmed != item.name) vm.renameTab(item.id, trimmed)
+                            onDismiss()
+                        }) { Text("保存") }
+                    }
+                }
+            }
+        }
+    }
+}
 
 /** 生成筛选摘要文案。 */
 private fun FilterSnapshot.summary(): String {
