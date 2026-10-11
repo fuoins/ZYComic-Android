@@ -111,14 +111,17 @@ fun BrowseScreen(
 
     val mainTab by vm.mainTab.collectAsState()
     val tabs = vm.tabs
-    val pagerState = rememberPagerState(pageCount = { tabs.size.coerceAtLeast(1) })
+    val pagerState = rememberPagerState(
+        initialPage = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
+        pageCount = { tabs.size.coerceAtLeast(1) },
+    )
     LaunchedEffect(mainTab, tabs.size) {
         val target = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
         if (pagerState.currentPage != target) pagerState.animateScrollToPage(target)
     }
     // 监听用户左右滑动切换页面，同步到 ViewModel 并触发请求
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }
+        snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .filter { it != vm.mainTab.value }
             .collect { page -> vm.selectMainTab(page) }
@@ -224,14 +227,14 @@ fun BrowseScreen(
             LaunchedEffect(pagerState.currentPage, tabs.size) {
                 // 选中 tab 后插入的筛选图标 lazy 下标 = currentPage+1；滚动使其露出，不与固定管理按钮重叠
                 runCatching {
-                    tabRowState.animateScrollToItem((pagerState.currentPage + 1).coerceAtMost(tabs.size))
+                    tabRowState.animateScrollToItem(pagerState.currentPage.coerceAtMost(tabs.lastIndex.coerceAtLeast(0)))
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Top) {
                 LazyRow(
                     state = tabRowState,
                     modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                 ) {
                     tabs.forEachIndexed { index, item ->
                         item(key = "tab_${item.id}") {
@@ -266,7 +269,7 @@ fun BrowseScreen(
                                 )
                             }
                         }
-                        if (index == pagerState.currentPage) {
+                        if (index == pagerState.currentPage && item.pageType != BrowsePageType.YUZONG_RANK) {
                             item(key = "filter_affordance") {
                                 IconButton(onClick = { showFilterDialog = true }) {
                                     Icon(
@@ -294,7 +297,6 @@ fun BrowseScreen(
                     vm = vm,
                     displayMode = displayMode,
                     gridColumns = gridColumns,
-                    onGridColumnsChange = { vm.setGridColumns(it, orientation) },
                     selectionMode = selectionMode,
                     selectedIds = selectedIds,
                     onOpenManga = onOpenManga,
@@ -357,7 +359,6 @@ private fun BrowseTabContent(
     vm: BrowseViewModel,
     displayMode: Int,
     gridColumns: Int,
-    onGridColumnsChange: (Int) -> Unit,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     onOpenManga: (String) -> Unit,
@@ -447,29 +448,6 @@ private fun BrowseTabContent(
                         }
                     }
                 }
-                }
-                // 仅封面网格模式：固定底部每行数量选择
-                if (displayMode == 2) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .navigationBarsPadding(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (gridColumns == 0) "自动" else gridColumns.toString(),
-                            modifier = Modifier.padding(end = 8.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        androidx.compose.material3.Slider(
-                            value = gridColumns.toFloat(),
-                            onValueChange = { onGridColumnsChange(it.toInt()) },
-                            valueRange = 0f..10f,
-                            steps = 9,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
                 }
             }
         }
