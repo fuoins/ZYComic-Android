@@ -243,15 +243,50 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp)) {
                 Icon(Icons.Outlined.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text("Tab 管理", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text("标签页管理", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
             }
             Text(
-                "长按拖动右侧手柄可调整顺序，即顶部标签顺序；可改名、改默认筛选、删除，恢复默认回到三个热门。",
+                "长按拖动右侧手柄调整顺序；可改名、改筛选、删除。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+
+            Text("添加标签页", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp))
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(12.dp)) {
+                Button(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("增加自定义筛选 tab")
+                }
+                Spacer(Modifier.height(8.dp))
+
+                SpecialAddButton(
+                    label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
+                    enabled = vm.canAddLatest(),
+                    onClick = { vm.addLatestTab() },
+                    info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
+                )
+                Spacer(Modifier.height(8.dp))
+
+                SpecialAddButton(
+                    label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
+                    enabled = vm.canAddRanking(),
+                    onClick = { vm.addRankingTab() },
+                    info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
+                )
+                Spacer(Modifier.height(8.dp))
+
+                SpecialAddButton(
+                    label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
+                    enabled = vm.canAddYuzong(),
+                    onClick = { vm.addYuzongTab() },
+                    info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
+                )
+            }
+
+            Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
 
             LazyColumn(
                 state = listState,
@@ -312,44 +347,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Button(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("增加自定义筛选 tab")
-                }
-                Spacer(Modifier.height(8.dp))
-
-                SpecialAddButton(
-                    label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
-                    enabled = vm.canAddLatest(),
-                    onClick = { vm.addLatestTab() },
-                    info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
-                )
-                Spacer(Modifier.height(8.dp))
-
-                SpecialAddButton(
-                    label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
-                    enabled = vm.canAddRanking(),
-                    onClick = { vm.addRankingTab() },
-                    info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
-                )
-                Spacer(Modifier.height(8.dp))
-
-                SpecialAddButton(
-                    label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
-                    enabled = vm.canAddYuzong(),
-                    onClick = { vm.addYuzongTab() },
-                    info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
-                )
-                Spacer(Modifier.height(8.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    TextButton(onClick = { confirmReset = true }) { Text("恢复默认预设") }
-                }
-                Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+                TextButton(onClick = { confirmReset = true }) { Text("恢复默认预设") }
             }
         }
     }
