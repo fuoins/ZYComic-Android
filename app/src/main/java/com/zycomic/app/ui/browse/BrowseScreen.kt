@@ -97,7 +97,7 @@ fun BrowseScreen(
     pendingTag: String?,
     onPendingTagConsumed: () -> Unit,
     onOpenManga: (String) -> Unit,
-    onOpenSearch: () -> Unit,
+    onOpenSearch: (String) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -171,7 +171,7 @@ fun BrowseScreen(
                     actions = {
                         AppBarActions(
                             persistentListOf(
-                                AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = onOpenSearch),
+                                AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("") }),
                                 AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                 AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                 AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
@@ -301,6 +301,7 @@ fun BrowseScreen(
                     onToggleSelect = { vm.toggleSelect(it) },
                     onLongClick = { if (!selectionMode) { vm.enterSelection(); vm.toggleSelect(it) } },
                     bottomPadding = contentPadding.calculateBottomPadding(),
+                    onOpenSearch = onOpenSearch,
                 )
             }
         }
@@ -363,7 +364,13 @@ private fun BrowseTabContent(
     onToggleSelect: (String) -> Unit,
     onLongClick: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
+    onOpenSearch: (String) -> Unit,
 ) {
+    val item = vm.tabs.getOrNull(page)
+    if (item?.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.YUZONG_RANK) {
+        com.zycomic.app.platform.YuzongRankContent(onSearchTitle = onOpenSearch, modifier = Modifier.fillMaxSize())
+        return
+    }
     val mangas by vm.mangasForTab(page).collectAsState()
     val loading by vm.loadingForTab(page).collectAsState()
     val appending by vm.appendingForTab(page).collectAsState()
@@ -410,7 +417,7 @@ private fun BrowseTabContent(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
                         state = gridState,
-                        contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
+                        contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),

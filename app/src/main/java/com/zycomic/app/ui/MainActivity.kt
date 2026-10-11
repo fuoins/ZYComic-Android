@@ -306,7 +306,7 @@ fun AppContent(
                     pendingTag = pendingTag,
                     onPendingTagConsumed = { pendingTag = null },
                     onOpenManga = { detailBookId = it },
-                    onOpenSearch = { showSearch = true },
+                    onOpenSearch = { kw -> searchKeyword = kw; showSearch = true },
                     onRequireLogin = { loginOpen = true },
                 )
                 1 -> LibraryScreen(
