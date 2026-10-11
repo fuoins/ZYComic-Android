@@ -49,6 +49,8 @@ import kotlinx.coroutines.launch
 fun YuzongRankContent(
     onSearchTitle: (String) -> Unit,
     modifier: Modifier = Modifier,
+    gridColumns: Int = 3,
+    displayMode: Int = 0,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -119,7 +121,7 @@ fun YuzongRankContent(
                     )
                 }
 
-                else -> RankGrid(items = items, onSearchTitle = onSearchTitle)
+                else -> RankGrid(items = items, onSearchTitle = onSearchTitle, gridColumns = gridColumns, displayMode = displayMode)
             }
         }
     }
@@ -169,21 +171,23 @@ private fun SubChipRow(
 private fun RankGrid(
     items: List<PlatformRankItem>,
     onSearchTitle: (String) -> Unit,
+    gridColumns: Int,
+    displayMode: Int,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
+        columns = GridCells.Fixed(gridColumns.coerceIn(2, 6)),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items = items, key = { it.rank }) { item ->
-            RankCell(item = item, onClick = { onSearchTitle(item.title) })
+            RankCell(item = item, displayMode = displayMode, onClick = { onSearchTitle(item.title) })
         }
     }
 }
 
 @Composable
-private fun RankCell(item: PlatformRankItem, onClick: () -> Unit) {
+private fun RankCell(item: PlatformRankItem, displayMode: Int, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -205,15 +209,17 @@ private fun RankCell(item: PlatformRankItem, onClick: () -> Unit) {
             }
             RankBadge(rank = item.rank, modifier = Modifier.align(Alignment.TopStart))
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (displayMode != 2) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

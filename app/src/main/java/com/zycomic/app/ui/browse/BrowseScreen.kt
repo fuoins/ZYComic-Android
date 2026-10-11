@@ -269,7 +269,7 @@ fun BrowseScreen(
                                 )
                             }
                         }
-                        if (index == pagerState.currentPage && item.pageType != BrowsePageType.YUZONG_RANK) {
+                        if (index == pagerState.currentPage) {
                             item(key = "filter_affordance") {
                                 IconButton(onClick = { showFilterDialog = true }) {
                                     Icon(
@@ -327,6 +327,7 @@ fun BrowseScreen(
             orientation = orientation,
             onDismiss = { showFilterDialog = false },
             onOpenTagDialog = { showTagDialog = true },
+            displayOnly = vm.tabs.getOrNull(mainTab)?.let { it.kind == TabKind.SPECIAL && it.pageType == BrowsePageType.YUZONG_RANK } ?: false,
         )
     }
 
@@ -369,7 +370,7 @@ private fun BrowseTabContent(
 ) {
     val item = vm.tabs.getOrNull(page)
     if (item?.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.YUZONG_RANK) {
-        com.zycomic.app.platform.YuzongRankContent(onSearchTitle = onOpenSearch, modifier = Modifier.fillMaxSize())
+        com.zycomic.app.platform.YuzongRankContent(onSearchTitle = onOpenSearch, modifier = Modifier.fillMaxSize(), gridColumns = if (gridColumns > 0) gridColumns else 3, displayMode = displayMode)
         return
     }
     val mangas by vm.mangasForTab(page).collectAsState()
@@ -532,10 +533,12 @@ private fun BrowseFilterDialog(
     orientation: Int,
     onDismiss: () -> Unit,
     onOpenTagDialog: () -> Unit,
+    displayOnly: Boolean = false,
 ) {
+    val titles = if (displayOnly) persistentListOf("显示") else persistentListOf("筛选", "显示")
     TabbedDialog(
         onDismissRequest = onDismiss,
-        tabTitles = persistentListOf("筛选", "显示"),
+        tabTitles = titles,
     ) { page ->
         Column(
             modifier = Modifier
@@ -543,7 +546,7 @@ private fun BrowseFilterDialog(
                 .verticalScroll(rememberScrollState())
                 .padding(TabbedDialogPaddings.Horizontal),
         ) {
-            if (page == 0) {
+            if (!displayOnly && page == 0) {
                 val item = vm.tabs.getOrNull(currentTab)
                 when {
                     item == null -> CategoryFilter(vm, onOpenTagDialog)
