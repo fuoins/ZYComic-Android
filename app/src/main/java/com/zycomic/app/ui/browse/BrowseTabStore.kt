@@ -9,7 +9,7 @@ object BrowseTabStore {
     private const val PREFS = "zycomic_browse_tabs"
     private const val KEY_TABS = "tabs_json"
     private const val KEY_SEED = "seed_version"
-    private const val SEED_VERSION = 3
+    private const val SEED_VERSION = 4
 
     private lateinit var prefs: android.content.SharedPreferences
 
@@ -42,6 +42,7 @@ object BrowseTabStore {
     private fun specialYuzong() = BrowseTabItem(id = ID_YUZONG, name = YUZONG_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.YUZONG_RANK)
 
     fun defaultTabs(): List<BrowseTabItem> = listOf(
+        specialYuzong(),
         BrowseTabItem(
             id = ID_GENERAL,
             name = "一般向热门",
@@ -63,9 +64,6 @@ object BrowseTabStore {
             builtin = true,
             filter = FilterSnapshot(gender = 2, tags = listOf("热血"), area = 0, end = 0, st = 2),
         ),
-        specialLatest(),
-        specialRanking(),
-        specialYuzong(),
     )
 
     /** 读取 tab 列表；首次/版本不符时种子化或迁移并持久化。解析失败回退默认。 */
@@ -80,18 +78,12 @@ object BrowseTabStore {
                     addAll(List(arr.length()) { BrowseTabItem.fromJson(arr.getJSONObject(it)) })
                 }
                 if (seeded == 1) {
-                    // v1→v2：仅移除内置「最近更新」，保留用户自定义与已添加的 gay排行。
                     list.removeAll { it.id == ID_LATEST_V1 }
                 }
-                if (seeded < 3) {
-                    // v2→v3：在 ID_REXUE 后补插缺失的特殊 tab（最新/gay排行/宇总排行）。
-                    var insertAt = list.indexOfFirst { it.id == ID_REXUE }.let { if (it >= 0) it + 1 else list.size }
-                    listOf(specialLatest(), specialRanking(), specialYuzong()).forEach { c ->
-                        if (list.none { it.id == c.id }) {
-                            list.add(insertAt, c)
-                            insertAt++
-                        }
-                    }
+                if (seeded < 4) {
+                    list.removeAll { it.id == ID_LATEST_ADD || it.id == ID_RANKING }
+                    val yzIdx = list.indexOfFirst { it.id == ID_YUZONG }
+                    if (yzIdx >= 0) { val yz = list.removeAt(yzIdx); list.add(0, yz) } else list.add(0, specialYuzong())
                 }
                 if (list.isNotEmpty()) {
                     save(list)
