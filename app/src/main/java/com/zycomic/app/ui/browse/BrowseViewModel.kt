@@ -439,6 +439,25 @@ class BrowseViewModel {
         return true
     }
 
+    fun canAddYuzong(): Boolean = tabs.none { it.pageType == BrowsePageType.YUZONG_RANK }
+
+    /** 添加「宇总排行」特殊 tab，固定 id，仅可添加一次。 */
+    fun addYuzongTab(): Boolean {
+        if (!canAddYuzong()) return false
+        tabs.add(
+            BrowseTabItem(
+                id = BrowseTabStore.ID_YUZONG,
+                name = BrowseTabStore.YUZONG_NAME,
+                kind = TabKind.SPECIAL,
+                builtin = false,
+                pageType = BrowsePageType.YUZONG_RANK,
+            ),
+        )
+        persist()
+        goTo(tabs.lastIndex)
+        return true
+    }
+
     fun resetToDefaults() {
         tabs.clear()
         stateById.clear()

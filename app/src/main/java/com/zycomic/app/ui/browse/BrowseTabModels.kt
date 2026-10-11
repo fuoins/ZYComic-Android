@@ -12,7 +12,7 @@ enum class TabKind { FILTER, SPECIAL }
  * - RANKING：整体排行（api/rank，展示名「gay排行」，默认不内置、可在管理面板添加）
  * 后续如需「宇总排行」，在此新增 pageType 即可，本期不实现。
  */
-enum class BrowsePageType { LATEST, RANKING }
+enum class BrowsePageType { LATEST, RANKING, YUZONG_RANK }
 
 /** 一个筛选型 tab 的完整筛选快照（对应 getClasses 的全部可调参数）。 */
 data class FilterSnapshot(

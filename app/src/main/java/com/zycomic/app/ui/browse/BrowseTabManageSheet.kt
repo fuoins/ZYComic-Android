@@ -341,38 +341,29 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
 
-                OutlinedButton(
-                    onClick = { vm.addLatestTab() },
+                SpecialAddButton(
+                    label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
                     enabled = vm.canAddLatest(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新")
-                }
-                Text(
-                    "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                    onClick = { vm.addLatestTab() },
+                    info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
                 )
                 Spacer(Modifier.height(8.dp))
 
-                OutlinedButton(
-                    onClick = { vm.addRankingTab() },
+                SpecialAddButton(
+                    label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
                     enabled = vm.canAddRanking(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加")
-                }
-                Text(
-                    "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                    onClick = { vm.addRankingTab() },
+                    info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
                 )
+                Spacer(Modifier.height(8.dp))
+
+                SpecialAddButton(
+                    label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
+                    enabled = vm.canAddYuzong(),
+                    onClick = { vm.addYuzongTab() },
+                    info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
+                )
+                Spacer(Modifier.height(8.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     TextButton(onClick = { confirmReset = true }) { Text("恢复默认预设") }
@@ -592,6 +583,32 @@ private fun FilterTabFormDialog(
                 TextButton(onClick = onDismiss) { Text("取消") }
                 Spacer(Modifier.width(8.dp))
                 Button(enabled = nameError == null, onClick = { onSave(trimmed, draft) }) { Text("保存") }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun SpecialAddButton(label: String, enabled: Boolean, onClick: () -> Unit, info: String) {
+    var showInfo by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.weight(1f)) {
+            Icon(Icons.Outlined.Add, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(label)
+        }
+        Box {
+            androidx.compose.material3.IconButton(onClick = { showInfo = true }) {
+                Icon(Icons.Outlined.Info, contentDescription = "说明", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Popup(visible = showInfo, onDismissRequest = { showInfo = false }) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
+                        .padding(12.dp),
+                ) {
+                    Text(info, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
