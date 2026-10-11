@@ -132,7 +132,7 @@ private fun PlatformChipRow(selected: PlatformMeta, onSelect: (PlatformMeta) -> 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PlatformCatalog.platforms.forEach { p ->
@@ -154,7 +154,7 @@ private fun SubChipRow(
     LazyRow(
         contentPadding = PaddingValues(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(bottom = 8.dp),
+        modifier = Modifier.padding(bottom = 2.dp),
     ) {
         items(platform.subs.size) { i ->
             val sub = platform.subs[i]
@@ -176,7 +176,7 @@ private fun RankGrid(
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(gridColumns.coerceIn(2, 6)),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 0.dp, end = 12.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
