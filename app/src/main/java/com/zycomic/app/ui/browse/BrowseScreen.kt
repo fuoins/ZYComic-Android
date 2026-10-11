@@ -421,7 +421,7 @@ private fun BrowseTabContent(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
                         state = gridState,
-                        contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
+                        contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
