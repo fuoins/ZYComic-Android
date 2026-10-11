@@ -3,6 +3,7 @@ package com.zycomic.app.platform
 import android.content.Context
 import coil3.ImageLoader
 import coil3.disk.DiskCache
+import coil3.disk.directory
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 
+@androidx.compose.runtime.Composable
 fun YuzongRankContent(
     onSearchTitle: (String) -> Unit,
     modifier: Modifier = Modifier,

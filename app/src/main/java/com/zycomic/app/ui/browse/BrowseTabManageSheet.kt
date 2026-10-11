@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
@@ -581,13 +583,15 @@ private fun SpecialAddButton(label: String, enabled: Boolean, onClick: () -> Uni
             androidx.compose.material3.IconButton(onClick = { showInfo = true }) {
                 Icon(Icons.Outlined.Info, contentDescription = "说明", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            androidx.compose.material3.Popup(visible = showInfo, onDismissRequest = { showInfo = false }) {
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-                        .padding(12.dp),
-                ) {
-                    Text(info, style = MaterialTheme.typography.bodySmall)
+            if (showInfo) {
+                androidx.compose.ui.window.Popup(onDismissRequest = { showInfo = false }) {
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
+                            .padding(12.dp),
+                    ) {
+                        Text(info, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
