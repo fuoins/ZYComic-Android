@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -114,30 +115,6 @@ fun FilterSnapshotEditor(
 
 // ==================== C. 标签选择器（重设计） ====================
 
-/** 标签选择 chip：选中 primary 高亮带 ✓，未选 surfaceVariant。仅用于标签选择器，不改全局 FilterChip。 */
-@Composable
-private fun TagPickChip(
-    text: String,
-    selected: Boolean,
-    showCheck: Boolean = true,
-    onClick: () -> Unit,
-) {
-    val container = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val content = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Surface(onClick = onClick, color = container, contentColor = content, shape = RoundedCornerShape(50)) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (selected && showCheck) {
-                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-            }
-            Text(text, style = MaterialTheme.typography.bodyMedium)
-        }
-    }
-}
-
 /** 标签多选弹窗（重设计）：搜索 + 已选区 + 自适应懒加载网格 + 底部清空/取消/确定（已选 N）。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -154,77 +131,81 @@ fun TagPickerDialog(
         if (keyword.isBlank()) ordered else ordered.filter { it.contains(keyword, ignoreCase = true) }
     }
 
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .background(MaterialTheme.colorScheme.surface),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxHeight(0.92f).widthIn(max = 460.dp).fillMaxWidth(),
             ) {
-                Text("选择标签", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
-            }
-
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (keyword.isNotEmpty()) {
-                        IconButton(onClick = { keyword = "" }) { Icon(Icons.Outlined.Close, contentDescription = "清除") }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("选择标签", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
                     }
-                },
-                placeholder = { Text("搜索标签") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            )
 
-            if (temp.isNotEmpty()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("已选（${temp.size}），点击可移除", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { temp = emptySet() }) { Text("清空") }
+                    OutlinedTextField(
+                        value = keyword,
+                        onValueChange = { keyword = it },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (keyword.isNotEmpty()) {
+                                IconButton(onClick = { keyword = "" }) { Icon(Icons.Outlined.Close, contentDescription = "清除") }
+                            }
+                        },
+                        placeholder = { Text("搜索标签") },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    )
+
+                    if (temp.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                            Text("已选（${temp.size}），点击移除", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { temp = emptySet() }) { Text("清空") }
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+                            temp.toList().forEach { tag ->
+                                com.zycomic.app.ui.components.FilterChip(text = tag, selected = true) { temp = temp - tag }
+                            }
+                        }
+                        HorizontalDivider()
                     }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        temp.toList().forEach { tag ->
-                            TagPickChip(text = tag, selected = true, showCheck = false) {
-                                temp = temp - tag
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 92.dp),
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(filtered) { tag ->
+                            com.zycomic.app.ui.components.FilterChip(text = tag, selected = temp.contains(tag)) {
+                                temp = if (temp.contains(tag)) temp - tag else temp + tag
                             }
                         }
                     }
-                }
-                HorizontalDivider()
-            }
 
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 92.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(filtered) { tag ->
-                    TagPickChip(text = tag, selected = temp.contains(tag)) {
-                        temp = if (temp.contains(tag)) temp - tag else temp + tag
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = { temp = emptySet() }) { Text("清空") }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onDismiss) { Text("取消") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = { onConfirm(temp) }) {
+                            Text(if (temp.isEmpty()) "确定" else "确定（已选 ${temp.size}）")
+                        }
                     }
-                }
-            }
-
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { temp = emptySet() }) { Text("清空") }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text("取消") }
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { onConfirm(temp) }) {
-                    Text(if (temp.isEmpty()) "确定" else "确定（已选 ${temp.size}）")
                 }
             }
         }
