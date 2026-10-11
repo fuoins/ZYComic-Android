@@ -208,15 +208,35 @@ fun AppContent(
 
     LaunchedEffect(Unit) {
         if (isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) {
-            android.util.Log.d("SpeedTest", "speed test launched")
-            val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
+            var attempt = 0
+            var done = false
+            while (!done) {
+                android.util.Log.d("SpeedTest", "speed test launched attempt=$attempt")
+                val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
+                when {
+                    result == null -> {
+                        android.util.Log.d("SpeedTest", "speed test timeout attempt=$attempt")
+                        if (attempt == 0) {
+                            attempt++
+                            Toast.makeText(context, "测速超时，重新测速", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show()
+                            done = true
+                        }
+                    }
+                    result.first == -1 -> {
+                        Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
+                        done = true
+                    }
+                    else -> {
+                        android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}")
+                        Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
+                        done = true
+                    }
+                }
+            }
             com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone = true
             speedTesting = false
-            when {
-                result == null -> { android.util.Log.d("SpeedTest", "speed test timeout"); Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show() }
-                result.first == -1 -> Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
-                else -> { android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}"); Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show() }
-            }
         } else {
             speedTesting = false
         }
