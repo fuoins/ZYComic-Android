@@ -182,15 +182,21 @@ fun TagPickerDialog(
                         HorizontalDivider()
                     }
 
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 92.dp),
-                        modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 6.dp),
                     ) {
-                        items(filtered) { tag ->
-                            com.zycomic.app.ui.components.FilterChip(text = tag, selected = temp.contains(tag)) {
-                                temp = if (temp.contains(tag)) temp - tag else temp + tag
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            filtered.forEach { tag ->
+                                com.zycomic.app.ui.components.FilterChip(text = tag, selected = temp.contains(tag)) {
+                                    temp = if (temp.contains(tag)) temp - tag else temp + tag
+                                }
                             }
                         }
                     }
@@ -493,13 +499,21 @@ private fun FilterTabFormDialog(
         else -> null
     }
 
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f)
-                .background(MaterialTheme.colorScheme.surface),
-        ) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxHeight(0.92f).widthIn(max = 460.dp).fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp),
@@ -566,6 +580,8 @@ private fun FilterTabFormDialog(
                 Spacer(Modifier.width(8.dp))
                 Button(enabled = nameError == null, onClick = { onSave(trimmed, draft) }) { Text("保存") }
             }
+                }
+            }
         }
     }
 }
@@ -579,21 +595,16 @@ private fun SpecialAddButton(label: String, enabled: Boolean, onClick: () -> Uni
             Spacer(Modifier.width(8.dp))
             Text(label)
         }
-        Box {
-            androidx.compose.material3.IconButton(onClick = { showInfo = true }) {
-                Icon(Icons.Outlined.Info, contentDescription = "说明", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (showInfo) {
-                androidx.compose.ui.window.Popup(onDismissRequest = { showInfo = false }) {
-                    androidx.compose.foundation.layout.Column(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-                            .padding(12.dp),
-                    ) {
-                        Text(info, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
+        androidx.compose.material3.IconButton(onClick = { showInfo = true }) {
+            Icon(Icons.Outlined.Info, contentDescription = "说明", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+    if (showInfo) {
+        AlertDialog(
+            onDismissRequest = { showInfo = false },
+            title = { Text("说明") },
+            text = { Text(info) },
+            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("知道了") } },
+        )
     }
 }
