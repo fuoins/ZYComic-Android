@@ -66,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -230,11 +231,11 @@ fun BrowseScreen(
                     tabRowState.animateScrollToItem(pagerState.currentPage.coerceAtMost(tabs.lastIndex.coerceAtLeast(0)))
                 }
             }
-            Row(verticalAlignment = Alignment.Top) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 LazyRow(
                     state = tabRowState,
                     modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.Top,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     tabs.forEachIndexed { index, item ->
                         item(key = "tab_${item.id}") {
@@ -271,20 +272,21 @@ fun BrowseScreen(
                         }
                         if (index == pagerState.currentPage) {
                             item(key = "filter_affordance") {
-                                IconButton(onClick = { showFilterDialog = true }) {
-                                    Icon(
-                                        Icons.Outlined.FilterList,
-                                        contentDescription = "重新筛选",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
+                                TabBarIcon(
+                                    icon = Icons.Outlined.FilterList,
+                                    contentDescription = "重新筛选",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    onClick = { showFilterDialog = true },
+                                )
                             }
                         }
                     }
                 }
-                IconButton(onClick = { showManageSheet = true }) {
-                    Icon(Icons.Outlined.Tune, contentDescription = "管理")
-                }
+                TabBarIcon(
+                    icon = Icons.Outlined.Tune,
+                    contentDescription = "管理",
+                    onClick = { showManageSheet = true },
+                )
             }
 
             HorizontalPager(
@@ -674,4 +676,22 @@ private fun FolderSelectDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+@Composable
+private fun TabBarIcon(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = tint)
+    }
 }
