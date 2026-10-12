@@ -81,7 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.ui.components.FilterChip
@@ -539,7 +539,7 @@ private fun FavGridItem(
                 .aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(8.dp)),
         ) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = coverUrl(item.bookImg),
                 contentDescription = item.bookName,
                 modifier = Modifier.fillMaxSize(),
@@ -640,7 +640,7 @@ private fun FavItemRow(
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = coverUrl(item.bookImg),
                 contentDescription = item.bookName,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
@@ -734,7 +734,7 @@ private fun FavItemRow(
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = coverUrl(item.bookImg),
                 contentDescription = item.bookName,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
@@ -798,7 +798,7 @@ private fun CoverWithBadges(
     showBadges: Boolean = true,
 ) {
     Box {
-        AsyncImage(
+        SubcomposeAsyncImage(
             model = coverUrl(item.bookImg),
             contentDescription = item.bookName,
             modifier = Modifier

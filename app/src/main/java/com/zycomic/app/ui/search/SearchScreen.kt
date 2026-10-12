@@ -1,6 +1,6 @@
 package com.zycomic.app.ui.search
 
-import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -215,7 +215,7 @@ private fun SearchMangaGridItem(
                 .aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(8.dp)),
         ) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = manga.picx.ifBlank { manga.pic },
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),

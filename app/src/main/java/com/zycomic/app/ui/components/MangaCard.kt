@@ -1,11 +1,12 @@
 package com.zycomic.app.ui.components
 
-import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,7 +70,7 @@ fun MangaCard(
         ) {
             val url = coverUrl(manga)
             if (url.isNotEmpty()) {
-                AsyncImage(
+                SubcomposeAsyncImage(
                     model = url,
                     contentDescription = manga.name,
                     contentScale = ContentScale.Crop,

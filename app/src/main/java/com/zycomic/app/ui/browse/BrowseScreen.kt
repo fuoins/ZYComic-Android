@@ -75,7 +75,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
-import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
@@ -481,7 +481,7 @@ private fun MangaGridItem(
                 .aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(8.dp)),
         ) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = com.zycomic.app.ui.components.coverUrl(manga.picx ?: manga.pic ?: ""),
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),

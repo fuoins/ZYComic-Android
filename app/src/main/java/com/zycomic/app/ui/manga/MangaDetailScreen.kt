@@ -81,6 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.reader.ReaderLauncher
@@ -212,7 +213,7 @@ fun MangaDetailScreen(
                             .padding(top = 56.dp, start = 16.dp, end = 16.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        AsyncImage(
+                        SubcomposeAsyncImage(
                             model = coverUrl(d),
                             contentDescription = d.name,
                             modifier = Modifier
@@ -623,7 +624,7 @@ private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
             .height(180.dp)
             .clickable(onClick = onClick),
     ) {
-        AsyncImage(
+        SubcomposeAsyncImage(
             model = coverUrl(manga),
             contentDescription = manga.name,
             modifier = Modifier
