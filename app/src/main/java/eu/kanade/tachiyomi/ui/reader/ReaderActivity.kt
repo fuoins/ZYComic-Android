@@ -311,6 +311,9 @@ class ReaderActivity : BaseActivity() {
                     is ReaderViewModel.Event.ShareImage -> {
                         onShareImageResult(event.uri, event.page /* SY --> */, event.secondPage /* SY <-- */)
                     }
+                    ReaderViewModel.Event.ShareImageFailed -> {
+                        toast("分享失败：该页图片数据不可用，可重新加载本页后再试")
+                    }
                 }
             }
             .launchIn(lifecycleScope)
@@ -715,25 +718,39 @@ class ReaderActivity : BaseActivity() {
     }
 
     /**
-     * 切换图源：确保域名在列表中 → setImgHost → 重建网络 → 清缓存 → 重启 Activity。
+     * 切换图源：确保域名在列表中 → setImgHost → （IO）重建网络 + 清章节缓存 → 回主线程重启 Activity。
+     *
+     * 重建网络里的 evictAll/cancelAll 会真正关 socket，属网络操作，绝不能跑在主线程，
+     * 否则抛 NetworkOnMainThreadException（这里原先被外层 try/catch 吃掉，表现为"切了没反应/切换失败"）。
      */
     private fun switchImgSource(domain: String) {
+        val rm = com.zycomic.app.net.RouteManager
         try {
-            val rm = com.zycomic.app.net.RouteManager
             if (rm.imgDomains.none { it.equals(domain, true) }) rm.addChapterImgDomain(domain)
             val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }
             rm.setImgHost(idx)
-            com.zycomic.app.net.NetworkModule.rebuild()
-            // 清空章节缓存，强制重新拉取并用新图源拼接URL
-            com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
-            // 重启 Activity 重新加载
-            val intent = intent
-            finish()
-            startActivity(intent)
-            Toast.makeText(this, "已切换图源: $domain", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             android.util.Log.e("ReaderActivity", "切换图源失败", e)
             Toast.makeText(this, "切换图源失败", Toast.LENGTH_SHORT).show()
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                com.zycomic.app.net.NetworkModule.rebuild()
+                // 清空章节缓存，强制重新拉取并用新图源拼接URL（这里是"确实换了图域"，与
+                // NetworkModule.rebuildClient 里不再无条件清理相呼应）
+                com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+            }.isSuccess
+            launch(Dispatchers.Main) {
+                val intent = intent
+                finish()
+                startActivity(intent)
+                Toast.makeText(
+                    this@ReaderActivity,
+                    if (ok) "已切换图源: $domain" else "已切换图源 $domain（网络重建异常，若图片异常请重试）",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
     }
 

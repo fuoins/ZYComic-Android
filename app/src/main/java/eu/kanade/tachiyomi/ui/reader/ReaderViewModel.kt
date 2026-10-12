@@ -1325,20 +1325,27 @@ class ReaderViewModel @JvmOverloads constructor(
 
         val filename = generateFilename(manga, page)
 
-        try {
-            viewModelScope.launchNonCancellable {
+        // try/catch 必须写在协程体**内部**：launch 是异步的，外层 try 只能捕获"启动协程"
+        // 这一步的错误，捕获不到协程体内抛出的异常（典型如 ImageSaver 的
+        // IllegalArgumentException: Not an image），后者会直接走未处理异常 → 进程 FATAL。
+        // 对齐 saveImage 的写法：失败改为发事件，由 Activity 提示，不崩进程。
+        viewModelScope.launchNonCancellable {
+            try {
                 destDir.deleteRecursively()
+                val stream = page.stream
+                    ?: error("页面无可用图片数据")
                 val uri = imageSaver.save(
                     image = Image.Page(
-                        inputStream = page.stream!!,
+                        inputStream = stream,
                         name = filename,
                         location = Location.Cache,
                     ),
                 )
                 eventChannel.send(Event.ShareImage(uri, page))
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e)
+                eventChannel.send(Event.ShareImageFailed)
             }
-        } catch (e: Throwable) {
-            logcat(LogPriority.ERROR, e)
         }
     }
 
@@ -1356,8 +1363,9 @@ class ReaderViewModel @JvmOverloads constructor(
         val context = Injekt.get<Application>()
         val destDir = context.cacheImageDir
 
-        try {
-            viewModelScope.launchNonCancellable {
+        // 同 shareImage：try/catch 必须在协程体内，否则协程体内抛出的异常抓不到 → 进程 FATAL
+        viewModelScope.launchNonCancellable {
+            try {
                 destDir.deleteRecursively()
                 val uri = saveImages(
                     page1 = firstPage,
@@ -1368,9 +1376,10 @@ class ReaderViewModel @JvmOverloads constructor(
                     manga = manga,
                 )
                 eventChannel.send(Event.ShareImage(uri, firstPage, secondPage))
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e)
+                eventChannel.send(Event.ShareImageFailed)
             }
-        } catch (e: Throwable) {
-            logcat(LogPriority.ERROR, e)
         }
     }
     // SY <--
@@ -1503,5 +1512,11 @@ class ReaderViewModel @JvmOverloads constructor(
             val secondPage: ReaderPage? = null,
             // SY <--
         ) : Event
+
+        /**
+         * 分享图片失败（缓存里的页面字节缺失/非图片等）。
+         * 走事件提示而不是抛异常——协程体内抛出会直接 FATAL 崩进程。
+         */
+        data object ShareImageFailed : Event
     }
 }

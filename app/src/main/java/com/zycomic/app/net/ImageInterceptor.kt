@@ -58,8 +58,10 @@ class ImageInterceptor : Interceptor {
             .url(fetchUrl)
             .header("User-Agent", ManwaInterceptor.UA)
             .header(HEADER_X_REQUESTED_WITH, VALUE_X_REQUESTED_WITH)
-            // 防盗链 Referer：动态当前线路 origin（与官方 App 一致）
-            .header("Referer", RouteManager.baseUrl.trimEnd('/'))
+            // 防盗链 Referer：用**固定 canonical 域**（抓包证实官方 App 无论打哪个线路/图域，
+            // Origin/Referer 恒为 mseeowpm1.xyz）。用"动态当前线路 origin"在线路为 .pro/.cc
+            // 时不在白名单，会被 403。
+            .header("Referer", ManwaInterceptor.REFERER)
             .header("Accept", "*/*")
             .header("Connection", "keep-alive")
             .build()

@@ -14,6 +14,9 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.Dns
@@ -154,10 +157,28 @@ object NetworkModule {
     }
 
     /**
-     * 切换线路后重建 Retrofit。
+     * 网络重建专用上下文：强制在 IO 线程执行，且并行度 = 1（串行）。
+     *
+     * 为什么必须在 IO：[OkHttpClient.connectionPool] 的 `evictAll()` 与 `dispatcher.cancelAll()`
+     * 会真正关闭 socket，属于网络操作；在主线程调用会抛 `NetworkOnMainThreadException`
+     * （冷启动测速选完线路后调 [rebuild] 必崩，表现为"所有图源测速超时"）。
+     * 为什么并行度 1：重建会整体替换 client/retrofit 单例，并发重建互相覆盖会产生
+     * "半个新半个旧"的网络栈，串行化从根上杜绝该竞态。
+     *
+     * 注意：内部实现一律调用 `*Locked()` 私有版本，**不要在已经处于 [netContext] 的协程里
+     * 再 `withContext(netContext)` 调公开版本**——单并行度上下文自我等待会死锁。
+     */
+    private val netContext: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+    /**
+     * 切换线路后重建 Retrofit（必须挂起：内部网络操作在 IO 串行执行）。
      * 同时清理 apiClient/imageClient 连接池 + 取消在途请求，让手动切换立即生效。
      */
-    fun rebuild() {
+    suspend fun rebuild() {
+        withContext(netContext) { rebuildLocked() }
+    }
+
+    private fun rebuildLocked() {
         _apiClient?.dispatcher?.cancelAll()
         _apiClient?.connectionPool?.evictAll()
         _imageClient?.dispatcher?.cancelAll()
@@ -200,10 +221,19 @@ object NetworkModule {
 
     /**
      * 重建网络客户端：apiClient/imageClient 都先 cancelAll + evictAll，再按当前生效策略重建，
-     * 并重建 Retrofit、清空章节缓存、重绑封面 Coil 工厂、清 Coil 内存缓存。
+     * 并重建 Retrofit、重绑封面 Coil 工厂、清 Coil 内存缓存。
      * 「自动跟随系统 VPN」开关变化 / VPN 或网络变化导致策略翻转时调用。
+     *
+     * [clearChapterCache] 默认 **false**：章节缓存里存的是已解密的图片文件，键是图片 URL，
+     * 而策略翻转（VPN 开/关）并不改变线路与图域，URL 不变 → 缓存仍然有效，没必要清。
+     * 无条件清理反而会让正在阅读/正在分享页面的人读到被清掉的文件，是崩溃 B
+     * （`ImageSaver` 拿到空流/非图片字节）的诱因之一。仅在确实更换线路/图域时显式传 true。
      */
-    fun rebuildClient(reason: String = "") {
+    suspend fun rebuildClient(reason: String = "", clearChapterCache: Boolean = false) {
+        withContext(netContext) { rebuildClientLocked(reason, clearChapterCache) }
+    }
+
+    private fun rebuildClientLocked(reason: String, clearChapterCache: Boolean) {
         Log.i("NetworkModule", "rebuildClient: reason=$reason, direct=${shouldUseDirectStrategy()}")
         _apiClient?.dispatcher?.cancelAll()
         _apiClient?.connectionPool?.evictAll()
@@ -214,7 +244,9 @@ object NetworkModule {
         _retrofit = null
         _api = null
         buildRetrofit()
-        runCatching { com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear() }
+        if (clearChapterCache) {
+            runCatching { com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear() }
+        }
         // 封面 Coil 单例改委托当前 imageClient：重建后必须重绑，否则封面仍用旧网络栈
         CoverCallFactory.rebind()
         DevConfig.clearImageMemoryCache()
@@ -226,7 +258,11 @@ object NetworkModule {
      * 无论策略是否翻转，都先 cancelAll + evictAll 丢弃可能绑在旧网络（如已关闭的 VPN 接口）上的连接；
      * 仅当"是否直连策略"翻转时才整体重建 client；策略不变（含强制直连模式下切换 VPN）时只清连接池与封面内存缓存。
      */
-    fun onVpnOrNetworkChanged(reason: String = "network changed") {
+    suspend fun onVpnOrNetworkChanged(reason: String = "network changed") {
+        withContext(netContext) { onVpnOrNetworkChangedLocked(reason) }
+    }
+
+    private fun onVpnOrNetworkChangedLocked(reason: String) {
         val now = shouldUseDirectStrategy()
         // 无条件清理在途/空闲连接，根治 VPN 拆除后的 Connection reset
         _apiClient?.dispatcher?.cancelAll()
@@ -235,7 +271,8 @@ object NetworkModule {
         _imageClient?.connectionPool?.evictAll()
         if (lastDirectStrategy != now) {
             lastDirectStrategy = now
-            rebuildClient(reason)
+            // 已在 netContext 内：必须走 Locked 版本，不能再调 suspend 公开版本
+            rebuildClientLocked(reason, clearChapterCache = false)
         } else {
             // 策略不变：封面委托与 imageClient 共享连接池（已 evict），仅清内存缓存
             DevConfig.clearImageMemoryCache()
@@ -243,20 +280,50 @@ object NetworkModule {
     }
 
     /**
-     * 测速专用 client：传输策略（cookieJar/trust-all/DNS/SNI）与当前网络下的运行时 client 完全一致，
-     * 仅超时收紧到 3s、不挂业务拦截器（线路探活自带签名头，图域探活自带与图片运行时一致的头）。
+     * 测速/探活超时：connect、read 保持 3s（快速判死不可达），callTimeout 放宽到 5s。
+     * 原因：线路探活要打真实业务接口（约 12KB gzip + AES 解密），VPN 下还有额外 RTT，
+     * 全 3s 会把"能通但稍慢"的线路误判成超时；5s 既不误杀也不会让测速拖太久。
+     */
+    private const val PROBE_CONNECT_READ_SECONDS = 3L
+    private const val PROBE_CALL_SECONDS = 5L
+
+    /**
+     * 图域探活专用 client：传输策略（cookieJar/trust-all/DNS/SNI）与当前网络下的运行时
+     * imageClient 完全一致，仅超时收紧、不挂业务拦截器（图域探活自带与图片运行时一致的头）。
      * 不再写死 NO_PROXY/RuleDns/去 SNI——VPN 开时测速即走 VPN 路径，保证测速结果可用于运行时。
      */
     fun newSpeedTestClient(): OkHttpClient {
         return OkHttpClient.Builder()
-            .connectTimeout(3, TimeUnit.SECONDS)
-            .readTimeout(3, TimeUnit.SECONDS)
-            .writeTimeout(3, TimeUnit.SECONDS)
-            .callTimeout(3, TimeUnit.SECONDS)
+            .connectTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(PROBE_CALL_SECONDS, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(8, 1, TimeUnit.MINUTES))
             .retryOnConnectionFailure(true)
             .enableTrustAll()
             .applyTransportStrategy()
+            .build()
+    }
+
+    /**
+     * 线路探活专用 client：传输策略与运行时 apiClient 一致（DNS/SNI/出口/cookie 同源），
+     * 但只挂 [ManwaInterceptor] —— 探活必须打"真实业务接口"，因此要完整走
+     * 追加 facility/deviceid/timestamp → 签 devid/X-Token → gzip → AES 解密 这条链路。
+     *
+     * 不挂 [LineFailoverInterceptor]（探活失败正是待采集的信号，不该触发自动换线）
+     * 也不挂 [ImageInterceptor]（图片路径与线路 API 无关）。
+     */
+    fun newLineProbeClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .connectTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(PROBE_CALL_SECONDS, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(8, 1, TimeUnit.MINUTES))
+            .retryOnConnectionFailure(true)
+            .enableTrustAll()
+            .applyTransportStrategy()
+            .addInterceptor(manwaInterceptor)
             .build()
     }
 

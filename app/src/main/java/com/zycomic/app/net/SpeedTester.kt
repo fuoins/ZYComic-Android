@@ -9,24 +9,51 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.Buffer
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 线路 / 图域测速。
  *
- * 关键一致性原则：测速使用的 OkHttpClient 由 [NetworkModule.newSpeedTestClient] 构建，
- * 其 DNS/SNI/证书/出口（cookieJar/传输策略）与当前网络下的运行时 api/image client 完全一致——
- * VPN 开时测速即走系统 DNS+SNI 的 VPN 路径，无 VPN 时走 RuleDns+去 SNI 直连。
+ * 关键一致性原则：测速使用的 OkHttpClient 传输层（DNS/SNI/证书/出口/cookie）由
+ * [NetworkModule.applyTransportStrategy] 统一构建，与当前网络下的运行时 api/image client
+ * 完全一致—— VPN 开时测速即走系统 DNS+SNI 的 VPN 路径，无 VPN 时走 RuleDns+去 SNI 直连。
  *
- * 图域探活打"真实封面 URL"（首页 index 取一张封面路径），带与图片运行时一致的头并只取前 2KB，
- * 仅当返回 200/206 且确为图片/非文本二进制才计成功：VPN 下返回 403/HTML 挑战页的图域会被自然淘汰。
+ * 两类探活都打"真实业务数据"，避免假 200 蒙混：
+ * - 线路探活：[NetworkModule.newLineProbeClient]（挂 [ManwaInterceptor]）打分类接口
+ *   `/api/classes/index`，完整经过 追加通用参数 → 签 devid/X-Token → gzip → AES 解密，
+ *   仅当 2xx **且解密后是合法 JSON** 才计成功；
+ * - 图域探活：先打固定真实封面（[PROBE_COVER_PATH]，带 Range 只取前 2KB），
+ *   仅当 200/206 且确为图片/非文本二进制才计成功：VPN 下返回 403/HTML 挑战页的图域会被自然淘汰。
+ *
+ * 线程约束（重要）：本对象所有对外方法都是 suspend 且**整体在 [Dispatchers.IO] 上执行**。
+ * 之前只有单次测量走 IO，而阶段 1 选完线路后的 `NetworkModule.rebuild()` 留在调用方线程，
+ * 冷启动时调用方是主线程 `LaunchedEffect`，`evictAll()` 关 socket 直接抛
+ * `NetworkOnMainThreadException` → 进程 12 秒必崩，图域探活根本没机会跑，UI 上表现成
+ * "所有图源都超时"。所以这里绝不能再把任何网络/重建调用留在调用方 dispatcher 上。
  */
 object SpeedTester {
 
     private const val TAG = "SpeedTester"
     private const val MAX = Long.MAX_VALUE
-    /** 探活只取前 2KB，避免逐域拉整张图。 */
+
+    /** 探活只取前 2KB，避免逐域拉整张图/整个 JSON。 */
     private const val PROBE_BYTES = 2048L
+
+    /**
+     * 线路探活路径：分类接口首页（与抓包、[ApiService.classes] 一致）。
+     * `facility/deviceid/timestamp` 与 `devid/X-Token` 头由 [ManwaInterceptor] 追加，
+     * **不要在这里手写**，否则会出现重复 query 且时间戳与签名不一致。
+     */
+    private const val LINE_PROBE_PATH =
+        "/api/classes/index?page=1&gender=2&tag=&area=0&end=0&has_full=0&level=0&st=2&orderBy=0"
+
+    /**
+     * 图域探活路径：固定真实封面（抓包证实 `newmwtuyuan8.cc` 上返回
+     * 200 / image/jpeg / 13842 字节 / Accept-Ranges: bytes / 明文 JPEG）。
+     * 选它是因为所有图域都应当镜像同一批 `/static/upload*` 资源，且路径不随业务数据变化。
+     */
+    private const val PROBE_COVER_PATH = "/static/upload2/book/id/126811/cover_1.jpg"
 
     /** 防止启动测速与网络变化重测速并发重叠。 */
     private val running = AtomicBoolean(false)
@@ -39,33 +66,29 @@ object SpeedTester {
 
     // ==================== 请求构造 ====================
 
-    private fun lineRequest(lineUrl: String): Request {
-        val ts = System.currentTimeMillis().toString()
-        val url = "$lineUrl/api/index/index?facility=android&deviceid=${ManwaInterceptor.DEVICE_ID}&timestamp=$ts"
-        return Request.Builder()
-            .url(url)
+    /** 线路探活请求：只给业务接口基础 query，签名与通用参数交给 [ManwaInterceptor]。 */
+    private fun lineRequest(lineUrl: String): Request =
+        Request.Builder()
+            .url(lineUrl.trimEnd('/') + LINE_PROBE_PATH)
             .get()
-            .header("User-Agent", ManwaInterceptor.UA)
-            .header("devid", ts)
-            .header("X-Token", Crypto.md5Hex(ts + Crypto.XTOKEN_SALT))
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", ManwaInterceptor.ACCEPT_LANGUAGE)
-            .header("Origin", ManwaInterceptor.ORIGIN)
-            .header("Referer", ManwaInterceptor.REFERER)
-            .header("Connection", "keep-alive")
             .build()
-    }
 
     /**
-     * 图域探活请求：[probePath] 为真实封面相对路径时打该 URL（带 Range 与运行时同款图片头）；
-     * 无可用样本路径时退回根路径（仍按图片/非文本严格判负）。
+     * 图域探活请求：[probePath] 为封面/样本相对路径时打该 URL（带 Range 只取前 2KB），
+     * 传 null 表示根路径兜底（仍按图片/非文本严格判负）。
+     *
+     * Referer 用**固定 canonical 域** [ManwaInterceptor.REFERER]，不用"当前线路 origin"：
+     * 抓包证实官方 App 无论打哪个线路/图域，Origin/Referer 恒为 mseeowpm1.xyz，
+     * 防盗链白名单按此校验；用动态线路 origin（.pro/.cc）反而会被 403。
      */
     private fun imgProbeRequest(domain: String, probePath: String?): Request {
         val builder = Request.Builder()
             .get()
             .header("User-Agent", ManwaInterceptor.UA)
             .header("X-Requested-With", "zycomic.com")
-            .header("Referer", RouteManager.baseUrl.trimEnd('/'))
+            .header("Referer", ManwaInterceptor.REFERER)
             .header("Accept", "image/*,*/*;q=0.8")
             .header("Connection", "keep-alive")
         if (probePath != null) {
@@ -79,35 +102,98 @@ object SpeedTester {
 
     // ==================== 单次测量 ====================
 
-    /** 线路探活：仅 2xx 计成功（API 经 ManwaInterceptor 解密与否不影响状态码判定）。 */
+    /** 一次探活的结果：[delayMs] 为 [MAX] 表示判负；[httpCode] 为 -1 表示根本没拿到响应。 */
+    private data class ProbeOutcome(val delayMs: Long, val httpCode: Int)
+
+    /** 线路探活：2xx **且解密后 body 是 JSON 对象** 才计成功。 */
     private suspend fun measureLine(client: OkHttpClient, req: Request): Long =
-        measure(client, req, strictImage = false)
+        probe(client, req, requireJson = true, strictImage = false).delayMs
 
-    /** 图域探活：200/206 且为图片/非文本二进制才计成功。 */
-    private suspend fun measureImg(client: OkHttpClient, req: Request): Long =
-        measure(client, req, strictImage = true)
+    /**
+     * 图域探活（含回退）：固定封面 → 404 时才试取样路径 → 仍 404 才试根路径。
+     *
+     * 只在 **404（对象不存在）** 时回退：403/超时/HTML 正是"该网络下这个域不可达"的采集信号，
+     * 重试只会把要淘汰的域洗白。
+     */
+    private suspend fun measureImg(client: OkHttpClient, domain: String, samplePath: String?): Long {
+        val candidates = buildList<String?> {
+            add(PROBE_COVER_PATH)
+            samplePath?.takeIf { it != PROBE_COVER_PATH }?.let { add(it) }
+            add(null)
+        }
+        for ((i, path) in candidates.withIndex()) {
+            val outcome = probe(client, imgProbeRequest(domain, path), requireJson = false, strictImage = true)
+            if (outcome.delayMs < MAX) {
+                if (i > 0) Log.i(TAG, "img probe fallback ok domain=$domain path=${path ?: "/"}")
+                return outcome.delayMs
+            }
+            if (outcome.httpCode != 404) return MAX
+        }
+        return MAX
+    }
 
-    private suspend fun measure(client: OkHttpClient, req: Request, strictImage: Boolean): Long =
+    private suspend fun measureLineOnce(client: OkHttpClient, lineUrl: String): Long =
+        measureLine(client, lineRequest(lineUrl))
+
+    /**
+     * 通用单次探活。计时口径：从发起请求到**读完响应头 2KB**——线路探活时
+     * [ManwaInterceptor] 是应用拦截器，`execute()` 返回前已完成 gzip 解压与 AES 解密，
+     * 所以这个耗时天然包含"解密完成"，反映的是真实 API 链路。
+     */
+    private suspend fun probe(
+        client: OkHttpClient,
+        req: Request,
+        requireJson: Boolean,
+        strictImage: Boolean,
+    ): ProbeOutcome =
         withContext(Dispatchers.IO) {
             val start = System.nanoTime()
+            var code = -1
             try {
                 client.newCall(req).execute().use { resp ->
+                    code = resp.code
                     val contentType = resp.header("Content-Type").orEmpty().lowercase()
-                    val head = resp.body?.source()?.use { it.readByteArray(PROBE_BYTES) } ?: ByteArray(0)
-                    val ok = resp.code in 200..299 &&
-                        (!strictImage || isImageLike(contentType, head))
+                    val head = readHead(resp, PROBE_BYTES)
+                    val ok = code in 200..299 && when {
+                        requireJson -> isJsonLike(head)
+                        else -> !strictImage || isImageLike(contentType, head)
+                    }
                     if (ok) {
-                        (System.nanoTime() - start) / 1_000_000
+                        ProbeOutcome((System.nanoTime() - start) / 1_000_000, code)
                     } else {
-                        Log.d(TAG, "probe reject url=${req.url} code=${resp.code} ct=$contentType")
-                        MAX
+                        Log.d(
+                            TAG,
+                            "probe reject url=${req.url} code=$code ct=$contentType len=${head.size}",
+                        )
+                        ProbeOutcome(MAX, code)
                     }
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "probe fail url=${req.url} err=${e.message}")
-                MAX
+                // 状态码已拿到就如实带上（404 后能否回退取样路径依赖它）
+                Log.d(TAG, "probe fail url=${req.url} code=$code err=${e.message}")
+                ProbeOutcome(MAX, code)
             }
         }
+
+    /**
+     * 读取响应前 [maxBytes] 字节。
+     *
+     * 用 `Source.read(sink, n)` 而不是 `BufferedSource.readByteArray(n)`：后者要求**凑满** n 字节，
+     * 遇到比 n 短的响应（小封面、几十~上百字节的错误 JSON）会抛 EOFException，
+     * 把"其实成功/确实是 404"误判成"网络异常"，进而丢掉图域探活的 404 回退逻辑。
+     */
+    private fun readHead(resp: okhttp3.Response, maxBytes: Long): ByteArray =
+        runCatching {
+            resp.body?.source()?.use { src ->
+                val buf = Buffer()
+                src.read(buf, maxBytes)
+                buf.readByteArray()
+            } ?: ByteArray(0)
+        }.getOrDefault(ByteArray(0))
+
+    /** 解密后的线路响应必须是 JSON 对象（被重置/未鉴权/假 200 的 HTML 或空 body 一律判负）。 */
+    private fun isJsonLike(head: ByteArray): Boolean =
+        String(head, Charsets.UTF_8).trimStart().startsWith("{")
 
     /**
      * 判断探活响应是否像图片：图片 content-type / 图片魔数直接通过；
@@ -137,10 +223,10 @@ object SpeedTester {
         return false
     }
 
-    // ==================== 真实探活样本路径 ====================
+    // ==================== 真实探活样本路径（固定封面 404 时的兜底）====================
 
     /**
-     * 获取探活图片相对路径：先用当前线路调首页 index 取一张封面（picx/pic），
+     * 获取兜底用封面相对路径：先用当前线路调首页 index 取一张封面（picx/pic），
      * 成功则持久化；失败回退上次缓存路径，再没有返回 null（探活退化为根路径严格判负）。
      */
     private suspend fun obtainProbePath(): String? {
@@ -172,30 +258,51 @@ object SpeedTester {
 
     // ==================== 对外：全量/单点 ====================
 
-    suspend fun testAllLines(): Map<Int, Long> = coroutineScope {
-        val client = NetworkModule.newSpeedTestClient()
-        RouteManager.lineHosts.mapIndexed { index, lineUrl ->
-            async { index to measureLine(client, lineRequest(lineUrl)) }
-        }.awaitAll().toMap()
+    /** 线路全量探活（只返回延迟，不应用结果）。 */
+    suspend fun testAllLines(): Map<Int, Long> = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val client = NetworkModule.newLineProbeClient()
+            try {
+                RouteManager.lineHosts.mapIndexed { index, lineUrl ->
+                    async { index to measureLineOnce(client, lineUrl) }
+                }.awaitAll().toMap()
+            } finally {
+                client.releaseProbe()
+            }
+        }
     }
 
-    /** 图域全量探活（ReaderActivity 手动入口用）；样本路径取缓存，无则根路径严格判负。 */
-    suspend fun testAllImgHosts(): Map<Int, Long> = coroutineScope {
-        val client = NetworkModule.newSpeedTestClient()
-        val probePath = RouteManager.loadProbeImgPath()
-        RouteManager.imgDomains.mapIndexed { index, domain ->
-            async { index to measureImg(client, imgProbeRequest(domain, probePath)) }
-        }.awaitAll().toMap()
+    /** 图域全量探活（ReaderActivity 手动入口用）；样本路径取缓存，作固定封面 404 时的兜底。 */
+    suspend fun testAllImgHosts(): Map<Int, Long> = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val client = NetworkModule.newSpeedTestClient()
+            try {
+                val samplePath = RouteManager.loadProbeImgPath()
+                RouteManager.imgDomains.mapIndexed { index, domain ->
+                    async { index to measureImg(client, domain, samplePath) }
+                }.awaitAll().toMap()
+            } finally {
+                client.releaseProbe()
+            }
+        }
     }
 
-    suspend fun testSingleImgHost(domain: String): Long {
+    suspend fun testSingleImgHost(domain: String): Long = withContext(Dispatchers.IO) {
         val client = NetworkModule.newSpeedTestClient()
-        return measureImg(client, imgProbeRequest(domain, RouteManager.loadProbeImgPath()))
+        try {
+            measureImg(client, domain, RouteManager.loadProbeImgPath())
+        } finally {
+            client.releaseProbe()
+        }
     }
 
-    suspend fun testSingleLine(lineUrl: String): Long {
-        val client = NetworkModule.newSpeedTestClient()
-        return measureLine(client, lineRequest(lineUrl))
+    suspend fun testSingleLine(lineUrl: String): Long = withContext(Dispatchers.IO) {
+        val client = NetworkModule.newLineProbeClient()
+        try {
+            measureLineOnce(client, lineUrl)
+        } finally {
+            client.releaseProbe()
+        }
     }
 
     fun selectFastestLine(delays: Map<Int, Long>): Int =
@@ -205,73 +312,95 @@ object SpeedTester {
 
     /**
      * 两阶段测速并应用结果：
-     * 1) 线路探活（与运行时同传输策略）→ 选最快线路并重建 Retrofit；
-     * 2) 取首页真实封面路径 → 图域探活 → 选最快图域；
+     * 1) 线路探活（走签名解密的分类接口）→ 选最快线路并重建 Retrofit；
+     * 2) 取兜底封面路径 → 图域探活（固定封面）→ 选最快图域；
      * 3) 成功才替换当前线路/图域；全部失败保留现状。
+     *
+     * 全程在 IO：内部的 [NetworkModule.rebuild] 是 suspend 且固定在 IO 串行执行，
+     * 取样本与写 prefs 也都在 IO，任何调用方（含主线程 `LaunchedEffect`）都不会触发
+     * `NetworkOnMainThreadException`。
      *
      * @param onProgress 每出一条结果回调一次（线路 Map、图域 Map 的不可变快照），供 UI 逐条刷新。
      * @return (最快线路 index, 最快图域 index)，失败项为 -1。已有测速在跑时直接返回 (-1,-1)。
      */
     suspend fun runAndApply(
         onProgress: ((line: Map<Int, Long>, img: Map<Int, Long>) -> Unit)? = null,
-    ): Pair<Int, Int> = coroutineScope {
-        if (!running.compareAndSet(false, true)) {
-            Log.w(TAG, "runAndApply skipped: another speed test is running")
-            return@coroutineScope (-1 to -1)
-        }
-        try {
-            val client = NetworkModule.newSpeedTestClient()
-
-            // 阶段 1：线路
-            val lineAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
-            val lineJobs = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
-                async {
-                    val v = measureLine(client, lineRequest(lineUrl))
-                    lineAcc[index] = v
-                    onProgress?.invoke(lineAcc.toSortedMap(), emptyMap())
-                    index to v
+    ): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        coroutineScope {
+            if (!running.compareAndSet(false, true)) {
+                Log.w(TAG, "runAndApply skipped: another speed test is running")
+                return@coroutineScope (-1 to -1)
+            }
+            val lineClient = NetworkModule.newLineProbeClient()
+            val imgClient = NetworkModule.newSpeedTestClient()
+            try {
+                // 阶段 1：线路（签名+解密全链路的分类接口）
+                val lineAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+                val lineJobs = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
+                    async {
+                        val v = measureLineOnce(lineClient, lineUrl)
+                        lineAcc[index] = v
+                        onProgress?.invoke(lineAcc.toSortedMap(), emptyMap())
+                        index to v
+                    }
                 }
-            }
-            val lines = lineJobs.awaitAll().toMap()
-            val bestLine = lines.filterValues { it < MAX }.minByOrNull { it.value }?.key
-            if (bestLine != null) {
-                RouteManager.setLine(bestLine)
-                RouteManager.saveLastFastestLine(bestLine)
-                NetworkModule.rebuild() // 让首页 index 走最快线路
-            }
-            Log.i(TAG, "line test done, best=$bestLine")
-
-            // 阶段 2：真实封面样本路径
-            val probePath = obtainProbePath()
-            Log.i(TAG, "img probe sample path=$probePath")
-
-            // 阶段 3：图域
-            val imgAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
-            val imgJobs = RouteManager.imgDomains.mapIndexed { index, domain ->
-                async {
-                    val v = measureImg(client, imgProbeRequest(domain, probePath))
-                    imgAcc[index] = v
-                    onProgress?.invoke(lines, imgAcc.toSortedMap())
-                    index to v
+                val lines = lineJobs.awaitAll().toMap()
+                val bestLine = lines.filterValues { it < MAX }.minByOrNull { it.value }?.key
+                if (bestLine != null) {
+                    RouteManager.setLine(bestLine)
+                    RouteManager.saveLastFastestLine(bestLine)
+                    NetworkModule.rebuild() // 让阶段 2 取样本走最快线路
                 }
-            }
-            val imgs = imgJobs.awaitAll().toMap()
+                Log.i(TAG, "line test done, best=$bestLine")
 
-            // 结果一次性写入，fastestImgDomain 据此派生
-            RouteManager.setLastDelays(lines, imgs)
-            val bestImg = imgs.filterValues { it < MAX }.minByOrNull { it.value }?.key
-            if (bestImg != null && bestImg != RouteManager.imgIndex) {
-                RouteManager.setImgHost(bestImg)
-            }
-            if (bestLine != null || bestImg != null) NetworkModule.rebuild()
-            RouteManager.markSpeedTestToday()
+                // 阶段 2：兜底样本路径（固定封面 404 时才用到）
+                val samplePath = obtainProbePath()
+                Log.i(TAG, "img probe sample path=$samplePath")
 
-            lastRunAt = System.currentTimeMillis()
-            lastRunDirectStrategy = NetworkModule.shouldUseDirectStrategy()
-            Log.i(TAG, "runAndApply done, bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
-            (bestLine ?: -1) to (bestImg ?: -1)
-        } finally {
-            running.set(false)
+                // 阶段 3：图域（固定真实封面，404 才回退）
+                val imgAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+                val imgJobs = RouteManager.imgDomains.mapIndexed { index, domain ->
+                    async {
+                        val v = measureImg(imgClient, domain, samplePath)
+                        imgAcc[index] = v
+                        onProgress?.invoke(lines, imgAcc.toSortedMap())
+                        index to v
+                    }
+                }
+                val imgs = imgJobs.awaitAll().toMap()
+
+                // 结果一次性写入，fastestImgDomain 据此派生
+                RouteManager.setLastDelays(lines, imgs)
+                val bestImg = imgs.filterValues { it < MAX }.minByOrNull { it.value }?.key
+                if (bestImg != null && bestImg != RouteManager.imgIndex) {
+                    RouteManager.setImgHost(bestImg)
+                }
+                if (bestLine != null || bestImg != null) NetworkModule.rebuild()
+                RouteManager.markSpeedTestToday()
+
+                lastRunAt = System.currentTimeMillis()
+                lastRunDirectStrategy = NetworkModule.shouldUseDirectStrategy()
+                Log.i(TAG, "runAndApply done, bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
+                (bestLine ?: -1) to (bestImg ?: -1)
+            } finally {
+                running.set(false)
+                lineClient.releaseProbe()
+                imgClient.releaseProbe()
+            }
         }
+    }
+
+    /**
+     * 探活 client 是"一次性"的（每次测速新建，保证传输策略与当时网络一致）。
+     * 用完只驱逐**自己那份**连接池（每个探活 client 都在 NetworkModule 里 new 了独立
+     * ConnectionPool），尽早释放占着旧网络路径的 socket。
+     *
+     * 故意不动 `dispatcher.executorService`：OkHttp 的 Dispatcher 在无参构造时共享同一个
+     * 懒加载默认线程池，运行时 apiClient/imageClient 也在用，关掉它会让后续 Retrofit
+     * 异步调用直接 RejectedExecutionException。该线程池核心线程数为 0、60s 空闲自动回收，
+     * 不关也不会常驻泄漏。
+     */
+    private fun OkHttpClient.releaseProbe() {
+        runCatching { connectionPool.evictAll() }
     }
 }

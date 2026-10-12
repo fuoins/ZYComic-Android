@@ -181,14 +181,17 @@ class SettingsViewModel {
         }
         RouteManager.setLine(index)
         currentLineIndex.value = index
-        com.zycomic.app.net.NetworkModule.rebuild()
-        com.zycomic.app.net.NetworkModule.cookieJar.syncToAllLines()
         toast.value = "已切换到线路 ${index + 1}"
-        // 切换线路后验证登录态（cookie 可能在新线路失效）
+        // rebuild() 内部要关 socket（evictAll/cancelAll），属网络操作：必须在 IO，
+        // 直接在主线程调会抛 NetworkOnMainThreadException。登录态校验一并放同一个 IO 块，
+        // 保证"网络已按新线路重建"发生在校验之前。
         scope.launch {
-            try {
-                UserRepository.verifyLogin()
-            } catch (_: Exception) {}
+            withContext(Dispatchers.IO) {
+                runCatching { NetworkModule.rebuild() }
+                    .onFailure { android.util.Log.e("SettingsVM", "rebuild after selectLine failed", it) }
+                runCatching { NetworkModule.cookieJar.syncToAllLines() }
+                runCatching { UserRepository.verifyLogin() }
+            }
         }
     }
 

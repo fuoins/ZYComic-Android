@@ -40,6 +40,9 @@ object RouteManager {
         "newmwtuyuan3.cc",
         "newmwtuyuan4.cc",
         "newmwtuyuan5.cc",
+        // 官方当前在用的新图域（抓包证实其上有 /static/upload2/... 真实封面），
+        // 列表缺失会少一个可达/更快的域；能否选中由探活实测决定。
+        "newmwtuyuan8.cc",
         "newmwimserv1.cc",
         "newmwimserv2.cc",
         "newmwimserv3.cc",
