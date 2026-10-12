@@ -3,8 +3,6 @@ package eu.kanade.tachiyomi.ui.reader
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.assist.AssistContent
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -97,9 +95,6 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.main.MainActivity
-import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibraryFirst
-import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
-import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
 import eu.kanade.tachiyomi.ui.reader.loader.HttpPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -316,12 +311,6 @@ class ReaderActivity : BaseActivity() {
                     is ReaderViewModel.Event.ShareImage -> {
                         onShareImageResult(event.uri, event.page /* SY --> */, event.secondPage /* SY <-- */)
                     }
-                    is ReaderViewModel.Event.CopyImage -> {
-                        onCopyImageResult(event.uri)
-                    }
-                    is ReaderViewModel.Event.SetCoverResult -> {
-                        onSetAsCoverResult(event.result)
-                    }
                 }
             }
             .launchIn(lifecycleScope)
@@ -435,9 +424,7 @@ class ReaderActivity : BaseActivity() {
                 is ReaderViewModel.Dialog.PageActions -> {
                     ReaderPageActionsDialog(
                         onDismissRequest = onDismissRequest,
-                        onSetAsCover = viewModel::setAsCover,
-                        onShare = viewModel::shareImage,
-                        // SY -->
+                        onShare = { extra -> viewModel.shareImage(extra) },
                         onSave = { extra ->
                             // KMK -->
                             if (externalStoragePermissionNotGranted) {
@@ -447,7 +434,7 @@ class ReaderActivity : BaseActivity() {
                                 viewModel.saveImage(extra)
                             }
                         },
-                        onShareCombined = viewModel::shareImages,
+                        onShareCombined = { viewModel.shareImages() },
                         onSaveCombined = {
                             // KMK -->
                             if (externalStoragePermissionNotGranted) {
@@ -1454,12 +1441,6 @@ class ReaderActivity : BaseActivity() {
         startActivity(intent)
     }
 
-    private fun onCopyImageResult(uri: Uri) {
-        val clipboardManager = applicationContext.getSystemService<ClipboardManager>() ?: return
-        val clipData = ClipData.newUri(applicationContext.contentResolver, "", uri)
-        clipboardManager.setPrimaryClip(clipData)
-    }
-
     /**
      * Called from the presenter when a page is saved or fails. It shows a message or logs the
      * event depending on the [result].
@@ -1473,20 +1454,6 @@ class ReaderActivity : BaseActivity() {
                 logcat(LogPriority.ERROR, result.error)
             }
         }
-    }
-
-    /**
-     * Called from the presenter when a page is set as cover or fails. It shows a different message
-     * depending on the [result].
-     */
-    private fun onSetAsCoverResult(result: ReaderViewModel.SetAsCoverResult) {
-        toast(
-            when (result) {
-                Success -> MR.strings.cover_updated
-                AddToLibraryFirst -> MR.strings.notification_first_add_to_library
-                Error -> MR.strings.notification_cover_update_failed
-            },
-        )
     }
 
     /**

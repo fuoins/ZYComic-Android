@@ -1306,7 +1306,6 @@ class ReaderViewModel @JvmOverloads constructor(
      * image will be kept so it won't be taking lots of internal disk space.
      */
     fun shareImage(
-        copyToClipboard: Boolean,
         // SY -->
         useExtraPage: Boolean,
         // SY <--
@@ -1336,7 +1335,7 @@ class ReaderViewModel @JvmOverloads constructor(
                         location = Location.Cache,
                     ),
                 )
-                eventChannel.send(if (copyToClipboard) Event.CopyImage(uri) else Event.ShareImage(uri, page))
+                eventChannel.send(Event.ShareImage(uri, page))
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
@@ -1344,7 +1343,7 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     // SY -->
-    fun shareImages(copyToClipboard: Boolean) {
+    fun shareImages() {
         val (firstPage, secondPage) = (state.value.dialog as? Dialog.PageActions ?: return)
         val viewer = state.value.viewer as? PagerViewer ?: return
         val isLTR = (viewer !is R2LPagerViewer) xor (viewer.config.invertDoublePages)
@@ -1368,49 +1367,13 @@ class ReaderViewModel @JvmOverloads constructor(
                     location = Location.Cache,
                     manga = manga,
                 )
-                eventChannel.send(if (copyToClipboard) Event.CopyImage(uri) else Event.ShareImage(uri, firstPage, secondPage))
+                eventChannel.send(Event.ShareImage(uri, firstPage, secondPage))
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
         }
     }
     // SY <--
-
-    /**
-     * Sets the image of the selected page as cover and notifies the UI of the result.
-     */
-    fun setAsCover(useExtraPage: Boolean) {
-        // SY -->
-        val page = if (useExtraPage) {
-            (state.value.dialog as? Dialog.PageActions)?.extraPage
-        } else {
-            (state.value.dialog as? Dialog.PageActions)?.page
-        }
-        // SY <--
-        if (page?.status != Page.State.Ready) return
-        val manga = manga ?: return
-        val stream = page.stream ?: return
-
-        viewModelScope.launchNonCancellable {
-            val result = try {
-                manga.editCover(Injekt.get(), stream())
-                if (manga.isLocal() || manga.favorite) {
-                    SetAsCoverResult.Success
-                } else {
-                    SetAsCoverResult.AddToLibraryFirst
-                }
-            } catch (_: Exception) {
-                SetAsCoverResult.Error
-            }
-            eventChannel.send(Event.SetCoverResult(result))
-        }
-    }
-
-    enum class SetAsCoverResult {
-        Success,
-        AddToLibraryFirst,
-        Error,
-    }
 
     sealed interface SaveImageResult {
         class Success(val uri: Uri) : SaveImageResult
@@ -1531,7 +1494,6 @@ class ReaderViewModel @JvmOverloads constructor(
         data object ReloadViewerChapters : Event
         data object PageChanged : Event
         data class SetOrientation(val orientation: Int) : Event
-        data class SetCoverResult(val result: SetAsCoverResult) : Event
 
         data class SavedImage(val result: SaveImageResult) : Event
         data class ShareImage(
@@ -1541,6 +1503,5 @@ class ReaderViewModel @JvmOverloads constructor(
             val secondPage: ReaderPage? = null,
             // SY <--
         ) : Event
-        data class CopyImage(val uri: Uri) : Event
     }
 }
