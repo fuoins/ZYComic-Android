@@ -4,26 +4,32 @@ import java.io.IOException
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
+import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
 
 /**
- * 图片拦截器：加请求头 + 加密漫画图片解密 + 加密图片磁盘缓存。
+ * 图片拦截器：加请求头（含 Referer 防盗链）+ 加密漫画图片解密 + 加密图片磁盘缓存。
  *
- * 健壮性（R1/R2）：
- * - 非 2xx 响应原样透传（真实状态码/Content-Type/body），不伪装成 200/image/webp、不落缓存；
+ * 健壮性：
+ * - 非 2xx 响应不伪装成图片、不落缓存；最终全部尝试失败时返回真实状态码（如 403），
+ *   让阅读器显示准确错误；
  * - 只有校验为有效图片（魔数匹配）才写入 ImageCacheManager；
  * - 缓存命中后解密，若仍非有效图片视为坏缓存，删除该缓存并按未命中重新走网络；
- * - 解密后非图片 / 空响应 / 解密异常，直接抛 IOException，让 Coil 走"加载失败+重试"，
- *   杜绝 "Failed to initialize decoder" 技术异常。
+ * - 失败兜底（对标官方 switchImageHost）：网络类错误（reset/超时/连接失败）先同域重试 1 次，
+ *   之后按图域列表最多换 2 个未冷却图域重试；HTTP 4xx/5xx 或非图片内容直接换域；
+ *   失败图域进入短期冷却（[RouteManager.markImgDomainFailed]）。封面经统一图片栈同样受益。
  */
 class ImageInterceptor : Interceptor {
 
     companion object {
         private const val HEADER_X_REQUESTED_WITH = "X-Requested-With"
         private const val VALUE_X_REQUESTED_WITH = "zycomic.com"
+        /** 同域重试之后，最多换几个图域。 */
+        private const val MAX_ROTATE_DOMAINS = 2
     }
 
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -52,40 +58,121 @@ class ImageInterceptor : Interceptor {
             .url(fetchUrl)
             .header("User-Agent", ManwaInterceptor.UA)
             .header(HEADER_X_REQUESTED_WITH, VALUE_X_REQUESTED_WITH)
+            // 防盗链 Referer：动态当前线路 origin（与官方 App 一致）
+            .header("Referer", RouteManager.baseUrl.trimEnd('/'))
             .header("Accept", "*/*")
             .header("Connection", "keep-alive")
             .build()
 
-        val response = chain.proceed(imgReq)
+        var request = imgReq
+        var sameHostRetried = false
+        var rotated = 0
+        var lastErrorCode = -1
+        var lastError: IOException? = null
 
-        // R1：非 2xx 原样透传（真实状态码/Content-Type/body），不包装成图片、不落缓存
-        if (!response.isSuccessful) return response
+        while (true) {
+            val host = request.url.host
+            val outcome = proceedOnce(chain, request, originalUrl)
+            if (outcome is Outcome.Success) {
+                return buildResponse(original, outcome.bytes)
+            }
 
-        val body = response.body ?: return response
+            val fail = outcome as Outcome.Fail
+            // 记录失败图域冷却（HTTP 失败 / 非图片 / 网络错误都记）
+            RouteManager.markImgDomainFailed(host)
+            when (fail) {
+                is Outcome.Fail.Http -> lastErrorCode = fail.code
+                is Outcome.Fail.IO -> lastError = fail.error
+            }
+
+            // 决定下一次尝试的主机：
+            // 网络类错误先同域重试 1 次；HTTP/内容错误或同域已重试 → 换未冷却图域（最多 2 个）
+            val nextHost: String? = when {
+                fail is Outcome.Fail.IO && !sameHostRetried -> {
+                    sameHostRetried = true
+                    host // 同域重试
+                }
+                rotated < MAX_ROTATE_DOMAINS -> {
+                    val cand = RouteManager.nextAvailableImgDomain(host)
+                    if (cand != null) {
+                        rotated++
+                        sameHostRetried = true
+                    }
+                    cand
+                }
+                else -> null
+            }
+
+            if (nextHost == null) break
+            if (!nextHost.equals(host, ignoreCase = true)) {
+                request = replaceHost(request, nextHost)
+            }
+        }
+
+        // 全部尝试失败：有真实 HTTP 状态码则透传（阅读器据此显示准确的 403 等），否则抛网络异常
+        if (lastErrorCode > 0) return errorResponse(original, lastErrorCode)
+        throw lastError ?: IOException("图片加载失败：$originalUrl")
+    }
+
+    /** 单次尝试：成功返回解密后的图片字节；任何失败归为 Http/IO。 */
+    private fun proceedOnce(
+        chain: Interceptor.Chain,
+        request: Request,
+        originalUrl: String,
+    ): Outcome {
+        val response = try {
+            chain.proceed(request)
+        } catch (io: IOException) {
+            return Outcome.Fail.IO(io)
+        }
+
+        // 非 2xx：不消费/伪装，记录状态码后交上层换域
+        if (!response.isSuccessful) {
+            val code = response.code
+            response.close()
+            return Outcome.Fail.Http(code)
+        }
+
+        val body = response.body ?: run {
+            response.close()
+            return Outcome.Fail.IO(IOException("图片响应为空"))
+        }
         val raw = try {
             body.source().readByteArray()
         } catch (_: Exception) {
-            throw IOException("读取图片响应失败")
+            response.close()
+            return Outcome.Fail.IO(IOException("读取图片响应失败"))
         }
 
-        if (raw.isEmpty()) throw IOException("图片响应为空")
+        if (raw.isEmpty()) {
+            response.close()
+            return Outcome.Fail.IO(IOException("图片响应为空"))
+        }
 
         val out = decryptIfNeeded(raw, originalUrl)
         if (!isImageMagic(out)) {
-            // 解密后仍非图片：原始响应其实是错误页/拦截页，走加载失败，绝不落缓存
-            throw IOException("响应不是有效图片(HTTP ${response.code})")
+            response.close()
+            // 原始响应其实是错误页/拦截页
+            return Outcome.Fail.Http(response.code)
         }
 
-        // R2：只有校验为有效图片才写加密缓存
+        response.close()
+
+        // 只有校验为有效图片才写加密缓存
         try {
             ImageCacheManager.putStream(originalUrl).use { it.write(raw) }
             ImageCacheManager.commit(originalUrl)
         } catch (_: Exception) {}
 
-        return buildResponse(original, out)
+        return Outcome.Success(out)
     }
 
-    private fun buildResponse(request: okhttp3.Request, bytes: ByteArray): Response {
+    private fun replaceHost(request: Request, host: String): Request {
+        val newUrl = request.url.toString().replace(Regex("https?://[^/]+"), "https://$host")
+        return request.newBuilder().url(newUrl).build()
+    }
+
+    private fun buildResponse(request: Request, bytes: ByteArray): Response {
         val body = object : ResponseBody() {
             override fun contentType() = "image/webp".toMediaType()
             override fun contentLength() = bytes.size.toLong()
@@ -96,6 +183,15 @@ class ImageInterceptor : Interceptor {
             .protocol(Protocol.HTTP_1_1)
             .code(200).message("OK")
             .body(body).build()
+    }
+
+    private fun errorResponse(request: Request, code: Int): Response {
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(code).message("img fail")
+            .body(ByteArray(0).toResponseBody(null))
+            .build()
     }
 
     /** 已加密则解密；原始即图片则原样返回。调用方负责用 [isImageMagic] 校验结果。 */
@@ -119,5 +215,13 @@ class ImageInterceptor : Interceptor {
         if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
         if (bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x38.toByte()) return true
         return false
+    }
+
+    private sealed class Outcome {
+        class Success(val bytes: ByteArray) : Outcome()
+        sealed class Fail : Outcome() {
+            class Http(val code: Int) : Fail()
+            class IO(val error: IOException) : Fail()
+        }
     }
 }

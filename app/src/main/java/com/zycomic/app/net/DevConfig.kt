@@ -61,18 +61,19 @@ object DevConfig {
     }
 
     /**
-     * "VPN 加速"开关，默认开启。
-     * - ON：检测到系统 VPN 时 RuleDns 回退系统 DNS、SniRemoving 不移除 SNI；无 VPN 时保持国内直连。
-     * - OFF：无论是否 VPN，始终国内直连（硬编码 IP + 去 SNI），供抓包使用。
+     * 「自动跟随系统 VPN」开关，默认开启（持久化 key 沿用 vpn_accel_enabled）。
+     * - ON（默认）：检测到系统 VPN 时走 VPN 路径（系统 DNS + 保留 SNI + VPN 出口）；
+     *   未检测到 VPN 时走直连穿透（RuleDns 硬编码 IP + 去 SNI）。
+     * - OFF：不自动跟随，**强制直连**，即使开着系统 VPN 也保持直连穿透（硬编码 IP + 去 SNI），用于抓包调试。
      */
-    fun isVpnAccelEnabled(): Boolean {
+    fun isFollowSystemVpnEnabled(): Boolean {
         val ctx = context ?: return true
         return ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getBoolean(KEY_VPN_ACCEL_ENABLED, true)
     }
 
-    /** 设置"VPN 加速"开关。 */
-    fun setVpnAccelEnabled(enabled: Boolean) {
+    /** 设置「自动跟随系统 VPN」开关。 */
+    fun setFollowSystemVpnEnabled(enabled: Boolean) {
         context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             ?.edit()
             ?.putBoolean(KEY_VPN_ACCEL_ENABLED, enabled)
@@ -360,6 +361,16 @@ object DevConfig {
             Log.i(TAG, "Coil image caches cleared (memory + disk)")
         } catch (e: Exception) {
             Log.w(TAG, "clearImageCaches failed: ${e.message}")
+        }
+    }
+
+    /** 仅清除 Coil 内存缓存（网络切换重建图片栈时用；磁盘内均为成功图，无需删除）。 */
+    fun clearImageMemoryCache() {
+        try {
+            val ctx = context ?: return
+            coil3.SingletonImageLoader.get(ctx).memoryCache?.clear()
+        } catch (e: Exception) {
+            Log.w(TAG, "clearImageMemoryCache failed: ${e.message}")
         }
     }
 }

@@ -1,7 +1,6 @@
 package com.zycomic.app.net
 
 import java.net.InetAddress
-import java.net.Proxy
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -114,22 +113,33 @@ object NetworkModule {
             .build()
     }
 
-    private fun OkHttpClient.Builder.applyNetworkConfig(withFailover: Boolean = false): OkHttpClient.Builder {
+    /**
+     * 传输层策略（与拦截器无关）：cookieJar + trust-all，以及按当前网络决定的 DNS/SNI。
+     * 运行时 client 与测速 client 必须共用本方法，保证"测速走的路径 = 运行时图片走的路径"。
+     * - 直连策略：RuleDns 硬编码 IP 直连 + SniRemoving 去 SNI；
+     * - 跟随 VPN（系统 VPN 开且开关 ON）：系统 DNS + 保留 SNI，流量走 VPN 隧道。
+     */
+    private fun OkHttpClient.Builder.applyTransportStrategy(): OkHttpClient.Builder {
         cookieJar(cookieJar)
-        if (withFailover) addInterceptor(LineFailoverInterceptor())
-        addInterceptor(manwaInterceptor)
-        addInterceptor(imageInterceptor)
         if (shouldUseDirectStrategy()) {
-            // 国内直连：RuleDns 硬编码 IP 直连 + SniRemoving 去 SNI
+            // 国内直连 / 强制直连：RuleDns 硬编码 IP 直连 + SniRemoving 去 SNI
             val baseSslContext = SSLContext.getInstance("TLS").apply {
                 init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
             }
             dns(RuleDns)
             sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
         } else {
-            // VPN 友好：系统 DNS + 保留 SNI（trust-all 已在 enableTrustAll 中设置默认 SSL）
+            // 跟随系统 VPN：系统 DNS + 保留 SNI（trust-all 已在 enableTrustAll 中设置默认 SSL）
             dns(Dns.SYSTEM)
         }
+        return this
+    }
+
+    private fun OkHttpClient.Builder.applyNetworkConfig(withFailover: Boolean = false): OkHttpClient.Builder {
+        applyTransportStrategy()
+        if (withFailover) addInterceptor(LineFailoverInterceptor())
+        addInterceptor(manwaInterceptor)
+        addInterceptor(imageInterceptor)
         return this
     }
 
@@ -178,21 +188,23 @@ object NetworkModule {
     }
 
     /**
-     * 是否走"国内直连策略"（RuleDns 硬编码 IP + SniRemoving 去 SNI）。
-     * - VPN 加速开关关闭 → 始终直连（抓包模式）。
-     * - 开关开启 + 检测到系统 VPN → 不走直连（系统 DNS + 保留 SNI）。
+     * 是否走"直连策略"（RuleDns 硬编码 IP + SniRemoving 去 SNI）。
+     * - 「自动跟随系统 VPN」开关关闭（强制直连/抓包模式）→ 始终直连，即使系统 VPN 开着；
+     * - 开关开启 + 检测到系统 VPN → 不走直连（系统 DNS + 保留 SNI + VPN 出口）；
      * - 开关开启 + 无 VPN → 直连。
      */
     fun shouldUseDirectStrategy(): Boolean {
-        if (!DevConfig.isVpnAccelEnabled()) return true
+        if (!DevConfig.isFollowSystemVpnEnabled()) return true
         return !isSystemVpnActive()
     }
 
     /**
-     * 重建网络客户端：apiClient/imageClient 都先 cancelAll + evictAll，再重建，
-     * 并清空章节 URL 缓存、重建 Retrofit。VPN 加速开关变化 / VPN 或网络变化后调用。
+     * 重建网络客户端：apiClient/imageClient 都先 cancelAll + evictAll，再按当前生效策略重建，
+     * 并重建 Retrofit、清空章节缓存、重绑封面 Coil 工厂、清 Coil 内存缓存。
+     * 「自动跟随系统 VPN」开关变化 / VPN 或网络变化导致策略翻转时调用。
      */
-    fun rebuildClient() {
+    fun rebuildClient(reason: String = "") {
+        Log.i("NetworkModule", "rebuildClient: reason=$reason, direct=${shouldUseDirectStrategy()}")
         _apiClient?.dispatcher?.cancelAll()
         _apiClient?.connectionPool?.evictAll()
         _imageClient?.dispatcher?.cancelAll()
@@ -202,34 +214,49 @@ object NetworkModule {
         _retrofit = null
         _api = null
         buildRetrofit()
-        com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+        runCatching { com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear() }
+        // 封面 Coil 单例改委托当前 imageClient：重建后必须重绑，否则封面仍用旧网络栈
+        CoverCallFactory.rebind()
+        DevConfig.clearImageMemoryCache()
         lastDirectStrategy = shouldUseDirectStrategy()
-        Log.i("NetworkModule", "client rebuilt, directStrategy=$lastDirectStrategy")
     }
 
     /**
-     * VPN 开关 / 网络变化回调：仅当"是否直连策略"发生变化时才重建 client，避免频繁重建。
+     * 网络变化入口（App 默认网络回调防抖后调用、手动切换开关时也调用）。
+     * 无论策略是否翻转，都先 cancelAll + evictAll 丢弃可能绑在旧网络（如已关闭的 VPN 接口）上的连接；
+     * 仅当"是否直连策略"翻转时才整体重建 client；策略不变（含强制直连模式下切换 VPN）时只清连接池与封面内存缓存。
      */
-    fun onVpnOrNetworkChanged() {
+    fun onVpnOrNetworkChanged(reason: String = "network changed") {
         val now = shouldUseDirectStrategy()
-        if (lastDirectStrategy == now) return
-        lastDirectStrategy = now
-        rebuildClient()
+        // 无条件清理在途/空闲连接，根治 VPN 拆除后的 Connection reset
+        _apiClient?.dispatcher?.cancelAll()
+        _apiClient?.connectionPool?.evictAll()
+        _imageClient?.dispatcher?.cancelAll()
+        _imageClient?.connectionPool?.evictAll()
+        if (lastDirectStrategy != now) {
+            lastDirectStrategy = now
+            rebuildClient(reason)
+        } else {
+            // 策略不变：封面委托与 imageClient 共享连接池（已 evict），仅清内存缓存
+            DevConfig.clearImageMemoryCache()
+        }
     }
 
-    /** 测速专用 client：NO_PROXY + trust-all + RuleDns + SNI 移除 + 3s 超时。 */
+    /**
+     * 测速专用 client：传输策略（cookieJar/trust-all/DNS/SNI）与当前网络下的运行时 client 完全一致，
+     * 仅超时收紧到 3s、不挂业务拦截器（线路探活自带签名头，图域探活自带与图片运行时一致的头）。
+     * 不再写死 NO_PROXY/RuleDns/去 SNI——VPN 开时测速即走 VPN 路径，保证测速结果可用于运行时。
+     */
     fun newSpeedTestClient(): OkHttpClient {
-        val sslContext = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-        }
         return OkHttpClient.Builder()
-            .proxy(Proxy.NO_PROXY)
             .connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(3, TimeUnit.SECONDS)
+            .writeTimeout(3, TimeUnit.SECONDS)
             .callTimeout(3, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(8, 1, TimeUnit.MINUTES))
+            .retryOnConnectionFailure(true)
             .enableTrustAll()
-            .dns(RuleDns)
-            .sslSocketFactory(SniRemovingSocketFactory(sslContext.socketFactory), trustAllManager)
+            .applyTransportStrategy()
             .build()
     }
 

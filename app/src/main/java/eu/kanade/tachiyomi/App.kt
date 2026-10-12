@@ -60,7 +60,6 @@ import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.PreferenceModule
 import eu.kanade.tachiyomi.di.SYPreferenceModule
-import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
 import eu.kanade.tachiyomi.util.CrashLogUtil
 import eu.kanade.tachiyomi.util.system.DeviceUtil
@@ -285,32 +284,70 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         initializeMigrator()
     }
 
+    private val networkScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO,
+    )
+    private val networkHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** 最近一次已处理的网络身份签名，用于去重连发回调。 */
+    @Volatile
+    private var lastNetworkSig: String? = null
+
+    private val networkRetestRunnable = Runnable {
+        networkScope.launch {
+            try {
+                // 1) 按当前生效策略清理连接池、必要时重建 client（强制直连模式下策略不翻转，仅清池）
+                com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged("default network changed")
+                // 2) 30s 内已在相同策略下测速成功则不重复测（避免冷启动回调与启动测速重复）
+                val fresh = System.currentTimeMillis() - com.zycomic.app.net.SpeedTester.lastRunAt < 30_000L
+                val sameStrategy = com.zycomic.app.net.SpeedTester.lastRunDirectStrategy ==
+                    com.zycomic.app.net.NetworkModule.shouldUseDirectStrategy()
+                if (fresh && sameStrategy) {
+                    android.util.Log.i("App", "network changed: reuse recent speed test, skip retest")
+                    return@launch
+                }
+                val r = com.zycomic.app.net.SpeedTester.runAndApply()
+                android.util.Log.i("App", "network changed retest done: line=${r.first}, img=${r.second}")
+            } catch (e: Exception) {
+                android.util.Log.w("App", "network changed retest failed: ${e.message}")
+            }
+        }
+    }
+
     /**
-     * 注册默认网络回调：网络/VPN 状态变化时，按当前"VPN 加速"模式重新评估并
-     * 按需重建网络 client（仅在直连策略变化时才真正重建）。
+     * 注册默认网络回调：网络/VPN 状态变化后 2s 防抖，先清连接池、按生效策略重建图片/网络栈，
+     * 再后台自动重测速（成功才替换线路/图域）。
+     * 「自动跟随系统 VPN」关闭（强制直连）期间同样防抖清池与重测，但策略恒为直连，不随 VPN 翻转。
      */
     private fun registerNetworkCallback() {
         try {
             val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                 as? android.net.ConnectivityManager ?: return
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: android.net.Network) {
-                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged()
-                }
-                override fun onLost(network: android.net.Network) {
-                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged()
-                }
+                override fun onAvailable(network: android.net.Network) = scheduleNetworkRetest(cm, network)
+                override fun onLost(network: android.net.Network) = scheduleNetworkRetest(cm, network)
                 override fun onCapabilitiesChanged(
                     network: android.net.Network,
                     caps: android.net.NetworkCapabilities,
-                ) {
-                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged()
-                }
+                ) = scheduleNetworkRetest(cm, network)
             }
             cm.registerDefaultNetworkCallback(callback)
         } catch (e: Exception) {
             android.util.Log.w("App", "registerNetworkCallback failed: ${e.message}")
         }
+    }
+
+    /** 网络身份去重 + 2s 防抖后触发 [networkRetestRunnable]。 */
+    private fun scheduleNetworkRetest(
+        cm: android.net.ConnectivityManager,
+        network: android.net.Network,
+    ) {
+        val caps = cm.getNetworkCapabilities(network)
+        val sig = "${network}@vpn=${caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)}"
+        if (sig == lastNetworkSig) return
+        lastNetworkSig = sig
+        networkHandler.removeCallbacks(networkRetestRunnable)
+        networkHandler.postDelayed(networkRetestRunnable, 2000)
     }
 
     private fun initializeMigrator() {
@@ -332,11 +369,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     override fun newImageLoader(context: Context): ImageLoader {
         return ImageLoader.Builder(this).apply {
-            val callFactoryLazy = lazy {
-                Injekt.get<NetworkHelper>().client.newBuilder()
-                    .addInterceptor(com.zycomic.app.net.FastestImgInterceptor())
-                    .build()
-            }
+            // 封面统一走 ZYComic 图片栈（NetworkModule.imageClient）：相同 DNS/SNI 策略、图片头、
+            // 最快图域改写与解密，并在网络/VPN 变化重建后经 CoverCallFactory.rebind() 自动跟随。
+            val callFactoryLazy = lazy { com.zycomic.app.net.CoverCallFactory }
             components {
                 // NetworkFetcher.Factory
                 add(OkHttpNetworkFetcherFactory(callFactoryLazy::value))

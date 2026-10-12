@@ -489,6 +489,64 @@ object RouteManager {
             return imgDomains.getOrNull(idx)
         }
 
+    // ---- 图域探活样本路径（真实封面相对路径，测速用）----
+    /** 读取上次成功获取的探活图片相对路径（如 /static/upload/xxx.jpg）。 */
+    fun loadProbeImgPath(): String? = try {
+        val ctx = DevConfig.appContext ?: return null
+        ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            .getString("probe_img_path", null)?.takeIf { it.startsWith("/") && it.length > 1 }
+    } catch (_: Exception) { null }
+
+    /** 持久化探活图片相对路径。 */
+    fun saveProbeImgPath(path: String) {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            if (!path.startsWith("/") || path.length <= 1) return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putString("probe_img_path", path).apply()
+        } catch (_: Exception) {}
+    }
+
+    // ---- 图域失败冷却与失败轮换（图片请求兜底）----
+    /** host -> 冷却到期时间戳（ms）。 */
+    private val imgFailUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** 图域失败冷却时长：30 分钟。 */
+    private const val IMG_FAIL_COOLDOWN_MS = 30L * 60L * 1000L
+
+    /** 标记某图域本次失败（403/reset/超时/非图片），进入短期冷却。 */
+    fun markImgDomainFailed(host: String?) {
+        host ?: return
+        imgFailUntil[host] = System.currentTimeMillis() + IMG_FAIL_COOLDOWN_MS
+    }
+
+    /** 图域当前是否可用（未在冷却期）。 */
+    fun isImgDomainAvailable(host: String?): Boolean {
+        host ?: return true
+        val until = imgFailUntil[host] ?: return true
+        if (until <= System.currentTimeMillis()) {
+            imgFailUntil.remove(host)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * 从 [currentHost] 起按图域列表顺序取下一个"未冷却"图域；没有可用域返回 null。
+     * 仅遍历一轮，不重复返回 currentHost。
+     */
+    fun nextAvailableImgDomain(currentHost: String?): String? {
+        val all = imgDomains
+        if (all.isEmpty()) return null
+        val curIdx = all.indexOfFirst { it.equals(currentHost, ignoreCase = true) }
+        val start = if (curIdx >= 0) curIdx else imgIndex
+        val n = all.size
+        for (step in 1..n) {
+            val cand = all[(start + step) % n]
+            if (!cand.equals(currentHost, ignoreCase = true) && isImgDomainAvailable(cand)) return cand
+        }
+        return null
+    }
+
     /** 临时切换到下一条线路（不持久化）。 */
     fun selectNextLine() {
         lineIndex = (lineIndex + 1) % lineHosts.size

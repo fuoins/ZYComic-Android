@@ -41,7 +41,7 @@ fun SpeedTestScreen(
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
-    val vpnAccel by vm.vpnAccelEnabled.collectAsState()
+    val followVpn by vm.followSystemVpn.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
 
@@ -138,15 +138,15 @@ fun SpeedTestScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("VPN 加速", style = MaterialTheme.typography.bodyLarge)
+                            Text("自动跟随系统 VPN", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (vpnAccel) "已开启：检测到系统VPN时自动恢复SNI/系统DNS；关闭则始终国内直连（抓包时用）"
-                                else "已关闭：始终国内直连（硬编码IP+去SNI）",
+                                if (followVpn) "已开启：系统 VPN 开则图片走 VPN、关则直连"
+                                else "已关闭：强制直连（硬编码IP+去SNI），即使开着系统 VPN 也不走 VPN，用于抓包调试",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(checked = vpnAccel, onCheckedChange = { vm.setVpnAccelEnabled(it) })
+                        Switch(checked = followVpn, onCheckedChange = { vm.setFollowSystemVpn(it) })
                     }
                 }
                 item {
