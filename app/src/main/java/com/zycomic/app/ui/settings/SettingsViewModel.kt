@@ -44,6 +44,11 @@ class SettingsViewModel {
     val lineDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastLineDelays)
     /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
     val imgDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastImgDelays)
+    /**
+     * 本轮图源探活逐域结论（index -> 连不上/无图/正常）。
+     * 没有它的时候"超时"这一种显示会同时掩盖三件不同的事：连不上、连上了但拿不到图、这一轮压根没探。
+     */
+    val imgVerdicts = MutableStateFlow<Map<Int, SpeedTester.ImgVerdict>>(emptyMap())
 
     /** 远程 ruledns 手动检查进行中 */
     val remoteChecking = MutableStateFlow(false)
@@ -216,6 +221,7 @@ class SettingsViewModel {
         followSystemVpn.value = v
         toast.value = if (v) "已开启自动跟随系统 VPN" else "已关闭：强制直连（抓包模式）"
         scope.launch {
+            imgVerdicts.value = emptyMap()
             NetworkModule.onVpnOrNetworkChanged("follow vpn toggled")
             val (bl, bi) = SpeedTester.runAndApply { l, i ->
                 lineDelays.value = l
@@ -223,8 +229,10 @@ class SettingsViewModel {
             }
             currentLineIndex.value = RouteManager.lineIndex
             currentImgIndex.value = RouteManager.imgIndex
-            if (bl < 0) toast.value = "已切换网络模式，但测速未完成，沿用当前线路/图源"
-            else if (bi < 0) toast.value = "已切换网络模式；线路 ${bl + 1}，图源测速失败沿用当前"
+            val summary = publishImgVerdicts()
+            if (SpeedTester.lastRunSkipped) toast.value = "已切换网络模式，但已有测速在跑，本轮未重测"
+            else if (bl < 0) toast.value = "已切换网络模式，但测速未完成，沿用当前线路/图源；$summary"
+            else if (bi < 0) toast.value = "已切换网络模式；线路 ${bl + 1}，图源不可用沿用当前；$summary"
         }
     }
 
@@ -248,6 +256,7 @@ class SettingsViewModel {
             testing.value = true
             lineDelays.value = emptyMap()
             imgDelays.value = emptyMap()
+            imgVerdicts.value = emptyMap()
             try {
                 val (bestLine, bestImg) = SpeedTester.runAndApply { l, i ->
                     lineDelays.value = l
@@ -255,10 +264,13 @@ class SettingsViewModel {
                 }
                 currentLineIndex.value = RouteManager.lineIndex
                 currentImgIndex.value = RouteManager.imgIndex
+                val summary = publishImgVerdicts()
                 toast.value = when {
-                    bestLine >= 0 && bestImg >= 0 -> "已选择线路 ${bestLine + 1}、图源 ${bestImg + 1}"
-                    bestLine >= 0 -> "已选择线路 ${bestLine + 1}；图源测速失败，沿用当前"
-                    else -> "测速失败，使用当前线路"
+                    // 整轮被防重入丢弃：一个域都没探，绝不能显示成"超时"
+                    SpeedTester.lastRunSkipped -> "已有测速在跑，本轮未执行（显示的仍是上一次结果）"
+                    bestLine >= 0 && bestImg >= 0 -> "已选择线路 ${bestLine + 1}、图源 ${bestImg + 1}；$summary"
+                    bestLine >= 0 -> "已选择线路 ${bestLine + 1}；$summary"
+                    else -> "线路全部不可用，使用当前线路；$summary"
                 }
             } catch (e: Exception) {
                 android.util.Log.e("SpeedTest", "runSpeedTest failed", e)
@@ -272,6 +284,21 @@ class SettingsViewModel {
     }
 
     /**
+     * 把本轮逐域结论发布到 UI，并返回一句人类可读的摘要（可用/连不上/无图 各多少）。
+     * "连不上"与"无图"必须分开：前者是网络可达性问题（换 VPN 才有解），
+     * 后者是链路通但该域没有这个图片对象/被防盗链（是探活目标或 Referer 的问题）。
+     */
+    private fun publishImgVerdicts(): String {
+        val v = SpeedTester.lastImgVerdicts
+        imgVerdicts.value = v
+        if (v.isEmpty()) return "本轮未采集到图源结论"
+        val ok = v.count { it.value == SpeedTester.ImgVerdict.OK }
+        val un = v.count { it.value == SpeedTester.ImgVerdict.UNREACHABLE }
+        val no = v.count { it.value == SpeedTester.ImgVerdict.NO_IMAGE }
+        return "图源 可用$ok/连不上$un/无图$no"
+    }
+
+    /**
      * App 启动自动测速 + 自动选择最快线路/图源（主体见 SpeedTester.runAndApply）。
      */
     suspend fun autoSelectFastest(): Pair<Int, Int> {
@@ -279,6 +306,7 @@ class SettingsViewModel {
         autoSelecting.value = true
         lineDelays.value = emptyMap()
         imgDelays.value = emptyMap()
+        imgVerdicts.value = emptyMap()
         return try {
             val r = SpeedTester.runAndApply { l, i ->
                 lineDelays.value = l
@@ -290,6 +318,7 @@ class SettingsViewModel {
         } finally {
             // 被 8s 整体超时取消时，NonCancellable 中保留已增量发布的结果，缺失 key 补"超时"
             withContext(NonCancellable) {
+                publishImgVerdicts()
                 fillMissingAsTimeout()
             }
             autoSelecting.value = false
@@ -306,6 +335,9 @@ class SettingsViewModel {
             RouteManager.lineHosts.indices.forEach { if (it !in m) m[it] = Long.MAX_VALUE }
             m
         }
+        // 本轮有逐域结论时**不再**补 MAX：缺席的域就是"没探到"，把它显示成"超时"
+        // 会让人以为探过了。只有没有结论信息（例如从旧版本持久化的历史延迟）时才沿用补全。
+        if (imgVerdicts.value.isNotEmpty()) return
         imgDelays.update { cur ->
             val m = cur.toMutableMap()
             RouteManager.imgDomains.indices.forEach { if (it !in m) m[it] = Long.MAX_VALUE }

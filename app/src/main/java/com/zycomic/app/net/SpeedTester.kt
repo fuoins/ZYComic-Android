@@ -105,31 +105,56 @@ object SpeedTester {
     /** 一次探活的结果：[delayMs] 为 [MAX] 表示判负；[httpCode] 为 -1 表示根本没拿到响应。 */
     private data class ProbeOutcome(val delayMs: Long, val httpCode: Int)
 
+    /** 图域探活结论，用于把"连不上"和"连上了但拿不到图"分开——UI 上一律显示"超时"会掩盖两种完全不同的问题。 */
+    enum class ImgVerdict { OK, UNREACHABLE, NO_IMAGE }
+
+    /** 图域探活结论 + 延迟。 */
+    private data class ImgProbe(val delayMs: Long, val verdict: ImgVerdict)
+
+    /** 最近一轮图域探活的逐域结论（index -> 结论），供 UI/排查区分"没测/连不上/无图"。 */
+    @Volatile var lastImgVerdicts: Map<Int, ImgVerdict> = emptyMap()
+        private set
+
+    /** 最近一次 runAndApply 是否因为"已有测速在跑"被整轮丢弃（被丢弃时一个域都没探）。 */
+    @Volatile var lastRunSkipped: Boolean = false
+        private set
+
     /** 线路探活：2xx **且解密后 body 是 JSON 对象** 才计成功。 */
     private suspend fun measureLine(client: OkHttpClient, req: Request): Long =
         probe(client, req, requireJson = true, strictImage = false).delayMs
 
     /**
-     * 图域探活（含回退）：固定封面 → 404 时才试取样路径 → 仍 404 才试根路径。
+     * 图域探活（含回退）：固定封面 → 失败时换取样路径再试。
      *
-     * 只在 **404（对象不存在）** 时回退：403/超时/HTML 正是"该网络下这个域不可达"的采集信号，
-     * 重试只会把要淘汰的域洗白。
+     * 回退条件按真机日志修正为**"只要不是连接层失败就回退"**：这批 CDN 对不存在/已废弃的对象
+     * 并不回 404，而是回 `3xx`（域名被回收做跳转站）或 `2xx + text/html`（默认虚拟主机错误页）。
+     * 上一版只在 HTTP 404 时回退，实测一轮里 404 出现 0 次 → 回退分支一次都没被触发，
+     * 会把"其实可用、只是没镜像这个对象"的域全部误杀。
+     *
+     * 反之，**连接层失败（拿不到任何响应）不回退**：域都不通，再打两个路径只是白等两个超时。
      */
-    private suspend fun measureImg(client: OkHttpClient, domain: String, samplePath: String?): Long {
-        val candidates = buildList<String?> {
+    private suspend fun measureImg(client: OkHttpClient, domain: String, samplePath: String?): ImgProbe {
+        val candidates = buildList {
             add(PROBE_COVER_PATH)
             samplePath?.takeIf { it != PROBE_COVER_PATH }?.let { add(it) }
-            add(null)
         }
+        var sawConnectionFailure = false
+        var lastCode = -1
         for ((i, path) in candidates.withIndex()) {
             val outcome = probe(client, imgProbeRequest(domain, path), requireJson = false, strictImage = true)
             if (outcome.delayMs < MAX) {
-                if (i > 0) Log.i(TAG, "img probe fallback ok domain=$domain path=${path ?: "/"}")
-                return outcome.delayMs
+                if (i > 0) Log.i(TAG, "img probe fallback ok domain=$domain path=$path")
+                return ImgProbe(outcome.delayMs, ImgVerdict.OK)
             }
-            if (outcome.httpCode != 404) return MAX
+            if (outcome.httpCode == -1) {
+                sawConnectionFailure = true
+                break
+            }
+            lastCode = outcome.httpCode
         }
-        return MAX
+        val verdict = if (sawConnectionFailure) ImgVerdict.UNREACHABLE else ImgVerdict.NO_IMAGE
+        if (verdict == ImgVerdict.NO_IMAGE) Log.d(TAG, "img no-image domain=$domain lastCode=$lastCode")
+        return ImgProbe(MAX, verdict)
     }
 
     private suspend fun measureLineOnce(client: OkHttpClient, lineUrl: String): Long =
@@ -227,23 +252,40 @@ object SpeedTester {
 
     /**
      * 获取兜底用封面相对路径：先用当前线路调首页 index 取一张封面（picx/pic），
-     * 成功则持久化；失败回退上次缓存路径，再没有返回 null（探活退化为根路径严格判负）。
+     * 成功则持久化；失败回退上次缓存路径，再没有返回 null。
+     *
+     * 这条路径是"固定封面在某域不存在"时唯一的回退目标，拿不到就等于回退链是空的，
+     * 因此每个失败原因都要打出来（上一版整条链静默吞异常，真机日志里只看到
+     * `img probe sample path=null`，完全查不出是接口没通、还是字段为空）。
      */
     private suspend fun obtainProbePath(): String? {
-        val live = runCatching {
-            val data: Manga? = NetworkModule.api.index().data
+        val resp = runCatching { NetworkModule.api.index() }
+        if (resp.isFailure) {
+            Log.w(TAG, "probe sample path: index() 请求失败 err=${resp.exceptionOrNull()?.message}")
+        }
+        val data: Manga? = resp.getOrNull()?.data
+        if (resp.isSuccess && data == null) {
+            Log.w(TAG, "probe sample path: index() 成功但 data 为空（可能解密/解析失败）")
+        }
+        val live = data?.let { d ->
             buildList {
-                if (data != null) {
-                    add(data)
-                    addAll(data.loveList)
-                }
+                add(d)
+                addAll(d.loveList)
             }.mapNotNull { m -> toImagePath(m.picx.ifBlank { m.pic }) }.firstOrNull()
-        }.getOrNull()
+        }
+        if (live == null && data != null) {
+            Log.w(TAG, "probe sample path: index() 有数据但所有条目的 picx/pic 都是空/无法解析")
+        }
         if (live != null) {
             RouteManager.saveProbeImgPath(live)
+            Log.i(TAG, "probe sample path: 取到新的样本路径 $live")
             return live
         }
-        return RouteManager.loadProbeImgPath()
+        val cached = RouteManager.loadProbeImgPath()
+        if (cached == null) {
+            Log.w(TAG, "probe sample path: 本地也没有历史样本路径，图域探活只能依赖固定封面路径")
+        }
+        return cached
     }
 
     /** 封面字段（完整 URL 或相对路径）→ 以 '/' 开头的相对路径。 */
@@ -279,7 +321,7 @@ object SpeedTester {
             try {
                 val samplePath = RouteManager.loadProbeImgPath()
                 RouteManager.imgDomains.mapIndexed { index, domain ->
-                    async { index to measureImg(client, domain, samplePath) }
+                    async { index to measureImg(client, domain, samplePath).delayMs }
                 }.awaitAll().toMap()
             } finally {
                 client.releaseProbe()
@@ -290,7 +332,7 @@ object SpeedTester {
     suspend fun testSingleImgHost(domain: String): Long = withContext(Dispatchers.IO) {
         val client = NetworkModule.newSpeedTestClient()
         try {
-            measureImg(client, domain, RouteManager.loadProbeImgPath())
+            measureImg(client, domain, RouteManager.loadProbeImgPath()).delayMs
         } finally {
             client.releaseProbe()
         }
@@ -328,9 +370,13 @@ object SpeedTester {
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             if (!running.compareAndSet(false, true)) {
-                Log.w(TAG, "runAndApply skipped: another speed test is running")
+                lastRunSkipped = true
+                Log.w(TAG, "runAndApply skipped: another speed test is running（本轮一个域都没探）")
                 return@coroutineScope (-1 to -1)
             }
+            lastRunSkipped = false
+            // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
+            lastImgVerdicts = emptyMap()
             val lineClient = NetworkModule.newLineProbeClient()
             val imgClient = NetworkModule.newSpeedTestClient()
             try {
@@ -357,17 +403,23 @@ object SpeedTester {
                 val samplePath = obtainProbePath()
                 Log.i(TAG, "img probe sample path=$samplePath")
 
-                // 阶段 3：图域（固定真实封面，404 才回退）
+                // 阶段 3：图域（固定真实封面；非连接层失败才回退取样路径）
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+                val verdictAcc = java.util.concurrent.ConcurrentHashMap<Int, ImgVerdict>()
                 val imgJobs = RouteManager.imgDomains.mapIndexed { index, domain ->
                     async {
-                        val v = measureImg(imgClient, domain, samplePath)
-                        imgAcc[index] = v
+                        val r = measureImg(imgClient, domain, samplePath)
+                        imgAcc[index] = r.delayMs
+                        verdictAcc[index] = r.verdict
+                        // 逐域发布快照：启动路径有 8s 整体超时，中途被取消时 UI 至少能看到
+                        // 已完成的那些域的真实结论，而不是把"没来得及探"也算成"超时"。
+                        lastImgVerdicts = verdictAcc.toSortedMap()
                         onProgress?.invoke(lines, imgAcc.toSortedMap())
-                        index to v
+                        index to r.delayMs
                     }
                 }
                 val imgs = imgJobs.awaitAll().toMap()
+                lastImgVerdicts = verdictAcc.toSortedMap()
 
                 // 结果一次性写入，fastestImgDomain 据此派生
                 RouteManager.setLastDelays(lines, imgs)
@@ -380,6 +432,20 @@ object SpeedTester {
 
                 lastRunAt = System.currentTimeMillis()
                 lastRunDirectStrategy = NetworkModule.shouldUseDirectStrategy()
+
+                // 汇总：把"连不上"和"连上了但没有图"分开计数，并列出最快的几个域。
+                // 只有失败才打逐条日志、成功不打，是此前"看不出哪些域没测过"的直接原因。
+                val vc = lastImgVerdicts.values.groupingBy { it }.eachCount()
+                val domains = RouteManager.imgDomains
+                val fastest = lastImgVerdicts.entries.filter { it.value == ImgVerdict.OK }
+                    .mapNotNull { e -> imgs[e.key]?.let { e.key to it } }.sortedBy { it.second }.take(5)
+                    .joinToString(", ") { (idx, ms) -> "${domains.getOrElse(idx) { "??" }}=${ms}ms" }
+                Log.i(
+                    TAG,
+                    "img probe summary total=${lastImgVerdicts.size} ok=${vc[ImgVerdict.OK] ?: 0}" +
+                        " unreachable=${vc[ImgVerdict.UNREACHABLE] ?: 0} no_image=${vc[ImgVerdict.NO_IMAGE] ?: 0}" +
+                        " samplePath=${if (samplePath == null) "null" else "ok"} fastest=[$fastest]",
+                )
                 Log.i(TAG, "runAndApply done, bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
                 (bestLine ?: -1) to (bestImg ?: -1)
             } finally {

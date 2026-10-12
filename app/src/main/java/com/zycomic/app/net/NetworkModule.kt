@@ -300,10 +300,23 @@ object NetworkModule {
             .callTimeout(PROBE_CALL_SECONDS, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(8, 1, TimeUnit.MINUTES))
             .retryOnConnectionFailure(true)
+            .noRedirect()
             .enableTrustAll()
             .applyTransportStrategy()
             .build()
     }
+
+    /**
+     * 探活 client 一律**不跟随重定向**。
+     *
+     * 真机实测证据：已废弃的图域 `mwfimsvfast2.cc` 对封面路径返回
+     * `302 → https://2026-10-08.urldance.com/7d/?mwfimsvfast2.cc`（域名被回收做了跳转站），
+     * OkHttp 默认跟随重定向，于是"探这个图域"实际测到了跳转目标站的 `206 text/html`
+     * ——延迟记在了一个根本不供图域名头上。3xx 本身就等于"该域已不做图片服务"，
+     * 应直接判负并单独归类，不能让别人的服务器替它答到。
+     */
+    private fun OkHttpClient.Builder.noRedirect(): OkHttpClient.Builder =
+        followRedirects(false).followSslRedirects(false)
 
     /**
      * 线路探活专用 client：传输策略与运行时 apiClient 一致（DNS/SNI/出口/cookie 同源），
@@ -321,6 +334,7 @@ object NetworkModule {
             .callTimeout(PROBE_CALL_SECONDS, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(8, 1, TimeUnit.MINUTES))
             .retryOnConnectionFailure(true)
+            .noRedirect()
             .enableTrustAll()
             .applyTransportStrategy()
             .addInterceptor(manwaInterceptor)
@@ -343,6 +357,38 @@ object NetworkModule {
     }
 
     // ==================== 方案B：自定义 DNS + SNI 移除（关闭本地代理时使用） ====================
+
+    /**
+     * Cloudflare 官方公布的 IPv4 网段（CDN anycast）。
+     *
+     * 用途：这些地址**强制要求 TLS SNI**（实测不带 SNI 直接握手失败），
+     * 所以即便域名在"去 SNI"名单里，只要对端落在 CF 段就必须保留 SNI。
+     * 内置 77 个图源里有两种完全不同的架构：CF 系（104.16-104.31 / 172.64-172.71）
+     * 与自建源站系（104.238 / 172.93 / 172.96 等），过去用同一套"IP直连+去SNI"
+     * 覆盖两者，对 CF 系是必然失败的。
+     */
+    private val cloudflareCidrs: List<Pair<Long, Int>> = listOf(
+        "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+        "141.101.64.0/18", "108.162.192.0/18", "190.15.192.0/18", "197.234.240.0/22",
+        "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14",
+        "172.64.0.0/13",
+    ).map { spec ->
+        val parts = spec.split('/')
+        val bits = parts[1].toInt()
+        val net = parts[0].split('.').fold(0L) { acc, o -> (acc shl 8) or (o.toLong() and 0xFF) }
+        net and v4Mask(bits) to bits
+    }
+
+    private fun v4Mask(bits: Int): Long =
+        if (bits == 0) 0L else ((-1L) shl (32 - bits)) and 0xFFFFFFFFL
+
+    /** 判断对端地址是否落在 Cloudflare v4 网段（非 IPv4 一律 false）。 */
+    private fun isInCloudflare(addr: java.net.InetAddress?): Boolean {
+        val bytes = addr?.address ?: return false
+        if (bytes.size != 4) return false
+        val v = bytes.fold(0L) { acc, b -> (acc shl 8) or ((b.toInt() and 0xFF).toLong()) }
+        return cloudflareCidrs.any { (net, bits) -> (v and v4Mask(bits)) == net }
+    }
 
     /**
      * 自定义 DNS：rule 配置中的域名 → 全部 IP，其他域名走系统 DNS。
@@ -399,6 +445,10 @@ object NetworkModule {
             if (socket !is SSLSocket) return
             if (host == null) return
             if (!DevConfig.getSniDomains().contains(host)) return
+            // Cloudflare 网段强制要求 SNI：实测对 104.21.72.208 不带 SNI 直接
+            // SSLV3_ALERT_HANDSHAKE_FAILURE，去了 SNI 只会把一个本来能通的 CDN 域打死。
+            // （嵌套类不能非限定访问外层 object 成员，必须写 NetworkModule.）
+            if (NetworkModule.isInCloudflare(socket.inetAddress)) return
             try {
                 val params = socket.sslParameters
                 params.serverNames = null

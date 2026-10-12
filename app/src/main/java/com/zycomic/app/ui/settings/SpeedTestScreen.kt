@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.RouteManager
+import com.zycomic.app.net.SpeedTester
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +38,7 @@ fun SpeedTestScreen(
     val testing by vm.testing.collectAsState()
     val lineDelays by vm.lineDelays.collectAsState()
     val imgDelays by vm.imgDelays.collectAsState()
+    val imgVerdicts by vm.imgVerdicts.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
@@ -151,7 +153,7 @@ fun SpeedTestScreen(
                 }
                 item {
                     Text(
-                        "按测速延迟升序（快→慢），未测/超时项排在最后",
+                        "按测速延迟升序（快→慢），未测/连不上/无图项排在最后；连不上=网络不通，无图=能连但取不到图片",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 16.dp, top = 8.dp),
@@ -178,6 +180,7 @@ fun SpeedTestScreen(
                         index = index,
                         host = RouteManager.imgDomains[index],
                         delay = imgDelays[index],
+                        verdict = imgVerdicts[index],
                         isSelected = index == currentImgIdx,
                         onClick = { vm.selectImgHost(index) },
                     )
@@ -203,6 +206,7 @@ private fun SpeedRow(
     host: String,
     delay: Long?,
     isSelected: Boolean,
+    verdict: SpeedTester.ImgVerdict? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -218,9 +222,11 @@ private fun SpeedRow(
             modifier = Modifier.padding(end = 8.dp),
         )
         Text(
-            text = "HTTP:${formatDelay(delay)}",
+            text = "HTTP:${formatDelay(delay, verdict)}",
             style = MaterialTheme.typography.bodySmall,
             color = when {
+                verdict == SpeedTester.ImgVerdict.OK && (delay ?: 0) < 300 -> MaterialTheme.colorScheme.primary
+                verdict != null && verdict != SpeedTester.ImgVerdict.OK -> MaterialTheme.colorScheme.error
                 delay == null -> MaterialTheme.colorScheme.onSurfaceVariant
                 delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
                 delay < 300 -> MaterialTheme.colorScheme.primary
@@ -233,8 +239,14 @@ private fun SpeedRow(
     }
 }
 
-private fun formatDelay(delay: Long?): String = when {
-    delay == null -> "--"
+/**
+ * 延迟显示。图源行带 [verdict] 时区分三种曾经都叫"超时"的情况：
+ * 连不上（网络层就没通）、无图（链路通但拿不到图片对象）、未测（这一轮没探到它）。
+ */
+private fun formatDelay(delay: Long?, verdict: SpeedTester.ImgVerdict? = null): String = when {
+    verdict == SpeedTester.ImgVerdict.UNREACHABLE -> "连不上"
+    verdict == SpeedTester.ImgVerdict.NO_IMAGE -> "无图"
+    delay == null -> "未测"
     delay == Long.MAX_VALUE -> "超时"
     else -> "${delay}ms"
 }
