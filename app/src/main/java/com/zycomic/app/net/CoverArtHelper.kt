@@ -10,6 +10,7 @@ import okhttp3.Request
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.ByteArrayInputStream
+import java.io.IOException
 
 /**
  * 详情页封面长按菜单：下载封面字节并保存/分享。

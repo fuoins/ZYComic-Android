@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,7 +94,7 @@ import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun MangaDetailScreen(
     bookId: String,
@@ -223,7 +224,7 @@ fun MangaDetailScreen(
                                 .aspectRatio(2f / 3f)
                                 .clip(MaterialTheme.shapes.extraSmall)
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .combinedClickable(onLongClick = { showCoverMenu = true }),
+                                .combinedClickable(onClick = {}, onLongClick = { showCoverMenu = true }),
                             contentScale = ContentScale.Crop,
                             error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
                         )
@@ -549,27 +550,33 @@ fun MangaDetailScreen(
             onDismiss = { showCoverMenu = false },
             onSave = {
                 showCoverMenu = false
-                val coverUrl = coverUrl(d)
-                scope.launch {
-                    try {
-                        val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl)
-                        com.zycomic.app.net.CoverArtHelper.save(bytes, d.name)
-                        Toast.makeText(context, "封面已保存到相册", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                val d = detail
+                if (d != null) {
+                    val coverUrl = coverUrl(d)
+                    scope.launch {
+                        try {
+                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl)
+                            com.zycomic.app.net.CoverArtHelper.save(bytes, d.name)
+                            Toast.makeText(context, "封面已保存到相册", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             },
             onShare = {
                 showCoverMenu = false
-                val coverUrl = coverUrl(d)
-                scope.launch {
-                    try {
-                        val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl)
-                        val uri = com.zycomic.app.net.CoverArtHelper.shareToCache(bytes, d.name)
-                        context.startActivity(uri.toShareIntent(context))
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "分享失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                val d = detail
+                if (d != null) {
+                    val coverUrl = coverUrl(d)
+                    scope.launch {
+                        try {
+                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl)
+                            val uri = com.zycomic.app.net.CoverArtHelper.shareToCache(bytes, d.name)
+                            context.startActivity(uri.toShareIntent(context))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "分享失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             },
