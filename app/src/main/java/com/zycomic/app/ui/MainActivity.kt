@@ -71,6 +71,7 @@ import com.zycomic.app.ui.settings.DataStorageScreen
 import com.zycomic.app.ui.settings.SettingsMainScreen
 import com.zycomic.app.ui.settings.SettingsViewModel
 import com.zycomic.app.ui.settings.SpeedTestScreen
+import com.zycomic.app.ui.settings.BookBlockScreen
 import com.zycomic.app.ui.settings.TagBlockScreen
 import com.zycomic.app.ui.settings.ZYSettingsAppearanceScreen
 import eu.kanade.domain.ui.UiPreferences
@@ -146,7 +147,7 @@ private fun Intent.shortcutTab(): Int? = when (action) {
 
 /** 设置子页面 Dialog 标识 */
 private enum class SettingsDialog {
-    Appearance, Reader, TagBlock, SpeedTest, DataStorage, About
+    Appearance, Reader, TagBlock, BookBlock, SpeedTest, DataStorage, About
 }
 
 @Composable
@@ -260,6 +261,8 @@ fun AppContent(
         if (!com.zycomic.app.util.LoginGate.ensureLogin(context)) loginOpen = true else action()
     }
     val openTagBlock = { requireLogin { settingsDialog = SettingsDialog.TagBlock } }
+    // 漫画屏蔽同为账号级功能：服务端接口挂在登录会话上，未登录点了只会失败
+    val openBookBlock = { requireLogin { settingsDialog = SettingsDialog.BookBlock } }
     val openSpeedTest = { settingsDialog = SettingsDialog.SpeedTest }
     val openDataStorage = { settingsDialog = SettingsDialog.DataStorage }
     val openAbout = { settingsDialog = SettingsDialog.About }
@@ -351,6 +354,7 @@ fun AppContent(
                     onRequireLogin = { loginOpen = true },
                     onNavigateToTab = { bottomTab = it },
                     onOpenTagBlock = openTagBlock,
+                    onOpenBookBlock = openBookBlock,
                     onBlockGayTags = blockGayTags,
                 )
                 4 -> SettingsMainScreen(
@@ -446,6 +450,14 @@ fun AppContent(
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 TagBlockScreen(vm = settingsVm, onClose = { settingsDialog = null })
+            }
+        }
+        SettingsDialog.BookBlock -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                BookBlockScreen(vm = settingsVm, onClose = { settingsDialog = null })
             }
         }
         SettingsDialog.SpeedTest -> {

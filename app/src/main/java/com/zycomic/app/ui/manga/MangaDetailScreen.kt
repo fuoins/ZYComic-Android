@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Folder
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -130,6 +132,10 @@ fun MangaDetailScreen(
 
     var showFolderDialog by remember { mutableStateOf(false) }
     var showCoverMenu by remember { mutableStateOf(false) }
+    /** 屏蔽二次确认：服务端接口是 toggle，必须让用户知道重复点击会变成取消屏蔽 */
+    var showBlockConfirm by remember { mutableStateOf(false) }
+    /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
+    val blockBusy by vm.blockBusy.collectAsState()
 
     LaunchedEffect(needLogin) {
         if (needLogin) {
@@ -140,6 +146,12 @@ fun MangaDetailScreen(
 
     LaunchedEffect(Unit) {
         vm.favSuccess.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        vm.blockMessage.collect { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
@@ -332,6 +344,37 @@ fun MangaDetailScreen(
                                     vm.openFolderPicker()
                                     showFolderDialog = true
                                 }
+                            },
+                        )
+                        // 屏蔽：按需求放在"其他收藏夹"右侧。服务端接口是开关式 toggle，
+                        // 文案固定叫"屏蔽"，本次到底是屏蔽还是取消，以 blockMessage 的 toast 为准。
+                        ActionItem(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Outlined.Block,
+                            label = "屏蔽",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            onClick = { if (!blockBusy) showBlockConfirm = true },
+                        )
+                    }
+
+                    if (showBlockConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showBlockConfirm = false },
+                            title = { Text("屏蔽这本漫画？") },
+                            text = {
+                                Text("屏蔽后这本漫画会从分类、搜索、排行里隐藏。\n\n" +
+                                    "注意：该漫画已在屏蔽列表时，重复点击会取消屏蔽。")
+                            },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        showBlockConfirm = false
+                                        vm.toggleBlock()
+                                    },
+                                ) { Text("确认") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showBlockConfirm = false }) { Text("取消") }
                             },
                         )
                     }

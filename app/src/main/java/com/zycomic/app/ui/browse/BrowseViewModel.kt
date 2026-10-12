@@ -6,7 +6,6 @@ import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
-import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -298,7 +297,7 @@ class BrowseViewModel {
                 }
             }
 
-            val result = if (TagRepository.isFilterEnabled()) {
+            val result = if (MangaRepository.isAnyFilterEnabled()) {
                 MangaRepository.loadWithFilter(ts.currentPage, target, rawLoader)
             } else {
                 rawLoader(ts.currentPage)

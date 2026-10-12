@@ -1,6 +1,8 @@
 package com.zycomic.app.net
 
 import com.zycomic.app.data.dto.AddBlacklistRequest
+import com.zycomic.app.data.dto.BookBlacklistData
+import com.zycomic.app.data.dto.BookBlacklistRequest
 import com.zycomic.app.data.dto.ApiResponse
 import com.zycomic.app.data.dto.BatchFavoriteRequest
 import com.zycomic.app.data.dto.BlacklistResponse
@@ -195,4 +197,11 @@ interface ApiService {
     /** 移除屏蔽标签：body={"removeTags":["tag1","tag2"]} */
     @POST("api/classes/removeBlacklist")
     suspend fun removeBlacklist(@Body body: RemoveBlacklistRequest): ApiResponse<JsonElement>
+
+    /**
+     * 漫画屏蔽**开关**（不是添加）：body={"bookId":123836}。
+     * 同一 body 连续调用两次 = 屏蔽 → 取消屏蔽；新状态看响应 data.is_blacklisted。
+     */
+    @POST("api/classes/updateBookBlacklist")
+    suspend fun updateBookBlacklist(@Body body: BookBlacklistRequest): ApiResponse<BookBlacklistData>
 }

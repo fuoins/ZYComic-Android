@@ -3,7 +3,6 @@ package com.zycomic.app.ui.search
 import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
-import com.zycomic.app.data.repository.TagRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -94,7 +93,7 @@ class SearchViewModel {
                 lastInvoked = p
                 MangaRepository.search(keyword.value.trim(), p)
             }
-            val result = if (TagRepository.isFilterEnabled())
+            val result = if (MangaRepository.isAnyFilterEnabled())
                 MangaRepository.loadWithFilter(currentPage, target, raw)
             else raw(currentPage)
             currentPage = lastInvoked + 1

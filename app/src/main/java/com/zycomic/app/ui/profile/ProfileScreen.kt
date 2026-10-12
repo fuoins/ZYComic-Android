@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Storage
 import android.widget.Toast
 import androidx.compose.material3.AlertDialog
@@ -83,6 +84,7 @@ fun ProfileScreen(
     onRequireLogin: () -> Unit,
     onNavigateToTab: (Int) -> Unit,
     onOpenTagBlock: () -> Unit,
+    onOpenBookBlock: () -> Unit,
     onBlockGayTags: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -207,6 +209,13 @@ fun ProfileScreen(
                     title = "标签屏蔽",
                     icon = Icons.AutoMirrored.Outlined.Label,
                     onPreferenceClick = onOpenTagBlock,
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = "漫画屏蔽",
+                    icon = Icons.Outlined.VisibilityOff,
+                    onPreferenceClick = onOpenBookBlock,
                 )
             }
             item {

@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.settings
 
 import com.zycomic.app.data.AllTags
+import com.zycomic.app.data.repository.BookBlockRepository
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.DevConfig
@@ -23,6 +24,16 @@ class SettingsViewModel {
 
     // 过滤开关
     val filterEnabled = MutableStateFlow(TagRepository.isFilterEnabled())
+
+    // ===== 漫画屏蔽（与标签屏蔽并行的第二套屏蔽，两个开关各管一种占位卡）=====
+    /** 「过滤屏蔽漫画」开关（本地持久化，默认开启）。 */
+    val bookFilterEnabled = MutableStateFlow(BookBlockRepository.isFilterEnabled())
+    /** 已屏蔽漫画列表（删除页数据源）。 */
+    val blockedBooks = MutableStateFlow<List<BookBlockRepository.BlockedBook>>(emptyList())
+    /** 删除/清空屏蔽漫画进行中，用于禁用按钮避免重复提交。 */
+    val removingBooks = MutableStateFlow(false)
+    /** 加载屏蔽漫画列表中标识。 */
+    val loadingBooks = MutableStateFlow(false)
 
     // 全部标签（内置，添加屏蔽用）
     val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
@@ -114,6 +125,49 @@ class SettingsViewModel {
             try { blockedTags.value = TagRepository.getBlackTags() }
             catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "loadBlockedTags failed", e)
+            }
+        }
+    }
+
+    // ==================== 漫画屏蔽 ====================
+
+    /** 切换「过滤屏蔽漫画」：内存 + SharedPreferences 由仓库负责，这里只同步 UI 状态。 */
+    fun setBookFilterEnabled(enabled: Boolean) {
+        BookBlockRepository.setFilterEnabled(enabled)
+        bookFilterEnabled.value = enabled
+        toast.value = if (enabled) "已开启：隐藏被屏蔽漫画" else "已关闭：被屏蔽漫画会以占位卡显示"
+    }
+
+    /** 拉取已屏蔽漫画列表（删除页进入时与每次变更后调用）。 */
+    fun loadBlockedBooks() {
+        scope.launch {
+            loadingBooks.value = true
+            try {
+                blockedBooks.value = BookBlockRepository.getBlockedBooks()
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "loadBlockedBooks failed", e)
+                toast.value = e.message ?: "获取屏蔽漫画列表失败"
+            } finally {
+                loadingBooks.value = false
+            }
+        }
+    }
+
+    /** 删除选中的屏蔽漫画（服务端是逐个 toggle，串行提交）。 */
+    fun submitUnblockBooks(books: List<BookBlockRepository.BlockedBook>, onSuccess: () -> Unit) {
+        if (books.isEmpty()) return
+        scope.launch {
+            removingBooks.value = true
+            try {
+                val (ok, failed) = BookBlockRepository.unblockBooks(books)
+                toast.value = if (failed == 0) "已取消屏蔽 $ok 本漫画" else "已取消 $ok 本，失败 $failed 本"
+                loadBlockedBooks()
+                if (ok > 0) onSuccess()
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "submitUnblockBooks failed", e)
+                toast.value = e.message ?: "删除屏蔽漫画失败"
+            } finally {
+                removingBooks.value = false
             }
         }
     }

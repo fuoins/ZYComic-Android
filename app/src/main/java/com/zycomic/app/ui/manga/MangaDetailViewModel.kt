@@ -3,6 +3,7 @@ package com.zycomic.app.ui.manga
 import com.zycomic.app.data.dto.Chapter
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.data.repository.BookBlockRepository
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.MangaRepository
@@ -43,6 +44,17 @@ class MangaDetailViewModel(private val bookId: String) {
     /** 收藏成功事件：UI 层收到后显示 toast。 */
     private val _favSuccess = MutableSharedFlow<String>()
     val favSuccess: SharedFlow<String> = _favSuccess.asSharedFlow()
+
+    /**
+     * 屏蔽操作结果事件：UI 层收到后显示 toast。
+     * 内容直接采用服务端文案（"已加入屏蔽" / "已從屏蔽中移除"），
+     * 因为接口是 toggle，只有服务端知道这次到底是屏蔽还是取消。
+     */
+    private val _blockMessage = MutableSharedFlow<String>()
+    val blockMessage: SharedFlow<String> = _blockMessage.asSharedFlow()
+
+    /** 屏蔽请求进行中，用于禁用按钮避免连点重复 toggle。 */
+    val blockBusy = MutableStateFlow(false)
 
     val user = UserRepository.userFlow
 
@@ -137,6 +149,33 @@ class MangaDetailViewModel(private val bookId: String) {
             } catch (_: Exception) {
             } finally {
                 favBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * 对当前漫画执行屏蔽开关。
+     *
+     * 服务端 `updateBookBlacklist` 是 toggle：没屏蔽过→屏蔽，已屏蔽→取消。
+     * 按钮文案固定叫「屏蔽」（按产品决策不额外拉列表判断状态），
+     * 所以这里必须把服务端返回的真实结果用 toast 讲清楚，用户才知道发生了什么。
+     */
+    fun toggleBlock() {
+        scope.launch {
+            blockBusy.value = true
+            try {
+                val id = bookId.toLongOrNull() ?: run {
+                    _blockMessage.emit("漫画 ID 异常，无法屏蔽")
+                    return@launch
+                }
+                val r = BookBlockRepository.toggleBlock(id)
+                _blockMessage.emit(r.message.ifBlank { if (r.isBlacklisted) "已加入屏蔽" else "已从屏蔽中移除" })
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (e: Exception) {
+                _blockMessage.emit(e.message ?: "屏蔽操作失败，请重试")
+            } finally {
+                blockBusy.value = false
             }
         }
     }

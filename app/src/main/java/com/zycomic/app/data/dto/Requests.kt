@@ -91,3 +91,15 @@ data class AddBlacklistRequest(
 data class RemoveBlacklistRequest(
     val removeTags: List<String> = emptyList(),
 )
+
+/**
+ * 漫画屏蔽请求体：{"bookId":123836}（抓包逐字对齐，bookId 为数字不是字符串）。
+ *
+ * 注意：服务端这个接口是**开关（toggle）**不是"添加"——同一个 body 连续调用两次，
+ * 第一次 `is_blacklisted:true`（已加入屏蔽），第二次 `is_blacklisted:false`（已从屏蔽中移除）。
+ * 所以调用方必须以响应的 isBlacklisted 为准向用户反馈结果，不能假设"调用即屏蔽"。
+ */
+@Serializable
+data class BookBlacklistRequest(
+    val bookId: Long,
+)

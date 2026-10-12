@@ -9,17 +9,23 @@ import java.io.IOException
 /**
  * 漫画仓库：首页 / 排行 / 最近更新 / 详情 / 搜索 / 分类 / 标签。
  *
- * 屏蔽标签过滤规则：
- * - 被屏蔽漫画特征：name 以 "已根据标签" 开头。
- * - 过滤开启时用 [filterBlockedMangas] 隐藏这类漫画。
+ * 屏蔽过滤规则（两种占位卡，两个独立开关）：
+ * - 标签屏蔽占位卡：name 以 "已根据标签" 开头 → 受 [TagRepository.isFilterEnabled] 控制；
+ * - 漫画屏蔽占位卡：name 以 "已屏蔽此漫画" 开头 → 受 [BookBlockRepository.isFilterEnabled] 控制；
+ * - 两者都由服务端下发（抓包实测：被屏蔽的条目不会消失，而是被替换成 ads/blocked.jpg 占位卡），
+ *   客户端只负责"隐藏/露出"，不参与判断哪本被屏蔽；
+ * - 过滤开启时用 [filterBlockedMangas] 隐藏这类条目；
  * - 分页凑数用 [loadWithFilter]，自动多页加载直到凑满目标条数。
  */
 object MangaRepository {
 
     private val api get() = NetworkModule.api
 
-    /** 被屏蔽漫画名称前缀 */
-    private const val BLOCKED_PREFIX = "已根据标签"
+    /** 标签屏蔽占位卡名称前缀 */
+    private const val BLOCKED_TAG_PREFIX = "已根据标签"
+
+    /** 漫画屏蔽占位卡名称前缀（抓包实测原文即"已屏蔽此漫画"） */
+    private const val BLOCKED_BOOK_PREFIX = "已屏蔽此漫画"
 
     // ==================== 首页 ====================
 
@@ -110,12 +116,25 @@ object MangaRepository {
     // ==================== 屏蔽标签过滤 ====================
 
     /**
-     * 过滤掉被屏蔽的漫画（name 以 "已根据标签" 开头的条目）。
+     * 过滤掉被屏蔽的条目。两种占位卡分别由各自开关控制，互不影响：
+     * - "已根据标签…" ← 过滤屏蔽标签开关
+     * - "已屏蔽此漫画" ← 过滤屏蔽漫画开关
      * 应用范围：分类、最近更新、排行、搜索。
      */
     fun filterBlockedMangas(list: List<Manga>): List<Manga> {
-        return list.filterNot { it.name.startsWith(BLOCKED_PREFIX) }
+        var out = list
+        if (TagRepository.isFilterEnabled()) {
+            out = out.filterNot { it.name.startsWith(BLOCKED_TAG_PREFIX) }
+        }
+        if (BookBlockRepository.isFilterEnabled()) {
+            out = out.filterNot { it.name.startsWith(BLOCKED_BOOK_PREFIX) }
+        }
+        return out
     }
+
+    /** 任一过滤开关开着，就需要走 [loadWithFilter] 的分页凑数（过滤掉的可能不止一条）。 */
+    fun isAnyFilterEnabled(): Boolean =
+        TagRepository.isFilterEnabled() || BookBlockRepository.isFilterEnabled()
 
     /**
      * 分页凑数：自动加载多页直到凑满 targetCount 条有效漫画。
