@@ -2,6 +2,10 @@ package com.zycomic.app.net
 
 import java.net.InetAddress
 import java.net.Proxy
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.util.Log
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -115,11 +119,17 @@ object NetworkModule {
         if (withFailover) addInterceptor(LineFailoverInterceptor())
         addInterceptor(manwaInterceptor)
         addInterceptor(imageInterceptor)
-        val baseSslContext = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
+        if (shouldUseDirectStrategy()) {
+            // 国内直连：RuleDns 硬编码 IP 直连 + SniRemoving 去 SNI
+            val baseSslContext = SSLContext.getInstance("TLS").apply {
+                init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
+            }
+            dns(RuleDns)
+            sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
+        } else {
+            // VPN 友好：系统 DNS + 保留 SNI（trust-all 已在 enableTrustAll 中设置默认 SSL）
+            dns(Dns.SYSTEM)
         }
-        dns(RuleDns)
-        sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
         return this
     }
 
@@ -135,13 +145,76 @@ object NetworkModule {
 
     /**
      * 切换线路后重建 Retrofit。
-     * GlobalCookieJar 全局共享 cookie，不按 host 分开，无需重写 domain。
-     * OkHttpClient 本身无需重建（拦截器无状态）。
+     * 同时清理 apiClient/imageClient 连接池 + 取消在途请求，让手动切换立即生效。
      */
     fun rebuild() {
+        _apiClient?.dispatcher?.cancelAll()
+        _apiClient?.connectionPool?.evictAll()
+        _imageClient?.dispatcher?.cancelAll()
+        _imageClient?.connectionPool?.evictAll()
         _retrofit = null
         _api = null
         buildRetrofit()
+    }
+
+    // ==================== VPN 加速 / 国内直连策略 ====================
+
+    /** 上次评估的"是否直连策略"，用于判断 VPN/网络变化后是否需要重建 client。 */
+    @Volatile
+    private var lastDirectStrategy: Boolean? = null
+
+    /** 检测系统 VPN 是否激活（NetworkCapabilities.TRANSPORT_VPN）。 */
+    fun isSystemVpnActive(): Boolean {
+        val ctx = appContext ?: return false
+        return try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            val network = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 是否走"国内直连策略"（RuleDns 硬编码 IP + SniRemoving 去 SNI）。
+     * - VPN 加速开关关闭 → 始终直连（抓包模式）。
+     * - 开关开启 + 检测到系统 VPN → 不走直连（系统 DNS + 保留 SNI）。
+     * - 开关开启 + 无 VPN → 直连。
+     */
+    fun shouldUseDirectStrategy(): Boolean {
+        if (!DevConfig.isVpnAccelEnabled()) return true
+        return !isSystemVpnActive()
+    }
+
+    /**
+     * 重建网络客户端：apiClient/imageClient 都先 cancelAll + evictAll，再重建，
+     * 并清空章节 URL 缓存、重建 Retrofit。VPN 加速开关变化 / VPN 或网络变化后调用。
+     */
+    fun rebuildClient() {
+        _apiClient?.dispatcher?.cancelAll()
+        _apiClient?.connectionPool?.evictAll()
+        _imageClient?.dispatcher?.cancelAll()
+        _imageClient?.connectionPool?.evictAll()
+        _apiClient = buildApiClient()
+        _imageClient = buildImageClient()
+        _retrofit = null
+        _api = null
+        buildRetrofit()
+        com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+        lastDirectStrategy = shouldUseDirectStrategy()
+        Log.i("NetworkModule", "client rebuilt, directStrategy=$lastDirectStrategy")
+    }
+
+    /**
+     * VPN 开关 / 网络变化回调：仅当"是否直连策略"发生变化时才重建 client，避免频繁重建。
+     */
+    fun onVpnOrNetworkChanged() {
+        val now = shouldUseDirectStrategy()
+        if (lastDirectStrategy == now) return
+        lastDirectStrategy = now
+        rebuildClient()
     }
 
     /** 测速专用 client：NO_PROXY + trust-all + RuleDns + SNI 移除 + 3s 超时。 */

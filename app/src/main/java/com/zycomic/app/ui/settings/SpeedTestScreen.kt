@@ -41,6 +41,7 @@ fun SpeedTestScreen(
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
+    val vpnAccel by vm.vpnAccelEnabled.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
 
@@ -129,6 +130,23 @@ fun SpeedTestScreen(
                             )
                         }
                         Switch(checked = useFastestImg, onCheckedChange = { vm.setUseFastestImgForAll(it) })
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("VPN 加速", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (vpnAccel) "已开启：检测到系统VPN时自动恢复SNI/系统DNS；关闭则始终国内直连（抓包时用）"
+                                else "已关闭：始终国内直连（硬编码IP+去SNI）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = vpnAccel, onCheckedChange = { vm.setVpnAccelEnabled(it) })
                     }
                 }
                 item {

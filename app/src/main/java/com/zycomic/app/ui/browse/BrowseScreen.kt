@@ -486,6 +486,7 @@ private fun MangaGridItem(
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
             // 紧凑网格：标题叠加封面底部
             if (displayMode == 0) {

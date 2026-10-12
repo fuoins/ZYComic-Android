@@ -24,6 +24,7 @@ object DevConfig {
     private const val KEY_CONFIG_JSON = "config_json"
     private const val KEY_PROXY_ENABLED = "proxy_enabled"
     private const val KEY_PROXY_MIGRATED = "proxy_migrated_v1"
+    private const val KEY_VPN_ACCEL_ENABLED = "vpn_accel_enabled"
 
     /** 内置基线配置版本：提升该值可在下次启动时把新基线再次合并进已持久化配置。 */
     private const val KEY_BASELINE_VERSION = "baseline_config_version"
@@ -57,6 +58,25 @@ object DevConfig {
         val editor = prefs.edit()
         if (prefs.getBoolean(KEY_PROXY_ENABLED, false)) editor.remove(KEY_PROXY_ENABLED)
         editor.putBoolean(KEY_PROXY_MIGRATED, true).commit()
+    }
+
+    /**
+     * "VPN 加速"开关，默认开启。
+     * - ON：检测到系统 VPN 时 RuleDns 回退系统 DNS、SniRemoving 不移除 SNI；无 VPN 时保持国内直连。
+     * - OFF：无论是否 VPN，始终国内直连（硬编码 IP + 去 SNI），供抓包使用。
+     */
+    fun isVpnAccelEnabled(): Boolean {
+        val ctx = context ?: return true
+        return ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_VPN_ACCEL_ENABLED, true)
+    }
+
+    /** 设置"VPN 加速"开关。 */
+    fun setVpnAccelEnabled(enabled: Boolean) {
+        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putBoolean(KEY_VPN_ACCEL_ENABLED, enabled)
+            ?.apply()
     }
 
     private fun bareHost(url: String): String =

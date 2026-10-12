@@ -74,6 +74,7 @@ fun MangaCard(
                     contentDescription = manga.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxWidth(),
+                    error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
                 )
             }
         }

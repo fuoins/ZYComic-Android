@@ -116,6 +116,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         DevConfig.migrateProxyDefaultIfNeeded()
         DevConfig.mergeBaselineConfigIfNeeded()
         com.zycomic.app.net.ImageCacheManager.init(this)
+        // 初始化网络模块上下文（VPN 检测需要），并注册网络/VPN 变化监听
+        com.zycomic.app.net.NetworkModule.init(this)
+        registerNetworkCallback()
         runCatching {
             if (getSharedPreferences("zycomic_data", android.content.Context.MODE_PRIVATE)
                     .getBoolean("auto_clear_chapter_cache", true)
@@ -280,6 +283,34 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         }
 
         initializeMigrator()
+    }
+
+    /**
+     * 注册默认网络回调：网络/VPN 状态变化时，按当前"VPN 加速"模式重新评估并
+     * 按需重建网络 client（仅在直连策略变化时才真正重建）。
+     */
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                as? android.net.ConnectivityManager ?: return
+            val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged()
+                }
+                override fun onLost(network: android.net.Network) {
+                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged()
+                }
+                override fun onCapabilitiesChanged(
+                    network: android.net.Network,
+                    caps: android.net.NetworkCapabilities,
+                ) {
+                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged()
+                }
+            }
+            cm.registerDefaultNetworkCallback(callback)
+        } catch (e: Exception) {
+            android.util.Log.w("App", "registerNetworkCallback failed: ${e.message}")
+        }
     }
 
     private fun initializeMigrator() {

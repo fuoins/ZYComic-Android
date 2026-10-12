@@ -517,6 +517,7 @@ private fun HistoryItemRow(
                         onLongClickRow()
                     },
                 ),
+            error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
         )
         Column(
             modifier = Modifier

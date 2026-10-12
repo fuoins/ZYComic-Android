@@ -222,6 +222,7 @@ fun MangaDetailScreen(
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .clickable { showCoverMenu = true },
                             contentScale = ContentScale.Crop,
+                            error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
                         )
                         Column(modifier = Modifier.padding(start = 16.dp)) {
                             Text(
@@ -631,6 +632,7 @@ private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentScale = ContentScale.Crop,
+            error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
         )
         Spacer(Modifier.height(4.dp))
         Text(

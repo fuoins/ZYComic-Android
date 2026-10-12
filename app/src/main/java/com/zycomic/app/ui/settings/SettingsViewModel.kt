@@ -40,6 +40,8 @@ class SettingsViewModel {
     val currentImgIndex = MutableStateFlow(RouteManager.imgIndex)
     val autoSelectEnabled = MutableStateFlow(RouteManager.autoSelectEnabled)
     val useFastestImgForAll = MutableStateFlow(RouteManager.useFastestImgForAll)
+    /** VPN 加速开关（默认开启） */
+    val vpnAccelEnabled = MutableStateFlow(DevConfig.isVpnAccelEnabled())
     /** 手动测速进行中（设置页"重新测速"按钮） */
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
@@ -206,6 +208,15 @@ class SettingsViewModel {
         RouteManager.updateUseFastestImgForAll(v)
         useFastestImgForAll.value = v
         toast.value = if (v) "已开启：封面和章节用测速最快图源" else "已关闭：用服务端推荐图源"
+    }
+
+    /** VPN 加速开关：持久化并立即按新模式重评重建 client。 */
+    fun setVpnAccelEnabled(v: Boolean) {
+        DevConfig.setVpnAccelEnabled(v)
+        vpnAccelEnabled.value = v
+        NetworkModule.onVpnOrNetworkChanged()
+        toast.value = if (v) "VPN 加速已开启：检测到系统VPN时自动恢复SNI/系统DNS"
+        else "VPN 加速已关闭：始终国内直连（抓包模式）"
     }
 
     /** 切换图源：更新 imgHost 并清除 Coil 缓存，避免旧图源图片/封面被缓存命中。 */

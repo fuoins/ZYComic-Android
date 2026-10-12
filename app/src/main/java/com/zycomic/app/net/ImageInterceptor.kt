@@ -1,5 +1,6 @@
 package com.zycomic.app.net
 
+import java.io.IOException
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
@@ -8,6 +9,16 @@ import okhttp3.ResponseBody
 import okio.Buffer
 import okio.BufferedSource
 
+/**
+ * 图片拦截器：加请求头 + 加密漫画图片解密 + 加密图片磁盘缓存。
+ *
+ * 健壮性（R1/R2）：
+ * - 非 2xx 响应原样透传（真实状态码/Content-Type/body），不伪装成 200/image/webp、不落缓存；
+ * - 只有校验为有效图片（魔数匹配）才写入 ImageCacheManager；
+ * - 缓存命中后解密，若仍非有效图片视为坏缓存，删除该缓存并按未命中重新走网络；
+ * - 解密后非图片 / 空响应 / 解密异常，直接抛 IOException，让 Coil 走"加载失败+重试"，
+ *   杜绝 "Failed to initialize decoder" 技术异常。
+ */
 class ImageInterceptor : Interceptor {
 
     companion object {
@@ -24,11 +35,17 @@ class ImageInterceptor : Interceptor {
             originalUrl.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
         } else originalUrl
 
-        val cached = ImageCacheManager.get(originalUrl)
-        if (cached != null) {
-            val bytes = cached.readBytes()
-            val out = decryptIfNeeded(bytes, originalUrl)
-            return buildResponse(original, out)
+        // 缓存命中分支：读出后解密校验；坏缓存删除后按未命中重取
+        ImageCacheManager.get(originalUrl)?.let { cached ->
+            val bytes = try { cached.readBytes() } catch (_: Exception) { null }
+            if (bytes != null) {
+                val out = decryptIfNeeded(bytes, originalUrl)
+                if (isImageMagic(out)) {
+                    return buildResponse(original, out)
+                }
+            }
+            // 坏缓存：删除并落到网络重新获取
+            try { cached.delete() } catch (_: Exception) {}
         }
 
         val imgReq = original.newBuilder()
@@ -40,15 +57,31 @@ class ImageInterceptor : Interceptor {
             .build()
 
         val response = chain.proceed(imgReq)
-        val body = response.body ?: return response
-        val raw = try { body.source().readByteArray() } catch (_: Exception) { return response }
 
+        // R1：非 2xx 原样透传（真实状态码/Content-Type/body），不包装成图片、不落缓存
+        if (!response.isSuccessful) return response
+
+        val body = response.body ?: return response
+        val raw = try {
+            body.source().readByteArray()
+        } catch (_: Exception) {
+            throw IOException("读取图片响应失败")
+        }
+
+        if (raw.isEmpty()) throw IOException("图片响应为空")
+
+        val out = decryptIfNeeded(raw, originalUrl)
+        if (!isImageMagic(out)) {
+            // 解密后仍非图片：原始响应其实是错误页/拦截页，走加载失败，绝不落缓存
+            throw IOException("响应不是有效图片(HTTP ${response.code})")
+        }
+
+        // R2：只有校验为有效图片才写加密缓存
         try {
             ImageCacheManager.putStream(originalUrl).use { it.write(raw) }
             ImageCacheManager.commit(originalUrl)
         } catch (_: Exception) {}
 
-        val out = decryptIfNeeded(raw, originalUrl)
         return buildResponse(original, out)
     }
 
@@ -65,10 +98,10 @@ class ImageInterceptor : Interceptor {
             .body(body).build()
     }
 
+    /** 已加密则解密；原始即图片则原样返回。调用方负责用 [isImageMagic] 校验结果。 */
     private fun decryptIfNeeded(raw: ByteArray, url: String): ByteArray {
         if (isImageMagic(raw)) return raw
-        val decrypted = try { Crypto.createImageCipher().doFinal(raw) } catch (_: Exception) { return raw }
-        return if (isImageMagic(decrypted)) decrypted else raw
+        return try { Crypto.createImageCipher().doFinal(raw) } catch (_: Exception) { raw }
     }
 
     private fun isImageRequest(url: String): Boolean {

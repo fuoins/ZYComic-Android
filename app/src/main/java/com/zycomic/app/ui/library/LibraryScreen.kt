@@ -544,6 +544,7 @@ private fun FavGridItem(
                 contentDescription = item.bookName,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
             // 未读完标记（左上角）
             if (showUnreadBadge && item.isUnread()) {
@@ -648,6 +649,7 @@ private fun FavItemRow(
                     .aspectRatio(3f / 4f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
+                error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
             Column(
                 modifier = Modifier
@@ -741,6 +743,7 @@ private fun FavItemRow(
                     .aspectRatio(3f / 4f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
+                error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
             Column(
                 modifier = Modifier
@@ -802,6 +805,7 @@ private fun CoverWithBadges(
                 .size(width = coverWidth, height = coverHeight)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
+            error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
         )
         if (showBadges) {
             if (showUnreadBadge && item.isUnread()) {
