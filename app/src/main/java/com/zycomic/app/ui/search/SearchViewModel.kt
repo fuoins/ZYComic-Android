@@ -32,6 +32,46 @@ class SearchViewModel {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    // ---- 搜索历史（持久化：最新在前、去重、有上限）----
+    private val _searchHistory = MutableStateFlow(loadHistoryFromPrefs())
+    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
+    /** 删除模式：点垃圾桶后每条历史右侧露出 ❌，逐条删；再点垃圾桶退出。 */
+    val historyDeleting = MutableStateFlow(false)
+
+    /** 用历史词直接搜索（点历史条目）。 */
+    fun searchHistoryItem(k: String) {
+        keyword.value = k
+        doSearch()
+    }
+
+    fun removeHistoryItem(k: String) {
+        val next = _searchHistory.value.filter { it != k }
+        _searchHistory.value = next
+        persistHistory(next)
+    }
+
+    fun clearHistory() {
+        _searchHistory.value = emptyList()
+        persistHistory(emptyList())
+    }
+
+    private fun loadHistoryFromPrefs(): List<String> = try {
+        val raw = prefs.getString(KEY_HISTORY, null)
+        if (raw.isNullOrBlank()) emptyList() else {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).map { arr.getString(it) }
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun persistHistory(list: List<String>) {
+        val arr = org.json.JSONArray()
+        list.forEach { arr.put(it) }
+        prefs.edit().putString(KEY_HISTORY, arr.toString()).apply()
+    }
+
     // ---- 显示模式（持久化）----
     /** 显示模式：0 紧凑网格 / 1 舒适网格 / 2 仅封面网格 / 3 列表（默认，对齐 manwa 搜索观感） */
     val displayMode = MutableStateFlow(prefs.getInt("search_display_mode", 3))
@@ -70,8 +110,16 @@ class SearchViewModel {
     fun doSearch() {
         val k = keyword.value.trim()
         if (k.isEmpty()) return
+        recordHistory(k)
         hasSearched = true
         scope.launch { load(reset = true) }
+    }
+
+    /** 记一条历史：同一个词重复搜只顶到最前，不产生重复条目；超出上限丢弃最旧的。 */
+    private fun recordHistory(k: String) {
+        val next = (listOf(k) + _searchHistory.value.filter { it != k }).take(HISTORY_MAX)
+        _searchHistory.value = next
+        persistHistory(next)
     }
 
     fun loadMore() {
@@ -110,6 +158,8 @@ class SearchViewModel {
     }
 
     companion object {
+        private const val KEY_HISTORY = "search_history"
+        private const val HISTORY_MAX = 20
         private lateinit var prefs: android.content.SharedPreferences
         fun init(context: Context) {
             prefs = context.getSharedPreferences("zycomic_display", Context.MODE_PRIVATE)

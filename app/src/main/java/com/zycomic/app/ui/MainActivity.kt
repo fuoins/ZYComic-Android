@@ -42,6 +42,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -182,7 +183,16 @@ fun AppContent(
     }
 
     // 覆盖层状态
-    var detailBookId by remember { mutableStateOf<String?>(null) }
+    /**
+     * 详情覆盖层的返回栈（最新一本在栈顶）。
+     * 之前只存一个 detailBookId，从相关推荐连点几本后按返回会把整个详情层一次关掉，
+     * 回不到上一本；改成栈后返回逐级退，最后一本退完才关层。
+     */
+    val detailStack = remember { mutableStateListOf<String>() }
+    /** 压入一本（点相关推荐/搜索结果时调用）。 */
+    val openDetail: (String) -> Unit = { id -> if (id.isNotBlank()) detailStack.add(id) }
+    /** 退一本：栈里还有就不关层，退空了才关。 */
+    val closeDetail: () -> Unit = { if (detailStack.isNotEmpty()) detailStack.removeAt(detailStack.lastIndex) }
     var showSearch by remember { mutableStateOf(false) }
     var loginOpen by remember { mutableStateOf(false) }
 
@@ -261,11 +271,11 @@ fun AppContent(
     val libraryVm = remember { LibraryViewModel(mode = 0) }
     val historyVm = remember { HistoryViewModel() }
     androidx.activity.compose.BackHandler(
-        enabled = detailBookId != null || showSearch || loginOpen || settingsDialog != null,
+        enabled = detailStack.isNotEmpty() || showSearch || loginOpen || settingsDialog != null,
     ) {
         when {
             settingsDialog != null -> settingsDialog = null
-            detailBookId != null -> detailBookId = null
+            detailStack.isNotEmpty() -> closeDetail()
             showSearch -> { showSearch = false }
             loginOpen -> loginOpen = false
         }
@@ -314,13 +324,13 @@ fun AppContent(
                     vm = browseVm,
                     pendingTag = pendingTag,
                     onPendingTagConsumed = { pendingTag = null },
-                    onOpenManga = { detailBookId = it },
+                    onOpenManga = openDetail,
                     onOpenSearch = { kw -> searchKeyword = kw; showSearch = true },
                     onRequireLogin = { loginOpen = true },
                 )
                 1 -> LibraryScreen(
                     vm = libraryVm,
-                    onOpenManga = { detailBookId = it },
+                    onOpenManga = openDetail,
                     onRequireLogin = { loginOpen = true },
                     onOpenSearch = { kw ->
                         searchKeyword = kw
@@ -329,7 +339,7 @@ fun AppContent(
                 )
                 2 -> HistoryScreen(
                     vm = historyVm,
-                    onOpenManga = { detailBookId = it },
+                    onOpenManga = openDetail,
                     onRequireLogin = { loginOpen = true },
                     onOpenSearch = { kw ->
                         searchKeyword = kw
@@ -378,18 +388,20 @@ fun AppContent(
     }
 
     // ---- 详情覆盖层 ----
-    detailBookId?.let { bookId ->
+    if (detailStack.isNotEmpty()) {
+        // 栈顶才是当前要展示的那本；相关推荐点击 = 往栈里再压一本，返回 = 弹栈
+        val bookId = detailStack.last()
         MangaDetailOverlay(
             bookId = bookId,
-            onClose = { detailBookId = null },
-            onOpenManga = { detailBookId = it },
+            onClose = { closeDetail() },
+            onOpenManga = openDetail,
             onSearchKeyword = { kw ->
                 searchKeyword = kw
-                detailBookId = null
+                detailStack.clear()
                 showSearch = true
             },
             onTagClick = { tag ->
-                detailBookId = null
+                detailStack.clear()
                 bottomTab = 0
                 pendingTag = tag
             },
@@ -405,7 +417,7 @@ fun AppContent(
                 showSearch = false
                 searchKeyword = ""
             },
-            onOpenManga = { detailBookId = it },
+            onOpenManga = openDetail,
         )
     }
 

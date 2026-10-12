@@ -35,6 +35,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCompact
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -81,6 +84,8 @@ fun SearchScreen(
     val hasMore by vm.hasMore.collectAsState()
 
     val displayMode by vm.displayMode.collectAsState()
+    /** 删除模式必须 collect 成状态，直读 .value 不会随点击重组 */
+    val historyDeleting by vm.historyDeleting.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
     var showDisplaySheet by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = showDisplaySheet) { showDisplaySheet = false }
@@ -138,6 +143,18 @@ fun SearchScreen(
                     onSearch = { vm.doSearch() },
                 ),
             )
+            // 搜索历史垃圾桶：放最右，只在关键词为空（显示历史）时出现。
+            // 点一下进删除模式，每条历史右侧露出 ❌ 逐条删；再点退出。清空走历史区的"清空"按钮。
+            if (keyword.isBlank()) {
+                IconButton(onClick = { vm.historyDeleting.value = !historyDeleting }) {
+                    Icon(
+                        Icons.Outlined.DeleteSweep,
+                        contentDescription = if (historyDeleting) "退出删除搜索记录" else "删除搜索记录",
+                        tint = if (historyDeleting) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             // 显示模式切换：点击弹出底部"显示"设置弹窗
             IconButton(onClick = { showDisplaySheet = true }) {
                 Icon(
@@ -157,6 +174,7 @@ fun SearchScreen(
             when {
                 loading && mangas.isEmpty() -> LoadingFooter()
                 mangas.isEmpty() && !loading && keyword.isNotBlank() -> EmptyView("没有搜索到「$keyword」")
+                keyword.isBlank() -> SearchHistorySection(vm = vm)
                 mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")
                 displayMode >= 3 -> LazyColumn(
                     state = listState,
@@ -258,16 +276,18 @@ private fun serializeLabel(manga: Manga): String? = when {
  */
 @Composable
 private fun SerializeBadge(text: String, modifier: Modifier = Modifier) {
-    val isSerializing = text == "连载"
+    // 连载 = primary（蓝），完结 = error（红）；形状与内边距完全一致，只换配色
+    val color = if (text == "连载") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    val onColor = if (text == "连载") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onError
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(3.dp))
-            .background(if (isSerializing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+            .background(color)
             .padding(horizontal = 4.dp, vertical = 1.dp),
     ) {
         Text(
             text,
-            color = if (isSerializing) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = onColor,
             style = MaterialTheme.typography.labelSmall,
         )
     }
@@ -407,6 +427,67 @@ private fun SearchMangaListRow(
         // 连载 / 完结：按需求放在最右面（收藏页列表项的标记组同位置）
         serializeLabel(manga)?.let {
             SerializeBadge(it, modifier = Modifier.padding(start = 4.dp))
+        }
+    }
+}
+
+/**
+ * 搜索历史：关键词为空时整页显示历史列表（最新在前）。
+ * 点一条 = 直接用该词搜索；垃圾桶进入删除模式后每条右侧出现 ❌ 可单条删，
+ * 长按垃圾桶清空全部。
+ */
+@Composable
+private fun SearchHistorySection(vm: SearchViewModel) {
+    val history by vm.searchHistory.collectAsState()
+    val deleting by vm.historyDeleting.collectAsState()
+
+    if (history.isEmpty()) {
+        EmptyView(if (deleting) "没有可删除的搜索记录" else "还没有搜索记录")
+        return
+    }
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                Text(
+                    if (deleting) "删除搜索记录（点条目右侧 ❌）" else "搜索历史",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (deleting) {
+                    TextButton(onClick = { vm.clearHistory() }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+        items(history, key = { it }) { k ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { if (!deleting) vm.searchHistoryItem(k) }
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = k,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (deleting) {
+                    IconButton(onClick = { vm.removeHistoryItem(k) }, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Outlined.Close,
+                            contentDescription = "删除记录 $k",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
