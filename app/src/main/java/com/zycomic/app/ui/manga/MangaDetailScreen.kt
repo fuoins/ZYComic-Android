@@ -106,7 +106,10 @@ fun MangaDetailScreen(
     onTagClick: (String) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
-    val vm = remember { MangaDetailViewModel(bookId) }
+    // 必须带 bookId 作为 key：相关推荐/搜索结果的漫画点击后只会换 bookId，
+    // 不带 key 时 remember 会复用上一本的 ViewModel（页面停留在旧漫画，表现为"点了不跳转"），
+    // 下面所有收集 vm 事件的 LaunchedEffect 也必须以 vm 为 key，否则会连着旧实例的流。
+    val vm = remember(bookId) { MangaDetailViewModel(bookId) }
     val detail by vm.detail.collectAsState()
     val loading by vm.loading.collectAsState()
     val error by vm.error.collectAsState()
@@ -137,20 +140,20 @@ fun MangaDetailScreen(
     /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
     val blockBusy by vm.blockBusy.collectAsState()
 
-    LaunchedEffect(needLogin) {
+    LaunchedEffect(vm, needLogin) {
         if (needLogin) {
             onRequireLogin()
             vm.needLogin.value = false
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(vm) {
         vm.favSuccess.collect { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(vm) {
         vm.blockMessage.collect { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }

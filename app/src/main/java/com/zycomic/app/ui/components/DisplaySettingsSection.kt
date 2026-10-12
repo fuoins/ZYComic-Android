@@ -26,10 +26,15 @@ fun DisplaySettingsSection(
     onSetDisplayMode: (Int) -> Unit,
     onSetGridColumns: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 可选的显示模式集合。默认只有三档网格（分类页沿用）。
+     * 搜索页额外传入 3 to "列表"——列表档不占网格列数，所以选中时下面的"每行数量"会隐藏。
+     */
+    modes: List<Pair<Int, String>> = listOf(0 to "紧凑网格", 1 to "舒适网格", 2 to "仅封面网格"),
 ) {
     Column(modifier = modifier) {
         FilterSection("显示模式") {
-            listOf(0 to "紧凑网格", 1 to "舒适网格", 2 to "仅封面网格").forEach { (v, label) ->
+            modes.forEach { (v, label) ->
                 FilterChip(
                     text = label,
                     selected = displayMode == v,
@@ -38,6 +43,7 @@ fun DisplaySettingsSection(
             }
         }
 
+        if (displayMode > 2) return@Column   // 列表档没有列数概念
         FilterSection("每行数量") {
             Text(
                 if (gridColumns == 0) "自动" else gridColumns.toString(),

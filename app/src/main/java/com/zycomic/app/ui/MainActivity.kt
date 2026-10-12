@@ -80,7 +80,6 @@ import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -209,32 +208,19 @@ fun AppContent(
 
     LaunchedEffect(Unit) {
         if (isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) {
-            var attempt = 0
-            var done = false
-            while (!done) {
-                android.util.Log.d("SpeedTest", "speed test launched attempt=$attempt")
-                val result = withTimeoutOrNull(8000) { settingsVm.autoSelectFastest() }
-                when {
-                    result == null -> {
-                        android.util.Log.d("SpeedTest", "speed test timeout attempt=$attempt")
-                        if (attempt == 0) {
-                            attempt++
-                            Toast.makeText(context, "测速超时，重新测速", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "测速超时，使用当前线路", Toast.LENGTH_SHORT).show()
-                            done = true
-                        }
-                    }
-                    result.first == -1 -> {
-                        Toast.makeText(context, "测速失败，使用当前线路", Toast.LENGTH_SHORT).show()
-                        done = true
-                    }
-                    else -> {
-                        android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}")
-                        Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
-                        done = true
-                    }
-                }
+            // 按需求去掉"整体 8s 超时 + 超时再重测一次"：
+            // 8s 这个值本身定不准（9 条线路 + 取样本 + 77 个图源，慢网必然掐断），
+            // 而重测又会撞上 SpeedTester 的防重入 —— 上一轮还在跑就直接 skip，
+            // 结果是"看着测过一轮，其实一个域都没探"，界面上全成了超时。
+            // 现在是每个探活各自测完再进入：单次请求 callTimeout 5s、取样本 6s 上限，
+            // 整轮耗时有界（一般几秒，最坏二十多秒），不会无限卡住。
+            val result = runCatching { settingsVm.autoSelectFastest() }.getOrNull()
+            if (result == null || result.first == -1) {
+                android.util.Log.w("SpeedTest", "startup speed test incomplete: $result")
+                Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
+            } else {
+                android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}")
+                Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
             }
             com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone = true
             speedTesting = false

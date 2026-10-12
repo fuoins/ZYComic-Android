@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -54,6 +55,9 @@ object SpeedTester {
      * 选它是因为所有图域都应当镜像同一批 `/static/upload*` 资源，且路径不随业务数据变化。
      */
     private const val PROBE_COVER_PATH = "/static/upload2/book/id/126811/cover_1.jpg"
+
+    /** 取样本封面路径的独立上限：超过就用历史缓存，不能让启动流程等它。 */
+    private const val SAMPLE_PATH_TIMEOUT_MS = 6_000L
 
     /** 防止启动测速与网络变化重测速并发重叠。 */
     private val running = AtomicBoolean(false)
@@ -259,12 +263,19 @@ object SpeedTester {
      * `img probe sample path=null`，完全查不出是接口没通、还是字段为空）。
      */
     private suspend fun obtainProbePath(): String? {
-        val resp = runCatching { NetworkModule.api.index() }
+        // 整轮测速已经没有"整体超时"了，这一步必须自带上限：api.index() 用的是运行时
+        // apiClient（readTimeout 30s），网络半死不活时能把启动卡住半分钟。
+        // 6s 内拿不到样本就退到历史缓存路径，绝不拖住进入主页。
+        val resp = runCatching { withTimeoutOrNull(SAMPLE_PATH_TIMEOUT_MS) { NetworkModule.api.index() } }
         if (resp.isFailure) {
             Log.w(TAG, "probe sample path: index() 请求失败 err=${resp.exceptionOrNull()?.message}")
         }
-        val data: Manga? = resp.getOrNull()?.data
-        if (resp.isSuccess && data == null) {
+        val index = resp.getOrNull()
+        if (resp.isSuccess && index == null) {
+            Log.w(TAG, "probe sample path: index() 在 ${SAMPLE_PATH_TIMEOUT_MS}ms 内没返回，改用历史缓存")
+        }
+        val data: Manga? = index?.data
+        if (index != null && data == null) {
             Log.w(TAG, "probe sample path: index() 成功但 data 为空（可能解密/解析失败）")
         }
         val live = data?.let { d ->
@@ -377,6 +388,7 @@ object SpeedTester {
             lastRunSkipped = false
             // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
             lastImgVerdicts = emptyMap()
+            val startedAt = System.currentTimeMillis()
             val lineClient = NetworkModule.newLineProbeClient()
             val imgClient = NetworkModule.newSpeedTestClient()
             try {
@@ -446,7 +458,8 @@ object SpeedTester {
                         " unreachable=${vc[ImgVerdict.UNREACHABLE] ?: 0} no_image=${vc[ImgVerdict.NO_IMAGE] ?: 0}" +
                         " samplePath=${if (samplePath == null) "null" else "ok"} fastest=[$fastest]",
                 )
-                Log.i(TAG, "runAndApply done, bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
+                Log.i(TAG, "runAndApply done in ${System.currentTimeMillis() - startedAt}ms, " +
+                    "bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
                 (bestLine ?: -1) to (bestImg ?: -1)
             } finally {
                 running.set(false)

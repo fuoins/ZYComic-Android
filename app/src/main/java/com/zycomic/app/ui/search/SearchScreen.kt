@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCompact
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.ui.components.DisplaySettingsSection
+import com.zycomic.app.ui.components.coverUrl
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
 import eu.kanade.presentation.components.TabbedDialog
@@ -81,6 +87,8 @@ fun SearchScreen(
     val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
     val gridState = rememberLazyGridState()
+    /** 列表档（displayMode == 3）用独立滚动状态，触底加载逻辑与网格档一致 */
+    val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
         if (initialKeyword.isNotBlank()) {
@@ -91,6 +99,13 @@ fun SearchScreen(
 
     LaunchedEffect(gridState.canScrollForward, mangas.size) {
         val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading) {
+            vm.loadMore()
+        }
+    }
+
+    LaunchedEffect(listState.canScrollForward, mangas.size) {
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading) {
             vm.loadMore()
         }
@@ -143,6 +158,29 @@ fun SearchScreen(
                 loading && mangas.isEmpty() -> LoadingFooter()
                 mangas.isEmpty() && !loading && keyword.isNotBlank() -> EmptyView("没有搜索到「$keyword」")
                 mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")
+                displayMode >= 3 -> LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    // key 必须带下标：搜索结果跨页可能返回同一 id，纯 id 作 key 会抛
+                    // "Key "..." was already used" 直接崩掉列表（网格档原本就是这么规避的）
+                    itemsIndexed(mangas, key = { i, m -> m.id + "_$i" }) { _, m ->
+                        SearchMangaListRow(
+                            manga = m,
+                            onClick = { onOpenManga(m.id) },
+                        )
+                    }
+                    if (appending) item { LoadingFooter() }
+                    else if (!hasMore && mangas.isNotEmpty()) item {
+                        Text(
+                            "没有更多了",
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 else -> LazyVerticalGrid(
                     columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
                     state = gridState,
@@ -190,13 +228,52 @@ fun SearchScreen(
                     orientation = orientation,
                     onSetDisplayMode = vm::setDisplayMode,
                     onSetGridColumns = { vm.setGridColumns(it, orientation) },
+                    modes = listOf(
+                        0 to "紧凑网格",
+                        1 to "舒适网格",
+                        2 to "仅封面网格",
+                        3 to "列表",
+                    ),
                 )
             }
         }
     }
 }
 
-/** 搜索结果漫画卡片，支持三种显示模式。 */
+/**
+ * 连载状态角标文案。服务端 serialize 实测简繁混用（"连载" / "完結"），
+ * 这里统一归一成简体的 连载 / 完结；认不出来（空或别的值）就不显示角标，不硬猜。
+ */
+private fun serializeLabel(manga: Manga): String? = when {
+    manga.state.isBlank() -> null
+    manga.state.contains("完") -> "完结"
+    manga.state.contains("载") || manga.state.contains("連") -> "连载"
+    else -> null
+}
+
+/**
+ * 连载/完结小角标。网格档贴在封面左上角、列表档放行尾，样式对齐收藏页
+ * （LibraryScreen 的"未读"标记：primary 底色 + onPrimary 文字 + labelSmall）。
+ * 连载用 primary，完结用中性的 surfaceVariant——完结不是错误状态，不配 error 红。
+ */
+@Composable
+private fun SerializeBadge(text: String, modifier: Modifier = Modifier) {
+    val isSerializing = text == "连载"
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(if (isSerializing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text,
+            color = if (isSerializing) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/** 搜索结果漫画卡片，支持三种网格显示模式。 */
 @Composable
 private fun SearchMangaGridItem(
     manga: Manga,
@@ -216,12 +293,16 @@ private fun SearchMangaGridItem(
                 .clip(RoundedCornerShape(8.dp)),
         ) {
             SubcomposeAsyncImage(
-                model = manga.picx.ifBlank { manga.pic },
+                model = coverUrl(manga),
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
+            // 连载 / 完结：与收藏页"未读"一样放封面左上角
+            serializeLabel(manga)?.let {
+                SerializeBadge(it, modifier = Modifier.align(Alignment.TopStart))
+            }
             // 紧凑网格：标题叠加封面底部
             if (displayMode == 0) {
                 Box(
@@ -259,6 +340,73 @@ private fun SearchMangaGridItem(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+    }
+}
+
+/**
+ * 列表档（displayMode == 3）单行：左侧封面 + 右侧书名/作者/简介，连载·完结放在最右面。
+ * 结构对齐收藏页的列表项（封面 3:4、名称加粗两行、次要信息一行、行尾标记组）。
+ */
+@Composable
+private fun SearchMangaListRow(
+    manga: Manga,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SubcomposeAsyncImage(
+            model = coverUrl(manga),
+            contentDescription = manga.name,
+            modifier = Modifier
+                .width(66.dp)
+                .aspectRatio(3f / 4f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Crop,
+            error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 10.dp, end = 6.dp),
+        ) {
+            Text(
+                text = manga.name,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (manga.author.isNotBlank()) {
+                Text(
+                    text = manga.author,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (manga.text.isNotBlank()) {
+                Text(
+                    text = manga.text,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        // 连载 / 完结：按需求放在最右面（收藏页列表项的标记组同位置）
+        serializeLabel(manga)?.let {
+            SerializeBadge(it, modifier = Modifier.padding(start = 4.dp))
         }
     }
 }
