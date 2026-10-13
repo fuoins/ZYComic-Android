@@ -141,9 +141,6 @@ object SpeedTester {
         val elapsedMs: Long = MAX,
     )
 
-    /** 图域探活结论，用于把"连不上"和"连上了但拿不到图"分开——UI 上一律显示"超时"会掩盖两种完全不同的问题。 */
-    enum class ImgVerdict { OK, UNREACHABLE, NO_IMAGE }
-
     /**
      * 图域探活结论 + 延迟 + 最后一次状态码。
      * [httpCode] 只为日志服务：无图到底是 302 跳转站、403 防盗链还是 200+html，
