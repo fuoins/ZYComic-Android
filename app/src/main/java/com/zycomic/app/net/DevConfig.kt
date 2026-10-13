@@ -2,6 +2,10 @@ package com.zycomic.app.net
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -10,13 +14,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 开发者配置管理（直连模式：自定义 DNS + SNI 移除）。
- *
- * 新规范（无独立 sni）：{"version","updated_at","port","lines":[完整URL],"sources":[裸域名],"rule":{domain:[ip]}}
- *  - rule：域名 -> IPv4，RuleDns 做 IP 直连（唯一 DNS 数据源）；
- *  - SNI 集合由 host(lines) ∪ sources 派生（并包含运行时学到的额外 rule 主机），不再单独维护；
- *  - 旧格式 {"rule","sni"} 仍可容错读取。
+ * Runtime configuration sourced exclusively from a validated remote snapshot.
+ * Route and source lists are not packaged in the app; first launch remains network-gated
+ * until the first successful fetch. A previously successful remote snapshot is retained for offline startup.
  */
+sealed interface RouteConfigState {
+    data object Loading : RouteConfigState
+    data object Ready : RouteConfigState
+    data class Failed(val message: String) : RouteConfigState
+}
+
 object DevConfig {
 
     private const val TAG = "DevConfig"
@@ -26,31 +33,106 @@ object DevConfig {
     private const val KEY_PROXY_MIGRATED = "proxy_migrated_v1"
     private const val KEY_VPN_ACCEL_ENABLED = "vpn_accel_enabled"
 
-    /** 内置基线配置版本：提升该值可在下次启动时把新基线再次合并进已持久化配置。 */
-    private const val KEY_BASELINE_VERSION = "baseline_config_version"
-    private const val BASELINE_VERSION = 3
-
     /** 远程配置持久化 */
     private const val PREFS_REMOTE = "zycomic_remote_config"
-    /** Bump when the interpretation of an already-downloaded remote config changes. */
-    private const val ROUTE_POLICY_VERSION = 1
+    private const val EMPTY_CONFIG_JSON = """{"version":0,"lines":[],"sources":[],"rule":{}}"""
 
     private var context: Context? = null
     private var cachedJson: String? = null
 
+    private val _routeConfigState = MutableStateFlow<RouteConfigState>(RouteConfigState.Loading)
+    val routeConfigState: StateFlow<RouteConfigState> = _routeConfigState.asStateFlow()
+
     /** 全局 ApplicationContext，供 RouteManager 等使用。 */
     val appContext: Context? get() = context
 
-    /** 初始化：从 SharedPreferences 读取配置（若无则用默认配置），并应用到 RouteManager。 */
+    val hasUsableRouteConfig: Boolean get() = RouteManager.hasRemoteConfig
+
+    /** 初始化时只恢复经远程版本、候选列表及规则校验的成功快照；不从包内/旧基线补线路。 */
     fun init(ctx: Context) {
         context = ctx.applicationContext
-        cachedJson = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_CONFIG_JSON, null)
-            ?: RouteManager.DEFAULT_CONFIG_JSON
-        applyToRouteManager(cachedJson!!)
+        val configPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val remotePrefs = ctx.getSharedPreferences(PREFS_REMOTE, Context.MODE_PRIVATE)
+        val version = remotePrefs.getInt("remote_version", 0)
+        val remoteHosts = runCatching {
+            val array = JSONArray(remotePrefs.getString("remote_hosts", "[]"))
+            (0 until array.length()).map { array.getString(it).lowercase() }.toSet()
+        }.getOrDefault(emptySet())
+        val candidates = listOfNotNull(
+            remotePrefs.getString("last_good_config", null),
+            configPrefs.getString(KEY_CONFIG_JSON, null),
+        ).distinct()
+        val cached = candidates.firstOrNull { isValidRemoteSnapshot(it, version, remoteHosts) }
+
+        if (cached != null) {
+            cachedJson = cached
+            runCatching { applyToRouteManager(cached) }
+                .onSuccess { _routeConfigState.value = RouteConfigState.Ready }
+                .onFailure {
+                    Log.e(TAG, "Unable to restore validated remote configuration", it)
+                    cachedJson = EMPTY_CONFIG_JSON
+                    RouteManager.clearConfiguration()
+                    remotePrefs.edit()
+                        .remove("remote_etag")
+                        .remove("remote_updated_at")
+                        .remove("remote_hosts")
+                        .remove("last_good_config")
+                        .remove("last_success_ts")
+                        .commit()
+                    _routeConfigState.value = RouteConfigState.Loading
+                }
+        } else {
+            cachedJson = EMPTY_CONFIG_JSON
+            RouteManager.clearConfiguration()
+            // Discard only the unusable snapshot/ETag. Keep the last applied version marker monotonic,
+            // while forcing a full response instead of allowing an old ETag to produce a cacheless 304.
+            remotePrefs.edit()
+                .remove("remote_etag")
+                .remove("remote_updated_at")
+                .remove("remote_hosts")
+                .remove("last_good_config")
+                .remove("last_success_ts")
+                .remove("last_error")
+                .commit()
+            _routeConfigState.value = RouteConfigState.Loading
+        }
     }
 
-    fun getConfigJson(): String = cachedJson ?: RouteManager.DEFAULT_CONFIG_JSON
+    fun getConfigJson(): String = cachedJson ?: EMPTY_CONFIG_JSON
+
+    fun markBootstrapLoading() {
+        if (!hasUsableRouteConfig) _routeConfigState.value = RouteConfigState.Loading
+    }
+
+    fun markBootstrapReady() {
+        if (hasUsableRouteConfig) _routeConfigState.value = RouteConfigState.Ready
+    }
+
+    fun markBootstrapFailed(message: String) {
+        if (!hasUsableRouteConfig) _routeConfigState.value = RouteConfigState.Failed(message)
+    }
+
+    suspend fun awaitUsableRouteConfig() {
+        _routeConfigState.first { it is RouteConfigState.Ready }
+    }
+
+    private fun isValidRemoteSnapshot(json: String, expectedVersion: Int, expectedHosts: Set<String>): Boolean {
+        if (expectedVersion <= 0 || expectedHosts.isEmpty()) return false
+        return runCatching {
+            RemoteConfigFetcher.Validator.validate(json)
+            val root = JSONObject(json)
+            if (root.optInt("version", -1) != expectedVersion) {
+                false
+            } else {
+                val actual = LinkedHashSet<String>()
+                val lines = root.getJSONArray("lines")
+                for (i in 0 until lines.length()) actual += bareHost(lines.getString(i)).lowercase()
+                val sources = root.getJSONArray("sources")
+                for (i in 0 until sources.length()) actual += sources.getString(i).lowercase()
+                actual == expectedHosts
+            }
+        }.getOrDefault(false)
+    }
 
     /** 老用户迁移：清理曾显式开启代理的遗留 SP key。 */
     fun migrateProxyDefaultIfNeeded() {
@@ -65,8 +147,8 @@ object DevConfig {
     /**
      * 「自动跟随系统 VPN」开关，默认开启（持久化 key 沿用 vpn_accel_enabled）。
      * - ON（默认）：检测到系统 VPN 时走 VPN 路径（系统 DNS + 保留 SNI + VPN 出口）；
-     *   未检测到 VPN 时走直连穿透（RuleDns 硬编码 IP + 去 SNI）。
-     * - OFF：不自动跟随，**强制直连**，即使开着系统 VPN 也保持直连穿透（硬编码 IP + 去 SNI），用于抓包调试。
+     *   未检测到 VPN 时走直连策略（远程 RuleDns + 去 SNI）。
+     * - OFF：不自动跟随，**强制直连**，即使开着系统 VPN 也保持远程 RuleDns 直连，用于抓包调试。
      */
     fun isFollowSystemVpnEnabled(): Boolean {
         val ctx = context ?: return true
@@ -84,72 +166,6 @@ object DevConfig {
 
     private fun bareHost(url: String): String =
         url.trim().removePrefix("https://").removePrefix("http://").substringBefore('/').trim('/')
-
-    private fun jsonKeys(o: JSONObject): MutableSet<String> {
-        val s = LinkedHashSet<String>()
-        val it = o.keys()
-        while (it.hasNext()) s.add(it.next())
-        return s
-    }
-
-    private fun jsonArrayToStringSet(arr: JSONArray?): MutableSet<String> {
-        val s = LinkedHashSet<String>()
-        if (arr != null) for (i in 0 until arr.length()) s.add(arr.getString(i))
-        return s
-    }
-
-    /**
-     * 一次性基线合并（按版本号 [BASELINE_VERSION]=3 驱动）。
-     * 把内置新规范（lines/sources/rule）合并进当前（可能是旧 {rule,sni} 或已被动态学习污染的）配置：
-     *  - 输出新规范结构（无 sni）；
-     *  - 内置主机 IP 以内置基线为准（覆盖）；当前 rule 中不属于内置的"学到主机"原样保留；
-     *  - 学到的图片主机写入章节图源集合（chapter_img_domains），避免升级后丢失；
-     * 成功后写入版本号；异常不写版本号，下次启动重试。
-     */
-    fun mergeBaselineConfigIfNeeded() {
-        val ctx = context ?: return
-        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getInt(KEY_BASELINE_VERSION, 0) >= BASELINE_VERSION) return
-        try {
-            val baseline = JSONObject(RouteManager.DEFAULT_CONFIG_JSON)
-            val current = JSONObject(getConfigJson())
-            val baseRule = baseline.optJSONObject("rule") ?: JSONObject()
-            val curRule = current.optJSONObject("rule") ?: JSONObject()
-
-            val baseHosts = jsonKeys(baseRule)
-            val baseSources = jsonArrayToStringSet(baseline.optJSONArray("sources"))
-            val baseLineHosts = jsonArrayToStringSet(baseline.optJSONArray("lines"))
-                .mapTo(HashSet()) { bareHost(it) }
-
-            // 运行时学到的主机 = 当前 rule 中不属于内置基线的主机
-            val learned = jsonKeys(curRule).filter { it !in baseHosts }
-
-            val outRule = JSONObject()
-            learned.forEach { outRule.put(it, curRule.getJSONArray(it)) }
-            baseHosts.forEach { outRule.put(it, baseRule.getJSONArray(it)) }
-
-            val out = JSONObject()
-            out.put("version", baseline.optInt("version", 1))
-            out.put("updated_at", baseline.optString("updated_at", ""))
-            out.put("port", baseline.optInt("port", 7891))
-            out.put("lines", baseline.getJSONArray("lines"))
-            out.put("sources", baseline.getJSONArray("sources"))
-            out.put("rule", outRule)
-
-            applyConfig(out.toString())
-
-            // 学到的图片主机（非内置图源、非线路）归入章节运行时图源集合
-            val routePrefs = ctx.getSharedPreferences("zycomic_route", Context.MODE_PRIVATE)
-            val chap = jsonArrayToStringSet(routePrefs.getString("chapter_img_domains", null)?.let(::JSONArray))
-            learned.forEach { h -> if (h !in baseSources && h !in baseLineHosts) chap.add(h) }
-            routePrefs.edit().putString("chapter_img_domains", JSONArray(chap.toList()).toString()).apply()
-
-            prefs.edit().putInt(KEY_BASELINE_VERSION, BASELINE_VERSION).apply()
-            Log.i(TAG, "baseline migrated to v$BASELINE_VERSION (rule=${outRule.length()}, chapter=${chap.size})")
-        } catch (e: Exception) {
-            Log.e(TAG, "mergeBaselineConfigIfNeeded failed", e)
-        }
-    }
 
     /** 域名→IP 列表映射。 */
     fun getRule(): Map<String, List<String>> {
@@ -170,9 +186,7 @@ object DevConfig {
     }
 
     /**
-     * 需要去 SNI 的域名集合（派生）：
-     * 新规范 = host(lines) ∪ sources，并并入 rule 中运行时学到的额外主机；
-     * 旧格式优先用其 sni，缺省回退 rule.keys；统一排除 dns.google。
+     * SNI bypass hosts are derived only from remote lines, sources, and their validated rules.
      */
     fun getSniDomains(): Set<String> {
         return try {
@@ -183,11 +197,7 @@ object DevConfig {
             val lines = strList("lines")
             val sources = strList("sources")
             val ruleKeys = root["rule"]?.jsonObject?.keys ?: emptySet()
-            val base: Set<String> = if (lines.isNotEmpty() || sources.isNotEmpty()) {
-                lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
-            } else {
-                root["sni"]?.jsonArray?.mapTo(HashSet()) { it.jsonPrimitive.content } ?: ruleKeys.toMutableSet()
-            }
+            val base = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
             (base + ruleKeys).filter { it != "dns.google" }.toSet()
         } catch (e: Exception) {
             Log.e(TAG, "getSniDomains failed", e)
@@ -215,35 +225,22 @@ object DevConfig {
         applyToRouteManager(json)
     }
 
-    /** 将 JSON 配置解析并设置到 RouteManager（rule 直连；lines/sources 显式分类；SNI 派生）。 */
+    /** Apply an explicit remote configuration; legacy rule-key classification is intentionally unsupported. */
     private fun applyToRouteManager(json: String) {
-        try {
-            val root = Json { ignoreUnknownKeys = true }
-                .parseToJsonElement(json).jsonObject
-            fun strList(key: String): List<String> =
-                root[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-
-            val ruleMap = LinkedHashMap<String, List<String>>()
-            root["rule"]?.jsonObject?.forEach { (domain, arr) ->
-                ruleMap[domain] = arr.jsonArray.map { it.jsonPrimitive.content }
-            }
-            val lines = strList("lines")
-            val sources = strList("sources")
-
-            RouteManager.setCustomRule(ruleMap)
-            if (lines.isNotEmpty() && sources.isNotEmpty()) {
-                RouteManager.applyBaseLists(lines, sources)
-            } else {
-                // 旧格式（无 lines/sources）兜底：后缀猜测分类
-                RouteManager.applyLegacyClassification(ruleMap)
-            }
-            // SNI 仅由配置声明的线路/图源主机派生；远程 rule 已在校验时要求主机集合完全匹配。
-            val canonical = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
-            val sniSet = (canonical + ruleMap.keys) - "dns.google"
-            RouteManager.setSniDomains(sniSet)
-        } catch (e: Exception) {
-            Log.e(TAG, "applyToRouteManager failed", e)
+        RemoteConfigFetcher.Validator.validate(json)
+        val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(json).jsonObject
+        fun strList(key: String): List<String> = root[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+        val ruleMap = LinkedHashMap<String, List<String>>()
+        root["rule"]?.jsonObject?.forEach { (domain, arr) ->
+            ruleMap[domain] = arr.jsonArray.map { it.jsonPrimitive.content }
         }
+        val lines = strList("lines")
+        val sources = strList("sources")
+        require(lines.isNotEmpty() && sources.isNotEmpty()) { "Remote routes and sources must not be empty" }
+        RouteManager.setCustomRule(ruleMap)
+        RouteManager.applyBaseLists(lines, sources)
+        val canonical = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
+        RouteManager.setSniDomains((canonical + ruleMap.keys) - "dns.google")
     }
 
     // ==================== 远程配置 ====================
@@ -261,11 +258,6 @@ object DevConfig {
     fun remoteError(): String? = runCatching { remotePrefs().getString("last_error", null) }.getOrNull()
     fun remoteEnabled(): Boolean = runCatching { remotePrefs().getBoolean("remote_enabled", true) }.getOrDefault(true)
 
-    /** Existing installations must re-fetch once so the same remote version is reapplied with authoritative semantics. */
-    fun needsRoutePolicyMigration(): Boolean = runCatching {
-        remotePrefs().getInt("route_policy_version", 0) < ROUTE_POLICY_VERSION
-    }.getOrDefault(false)
-
     fun setRemoteEnabled(v: Boolean) = runCatching {
         remotePrefs().edit().putBoolean("remote_enabled", v).apply()
     }
@@ -281,57 +273,56 @@ object DevConfig {
             .apply()
     }
 
-    /** Apply a validated remote config as the complete authority for routes, sources, and IP rules. */
+    /** Apply only a strictly newer remote version and retain that exact successful snapshot offline. */
     fun applyRemoteConfig(body: String, etag: String?): Boolean {
         val ctx = context ?: return false
-        try {
+        return try {
+            RemoteConfigFetcher.Validator.validate(body)
             val remote = JSONObject(body)
-            val rVersion = remote.optInt("version", 0)
+            val version = remote.getInt("version")
             val rp = ctx.getSharedPreferences(PREFS_REMOTE, Context.MODE_PRIVATE)
             val appliedVersion = rp.getInt("remote_version", 0)
-            val policyVersion = rp.getInt("route_policy_version", 0)
-            if (rVersion < appliedVersion) return false
-            if (rVersion == appliedVersion && policyVersion >= ROUTE_POLICY_VERSION) return false
+            if (!RemoteConfigVersionPolicy.shouldApply(version, appliedVersion)) return false
 
-            val rLines = remote.getJSONArray("lines")
-            val rSources = remote.getJSONArray("sources")
-            val rRule = remote.getJSONObject("rule")
+            val lines = remote.getJSONArray("lines")
+            val sources = remote.getJSONArray("sources")
+            val rules = remote.getJSONObject("rule")
+            val hosts = LinkedHashSet<String>()
+            for (i in 0 until lines.length()) hosts += bareHost(lines.getString(i)).lowercase()
+            for (i in 0 until sources.length()) hosts += sources.getString(i).lowercase()
 
-            val newRemote = LinkedHashSet<String>()
-            for (i in 0 until rLines.length()) newRemote.add(bareHost(rLines.getString(i)))
-            for (i in 0 until rSources.length()) newRemote.add(rSources.getString(i))
-
-            val out = JSONObject()
-            out.put("version", rVersion)
-            out.put("updated_at", remote.optString("updated_at", ""))
-            out.put("port", remote.getInt("port"))
-            out.put("lines", rLines)
-            out.put("sources", rSources)
-            out.put("rule", rRule)
-
+            val snapshot = JSONObject().apply {
+                put("version", version)
+                put("updated_at", remote.optString("updated_at", ""))
+                put("port", remote.getInt("port"))
+                put("lines", lines)
+                put("sources", sources)
+                put("rule", rules)
+            }.toString()
             val previous = getConfigJson()
-            rp.edit().putString("last_good_config", previous).apply()
             try {
-                applyConfig(out.toString())
-            } catch (ae: Exception) {
-                runCatching { applyConfig(previous) }
-                throw ae
+                applyConfig(snapshot)
+            } catch (error: Exception) {
+                runCatching {
+                    if (previous != EMPTY_CONFIG_JSON) applyConfig(previous) else RouteManager.clearConfiguration()
+                }
+                throw error
             }
 
-            rp.edit()
-                .putInt("remote_version", rVersion)
-                .putInt("route_policy_version", ROUTE_POLICY_VERSION)
+            val editor = rp.edit()
+                .putInt("remote_version", version)
                 .putString("remote_etag", etag ?: "")
                 .putString("remote_updated_at", remote.optString("updated_at", ""))
-                .putString("remote_hosts", JSONArray(newRemote.toList()).toString())
+                .putString("remote_hosts", JSONArray(hosts.toList()).toString())
+                .putString("last_good_config", snapshot)
                 .putLong("last_success_ts", System.currentTimeMillis())
                 .remove("last_error")
-                .apply()
-            Log.i(TAG, "authoritative remote config applied v$rVersion (hosts=${newRemote.size})")
-            return true
+            if (!editor.commit()) editor.apply()
+            Log.i(TAG, "authoritative remote config applied v$version (hosts=${hosts.size})")
+            true
         } catch (e: Exception) {
             Log.e(TAG, "applyRemoteConfig failed", e)
-            return false
+            false
         }
     }
 

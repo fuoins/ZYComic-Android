@@ -15,8 +15,8 @@ import java.util.concurrent.TimeUnit
  *   服务器不支持时退化为体内 version 比较；
  * - 使用**独立的、正常校验证书的 HTTPS 客户端**（系统 DNS、默认 TLS），
  *   绝不复用 trust-all / IP 直连客户端（ruledns 本身会改写 DNS/SNI，必须保证传输可信）；
- * - 严格校验通过且 version 更新才原子写入 [DevConfig]；任何异常/非 200/304/校验失败/版本未变，
- *   都保留当前可用配置，静默回退内置/上次可用。
+ * - 严格校验通过且 version 严格递增才写入 [DevConfig]；首装无缓存时，配置未就绪前不开放 API/图片网络。
+ * - 已有有效远程缓存时允许离线启动；异常或版本未变均保留当前可用配置。
  */
 object RemoteConfigFetcher {
 
@@ -48,7 +48,11 @@ object RemoteConfigFetcher {
 
     /** 执行一次远程检查；[manual] 为手动触发（仅用于日志/返回信息，行为一致）。 */
     suspend fun checkAndApply(manual: Boolean = false): Result = withContext(Dispatchers.IO) {
-        if (!DevConfig.remoteEnabled()) return@withContext Result(Outcome.NOT_CHANGED, "远程更新已关闭", DevConfig.remoteVersion())
+        DevConfig.markBootstrapLoading()
+        if (!DevConfig.remoteEnabled() && DevConfig.hasUsableRouteConfig) {
+            DevConfig.markBootstrapReady()
+            return@withContext Result(Outcome.NOT_CHANGED, "远程更新已关闭", DevConfig.remoteVersion())
+        }
         DevConfig.markRemoteCheck()
         try {
             val uri = java.net.URI(REMOTE_CONFIG_URL)
@@ -56,14 +60,17 @@ object RemoteConfigFetcher {
             require(uri.host in ALLOWED_HOSTS) { "主机不在允许列表: ${uri.host}" }
 
             val builder = Request.Builder().url(REMOTE_CONFIG_URL).get()
-            if (!DevConfig.needsRoutePolicyMigration()) {
-                DevConfig.remoteEtag()?.let { builder.header("If-None-Match", it) }
-            }
+            DevConfig.remoteEtag()?.let { builder.header("If-None-Match", it) }
 
             client.newCall(builder.build()).execute().use { resp ->
                 when (resp.code) {
                     304 -> {
-                        Result(Outcome.NOT_CHANGED, "配置未更新（304）", DevConfig.remoteVersion())
+                        if (DevConfig.hasUsableRouteConfig) {
+                            DevConfig.markBootstrapReady()
+                            Result(Outcome.NOT_CHANGED, "配置未更新（304）", DevConfig.remoteVersion())
+                        } else {
+                            fail("服务器返回 304，但本机没有有效配置缓存；请提高远程配置版本号后重试")
+                        }
                     }
                     200 -> {
                         val body = resp.body?.string()
@@ -71,12 +78,31 @@ object RemoteConfigFetcher {
                         if (body.length > MAX_BODY_BYTES) return@use fail("配置超过 ${MAX_BODY_BYTES} 字节")
                         Validator.validate(body) // 校验失败抛异常
                         val etag = resp.header("ETag")
+                        val version = JSONObject(body).optInt("version", 0)
+                        if (!RemoteConfigVersionPolicy.shouldApply(version, DevConfig.remoteVersion())) {
+                            if (DevConfig.hasUsableRouteConfig) {
+                                DevConfig.markBootstrapReady()
+                                return@use Result(Outcome.NOT_CHANGED, "远程版本未递增，保留当前有效配置", DevConfig.remoteVersion())
+                            }
+                            return@use fail("远程配置版本必须高于已应用版本；当前没有可用缓存，请提高版本号后重试")
+                        }
                         val applied = DevConfig.applyRemoteConfig(body, etag)
                         if (applied) {
-                            val v = JSONObject(body).optInt("version", 0)
-                            Result(Outcome.APPLIED, "已更新到 v$v", v)
+                            // The route list is now authoritative. Rebuild the API base URL and rebind the image stack
+                            // before allowing a first-install UI to issue any requests.
+                            runCatching { NetworkModule.rebuildApi("远程配置 v$version") }
+                                .onFailure { android.util.Log.w("RemoteConfigFetcher", "API stack rebuild failed", it) }
+                            runCatching { NetworkModule.rebindImageRoute("远程配置 v$version") }
+                                .onFailure { android.util.Log.w("RemoteConfigFetcher", "image route rebind failed", it) }
+                            DevConfig.markBootstrapReady()
+                            Result(Outcome.APPLIED, "已更新到 v$version", version)
                         } else {
-                            Result(Outcome.NOT_CHANGED, "版本未更新", DevConfig.remoteVersion())
+                            if (DevConfig.hasUsableRouteConfig) {
+                                DevConfig.markBootstrapReady()
+                                Result(Outcome.NOT_CHANGED, "远程版本未递增，保留当前有效配置", DevConfig.remoteVersion())
+                            } else {
+                                fail("远程配置未能应用；请确认版本号递增后重试")
+                            }
                         }
                     }
                     else -> fail("HTTP ${resp.code}")
@@ -89,6 +115,7 @@ object RemoteConfigFetcher {
 
     private fun fail(msg: String): Result {
         DevConfig.recordRemoteError(msg)
+        DevConfig.markBootstrapFailed(msg)
         return Result(Outcome.FAILED, msg, DevConfig.remoteVersion())
     }
 

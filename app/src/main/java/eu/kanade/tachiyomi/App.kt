@@ -113,7 +113,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 初始化开发者配置
         DevConfig.init(this)
         DevConfig.migrateProxyDefaultIfNeeded()
-        DevConfig.mergeBaselineConfigIfNeeded()
         com.zycomic.app.net.ImageCacheManager.init(this)
         // 初始化网络模块上下文（VPN 检测需要），并注册网络/VPN 变化监听
         com.zycomic.app.net.NetworkModule.init(this)
@@ -146,8 +145,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.ui.library.LibraryViewModel.init(this)
         // 先从本地恢复登录态，UI 立即显示登录（没网也显示）
         com.zycomic.app.data.repository.UserRepository.restoreLoginFromLocal()
-        // 后台异步校验登录态并刷新用户信息（cookie 已由 GlobalCookieJar 从 SharedPreferences 恢复）
+        // 无有效远程快照的首次安装先等待配置；配置就绪后再进行用户 API 校验。
         ProcessLifecycleOwner.get().lifecycleScope.launch {
+            DevConfig.awaitUsableRouteConfig()
             com.zycomic.app.data.repository.UserRepository.verifyLogin()
         }
         // 启动后异步拉取权威远程配置。只有应用成功替换后，才针对新候选列表测速。

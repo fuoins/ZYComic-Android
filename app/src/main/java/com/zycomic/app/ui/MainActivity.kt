@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,7 +100,6 @@ class MainActivity : BaseActivity() {
         // 桌面快捷方式冷启动直达对应底部 tab
         shortcutTab = intent?.shortcutTab() ?: -1
 
-        com.zycomic.app.net.RouteManager.applyDefaultConfig()
         com.zycomic.app.net.NetworkModule.init(this)
         setContent {
             val uiPreferences = remember { Injekt.get<UiPreferences>() }
@@ -109,11 +110,21 @@ class MainActivity : BaseActivity() {
                     LocalTextStyle provides MaterialTheme.typography.bodySmall,
                     LocalContentColor provides MaterialTheme.colorScheme.onBackground,
                 ) {
-                    AppContent(
-                        isLaunch = savedInstanceState == null,
-                        shortcutTab = shortcutTab,
-                        onShortcutTabConsumed = { shortcutTab = -1 },
-                    )
+                    val routeConfigState by com.zycomic.app.net.DevConfig.routeConfigState.collectAsState()
+                    val bootstrapScope = rememberCoroutineScope()
+                    if (routeConfigState is com.zycomic.app.net.RouteConfigState.Ready) {
+                        AppContent(
+                            isLaunch = savedInstanceState == null,
+                            shortcutTab = shortcutTab,
+                            onShortcutTabConsumed = { shortcutTab = -1 },
+                        )
+                    } else {
+                        RemoteConfigGate(routeConfigState) {
+                            bootstrapScope.launch {
+                                com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = true)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -126,6 +137,37 @@ class MainActivity : BaseActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.shortcutTab()?.let { shortcutTab = it }
+    }
+}
+
+@Composable
+private fun RemoteConfigGate(
+    state: com.zycomic.app.net.RouteConfigState,
+    onRetry: () -> Unit,
+) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 36.dp)) {
+            Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(20.dp))
+            when (state) {
+                com.zycomic.app.net.RouteConfigState.Loading -> {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("正在从网络加载线路与图源配置…", style = MaterialTheme.typography.bodyMedium)
+                }
+                is com.zycomic.app.net.RouteConfigState.Failed -> {
+                    Text("尚未取得有效的网络配置", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onRetry) { Text("重试") }
+                }
+                com.zycomic.app.net.RouteConfigState.Ready -> Unit
+            }
+        }
     }
 }
 

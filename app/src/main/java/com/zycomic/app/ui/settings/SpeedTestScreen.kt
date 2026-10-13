@@ -61,7 +61,6 @@ fun SpeedTestScreen(
     val successfulImgEndpoints = remember(imgOrder, imgVerdicts) {
         imgOrder.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
     }
-    val fastestImgEndpoint = successfulImgEndpoints.firstOrNull()
     val currentImgEndpoint = remember(imgOrder, imgVerdicts, currentImgIdx, currentImgIp) {
         val domain = RouteManager.imgDomains.getOrNull(currentImgIdx)
         ImageEndpointSelectionPolicy.currentEndpoint(successfulImgEndpoints, domain, currentImgIp)
@@ -220,7 +219,6 @@ fun SpeedTestScreen(
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
                         isSelected = endpoint == currentImgEndpoint,
-                        isFastest = endpoint == fastestImgEndpoint,
                         onClick = { if (index >= 0) vm.selectImgHost(index, endpoint.ip) },
                     )
                 }
@@ -246,7 +244,6 @@ private fun SpeedRow(
     delay: Long?,
     isSelected: Boolean,
     verdict: SpeedTester.ImgVerdict? = null,
-    isFastest: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -274,10 +271,7 @@ private fun SpeedRow(
             },
         )
         if (isSelected) {
-            Text(" ←", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-        }
-        if (isFastest) {
-            Text(" 最快", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text(" ✓", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

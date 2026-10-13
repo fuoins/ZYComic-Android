@@ -6,197 +6,43 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * 线路与图源管理。
  *
- * - 7 条控制面线路（接口域名），可切换。
- * - 6 个数据面图源（图片 CDN 域名），可切换。
- * - 预设 IP 映射表，供 RuleDns 做 IP 直连。
+ * - 控制面线路与数据面图源仅由经过校验的远程配置提供。
+ * - 远程规则表是唯一的 IP 映射来源；未声明的主机使用系统 DNS。
  * - SNI 绕过域名列表，供 SniRemovingSocketFactory 移除 SNI。
  */
 object RouteManager {
 
-    // ---- 8 条线路 ----
-    val LINE_HOSTS: List<String> = listOf(
-        "https://mseeowpm.online",
-        "https://mseeowpm.cc",
-        "https://mseeowpm2.cc",
-        "https://mseeowpm3.cc",
-        "https://mseeowpm4.cc",
-        "http://mseeowpm.pro",
-        "https://mseeowpma.cc",
-        "http://mseeowpm1.xyz",
-        "https://etmdcw.cn",
-    )
-
-    val IMG_DOMAINS: List<String> = listOf(
-        "newmwtuyuan1.cc",
-        "newmwtuyuan2.cc",
-        "newmwtuyuan3.cc",
-        "newmwtuyuan4.cc",
-        "newmwtuyuan5.cc",
-        // 官方当前在用的新图域（抓包证实其上有 /static/upload2/... 真实封面），
-        // 列表缺失会少一个可达/更快的域；能否选中由探活实测决定。
-        "newmwtuyuan8.cc",
-        "newmwimserv1.cc",
-        "newmwimserv2.cc",
-        "newmwimserv3.cc",
-        "newmwimserv4.cc",
-        "newmwimserv5.cc",
-        "newmwimserv6.cc",
-        "newmwimserv7.cc",
-        "newmwimserv8.cc",
-        "newmwimserv9.cc",
-        "newmwimserv10.cc",
-        "newmwimserv11.cc",
-        "newmwimserv12.cc",
-        "newmwimserv13.cc",
-        "newmwimserv14.cc",
-        "newmwimserv15.cc",
-        "newmwimserv16.cc",
-        "mwfimsvfast2.cc",
-        "mwfimsvfast5.cc",
-        "mwfimsvfast9.cc",
-        "mwfimsvfast10.cc",
-        "mwfimsvfast11.cc",
-        "mwfimsvfast12.cc",
-        "mwfimsvfast13.cc",
-        "mwfimsvfast14.cc",
-        "mwfimsvfast15.cc",
-        "mwfimsvfast16.cc",
-        "mwfimsvfast17.cc",
-        "mwfimsvfast18.cc",
-        "mwfimsvfast19.cc",
-        "mwfimsvfast20.cc",
-        "mwfimsvfast21.cc",
-        "mwfimsvfast22.cc",
-        "mwfimsvfast23.cc",
-        "mwfimsvfast24.cc",
-        "mwfimsvfast25.cc",
-        "mwfimsvfast26.cc",
-        "mwfimsvfast27.cc",
-        "mwfimsvfast28.cc",
-        "mwfimsvfast29.cc",
-        "mwfimsvfast30.cc",
-        "mwfimsvfast31.cc",
-        "mwfimsvfast32.cc",
-        "mwfimsvfast33.cc",
-        "mwfimsvfast34.cc",
-        "mwfimsvfast35.cc",
-        "mwfimsvfast36.cc",
-        "mwfimsvfast37.cc",
-        "mwfimsvfast38.cc",
-        "mwfimsvfast39.cc",
-        "mwfimsvfast40.cc",
-        "mwfimsvfast41.cc",
-        "mwfimsvfast42.cc",
-        "mwfimsvfast43.cc",
-        "mwfimsvfast44.cc",
-        "mwfimsvfast45.cc",
-        "mwfimsvfast46.cc",
-        "mwfimsvfast47.cc",
-        "mwfimsvfast48.cc",
-        "mwfimsvfast49.cc",
-        "mwfimsvfast50.cc",
-        "mwfimsvfast51.cc",
-        "mwfimsvfast52.cc",
-        "mwfimsvfast53.cc",
-        "mwfimsvfast54.cc",
-        "mwfimsvfast55.cc",
-        "mwfimsvfast56.cc",
-        "mwfimsvfast57.cc",
-        "mwfimsvfast58.cc",
-        "mwfimsvfast59.cc",
-        "mwfimsvfast60.cc",
-        "mwappimgs.cc",
-    )
-
-    // ---- 动态域名列表（开发者配置更新后同步）----
-    /** 当前生效的线路列表（测速和请求用这个，不用硬编码 LINE_HOSTS） */
-    @Volatile var lineHosts: List<String> = LINE_HOSTS
+    // Candidate routes and image sources are populated only from validated remote configuration.
+    @Volatile var lineHosts: List<String> = emptyList()
         private set
 
-    // 当前 DevConfig 中声明的权威 sources。
-    @Volatile private var baselineImgDomains: List<String> = IMG_DOMAINS
+    @Volatile private var baselineImgDomains: List<String> = emptyList()
 
-    // 旧版字段兼容位，始终保持为空；服务器推荐项不得扩充全局候选。
-    @Volatile private var chapterImgDomains: List<String> = emptyList()
-
-    /** 当前生效的图源域名列表，与 DevConfig 当前 sources 一致。 */
-    var imgDomains: List<String> by mutableStateOf(IMG_DOMAINS)
+    /** Current image-source candidates, exactly as supplied by the active remote configuration. */
+    var imgDomains: List<String> by mutableStateOf(emptyList())
         private set
 
     /** Increased whenever an authoritative route/source configuration replaces the active lists. */
     @Volatile var configRevision: Long = 0L
         private set
 
-    /** 从配置定义的图源集合重算当前列表；运行时推荐不再扩充全局候选集。 */
-    private fun rebuildImgDomains() {
-        val merged = baselineImgDomains.map(String::trim).filter(String::isNotBlank).distinctBy { it.lowercase() }
-        if (merged.isEmpty()) return
-        val cur = imgDomains.getOrNull(imgIndex)
-        imgDomains = merged
-        val kept = cur?.let { c -> merged.indexOfFirst { it.equals(c, ignoreCase = true) } }?.takeIf { it >= 0 }
-        imgIndex = kept ?: 0
-        saveImgIndex()
-    }
-
-    /**
-     * 仅用于旧格式配置（未提供显式 lines/sources）时，根据 customRule 的 keys 推导候选列表。
-     * 线路域名：包含 "mseeowpm"；图源域名：包含 "mw" 且不是线路；排除 dns.google。
-     */
-    fun updateDomainsFromRule(rule: Map<String, List<String>>) {
-        val lines = mutableListOf<String>()
-        val imgs = mutableListOf<String>()
-        rule.keys.forEach { domain ->
-            when {
-                domain == "dns.google" -> return@forEach
-                domain.contains("mseeowpm") -> {
-                    // 线路域名：补全 http/https 前缀（和 LINE_HOSTS 格式一致）
-                    val url = if (domain.endsWith(".pro") || (domain.endsWith(".cc") && !domain.contains("mseeowpm"))) {
-                        "http://$domain"
-                    } else {
-                        "https://$domain"
-                    }
-                    lines.add(url)
-                }
-                domain.contains("mw") || domain.contains("img") || domain.contains("imserv") || domain.contains("fimsv") -> {
-                    imgs.add(domain)
-                }
-            }
-        }
-        // 旧格式兼容路径；校验通过的远程配置总是提供显式 lines/sources，不会进入这里。
-        if (lines.isNotEmpty()) {
-            val merged = lineHosts.toMutableList()
-            lines.forEach { l -> if (merged.none { sameLine(it, l) }) merged.add(l) }
-            lineHosts = merged
-        }
-        if (imgs.isNotEmpty()) {
-            val merged = imgDomains.toMutableList()
-            imgs.forEach { d -> if (merged.none { it.equals(d, ignoreCase = true) }) merged.add(d) }
-            imgDomains = merged
-        }
-    }
-
-    /** 配置是图源集合的唯一来源：不附加内置、章节运行时或历史缓存图源。 */
+    /** Replace image-source candidates with the exact remote list; never merge local or learned entries. */
     fun setBaselineImgDomains(sources: List<String>) {
         val previous = persistedSelectedImgDomain() ?: imgDomains.getOrNull(imgIndex)
         val out = LinkedHashMap<String, String>()
         sources.map(String::trim).filter(String::isNotBlank).forEach { out.putIfAbsent(it.lowercase(), it) }
-        if (out.isEmpty()) return
-
         baselineImgDomains = out.values.toList()
-        chapterImgDomains = emptyList()
         imgDomains = baselineImgDomains
-        imgIndex = baselineImgDomains.indexOfFirst { it.equals(previous, ignoreCase = true) }
-            .takeIf { it >= 0 } ?: 0
+        imgIndex = if (baselineImgDomains.isEmpty()) {
+            0
+        } else {
+            baselineImgDomains.indexOfFirst { it.equals(previous, ignoreCase = true) }.takeIf { it >= 0 } ?: 0
+        }
         saveImgIndex()
-
         val savedPin = pinnedImgDomain ?: runCatching {
             DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
                 ?.getString("pinned_img_domain", null)
@@ -209,15 +55,7 @@ object RouteManager {
         clearPersistedCandidateLists()
     }
 
-    /** 兼容旧调用点；配置外图源不得进入或持久化为全局候选。 */
-    fun addChapterImgDomain(domain: String) {
-        if (baselineImgDomains.none { it.equals(domain.trim(), ignoreCase = true) }) return
-        rebuildImgDomains()
-    }
-
-    /**
-     * 清理旧版持久化候选列表。有效图源只从 DevConfig 当前的 lines/sources 配置重建。
-     */
+    /** Clear old preference keys; they are never read as candidate sources. */
     fun loadImgDomainsFromPrefs() {
         clearPersistedCandidateLists()
     }
@@ -349,15 +187,34 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    /** 当前接口 baseUrl */
-    val baseUrl: String get() = lineHosts[lineIndex.coerceIn(0, lineHosts.lastIndex)]
+    /** Current API base URL; empty until validated remote configuration is available. */
+    val baseUrl: String get() = lineHosts.getOrNull(lineIndex).orEmpty()
 
-    /** 当前图源 host（不含 scheme） */
-    val imgHost: String get() = imgDomains[imgIndex.coerceIn(0, imgDomains.lastIndex)]
+    /** Current image host, or empty until remote configuration is available. */
+    val imgHost: String get() = imgDomains.getOrNull(imgIndex).orEmpty()
 
-    /** 当前线路 host（不含 scheme） */
+    /** Current route host, or empty until remote configuration is available. */
     val lineHost: String
         get() = hostFromLine(baseUrl)
+
+    val hasRemoteConfig: Boolean
+        get() = lineHosts.isNotEmpty() && imgDomains.isNotEmpty() && customRule.isNotEmpty()
+
+    /** Clear every route/rule when no valid cached remote configuration exists. */
+    fun clearConfiguration() {
+        lineHosts = emptyList()
+        baselineImgDomains = emptyList()
+        imgDomains = emptyList()
+        lineIndex = 0
+        imgIndex = 0
+        selectedLineIp = null
+        selectedLineDomain = null
+        setCustomRule(emptyMap())
+        setSniDomains(emptySet())
+        clearSpeedTestResults()
+        clearPersistedCandidateLists()
+        configRevision++
+    }
 
     private fun hostFromLine(url: String): String =
         url.trim().removePrefix("https://").removePrefix("http://").substringBefore('/').substringBefore(':')
@@ -365,37 +222,7 @@ object RouteManager {
     private fun lineIndexForDomain(domain: String): Int =
         lineHosts.indexOfFirst { hostFromLine(it).equals(domain, ignoreCase = true) }
 
-    // ---- 预设 IP 映射 ----
-    /** 6 个线路域名统一 IP 组 */
-    private val LINE_IPS = listOf(
-        "207.57.165.208",
-        "207.57.165.154",
-        "207.57.165.187",
-        "207.57.165.251",
-        "207.57.165.198",
-    )
-
-    /** 全量域名 -> IP 列表预设表（含线路 + 图源） */
-    val STATIC_IP: Map<String, List<String>> = buildMap {
-        // 线路域名
-        listOf(
-            "mseeowpm.online",
-            "mseeowpm.pro",
-            "mseeowpm.cc",
-            "mseeowpm2.cc",
-            "mseeowpma.cc",
-            "mseeowpm1.xyz",
-        ).forEach { put(it, LINE_IPS) }
-
-        // 图源
-        put("newmwimserv5.cc", listOf("172.93.103.134", "172.96.141.5", "104.238.220.203", "172.96.161.195"))
-        put("newmwimserv4.cc", listOf("172.93.103.134", "172.96.141.5", "104.238.220.203", "172.96.161.195"))
-        put("newmwimserv6.cc", listOf("172.93.103.134", "172.96.141.5", "104.238.220.203", "172.96.161.195"))
-        put("mwappimgs.cc", listOf("204.77.223.249", "207.32.217.75", "207.32.217.51"))
-        put("mwfimsvfast31.cc", listOf("172.93.103.134", "172.96.161.195"))
-        put("mwfimsvfast40.cc", listOf("172.96.161.195", "104.238.220.203", "172.93.103.134", "104.238.221.230", "172.96.141.5"))
-    }
-
+    // DNS/IP rules are authoritative only when supplied by validated remote configuration.
     // ---- 运行时自定义 rule（域名 -> IP 列表），优先级高于预设 ----
     @Volatile
     var customRule: Map<String, List<String>> = emptyMap()
@@ -408,6 +235,7 @@ object RouteManager {
 
     /** 切换线路；域名级选择清除旧 IP pin，避免把另一线路的地址误用于新 host。 */
     fun setLine(index: Int) {
+        if (lineHosts.isEmpty()) return
         lineIndex = index.coerceIn(0, lineHosts.lastIndex)
         selectedLineIp = null
         selectedLineDomain = null
@@ -435,6 +263,10 @@ object RouteManager {
     fun loadImgIndex() {
         try {
             val ctx = DevConfig.appContext ?: return
+            if (imgDomains.isEmpty()) {
+                imgIndex = 0
+                return
+            }
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
             val savedDomain = prefs.getString("selected_img_domain", null)
             val savedIndex = savedDomain?.let { domain ->
@@ -473,6 +305,7 @@ object RouteManager {
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
             autoSelectEnabled = prefs.getBoolean("auto_select", true)
             lastFastestLineIndex = prefs.getInt("last_fastest_line", 0)
+            if (lineHosts.isEmpty()) return
             val savedDomain = prefs.getString("selected_line_domain", null)
             val savedIp = prefs.getString("selected_line_ip", null)
             val savedIndex = savedDomain?.let(::lineIndexForDomain)?.takeIf { it >= 0 }
@@ -584,6 +417,7 @@ object RouteManager {
 
     /** 手动选定图源：同时更新 imgIndex（UI 显示）与 pin（实际生效）。 */
     fun pinImgHost(index: Int, ip: String? = null) {
+        if (imgDomains.isEmpty()) return
         val safe = index.coerceIn(0, imgDomains.lastIndex)
         val domain = imgDomains.getOrNull(safe) ?: return
         setImgHost(safe)
@@ -717,6 +551,7 @@ object RouteManager {
 
     /** 临时切换到下一条线路（不持久化）。 */
     fun selectNextLine() {
+        if (lineHosts.isEmpty()) return
         lineIndex = (lineIndex + 1) % lineHosts.size
         selectedLineIp = null
         selectedLineDomain = null
@@ -748,14 +583,9 @@ object RouteManager {
         }
     }
 
-    /** 直接设置自定义 rule（DNS 直连映射），不在此做分类；分类由 applyBaseLists / 旧格式兜底负责。 */
+    /** Set the DNS/IP rules from the active remote configuration. */
     fun setCustomRule(rule: Map<String, List<String>>) {
         customRule = rule
-    }
-
-    /** 旧格式（无 lines/sources）兜底：按域名后缀猜测并增量追加线路/图源。 */
-    fun applyLegacyClassification(rule: Map<String, List<String>>) {
-        updateDomainsFromRule(rule)
     }
 
     /**
@@ -765,8 +595,12 @@ object RouteManager {
     fun applyBaseLists(lineUrls: List<String>, sourceDomains: List<String>) {
         val lists = RouteListPolicy.replace(lineUrls, sourceDomains)
         val oldLine = lineHosts.getOrNull(lineIndex)
+        val savedSelection = runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+        }.getOrNull()
         val oldDomain = selectedLineDomain ?: oldLine?.let(::hostFromLine)
-        val oldIp = selectedLineIp
+            ?: savedSelection?.getString("selected_line_domain", null)
+        val oldIp = selectedLineIp ?: savedSelection?.getString("selected_line_ip", null)
         val newLines = lists.lines
         lineHosts = newLines
         val keptLine = oldDomain?.let { domain -> newLines.indexOfFirst { hostFromLine(it).equals(domain, true) } }
@@ -806,664 +640,7 @@ object RouteManager {
     /** 判断某 host 是否需要 SNI 绕过 */
     fun isSniBypass(host: String): Boolean = sniDomains.contains(host)
 
-    /**
-     * 查找某 host 对应的 IP 列表。
-     * 优先级：customRule > STATIC_IP。
-     * @return IP 列表，空表示无预设（走系统 DNS）。
-     */
-    fun resolveIp(host: String): List<String> {
-        customRule.entries.firstOrNull { it.key.equals(host, ignoreCase = true) }
-            ?.value?.takeIf { it.isNotEmpty() }?.let { return it }
-        return STATIC_IP.entries.firstOrNull { it.key.equals(host, ignoreCase = true) }
-            ?.value.orEmpty()
-    }
-
-    // ==================== 默认配置 ====================
-
-    /** 默认配置 JSON（应用启动时加载）。 */
-    const val DEFAULT_CONFIG_JSON = """
-{
-  "version": 1,
-  "updated_at": "2026-10-09T13:54:37+08:00",
-  "port": 7891,
-  "lines": [
-    "https://mseeowpm.online",
-    "https://mseeowpm.cc",
-    "https://mseeowpm2.cc",
-    "https://mseeowpm3.cc",
-    "https://mseeowpm4.cc",
-    "http://mseeowpm.pro",
-    "https://mseeowpma.cc",
-    "http://mseeowpm1.xyz",
-    "https://etmdcw.cn"
-  ],
-  "sources": [
-    "newmwtuyuan1.cc",
-    "newmwtuyuan2.cc",
-    "newmwtuyuan3.cc",
-    "newmwtuyuan4.cc",
-    "newmwtuyuan5.cc",
-    "newmwimserv1.cc",
-    "newmwimserv2.cc",
-    "newmwimserv3.cc",
-    "newmwimserv4.cc",
-    "newmwimserv5.cc",
-    "newmwimserv6.cc",
-    "newmwimserv7.cc",
-    "newmwimserv8.cc",
-    "newmwimserv9.cc",
-    "newmwimserv10.cc",
-    "newmwimserv11.cc",
-    "newmwimserv12.cc",
-    "newmwimserv13.cc",
-    "newmwimserv14.cc",
-    "newmwimserv15.cc",
-    "newmwimserv16.cc",
-    "mwfimsvfast2.cc",
-    "mwfimsvfast5.cc",
-    "mwfimsvfast9.cc",
-    "mwfimsvfast10.cc",
-    "mwfimsvfast11.cc",
-    "mwfimsvfast12.cc",
-    "mwfimsvfast13.cc",
-    "mwfimsvfast14.cc",
-    "mwfimsvfast15.cc",
-    "mwfimsvfast16.cc",
-    "mwfimsvfast17.cc",
-    "mwfimsvfast18.cc",
-    "mwfimsvfast19.cc",
-    "mwfimsvfast20.cc",
-    "mwfimsvfast21.cc",
-    "mwfimsvfast22.cc",
-    "mwfimsvfast23.cc",
-    "mwfimsvfast24.cc",
-    "mwfimsvfast25.cc",
-    "mwfimsvfast26.cc",
-    "mwfimsvfast27.cc",
-    "mwfimsvfast28.cc",
-    "mwfimsvfast29.cc",
-    "mwfimsvfast30.cc",
-    "mwfimsvfast31.cc",
-    "mwfimsvfast32.cc",
-    "mwfimsvfast33.cc",
-    "mwfimsvfast34.cc",
-    "mwfimsvfast35.cc",
-    "mwfimsvfast36.cc",
-    "mwfimsvfast37.cc",
-    "mwfimsvfast38.cc",
-    "mwfimsvfast39.cc",
-    "mwfimsvfast40.cc",
-    "mwfimsvfast41.cc",
-    "mwfimsvfast42.cc",
-    "mwfimsvfast43.cc",
-    "mwfimsvfast44.cc",
-    "mwfimsvfast45.cc",
-    "mwfimsvfast46.cc",
-    "mwfimsvfast47.cc",
-    "mwfimsvfast48.cc",
-    "mwfimsvfast49.cc",
-    "mwfimsvfast50.cc",
-    "mwfimsvfast51.cc",
-    "mwfimsvfast52.cc",
-    "mwfimsvfast53.cc",
-    "mwfimsvfast54.cc",
-    "mwfimsvfast55.cc",
-    "mwfimsvfast56.cc",
-    "mwfimsvfast57.cc",
-    "mwfimsvfast58.cc",
-    "mwfimsvfast59.cc",
-    "mwfimsvfast60.cc",
-    "mwappimgs.cc"
-  ],
-  "rule": {
-    "mseeowpm.online": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm.cc": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm2.cc": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm3.cc": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm4.cc": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm.pro": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpma.cc": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "mseeowpm1.xyz": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "etmdcw.cn": [
-      "207.57.165.154",
-      "207.57.165.187",
-      "207.57.165.198",
-      "207.57.165.208",
-      "207.57.165.251",
-      "207.57.166.161"
-    ],
-    "newmwtuyuan1.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwtuyuan2.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwtuyuan3.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwtuyuan4.cc": [
-      "162.255.119.184"
-    ],
-    "newmwtuyuan5.cc": [
-      "162.255.119.231"
-    ],
-    "newmwimserv1.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv2.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv3.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv4.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv5.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv6.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv7.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv8.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv9.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv10.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv11.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv12.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv13.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv14.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv15.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "newmwimserv16.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast2.cc": [
-      "104.21.72.208",
-      "172.67.154.251"
-    ],
-    "mwfimsvfast5.cc": [
-      "104.21.19.40",
-      "172.67.184.246"
-    ],
-    "mwfimsvfast9.cc": [
-      "172.65.211.209"
-    ],
-    "mwfimsvfast10.cc": [
-      "172.65.211.209"
-    ],
-    "mwfimsvfast11.cc": [
-      "172.65.211.209"
-    ],
-    "mwfimsvfast12.cc": [
-      "172.65.211.209"
-    ],
-    "mwfimsvfast13.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast14.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast15.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast16.cc": [
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast17.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast18.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast19.cc": [
-      "104.238.220.203",
-      "172.93.103.134"
-    ],
-    "mwfimsvfast20.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast21.cc": [
-      "104.238.220.203",
-      "172.93.103.134"
-    ],
-    "mwfimsvfast22.cc": [
-      "104.238.220.203",
-      "172.93.103.134"
-    ],
-    "mwfimsvfast23.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast24.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast25.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast26.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast27.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5"
-    ],
-    "mwfimsvfast28.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast29.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast30.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast31.cc": [
-      "172.93.103.134",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast32.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast33.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast34.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast35.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast36.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast37.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast38.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast39.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast40.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast41.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast42.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast43.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast44.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast45.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast46.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast47.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast48.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast49.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast50.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast51.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast52.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast53.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast54.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast55.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast56.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast57.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast58.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast59.cc": [
-      "104.238.220.203",
-      "104.238.221.230",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwfimsvfast60.cc": [
-      "104.238.220.203",
-      "172.93.103.134",
-      "172.96.141.5",
-      "172.96.161.195"
-    ],
-    "mwappimgs.cc": [
-      "204.77.223.249",
-      "207.32.217.51",
-      "207.32.217.75"
-    ]
-  }
-}
-    """
-
-    /**
-     * 应用默认配置：解析 DEFAULT_CONFIG_JSON，提取 rule 和 sni。
-     * 必须在 NetworkModule 构建 client 之前调用。
-     */
-    fun applyDefaultConfig() {
-        try {
-            val json = Json { ignoreUnknownKeys = true }
-            val root = json.parseToJsonElement(DEFAULT_CONFIG_JSON).jsonObject
-            fun strList(key: String): List<String> =
-                root[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-
-            val ruleMap = mutableMapOf<String, List<String>>()
-            root["rule"]?.jsonObject?.forEach { (domain, arr) ->
-                ruleMap[domain] = arr.jsonArray.map { it.jsonPrimitive.content }
-            }
-            val lines = strList("lines")
-            val sources = strList("sources")
-
-            setCustomRule(ruleMap)
-            if (lines.isNotEmpty() && sources.isNotEmpty()) {
-                // 新规范：显式 lines/sources 分类
-                applyBaseLists(lines, sources)
-            } else {
-                // 旧格式兜底：后缀猜测
-                applyLegacyClassification(ruleMap)
-            }
-            // SNI 由默认配置声明的线路/图源主机派生，不再读取独立 sni。
-            setSniDomains(ruleMap.keys - "dns.google")
-        } catch (e: Exception) {
-            android.util.Log.e("RouteManager", "applyDefaultConfig failed", e)
-        }
-    }
+    /** Resolve only from the active remote rule; an unlisted host uses system DNS. */
+    fun resolveIp(host: String): List<String> =
+        customRule.entries.firstOrNull { it.key.equals(host, ignoreCase = true) }?.value.orEmpty()
 }

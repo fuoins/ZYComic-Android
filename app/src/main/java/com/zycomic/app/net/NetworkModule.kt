@@ -1,10 +1,22 @@
 package com.zycomic.app.net
 
-import java.net.InetAddress
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
+import okhttp3.Dns
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import retrofit2.create
+import java.net.InetAddress
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -14,18 +26,6 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import okhttp3.ConnectionPool
-import okhttp3.Dispatcher
-import okhttp3.Dns
-import okhttp3.OkHttpClient
-import retrofit2.Retrofit
-import retrofit2.create
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 
 /**
  * 网络模块：构建 OkHttpClient 与 Retrofit，整合所有拦截器。
@@ -62,9 +62,16 @@ object NetworkModule {
     }
 
     @Volatile private var _apiClient: OkHttpClient? = null
+
     @Volatile private var _imageClient: OkHttpClient? = null
-    @Volatile private var _retrofit: Retrofit? = null
+
+    @Volatile private var retrofitCache: Retrofit? = null
+
     @Volatile private var _api: ApiService? = null
+
+    private fun requireRemoteConfiguration() {
+        check(RouteManager.hasRemoteConfig) { "远程网络配置尚未加载，业务网络请求已暂停" }
+    }
 
     private val manwaInterceptor by lazy { ManwaInterceptor() }
     private val imageInterceptor by lazy { ImageInterceptor() }
@@ -74,15 +81,27 @@ object NetworkModule {
 
     /** API 请求 client（接口/列表/详情）。 */
     val apiClient: OkHttpClient
-        get() = _apiClient ?: buildApiClient().also { _apiClient = it }
+        get() {
+            requireRemoteConfiguration()
+            return _apiClient ?: buildApiClient().also { _apiClient = it }
+        }
 
     /** 图片下载 client（长超时 + 更高并发）。 */
     val imageClient: OkHttpClient
-        get() = _imageClient ?: buildImageClient().also { _imageClient = it }
+        get() {
+            requireRemoteConfiguration()
+            return _imageClient ?: buildImageClient().also { _imageClient = it }
+        }
 
     /** 当前 ApiService（baseUrl 取 [RouteManager.baseUrl]） */
     val api: ApiService
-        get() = _api ?: buildRetrofit().let { _api = it.create(ApiService::class.java); _api!! }
+        get() {
+            requireRemoteConfiguration()
+            return _api ?: buildRetrofit().let {
+                _api = it.create(ApiService::class.java)
+                _api!!
+            }
+        }
 
     private fun buildApiClient(): OkHttpClient {
         return OkHttpClient.Builder()
@@ -91,10 +110,12 @@ object NetworkModule {
             .writeTimeout(15, TimeUnit.SECONDS)
             .callTimeout(30, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
-            .dispatcher(Dispatcher().apply {
-                maxRequests = 16
-                maxRequestsPerHost = 8
-            })
+            .dispatcher(
+                Dispatcher().apply {
+                    maxRequests = 16
+                    maxRequestsPerHost = 8
+                },
+            )
             .enableTrustAll()
             .applyNetworkConfig(withFailover = true)
             .build()
@@ -107,10 +128,12 @@ object NetworkModule {
             .writeTimeout(30, TimeUnit.SECONDS)
             .callTimeout(90, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(12, 5, TimeUnit.MINUTES))
-            .dispatcher(Dispatcher().apply {
-                maxRequests = 32
-                maxRequestsPerHost = 8
-            })
+            .dispatcher(
+                Dispatcher().apply {
+                    maxRequests = 32
+                    maxRequestsPerHost = 8
+                },
+            )
             .enableTrustAll()
             .applyNetworkConfig()
             .build()
@@ -119,13 +142,13 @@ object NetworkModule {
     /**
      * 传输层策略（与拦截器无关）：cookieJar + trust-all，以及按当前网络决定的 DNS/SNI。
      * 运行时 client 与测速 client 必须共用本方法，保证"测速走的路径 = 运行时图片走的路径"。
-     * - 直连策略：RuleDns 硬编码 IP 直连 + SniRemoving 去 SNI；
+     * - 直连策略：远程 RuleDns 指定 IP + SniRemoving 去 SNI；
      * - 跟随 VPN（系统 VPN 开且开关 ON）：系统 DNS + 保留 SNI，流量走 VPN 隧道。
      */
     private fun OkHttpClient.Builder.applyTransportStrategy(): OkHttpClient.Builder {
         cookieJar(cookieJar)
         if (shouldUseDirectStrategy()) {
-            // 国内直连 / 强制直连：RuleDns 硬编码 IP 直连 + SniRemoving 去 SNI
+            // 国内直连 / 强制直连：远程 RuleDns 指定 IP + SniRemoving 去 SNI
             val baseSslContext = SSLContext.getInstance("TLS").apply {
                 init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
             }
@@ -176,13 +199,14 @@ object NetworkModule {
     }
 
     private fun buildRetrofit(): Retrofit {
+        requireRemoteConfiguration()
         val contentType = "application/json".toMediaType()
         return Retrofit.Builder()
             .baseUrl(RouteManager.baseUrl + "/")
             .client(apiClient)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
-            .also { _retrofit = it }
+            .also { retrofitCache = it }
     }
 
     /**
@@ -218,7 +242,7 @@ object NetworkModule {
             Log.i("NetworkModule", "rebuildApi: reason=$reason")
             _apiClient?.dispatcher?.cancelAll()
             _apiClient?.connectionPool?.evictAll()
-            _retrofit = null
+            retrofitCache = null
             _api = null
             buildRetrofit()
         }
@@ -261,7 +285,7 @@ object NetworkModule {
     }
 
     /**
-     * 是否走"直连策略"（RuleDns 硬编码 IP + SniRemoving 去 SNI）。
+     * 是否走"直连策略"（远程 RuleDns + SniRemoving 去 SNI）。
      * - 「自动跟随系统 VPN」开关关闭（强制直连/抓包模式）→ 始终直连，即使系统 VPN 开着；
      * - 开关开启 + 检测到系统 VPN → 不走直连（系统 DNS + 保留 SNI + VPN 出口）；
      * - 开关开启 + 无 VPN → 直连。
@@ -287,13 +311,21 @@ object NetworkModule {
 
     private fun rebuildClientLocked(reason: String, clearChapterCache: Boolean) {
         Log.i("NetworkModule", "rebuildClient: reason=$reason, direct=${shouldUseDirectStrategy()}")
+        if (!RouteManager.hasRemoteConfig) {
+            _apiClient = null
+            _imageClient = null
+            retrofitCache = null
+            _api = null
+            lastDirectStrategy = shouldUseDirectStrategy()
+            return
+        }
         _apiClient?.dispatcher?.cancelAll()
         _apiClient?.connectionPool?.evictAll()
         _imageClient?.dispatcher?.cancelAll()
         _imageClient?.connectionPool?.evictAll()
         _apiClient = buildApiClient()
         _imageClient = buildImageClient()
-        _retrofit = null
+        retrofitCache = null
         _api = null
         buildRetrofit()
         if (clearChapterCache) {

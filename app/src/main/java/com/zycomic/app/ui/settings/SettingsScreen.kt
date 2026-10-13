@@ -65,7 +65,6 @@ fun SettingsScreen() {
     val successfulImgEndpoints = remember(sortedImgEntries, imgVerdicts) {
         sortedImgEntries.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
     }
-    val fastestImgEndpoint = successfulImgEndpoints.firstOrNull()
     val currentImgEndpoint = remember(sortedImgEntries, successfulImgEndpoints, currentImgIdx, currentImgIp) {
         val domain = RouteManager.imgDomains.getOrNull(currentImgIdx)
         ImageEndpointSelectionPolicy.currentEndpoint(successfulImgEndpoints, domain, currentImgIp)
@@ -190,8 +189,8 @@ fun SettingsScreen() {
                             color = if (endpoint == currentImgEndpoint) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
-                        if (endpoint == fastestImgEndpoint) {
-                            Text("最快", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                        if (endpoint == currentImgEndpoint) {
+                            Text("✓", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                         }
                         Text(
                             text = "HTTP:${formatDelay(entry.value, verdict)}",

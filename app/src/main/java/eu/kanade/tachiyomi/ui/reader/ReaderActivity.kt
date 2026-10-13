@@ -532,7 +532,6 @@ class ReaderActivity : BaseActivity() {
                             rm.lastImgIpVerdicts[endpoint] == com.zycomic.app.net.SpeedTester.ImgVerdict.OK
                     }
                     .sortedWith(compareBy({ it.value }, { it.key.domain }, { it.key.ip }))
-                val fastestEndpoint = successfulEndpoints.firstOrNull()?.key
                 val currentIp = rm.selectedImgIp
                 val currentEndpoint = com.zycomic.app.net.ImageEndpointSelectionPolicy.currentEndpoint(
                     successfulEndpoints.map { it.key },
@@ -574,7 +573,6 @@ class ReaderActivity : BaseActivity() {
                             items(successfulEndpoints) { entry ->
                                 val endpoint = entry.key
                                 val isSelected = endpoint == currentEndpoint
-                                val isFastest = endpoint == fastestEndpoint
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clickable {
@@ -589,9 +587,6 @@ class ReaderActivity : BaseActivity() {
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    if (isFastest) {
-                                        Text("最快", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                                    }
                                     if (isSelected) {
                                         Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
                                     }
