@@ -319,6 +319,25 @@ object NetworkModule {
      * imageClient 完全一致，仅超时收紧、不挂业务拦截器（图域探活自带与图片运行时一致的头）。
      * 不再写死 NO_PROXY/RuleDns/去 SNI——VPN 开时测速即走 VPN 路径，保证测速结果可用于运行时。
      */
+    /**
+     * 把"测哪个 IP"变成可控量：传输层（cookieJar/trust-all/SNI 策略）与 [newSpeedTestClient]
+     * 完全一致，只把 DNS 钉成单个 IP。
+     *
+     * 注意仍然用**真实域名**发请求（URL 里不写 IP）：Host/SNI 保持真实才不会落到机器的默认
+     * 那个 vhost，而且 [SniRemovingSocketFactory] 是按 host 是否在 sni 名单里决定去不去 SNI 的，
+     * 换成 IP 字面量会让 Cloudflare 段的 SNI 豁免失效。
+     */
+    /**
+     * [base] 一般传 [newSpeedTestClient] 的那一份：一轮探测共用同一套传输层，逐 IP 只换 DNS，
+     * 不必每个 IP 重装一次 SSLContext / 拦截器。
+     */
+    fun newPinnedIpProbeClient(ip: String, base: OkHttpClient = newSpeedTestClient()): OkHttpClient {
+        val address = java.net.InetAddress.getByName(ip)
+        return base.newBuilder()
+            .dns { listOf(address) }
+            .build()
+    }
+
     fun newSpeedTestClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(PROBE_CONNECT_READ_SECONDS, TimeUnit.SECONDS)
@@ -425,7 +444,10 @@ object NetworkModule {
         override fun lookup(hostname: String): List<InetAddress> {
             val ips = DevConfig.getRule()[hostname]
             if (!ips.isNullOrEmpty()) {
-                return ips.map { InetAddress.getByName(it) }
+                // OkHttp 按这个列表的顺序试路由，且只在**连不上**时才跳下一个 IP（慢不会跳），
+                // 所以首位就是实际生效的那台机器。按 IP 测速分数重排后，103 个图源域名
+                // 不管最终选中哪一个，都会先拨到最快的那台。
+                return RouteManager.orderedIpsFor(hostname, ips).map { InetAddress.getByName(it) }
             }
             return Dns.SYSTEM.lookup(hostname)
         }

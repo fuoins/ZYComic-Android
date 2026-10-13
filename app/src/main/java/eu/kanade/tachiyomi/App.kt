@@ -131,6 +131,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadUseFastestImgForAll()
         // 恢复用户手动钉住的图源（pin 优先级高于派生最快域）
         com.zycomic.app.net.RouteManager.loadPinnedImgDomain()
+        // 恢复按机器测速的 IP 分数（网络身份/直连策略/新鲜期任一不符即自动作废）
+        com.zycomic.app.net.RouteManager.loadIpScores()
         // 合并本地缓存的服务端下发线路（只增不减）
         com.zycomic.app.net.RouteManager.loadServerLinesFromPrefs()
         // 合并持久化的图源列表

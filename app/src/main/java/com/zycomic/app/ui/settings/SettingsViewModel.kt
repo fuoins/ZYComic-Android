@@ -338,7 +338,8 @@ class SettingsViewModel {
             imgDelays.value = emptyMap()
             imgVerdicts.value = emptyMap()
             try {
-                val (bestLine, bestImg) = SpeedTester.runAndApply { l, i ->
+                // 手动入口：forceFullProbe=true，全部 IP 重测（启动路径是增量复用，不强制）
+                val (bestLine, bestImg) = SpeedTester.runAndApply(forceFullProbe = true) { l, i ->
                     lineDelays.value = l
                     imgDelays.value = i
                 }

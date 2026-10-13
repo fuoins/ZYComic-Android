@@ -149,8 +149,32 @@ object DevConfig {
         }
     }
 
+    /**
+     * [getRule] 的解析结果缓存。
+     *
+     * 为什么要缓存：`NetworkModule.RuleDns.lookup()` 每建立一条新连接就会调一次 getRule()，
+     * 而配置有 100+ 主机，原实现每次都把整份 JSON 重新解析一遍。配置只在本地写入/远程更新时变化，
+     * 所以缓存挂在 [saveConfig] 上失效即可。
+     */
+    @Volatile
+    private var ruleCache: Map<String, List<String>>? = null
+
+    @Volatile
+    private var ruleCacheSource: String? = null
+
     /** 域名→IP 列表映射。 */
     fun getRule(): Map<String, List<String>> {
+        val source = getConfigJson()
+        // 用引用比较：配置只会整体换字符串（init / saveConfig / 远程下发 / 基线合并），
+        // 不存在"同一个 String 内容变了"的情况，所以引用一变就必须重解析。
+        ruleCache?.let { if (ruleCacheSource === source) return it }
+        val parsed = parseRule()
+        ruleCache = parsed
+        ruleCacheSource = source
+        return parsed
+    }
+
+    private fun parseRule(): Map<String, List<String>> {
         return try {
             val root = Json { ignoreUnknownKeys = true }
                 .parseToJsonElement(getConfigJson()).jsonObject
@@ -205,6 +229,7 @@ object DevConfig {
             }
         }
         cachedJson = json
+        ruleCache = null // 配置一变，解析缓存立刻作废（双保险，正常靠上面的引用比较即可）
     }
 
     /** 保存配置 + 更新 RouteManager。 */

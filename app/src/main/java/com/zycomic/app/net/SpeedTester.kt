@@ -106,8 +106,21 @@ object SpeedTester {
 
     // ==================== 单次测量 ====================
 
-    /** 一次探活的结果：[delayMs] 为 [MAX] 表示判负；[httpCode] 为 -1 表示根本没拿到响应。 */
-    private data class ProbeOutcome(val delayMs: Long, val httpCode: Int)
+    /**
+     * 一次探活的结果。
+     *
+     * - [delayMs]：仅在"判定成功"时有值，否则 [MAX]（沿用原有选域口径）；
+     * - [httpCode]：-1 表示连接层就没拿到响应；
+     * - [elapsedMs]：**无论内容是否合格**都记录的实测耗时。
+     *   这是 IP 层探测的关键区分：只要拿到任何 HTTP 响应（200/302/404/text/html 都算），
+     *   就证明这台机器可达，延迟可用于 IP 排序；只有连接层失败才说明机器不可达。
+     *   没有这个字段，一个"活着但没镜像该对象"的 IP 会被误判成死机器。
+     */
+    private data class ProbeOutcome(
+        val delayMs: Long,
+        val httpCode: Int,
+        val elapsedMs: Long = MAX,
+    )
 
     /** 图域探活结论，用于把"连不上"和"连上了但拿不到图"分开——UI 上一律显示"超时"会掩盖两种完全不同的问题。 */
     enum class ImgVerdict { OK, UNREACHABLE, NO_IMAGE }
@@ -183,23 +196,26 @@ object SpeedTester {
                     code = resp.code
                     val contentType = resp.header("Content-Type").orEmpty().lowercase()
                     val head = readHead(resp, PROBE_BYTES)
+                    val elapsed = (System.nanoTime() - start) / 1_000_000
                     val ok = code in 200..299 && when {
                         requireJson -> isJsonLike(head)
                         else -> !strictImage || isImageLike(contentType, head)
                     }
                     if (ok) {
-                        ProbeOutcome((System.nanoTime() - start) / 1_000_000, code)
+                        ProbeOutcome(elapsed, code, elapsed)
                     } else {
                         Log.d(
                             TAG,
                             "probe reject url=${req.url} code=$code ct=$contentType len=${head.size}",
                         )
-                        ProbeOutcome(MAX, code)
+                        // 拿到了响应但内容不合格：延迟仍然有效（证明该机器可达）
+                        ProbeOutcome(MAX, code, elapsed)
                     }
                 }
             } catch (e: Exception) {
                 // 状态码已拿到就如实带上（404 后能否回退取样路径依赖它）
                 Log.d(TAG, "probe fail url=${req.url} code=$code err=${e.message}")
+                // elapsedMs 保持 MAX：连接层失败不给这台 IP 记延迟
                 ProbeOutcome(MAX, code)
             }
         }
@@ -251,6 +267,110 @@ object SpeedTester {
         if (b[0] == 0x47.toByte() && b[1] == 0x49.toByte() && b[2] == 0x46.toByte() && b[3] == 0x38.toByte()) return true
         return false
     }
+
+    // ==================== IP 层探测（按机器测速）====================
+
+    /** 一个 IP 的探测结论：延迟 + 这台机器上代表域的取图结论。 */
+    private data class IpProbeResult(val delayMs: Long, val verdict: ImgVerdict)
+
+    /** 最近一轮 IP 层探测的逐 IP 结论（ip -> 结论），供测速日志与人工更新 ruledns 用。 */
+    @Volatile var lastIpVerdicts: Map<String, ImgVerdict> = emptyMap()
+        private set
+
+    /**
+     * 探一个 IP：用代表域名发真实图片请求，但把这一发的 DNS 解析钉到目标 IP。
+     *
+     * 为什么仍用域名而不是直接打 IP：Host/SNI 必须保持真实，否则会落到机器的默认 vhost
+     * （404/停车场页），而且 `SniRemovingSocketFactory` 是按 host 是否在 sni 名单里决定去不去
+     * SNI 的——URL 写 IP 会让 Cloudflare 段的豁免逻辑失效。
+     *
+     * [reps] 是同一 IP 名下的若干代表域（按列表顺序，最多 3 个）：
+     * - 任一代表域拿到图片 → 立即返回，结论最干净（延迟 + OK）；
+     * - 只代表域全都拿到过 HTTP 响应（含 302/404/text-html）→ 机器**可达**，
+     *   记最小延迟、verdict=NO_IMAGE（见 [ProbeOutcome.elapsedMs] 的说明）；
+     * - 一次响应都没拿到 → UNREACHABLE，不记延迟。
+     * 代表域是"死 vhost"还是"活 IP"必须分开，否则一个搬走的域会把整台机器误判成死机器。
+     */
+    private suspend fun measureIp(client: OkHttpClient, ip: String, reps: List<String>): IpProbeResult {
+        if (reps.isEmpty()) return IpProbeResult(MAX, ImgVerdict.UNREACHABLE)
+        // 复用同一套传输层，只把这一发的 DNS 钉到目标 IP
+        val pinned = NetworkModule.newPinnedIpProbeClient(ip, base = client)
+        var bestElapsed = MAX
+        var sawResponse = false
+        // 不在这个 pinned client 上 releaseProbe：newBuilder 与 base 共用同一个连接池，
+        // 逐个 IP 都去 evictAll 会把别的探测刚建好的空闲连接关掉，导致重复握手、
+        // 把后面的延迟测高。整轮的连接池统一由 probeImgIps 末尾释放。
+        for (rep in reps) {
+            val outcome = probe(
+                pinned,
+                imgProbeRequest(rep, PROBE_COVER_PATH),
+                requireJson = false,
+                strictImage = true,
+            )
+            if (outcome.delayMs < MAX) return IpProbeResult(outcome.delayMs, ImgVerdict.OK)
+            if (outcome.elapsedMs < MAX) {
+                sawResponse = true
+                if (outcome.elapsedMs < bestElapsed) bestElapsed = outcome.elapsedMs
+            }
+        }
+        return if (sawResponse) {
+            Log.d(TAG, "ip $ip reachable but no image on representatives $reps -> delay=$bestElapsed")
+            IpProbeResult(bestElapsed, ImgVerdict.NO_IMAGE)
+        } else {
+            IpProbeResult(MAX, ImgVerdict.UNREACHABLE)
+        }
+    }
+
+    /**
+     * 按机器测速并派生域名分数。
+     *
+     * @param forceFullProbe true（用户点"重新测速"）时全部重测；false 时只补测**还没有分数**的 IP，
+     *   于是 ruledns 下发新 IP 的那一轮天然只探新 IP，不需要额外记账"IP 集合签名"。
+     * @return (ip -> 延迟, ip -> 结论)
+     */
+    suspend fun probeImgIps(forceFullProbe: Boolean = false): Pair<Map<String, Long>, Map<String, ImgVerdict>> =
+        withContext(Dispatchers.IO) {
+            coroutineScope {
+                val rule = DevConfig.getRule()
+                val hosts = RouteManager.imgDomains
+                val known = RouteManager.ipScoresSnapshot()
+                val plan = IpProbePlanner.plan(hosts, rule, known, forceFullProbe)
+                // 多个协程并发写：一律用并发容器，不用 HashMap / synchronized
+                // 基线只取"本轮有效"的分数：跨网络/跨策略的旧分数不能当已知复用，
+                // 否则换网络后会拿别的链路的延迟去派生选域。
+                val stored = java.util.concurrent.ConcurrentHashMap<String, Long>(known)
+                val verdicts = java.util.concurrent.ConcurrentHashMap<String, ImgVerdict>()
+                if (plan.isEmpty()) {
+                    Log.i(TAG, "ip probe skipped: 全部 IP 已有分数 (known=${known.size})")
+                    // 跳过探测也要清理：配置里已消失的 IP 分数不能一直留着
+                    return@coroutineScope IpProbePlanner.prune(
+                        stored.toMap(),
+                        IpProbePlanner.uniqueIps(hosts, rule),
+                    ) to verdicts.toMap()
+                }
+                val client = NetworkModule.newSpeedTestClient()
+                try {
+                    plan.map { target ->
+                        async {
+                            val r = measureIp(client, target.ip, target.representatives)
+                            Log.i(
+                                TAG,
+                                "ip probe ${target.ip} -> ${r.delayMs}ms ${r.verdict}" +
+                                    " cf=${IpProbePlanner.isCloudflareAnycast(target.ip)}" +
+                                    " reps=${target.representatives}",
+                            )
+                            stored[target.ip] = r.delayMs
+                            verdicts[target.ip] = r.verdict
+                            r
+                        }
+                    }.awaitAll()
+                } finally {
+                    client.releaseProbe()
+                }
+                // 丢掉配置里已经不存在的 IP，避免陈旧分数继续参与派生
+                IpProbePlanner.prune(stored.toMap(), IpProbePlanner.uniqueIps(hosts, rule)) to verdicts.toMap()
+            }
+        }
 
     // ==================== 真实探活样本路径（固定封面 404 时的兜底）====================
 
@@ -310,6 +430,15 @@ object SpeedTester {
     }
 
     // ==================== 对外：全量/单点 ====================
+
+    /**
+     * 「IP 分数 -> 域名延迟」派生：域名分数 = 它 IP 组里已测出的最快值。
+     *
+     * 这一步**不发任何请求**，所以 103 个域共享同一批探测结果——这就是"一次测机器、
+     * 收益覆盖全部图源"。没测过的 IP 不参与 min；整组都没分数时返回 [MAX]（判负，不是 0）。
+     */
+    private fun deriveDomainDelays(scores: Map<String, Long>): Map<String, Long> =
+        IpProbePlanner.domainDelays(RouteManager.imgDomains, DevConfig.getRule(), scores)
 
     /** 线路全量探活（只返回延迟，不应用结果）。 */
     suspend fun testAllLines(): Map<Int, Long> = withContext(Dispatchers.IO) {
@@ -378,6 +507,7 @@ object SpeedTester {
      */
     suspend fun runAndApply(
         onProgress: ((line: Map<Int, Long>, img: Map<Int, Long>) -> Unit)? = null,
+        forceFullProbe: Boolean = false,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             if (!running.compareAndSet(false, true)) {
@@ -393,7 +523,6 @@ object SpeedTester {
             lastImgVerdicts = emptyMap()
             val startedAt = System.currentTimeMillis()
             val lineClient = NetworkModule.newLineProbeClient()
-            val imgClient = NetworkModule.newSpeedTestClient()
             try {
                 // 阶段 1：线路（签名+解密全链路的分类接口）
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
@@ -419,23 +548,56 @@ object SpeedTester {
                 val samplePath = obtainProbePath()
                 Log.i(TAG, "img probe sample path=$samplePath")
 
-                // 阶段 3：图域（固定真实封面；非连接层失败才回退取样路径）
+                // 阶段 3：按机器（IP）测速，再把分数派生给全部图源域名。
+                //
+                // 原实现是逐域各发一次探活：线上配置 103 个图源域名其实只落在 15 个 IP 上，
+                // 而 RuleDns 按列表顺序返回、OkHttp 只拨第一个连得上的 IP —— 于是 103 次请求
+                // 测到的是"每个域第 0 号 IP 的分数"，用最贵的方式间接测 15 台机器。
+                // 现在：探 IP 并集（增量：只补测还没有分数的 IP）→ 域名分数 = 其 IP 组最快值，
+                // 零额外请求覆盖全部图源；逐域"能不能取到图"改由设置页/阅读器的测活入口提供。
+                val rule = DevConfig.getRule()
+                val noRule = IpProbePlanner.hostsWithoutRule(RouteManager.imgDomains, rule)
+                if (noRule.isNotEmpty()) {
+                    // 章节接口 / Trello 运行时学到、但 ruledns 还没下发 IP 组的域：走 Dns.SYSTEM，
+                    // 拿不到 IP 分数。记进日志，供人工补进配置。
+                    Log.i(TAG, "hosts without rule entry (不参与 IP 测速): $noRule")
+                }
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
                 val verdictAcc = java.util.concurrent.ConcurrentHashMap<Int, ImgVerdict>()
-                val imgJobs = RouteManager.imgDomains.mapIndexed { index, domain ->
-                    async {
-                        val r = measureImg(imgClient, domain, samplePath)
-                        imgAcc[index] = r.delayMs
-                        verdictAcc[index] = r.verdict
-                        // 逐域发布快照：启动路径有 8s 整体超时，中途被取消时 UI 至少能看到
-                        // 已完成的那些域的真实结论，而不是把"没来得及探"也算成"超时"。
-                        lastImgVerdicts = verdictAcc.toSortedMap()
-                        onProgress?.invoke(lines, imgAcc.toSortedMap())
-                        index to r.delayMs
-                    }
+                val knownBefore = RouteManager.ipScoresSnapshot()
+                // 先用上一轮分数派生一次：本轮即使中途被取消，UI 也不会显示成"全部超时"
+                deriveDomainDelays(knownBefore).forEach { (host, ms) ->
+                    RouteManager.imgDomains.indexOf(host).takeIf { it >= 0 }?.let { imgAcc[it] = ms }
                 }
-                val imgs = imgJobs.awaitAll().toMap()
+                onProgress?.invoke(lines, imgAcc.toSortedMap())
+
+                val (ipDelays, ipVerdicts) = probeImgIps(forceFullProbe = forceFullProbe)
+                lastIpVerdicts = ipVerdicts
+                RouteManager.setLastIpDelays(ipDelays)
+                val finalDerived = deriveDomainDelays(ipDelays)
+                RouteManager.imgDomains.forEachIndexed { index, host ->
+                    val ms = finalDerived[host] ?: MAX
+                    imgAcc[index] = ms
+                    // 域名级 verdict 的口径变化：本轮测的是机器，所以"有分数=这台机器能取到图"记 OK，
+                    // "IP 组全不可达"记 UNREACHABLE；"机器活着但这个 vhost 没图"要靠测活入口逐域确认
+                    // （见 lastIpVerdicts 里的 NO_IMAGE 与"重新测活"）。
+                    verdictAcc[index] = if (ms < MAX) ImgVerdict.OK else ImgVerdict.UNREACHABLE
+                }
+                val imgs: Map<Int, Long> = imgAcc.toSortedMap()
                 lastImgVerdicts = verdictAcc.toSortedMap()
+                onProgress?.invoke(lines, imgs)
+                RouteManager.saveIpScores(
+                    scores = ipDelays,
+                    networkKey = RouteManager.currentNetworkKey(),
+                    directStrategy = NetworkModule.shouldUseDirectStrategy(),
+                )
+                Log.i(
+                    TAG,
+                    "ip-layer test done ips=${ipDelays.size} reused=${knownBefore.size} " +
+                        "ok=${ipVerdicts.values.count { it == ImgVerdict.OK }} " +
+                        "unreachable=${ipVerdicts.values.count { it == ImgVerdict.UNREACHABLE }} " +
+                        "noImage=${ipVerdicts.values.count { it == ImgVerdict.NO_IMAGE }}",
+                )
 
                 // 结果一次性写入，fastestImgDomain 据此派生
                 RouteManager.setLastDelays(lines, imgs)
@@ -472,7 +634,6 @@ object SpeedTester {
             } finally {
                 running.set(false)
                 lineClient.releaseProbe()
-                imgClient.releaseProbe()
             }
         }
     }

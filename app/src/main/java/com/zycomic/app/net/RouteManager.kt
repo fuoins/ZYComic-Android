@@ -464,6 +464,128 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
+    // ---- IP 层测速分数表（不写进 config_json：远程 ruledns 会整体覆盖 rule）----
+    private val ipScoreStore = IpScoreStore()
+
+    /** 分数新鲜期：超过就重新按机器探测。 */
+    private const val IP_SCORE_TTL_MS = 6 * 60 * 60 * 1000L
+
+    /** 本轮 IP 探测结果（ip -> 毫秒），供测速日志与展示。 */
+    @Volatile
+    var lastIpDelays: Map<String, Long> = emptyMap()
+        private set
+
+    /** 直连策略查询的结果做 1s 记忆：`shouldUseDirectStrategy()` 会走 ConnectivityManager。 */
+    private var lastDirectCheckAt = 0L
+    private var lastDirectValue = true
+
+    /** [currentNetworkKey] 的记忆值（5s 内复用，避免每条新连接都问一次系统） */
+    private var lastNetworkKeyAt = 0L
+    private var lastNetworkKeyValue = ""
+
+    private fun directStrategyNowCached(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastDirectCheckAt > 1_000L) {
+            lastDirectCheckAt = now
+            lastDirectValue = NetworkModule.shouldUseDirectStrategy()
+        }
+        return lastDirectValue
+    }
+
+    /**
+     * 网络身份：换 Wi-Fi/蜂窝/重连都会变。VPN 模式下 IP 组不参与解析，
+     * 所以把策略本身也编进 key，策略一翻旧分数即失效。
+     */
+    fun currentNetworkKey(): String {
+        val now = System.currentTimeMillis()
+        // 5s 记忆：本方法会被 DNS 查询（每建立一条新连接）触发，不能每次都去问系统
+        if (lastNetworkKeyAt != 0L && now - lastNetworkKeyAt < 5_000L) return lastNetworkKeyValue
+        val base = "direct=" + directStrategyNowCached()
+        val key = try {
+            val ctx = DevConfig.appContext
+            val cm = ctx?.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                as? android.net.ConnectivityManager
+            // 用 Network.toString()（内含 netId/handle，值语义：同一网络得到同一字符串）。
+            // **不能**用 System.identityHashCode —— activeNetwork 每次可能返回不同的 Network
+            // 实例，那样 key 每查一次都在变，分数会被永久判成"网络已变化"：既不参与拨号排序，
+            // 每轮还要全量重测。口径与 App.scheduleNetworkRetest 保持一致。
+            val net = cm?.activeNetwork
+            if (ctx == null) "$base/net=unknown" else "$base/net=${net ?: "none"}"
+        } catch (_: Exception) {
+            "$base/net=unknown"
+        }
+        lastNetworkKeyAt = now
+        lastNetworkKeyValue = key
+        return key
+    }
+
+    /** 从 SharedPreferences 恢复 IP 分数（网络身份/策略/新鲜期任一不符即视为不可用）。 */
+    fun loadIpScores() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .getString("ip_scores", null)
+            val loaded = IpScoreStore.fromPersistentString(raw)
+            ipScoreStore.replaceAll(loaded.scores)
+            ipScoreStore.networkKey = loaded.networkKey
+            ipScoreStore.directStrategy = loaded.directStrategy
+            ipScoreStore.savedAt = loaded.savedAt
+            android.util.Log.i(
+                "RouteManager",
+                "IP 分数恢复 count=${ipScoreStore.scores.size} usable=${ipScoresSnapshot().isNotEmpty()}",
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("RouteManager", "loadIpScores failed", e)
+        }
+    }
+
+    /** 保存本轮 IP 分数并落盘；同时刷新可用性判定。 */
+    fun saveIpScores(scores: Map<String, Long>, networkKey: String, directStrategy: Boolean) {
+        ipScoreStore.replaceAll(scores)
+        ipScoreStore.networkKey = networkKey
+        ipScoreStore.directStrategy = directStrategy
+        ipScoreStore.savedAt = System.currentTimeMillis()
+        try {
+            val ctx = DevConfig.appContext ?: return
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .edit().putString("ip_scores", ipScoreStore.toPersistentString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 当前可用的 IP 分数快照；网络身份变化、直连策略翻转（VPN 走 Dns.SYSTEM，IP 顺序不参与）、
+     * 或超过新鲜期，一律返回空表，RuleDns 随即退回配置原序。
+     *
+     * 读时判定而不是存标志位：避免"策略在会话中途翻了、脏分数还在被用来排序"。
+     */
+    fun ipScoresSnapshot(): Map<String, Long> =
+        if (ipScoreStore.isValidFor(
+                networkKey = currentNetworkKey(),
+                directStrategy = directStrategyNowCached(),
+                now = System.currentTimeMillis(),
+                ttlMs = IP_SCORE_TTL_MS,
+            )
+        ) {
+            ipScoreStore.scores
+        } else {
+            emptyMap()
+        }
+
+    /**
+     * 供 [NetworkModule.RuleDns] 在返回前调用：把该域名的 IP 组按"最快在前"重排。
+     * 没有分数时原序返回，行为与改动前一致。
+     */
+    fun orderedIpsFor(host: String, ips: List<String>): List<String> {
+        val scores = ipScoresSnapshot()
+        if (scores.isEmpty()) return ips
+        return IpProbePlanner.orderIps(ips, scores)
+    }
+
+    /** 记录本轮 IP 探测结果。 */
+    fun setLastIpDelays(delays: Map<String, Long>) {
+        lastIpDelays = delays
+    }
+
     // ---- 封面/章节统一用测速最快图源 ----
     var useFastestImgForAll: Boolean by androidx.compose.runtime.mutableStateOf(true)
         private set
