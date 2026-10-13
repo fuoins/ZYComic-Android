@@ -129,6 +129,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
         // 恢复"封面/章节用测速最快图源"偏好
         com.zycomic.app.net.RouteManager.loadUseFastestImgForAll()
+        // 恢复用户手动钉住的图源（pin 优先级高于派生最快域）
+        com.zycomic.app.net.RouteManager.loadPinnedImgDomain()
         // 合并本地缓存的服务端下发线路（只增不减）
         com.zycomic.app.net.RouteManager.loadServerLinesFromPrefs()
         // 合并持久化的图源列表
@@ -168,7 +170,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     val fastest = com.zycomic.app.net.SpeedTester.selectFastestLine(delays)
                     if (com.zycomic.app.net.RouteManager.autoSelectEnabled && fastest != com.zycomic.app.net.RouteManager.lineIndex) {
                         com.zycomic.app.net.RouteManager.setLine(fastest)
-                        com.zycomic.app.net.NetworkModule.rebuild()
+                        com.zycomic.app.net.NetworkModule.rebuildApi("Trello 增量线路后选最快")
                     }
                     com.zycomic.app.net.RouteManager.saveLastFastestLine(fastest)
                 }

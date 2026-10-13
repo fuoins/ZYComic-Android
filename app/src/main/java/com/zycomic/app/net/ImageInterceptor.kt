@@ -37,8 +37,10 @@ class ImageInterceptor : Interceptor {
         val originalUrl = original.url.toString()
         if (!isImageRequest(originalUrl)) return chain.proceed(original)
 
-        val fetchUrl = if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
-            originalUrl.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+        // 统一读 imgRewriteTarget：这样手动 pin 的图源在运行时也真的生效
+        val imgTarget = RouteManager.imgRewriteTarget
+        val fetchUrl = if (!imgTarget.isNullOrBlank()) {
+            originalUrl.replace(Regex("https?://[^/]+"), "https://$imgTarget")
         } else originalUrl
 
         // 缓存命中分支：读出后解密校验；坏缓存删除后按未命中重取

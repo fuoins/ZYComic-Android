@@ -41,6 +41,7 @@ fun SpeedTestScreen(
     val imgVerdicts by vm.imgVerdicts.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
+    val pinnedImg by vm.imgPinned.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
     val followVpn by vm.followSystemVpn.collectAsState()
@@ -132,6 +133,25 @@ fun SpeedTestScreen(
                             )
                         }
                         Switch(checked = useFastestImg, onCheckedChange = { vm.setUseFastestImgForAll(it) })
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("当前图源", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (pinnedImg.isNullOrBlank()) "自动：由测速结果选择最快图源"
+                                else "已固定：$pinnedImg（不会被测速结果覆盖）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (!pinnedImg.isNullOrBlank()) {
+                            Button(onClick = { vm.resetImgHostToAuto() }) { Text("恢复自动") }
+                        }
                     }
                 }
                 item {

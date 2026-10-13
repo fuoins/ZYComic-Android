@@ -224,8 +224,9 @@ class MangaCoverFetcher(
 
     private fun newRequest(): Request {
         val reqUrl = com.zycomic.app.net.RouteManager.let { rm ->
-            if (rm.useFastestImgForAll && !rm.fastestImgDomain.isNullOrBlank()) {
-                url!!.replace(Regex("https?://[^/]+"), "https://${rm.fastestImgDomain}")
+            val target = rm.imgRewriteTarget
+            if (!target.isNullOrBlank()) {
+                url!!.replace(Regex("https?://[^/]+"), "https://$target")
             } else url
         }
         val request = Request.Builder().apply {

@@ -37,13 +37,15 @@ fun coverUrl(manga: Manga): String {
  */
 fun coverUrl(raw: String): String {
     if (raw.isBlank()) return ""
+    // 统一读 imgRewriteTarget：手动 pin 优先，其次才是开关开启时的派生最快域
+    val target = RouteManager.imgRewriteTarget
     if (raw.startsWith("http://") || raw.startsWith("https://")) {
-        if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
-            return raw.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+        if (!target.isNullOrBlank()) {
+            return raw.replace(Regex("https?://[^/]+"), "https://$target")
         }
         return raw
     }
-    val host = if (RouteManager.useFastestImgForAll) RouteManager.fastestImgDomain ?: RouteManager.imgHost else RouteManager.imgHost
+    val host = target ?: RouteManager.imgHost
     val sep = if (raw.startsWith("/")) "" else "/"
     return "https://$host$sep$raw"
 }

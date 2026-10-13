@@ -527,7 +527,8 @@ class ReaderActivity : BaseActivity() {
                 val allDomains = com.zycomic.app.net.RouteManager.imgDomains
                 val otherDomains = allDomains.filterNot { d -> chapterDomains.any { it.equals(d, true) } }
                 val rm = com.zycomic.app.net.RouteManager
-                val currentDomain = if (rm.useFastestImgForAll) rm.fastestImgDomain ?: rm.imgHost else rm.imgHost
+                // 与运行时改写目标保持一致：手动 pin 的域才是"当前图源"
+                val currentDomain = rm.imgRewriteTarget ?: rm.imgHost
                 var imgTesting by remember { mutableStateOf(false) }
                 val scope = rememberCoroutineScope()
                 fun delayOf(domain: String): String {
@@ -653,8 +654,10 @@ class ReaderActivity : BaseActivity() {
                                             if (rm.useFastestImgForAll) {
                                                 val fastest = delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
                                                 if (fastest != null && fastest != rm.imgIndex) {
+                                                    // 自动选最快：只更新 imgIndex，不 pin
                                                     rm.setImgHost(fastest)
-                                                    com.zycomic.app.net.NetworkModule.rebuild()
+                                                    // 图源变了只驱逐图片侧空闲连接；不动 API 侧、不 cancelAll 在途图片
+                                                    com.zycomic.app.net.NetworkModule.rebindImageRoute("测速后切换最快图源")
                                                     com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
                                                     launch(Dispatchers.Main) {
                                                         showImgSourceDialog = false
@@ -728,7 +731,8 @@ class ReaderActivity : BaseActivity() {
         try {
             if (rm.imgDomains.none { it.equals(domain, true) }) rm.addChapterImgDomain(domain)
             val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }
-            rm.setImgHost(idx)
+            // 阅读器里的手动选择 = pin（最高优先级），否则会被派生最快域静默覆盖
+            rm.pinImgHost(idx)
         } catch (e: Exception) {
             android.util.Log.e("ReaderActivity", "切换图源失败", e)
             Toast.makeText(this, "切换图源失败", Toast.LENGTH_SHORT).show()
@@ -736,7 +740,9 @@ class ReaderActivity : BaseActivity() {
         }
         lifecycleScope.launch(Dispatchers.IO) {
             val ok = runCatching {
-                com.zycomic.app.net.NetworkModule.rebuild()
+                // 换图源：只驱逐图片侧空闲连接，**不** cancelAll —— 旧域在途请求跑完仍是有效图
+                // （缓存与解密都以 originalUrl 为键），杀掉它们只会把分页打进粘住的 Error 状态
+                com.zycomic.app.net.NetworkModule.rebindImageRoute("阅读器手动切图源")
                 // 清空章节缓存，强制重新拉取并用新图源拼接URL（这里是"确实换了图域"，与
                 // NetworkModule.rebuildClient 里不再无条件清理相呼应）
                 com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()

@@ -212,19 +212,15 @@ object ReaderRepository {
      * @return 完整图片 URL 列表
      */
     fun getImageUrls(chapterContent: ChapterContent): List<String> {
-        val domain = if (RouteManager.useFastestImgForAll) {
-            RouteManager.fastestImgDomain ?: chapterContent.currentImgDomain.ifBlank {
-                chapterContent.imgDomains.firstOrNull() ?: return emptyList()
-            }
-        } else {
-            chapterContent.currentImgDomain.ifBlank {
-                chapterContent.imgDomains.firstOrNull() ?: return emptyList()
-            }
+        // imgRewriteTarget 为 null 时（开关关闭且没手动 pin）保持服务端给的域名，行为同改前
+        val target = RouteManager.imgRewriteTarget
+        val domain = target ?: chapterContent.currentImgDomain.ifBlank {
+            chapterContent.imgDomains.firstOrNull() ?: return emptyList()
         }
         return chapterContent.piclist.map { path ->
             if (path.startsWith("http://") || path.startsWith("https://")) {
-                if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
-                    path.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+                if (!target.isNullOrBlank()) {
+                    path.replace(Regex("https?://[^/]+"), "https://$target")
                 } else path
             } else {
                 val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"

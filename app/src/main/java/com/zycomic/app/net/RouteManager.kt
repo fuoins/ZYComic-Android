@@ -492,6 +492,64 @@ object RouteManager {
             return imgDomains.getOrNull(idx)
         }
 
+    // ---- 手动 pin 图源（持久化，直到用户点「恢复自动」）----
+    /**
+     * 用户手动钉住的图源域名。
+     *
+     * 修既有 bug：`useFastestImgForAll` 为 true 时拦截器只读派生的 [fastestImgDomain]，
+     * 手动 `setImgHost` 改的 imgIndex 根本不参与 URL 改写 —— 阅读器/设置页里的手动切图源
+     * 对实际请求是空操作。现在手动选择写入本字段，并由 [imgRewriteTarget] 置于最高优先级。
+     * 优先级判定本身在 [ImgDomainPolicy]（纯函数，可单测）。
+     */
+    @Volatile var pinnedImgDomain: String? = null
+        private set
+
+    /** 手动选定图源：同时更新 imgIndex（UI 显示）与 pin（实际生效）。 */
+    fun pinImgHost(index: Int) {
+        val safe = index.coerceIn(0, imgDomains.lastIndex)
+        val domain = imgDomains.getOrNull(safe) ?: return
+        setImgHost(safe)
+        pinnedImgDomain = domain
+        persistPinnedImgDomain(domain)
+    }
+
+    /** 恢复自动：清除手动 pin，重新由测速结果决定。 */
+    fun clearPinnedImgDomain() {
+        pinnedImgDomain = null
+        persistPinnedImgDomain(null)
+    }
+
+    /** 启动时恢复 pin；域名已被移出当前图源列表时由策略自动忽略。 */
+    fun loadPinnedImgDomain() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            pinnedImgDomain = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {}
+    }
+
+    private fun persistPinnedImgDomain(domain: String?) {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            if (domain == null) editor.remove("pinned_img_domain") else editor.putString("pinned_img_domain", domain)
+            editor.apply()
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 统一决策入口：这次图片/封面请求应当改写到哪个图源域名；返回 null 表示**不接管**，
+     * 保持服务端给的原始域名。所有改写点只读这一个属性，避免"手动选择被派生结果静默覆盖"
+     * 再出现在某个新增调用点上。
+     */
+    val imgRewriteTarget: String?
+        get() = ImgDomainPolicy.rewriteTarget(
+            pinned = pinnedImgDomain,
+            imgDomains = imgDomains,
+            useFastestImgForAll = useFastestImgForAll,
+            derivedFastest = fastestImgDomain,
+        )
+
     // ---- 图域探活样本路径（真实封面相对路径，测速用）----
     /** 读取上次成功获取的探活图片相对路径（如 /static/upload/xxx.jpg）。 */
     fun loadProbeImgPath(): String? = try {
@@ -574,7 +632,8 @@ object RouteManager {
     private fun failover() {
         CoroutineScope(Dispatchers.IO).launch {
             selectNextLine()
-            NetworkModule.rebuild()
+            // 只清 API 侧：自动换线（连续 3 次 API 失败）不能 cancelAll 掉正在下载的图片
+            NetworkModule.rebuildApi("自动换线")
             NetworkModule.cookieJar.syncToAllLines()
         }
     }

@@ -8,8 +8,9 @@ import okhttp3.Response
 class FastestImgInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
-        val host = RouteManager.fastestImgDomain
-        if (RouteManager.useFastestImgForAll && !host.isNullOrBlank() &&
+        // 统一读 imgRewriteTarget：这样手动 pin 的图源在运行时也真的生效
+        val host = RouteManager.imgRewriteTarget
+        if (!host.isNullOrBlank() &&
             (req.url.toString().contains("/static/upload") || req.url.toString().contains(".webp") ||
                 req.url.toString().contains(".jpg") || req.url.toString().contains(".png"))
         ) {

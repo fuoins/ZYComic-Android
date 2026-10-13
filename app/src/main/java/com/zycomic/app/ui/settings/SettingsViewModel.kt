@@ -42,6 +42,8 @@ class SettingsViewModel {
 
     // 测速
     val currentLineIndex = MutableStateFlow(RouteManager.lineIndex)
+    /** 用户手动固定的图源域名；null = 自动（由测速结果决定）。 */
+    val imgPinned = MutableStateFlow(RouteManager.pinnedImgDomain)
     val currentImgIndex = MutableStateFlow(RouteManager.imgIndex)
     val autoSelectEnabled = MutableStateFlow(RouteManager.autoSelectEnabled)
     val useFastestImgForAll = MutableStateFlow(RouteManager.useFastestImgForAll)
@@ -246,7 +248,7 @@ class SettingsViewModel {
         // 保证"网络已按新线路重建"发生在校验之前。
         scope.launch {
             withContext(Dispatchers.IO) {
-                runCatching { NetworkModule.rebuild() }
+                runCatching { NetworkModule.rebuildApi("手动选线") }
                     .onFailure { android.util.Log.e("SettingsVM", "rebuild after selectLine failed", it) }
                 runCatching { NetworkModule.cookieJar.syncToAllLines() }
                 runCatching { UserRepository.verifyLogin() }
@@ -290,13 +292,36 @@ class SettingsViewModel {
         }
     }
 
-    /** 切换图源：更新 imgHost 并清除 Coil 缓存，避免旧图源图片/封面被缓存命中。 */
+    /**
+     * 手动切换图源：写入 pin（最高优先级）并驱逐图片侧空闲连接。
+     *
+     * 修既有空操作 bug：以前这里只改 imgIndex，而拦截器读的是派生最快域，
+     * 开关开着时手动选择完全不生效。
+     */
     fun selectImgHost(index: Int) {
-        RouteManager.setImgHost(index)
+        RouteManager.pinImgHost(index)
         currentImgIndex.value = index
+        imgPinned.value = RouteManager.pinnedImgDomain
         // 清除内存 + 磁盘缓存，强制用新图源重新加载图片
         DevConfig.clearImageCaches()
-        toast.value = "已切换到图源 ${index + 1}"
+        toast.value = "已固定图源 ${index + 1}（可在测速页恢复自动）"
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { NetworkModule.rebindImageRoute("手动固定图源") }
+            }
+        }
+    }
+
+    /** 恢复自动：清除手动 pin，重新由测速结果决定图源。 */
+    fun resetImgHostToAuto() {
+        RouteManager.clearPinnedImgDomain()
+        imgPinned.value = null
+        toast.value = "已恢复自动选择图源"
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { NetworkModule.rebindImageRoute("恢复自动图源") }
+            }
+        }
     }
 
     /** setImgHost 别名（语义化命名）：切换图源并清缓存。 */
