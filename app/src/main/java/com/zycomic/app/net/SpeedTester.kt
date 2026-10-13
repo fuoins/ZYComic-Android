@@ -505,9 +505,13 @@ object SpeedTester {
      * @param onProgress 每出一条结果回调一次（线路 Map、图域 Map 的不可变快照），供 UI 逐条刷新。
      * @return (最快线路 index, 最快图域 index)，失败项为 -1。已有测速在跑时直接返回 (-1,-1)。
      */
+    /**
+     * [forceFullProbe] 放在倒数第二位、[onProgress] 保持在最后：
+     * 这样三处调用点的尾随 lambda 仍然绑到 onProgress（Kotlin 尾随 lambda 只认最后一个参数）。
+     */
     suspend fun runAndApply(
-        onProgress: ((line: Map<Int, Long>, img: Map<Int, Long>) -> Unit)? = null,
         forceFullProbe: Boolean = false,
+        onProgress: ((line: Map<Int, Long>, img: Map<Int, Long>) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             if (!running.compareAndSet(false, true)) {
