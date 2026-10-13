@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.browse
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,9 +94,6 @@ fun FilterSnapshotEditor(
         AllTags.PINNED_TAGS.forEach { tag ->
             FilterChip(text = tag, selected = snapshot.tags.contains(tag), onClick = { toggleTag(tag) })
         }
-        snapshot.tags.filter { it !in AllTags.PINNED_TAGS }.take(3).forEach { tag ->
-            FilterChip(text = tag, selected = true, onClick = { toggleTag(tag) })
-        }
         FilterChip(text = "更多", selected = false, bold = true, onClick = onOpenTagDialog)
     }
     FilterSection("地区") {
@@ -117,7 +115,7 @@ fun FilterSnapshotEditor(
 
 // ==================== C. 标签选择器（重设计） ====================
 
-/** 标签多选弹窗（重设计）：搜索 + 已选区 + 自适应懒加载网格 + 底部清空/取消/确定（已选 N）。 */
+/** 标签多选弹窗：搜索 + 已选区 + 分类标签与原因说明 + 底部清空/取消/确定。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TagPickerDialog(
@@ -127,10 +125,15 @@ fun TagPickerDialog(
 ) {
     var keyword by remember { mutableStateOf("") }
     var temp by remember { mutableStateOf(initial) }
-
-    val ordered = remember { AllTags.PINNED_TAGS + AllTags.LIST.filterNot { it in AllTags.PINNED_TAGS } }
-    val filtered = remember(keyword, ordered) {
-        if (keyword.isBlank()) ordered else ordered.filter { it.contains(keyword, ignoreCase = true) }
+    var reason by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val filteredGroups = remember(keyword) {
+        TagCategoryData.GROUPS.mapNotNull { group ->
+            val sections = group.sections.mapNotNull { section ->
+                val tags = if (keyword.isBlank()) section.tags else section.tags.filter { it.contains(keyword, ignoreCase = true) }
+                section.copy(tags = tags).takeIf { tags.isNotEmpty() }
+            }
+            group.copy(sections = sections).takeIf { sections.isNotEmpty() }
+        }
     }
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
@@ -150,7 +153,7 @@ fun TagPickerDialog(
                         modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("选择标签", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        Text("选择标签（可多选）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         Text("已选 ${temp.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
                     }
@@ -189,13 +192,53 @@ fun TagPickerDialog(
                             .verticalScroll(rememberScrollState())
                             .padding(vertical = 6.dp),
                     ) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            filtered.forEach { tag ->
-                                com.zycomic.app.ui.components.FilterChip(text = tag, selected = temp.contains(tag)) {
-                                    temp = if (temp.contains(tag)) temp - tag else temp + tag
+                        if (filteredGroups.isEmpty()) {
+                            Text("没有匹配的标签", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        filteredGroups.forEach { group ->
+                            Text(
+                                text = group.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 5.dp, bottom = 1.dp),
+                            )
+                            group.sections.forEach { section ->
+                                Row(
+                                    modifier = Modifier.padding(top = 2.dp, bottom = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = section.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(start = 2.dp)
+                                            .size(18.dp)
+                                            .clip(RoundedCornerShape(percent = 50))
+                                            .clickable { reason = section.title to section.reason },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Info,
+                                            contentDescription = "${section.title}分类原因",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    section.tags.forEach { tag ->
+                                        FilterChip(text = tag, selected = temp.contains(tag)) {
+                                            temp = if (temp.contains(tag)) temp - tag else temp + tag
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -217,6 +260,14 @@ fun TagPickerDialog(
                 }
             }
         }
+    }
+    reason?.let { (title, text) ->
+        AlertDialog(
+            onDismissRequest = { reason = null },
+            title = { Text(title, style = MaterialTheme.typography.titleSmall) },
+            text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = { TextButton(onClick = { reason = null }) { Text("确认") } },
+        )
     }
 }
 

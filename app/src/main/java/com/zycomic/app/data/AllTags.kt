@@ -6,8 +6,8 @@ package com.zycomic.app.data
  */
 object AllTags {
 
-    /** 分类页始终显示的前4个固定标签。 */
-    val PINNED_TAGS = listOf("中文", "巨乳", "中出", "口交")
+    /** 分类筛选栏始终显示的4个快捷标签。 */
+    val PINNED_TAGS = listOf("热血", "冒险", "爱情", "纯爱")
 
     /** 全量标签列表。 */
     val LIST = listOf(
