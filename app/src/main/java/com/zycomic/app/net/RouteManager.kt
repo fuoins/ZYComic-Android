@@ -120,29 +120,34 @@ object RouteManager {
     /** 当前生效的线路列表（测速和请求用这个，不用硬编码 LINE_HOSTS） */
     @Volatile var lineHosts: List<String> = LINE_HOSTS
         private set
-    // 基础图源（内置 IMG_DOMAINS ∪ 远程/基线 sources）
+
+    // 当前 DevConfig 中声明的权威 sources。
     @Volatile private var baselineImgDomains: List<String> = IMG_DOMAINS
-    // 章节接口 / DoH 运行时学到的图源（远程刷新不会清除）
+
+    // 旧版字段兼容位，始终保持为空；服务器推荐项不得扩充全局候选。
     @Volatile private var chapterImgDomains: List<String> = emptyList()
 
-    /** 当前生效的图源域名列表：基础图源 + 章节运行时图源（去重拼接，基础在前） */
+    /** 当前生效的图源域名列表，与 DevConfig 当前 sources 一致。 */
     var imgDomains: List<String> by mutableStateOf(IMG_DOMAINS)
         private set
 
-    /** 按基础集 + 章节集重算 imgDomains，并尽量保持当前选中图源。 */
+    /** Increased whenever an authoritative route/source configuration replaces the active lists. */
+    @Volatile var configRevision: Long = 0L
+        private set
+
+    /** 从配置定义的图源集合重算当前列表；运行时推荐不再扩充全局候选集。 */
     private fun rebuildImgDomains() {
-        val out = LinkedHashSet<String>()
-        baselineImgDomains.forEach { out.add(it.trim()) }
-        chapterImgDomains.forEach { out.add(it.trim()) }
-        val merged = out.toList()
+        val merged = baselineImgDomains.map(String::trim).filter(String::isNotBlank).distinctBy { it.lowercase() }
+        if (merged.isEmpty()) return
         val cur = imgDomains.getOrNull(imgIndex)
         imgDomains = merged
         val kept = cur?.let { c -> merged.indexOfFirst { it.equals(c, ignoreCase = true) } }?.takeIf { it >= 0 }
-        imgIndex = kept ?: imgIndex.coerceIn(0, merged.lastIndex)
+        imgIndex = kept ?: 0
+        saveImgIndex()
     }
 
     /**
-     * 根据 customRule 的 keys 更新线路和图源域名列表。
+     * 仅用于旧格式配置（未提供显式 lines/sources）时，根据 customRule 的 keys 推导候选列表。
      * 线路域名：包含 "mseeowpm"；图源域名：包含 "mw" 且不是线路；排除 dns.google。
      */
     fun updateDomainsFromRule(rule: Map<String, List<String>>) {
@@ -153,7 +158,7 @@ object RouteManager {
                 domain == "dns.google" -> return@forEach
                 domain.contains("mseeowpm") -> {
                     // 线路域名：补全 http/https 前缀（和 LINE_HOSTS 格式一致）
-                    val url = if (domain.endsWith(".pro") || domain.endsWith(".cc") && !domain.contains("mseeowpm")) {
+                    val url = if (domain.endsWith(".pro") || (domain.endsWith(".cc") && !domain.contains("mseeowpm"))) {
                         "http://$domain"
                     } else {
                         "https://$domain"
@@ -165,7 +170,7 @@ object RouteManager {
                 }
             }
         }
-        // 线路：在当前 lineHosts 基础上追加 rule 推导的线路，不重置（保留 Trello 追加的线路）
+        // 旧格式兼容路径；校验通过的远程配置总是提供显式 lines/sources，不会进入这里。
         if (lines.isNotEmpty()) {
             val merged = lineHosts.toMutableList()
             lines.forEach { l -> if (merged.none { sameLine(it, l) }) merged.add(l) }
@@ -178,67 +183,78 @@ object RouteManager {
         }
     }
 
-    /** 远程/基线基础图源：sources 在前，内置 IMG_DOMAINS 缺失补尾（内置永不删），持久化并重算。 */
+    /** 配置是图源集合的唯一来源：不附加内置、章节运行时或历史缓存图源。 */
     fun setBaselineImgDomains(sources: List<String>) {
-        val out = LinkedHashSet<String>()
-        sources.forEach { d -> d.trim().takeIf { it.isNotBlank() }?.let { out.add(it) } }
-        IMG_DOMAINS.forEach { out.add(it) }
-        baselineImgDomains = out.toList()
-        persistStringList("baseline_img_domains", baselineImgDomains)
+        val previous = persistedSelectedImgDomain() ?: imgDomains.getOrNull(imgIndex)
+        val out = LinkedHashMap<String, String>()
+        sources.map(String::trim).filter(String::isNotBlank).forEach { out.putIfAbsent(it.lowercase(), it) }
+        if (out.isEmpty()) return
+
+        baselineImgDomains = out.values.toList()
+        chapterImgDomains = emptyList()
+        imgDomains = baselineImgDomains
+        imgIndex = baselineImgDomains.indexOfFirst { it.equals(previous, ignoreCase = true) }
+            .takeIf { it >= 0 } ?: 0
+        saveImgIndex()
+
+        val savedPin = pinnedImgDomain ?: runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                ?.getString("pinned_img_domain", null)
+        }.getOrNull()
+        if (!savedPin.isNullOrBlank() && baselineImgDomains.none { it.equals(savedPin, ignoreCase = true) }) {
+            pinnedImgDomain = null
+            pinnedImgIp = null
+            persistPinnedImgDomain(null, null)
+        }
+        clearPersistedCandidateLists()
+    }
+
+    /** 兼容旧调用点；配置外图源不得进入或持久化为全局候选。 */
+    fun addChapterImgDomain(domain: String) {
+        if (baselineImgDomains.none { it.equals(domain.trim(), ignoreCase = true) }) return
         rebuildImgDomains()
     }
 
-    /** 章节接口/DoH 运行时学到的图源：加入章节集并持久化，远程刷新不会清除。 */
-    fun addChapterImgDomain(domain: String) {
-        val d = domain.trim()
-        if (d.isNotBlank() && chapterImgDomains.none { it.equals(d, ignoreCase = true) }) {
-            chapterImgDomains = chapterImgDomains + d
-            persistStringList("chapter_img_domains", chapterImgDomains)
-            rebuildImgDomains()
-        } else {
-            rebuildImgDomains()
+    /**
+     * 清理旧版持久化候选列表。有效图源只从 DevConfig 当前的 lines/sources 配置重建。
+     */
+    fun loadImgDomainsFromPrefs() {
+        clearPersistedCandidateLists()
+    }
+
+    private fun persistedSelectedImgDomain(): String? {
+        try {
+            val ctx = DevConfig.appContext ?: return null
+            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .let { prefs ->
+                    prefs.getString("selected_img_domain", null)?.takeIf { it.isNotBlank() }?.let { return it }
+                    val oldDomains = LinkedHashSet<String>().apply {
+                        listOf("baseline_img_domains", "chapter_img_domains", "img_domains").forEach { key ->
+                            val raw = prefs.getString(key, null) ?: return@forEach
+                            runCatching {
+                                val arr = org.json.JSONArray(raw)
+                                for (i in 0 until arr.length()) add(arr.getString(i))
+                            }
+                        }
+                    }.toList()
+                    return oldDomains.getOrNull(prefs.getInt("img_index", -1))
+                }
+        } catch (_: Exception) {
+            return null
         }
     }
 
-    /**
-     * 启动时恢复图源：基础集 baseline_img_domains（缺省回退内置），章节集 chapter_img_domains；
-     * 并对旧版本做一次性拆分迁移 img_split_v1：旧 img_domains 中不属于内置的条目归入章节集。
-     */
-    fun loadImgDomainsFromPrefs() {
-        try {
-            val ctx = DevConfig.appContext ?: return
-            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            baselineImgDomains = prefs.getString("baseline_img_domains", null)?.let(::toStringList)
-                ?.takeIf { it.isNotEmpty() } ?: IMG_DOMAINS
-            chapterImgDomains = prefs.getString("chapter_img_domains", null)?.let(::toStringList) ?: emptyList()
-            if (!prefs.getBoolean("img_split_v1", false)) {
-                prefs.getString("img_domains", null)?.let(::toStringList)?.forEach { d ->
-                    if (IMG_DOMAINS.none { it.equals(d, ignoreCase = true) } &&
-                        chapterImgDomains.none { it.equals(d, ignoreCase = true) }
-                    ) {
-                        chapterImgDomains = chapterImgDomains + d
-                    }
-                }
-                persistStringList("chapter_img_domains", chapterImgDomains)
-                prefs.edit().putBoolean("img_split_v1", true).apply()
-            }
-            rebuildImgDomains()
-        } catch (_: Exception) {}
-    }
-
-    private fun persistStringList(key: String, list: List<String>) {
-        try {
-            val ctx = DevConfig.appContext ?: return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putString(key, org.json.JSONArray(list).toString()).apply()
-        } catch (_: Exception) {}
-    }
-
-    private fun toStringList(raw: String): List<String> = try {
-        val arr = org.json.JSONArray(raw)
-        List(arr.length()) { arr.getString(it) }
-    } catch (_: Exception) {
-        emptyList()
+    private fun clearPersistedCandidateLists() {
+        runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                ?.edit()
+                ?.remove("baseline_img_domains")
+                ?.remove("chapter_img_domains")
+                ?.remove("img_domains")
+                ?.remove("server_lines")
+                ?.putBoolean("img_split_v1", true)
+                ?.apply()
+        }
     }
 
     private fun normalizeLine(url: String): String {
@@ -247,66 +263,21 @@ object RouteManager {
     }
 
     private fun lineKey(url: String): String =
-        url.trim().removePrefix("http://").removePrefix("https://").removeSuffix("/")
+        runCatching { java.net.URI(url).host?.lowercase().orEmpty() }
+            .getOrDefault(url.trim().substringAfter("://", url).substringBefore('/').lowercase())
 
     private fun sameLine(a: String, b: String): Boolean = lineKey(a) == lineKey(b)
-
-    /**
-     * Trello 专用入口（在 ruledns 远程更新之后执行的兜底来源）。
-     * 严格"只增量补充线路"：只按 host 去重新增，已存在（含 ruledns 已托管）的线路一律跳过；
-     * 不得覆盖/删除已有线路，不得改 rule/SNI，不得改图源。返回本次新增的线路。
-     */
-    fun appendTrelloLinesOnly(serverLines: List<String>): List<String> = appendServerLines(serverLines)
-
-    /** 服务端线路追加：只增不减去重，不覆盖硬编码线路。返回本次新增的线路。 */
-    fun appendServerLines(serverLines: List<String>): List<String> {
-        val normalized = serverLines.map { normalizeLine(it) }.filter { it.isNotBlank() }.distinctBy { lineKey(it) }
-        if (normalized.isEmpty()) return emptyList()
-        val current = lineHosts.toMutableList()
-        val added = mutableListOf<String>()
-        normalized.forEach { url ->
-            if (current.none { sameLine(it, url) }) {
-                current.add(url)
-                added.add(url)
-            }
-        }
-        if (added.isNotEmpty()) {
-            lineHosts = current
-            persistServerLines(current)
-        }
-        return added
-    }
-
-    /** 读取本地缓存的 Trello 补充线路（不修改当前列表）。 */
-    private fun readPersistedServerLines(): List<String> = try {
-        val ctx = DevConfig.appContext ?: return emptyList()
-        val raw = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            .getString("server_lines", null) ?: return emptyList()
-        toStringList(raw)
-    } catch (_: Exception) {
-        emptyList()
-    }
-
-    /** 启动时读本地缓存的服务端线路并合并。 */
-    fun loadServerLinesFromPrefs() {
-        appendServerLines(readPersistedServerLines())
-    }
-
-    private fun persistServerLines(lines: List<String>) {
-        try {
-            val ctx = DevConfig.appContext ?: return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putString("server_lines", org.json.JSONArray(lines).toString()).apply()
-        } catch (_: Exception) {}
-    }
 
     // ---- 当前选择 ----
     @Volatile var lineIndex: Int = 0
         private set
+
     @Volatile var imgIndex: Int = 0
         private set
+
     @Volatile var selectedLineIp: String? = null
         private set
+
     @Volatile private var selectedLineDomain: String? = null
 
     // ---- 测速结果持久化（切换页面后不丢失）----
@@ -364,7 +335,9 @@ object RouteManager {
             .format(java.util.Date())
         ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
             .getString("last_speed_test_date", "") == today
-    } catch (_: Exception) { false }
+    } catch (_: Exception) {
+        false
+    }
 
     fun markSpeedTestToday() {
         try {
@@ -453,6 +426,7 @@ object RouteManager {
 
     /** 切换图源 */
     fun setImgHost(index: Int) {
+        if (imgDomains.isEmpty()) return
         imgIndex = index.coerceIn(0, imgDomains.lastIndex)
         saveImgIndex()
     }
@@ -462,10 +436,12 @@ object RouteManager {
         try {
             val ctx = DevConfig.appContext ?: return
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            val saved = prefs.getInt("img_index", 0)
-            if (saved in 0..imgDomains.lastIndex) {
-                imgIndex = saved
+            val savedDomain = prefs.getString("selected_img_domain", null)
+            val savedIndex = savedDomain?.let { domain ->
+                imgDomains.indexOfFirst { it.equals(domain, ignoreCase = true) }.takeIf { it >= 0 }
             }
+            imgIndex = savedIndex ?: 0
+            saveImgIndex()
         } catch (_: Exception) {}
     }
 
@@ -474,7 +450,10 @@ object RouteManager {
         try {
             val ctx = DevConfig.appContext ?: return
             ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putInt("img_index", imgIndex).apply()
+                .edit()
+                .putInt("img_index", imgIndex)
+                .putString("selected_img_domain", imgDomains.getOrNull(imgIndex))
+                .apply()
         } catch (_: Exception) {}
     }
 
@@ -505,6 +484,12 @@ object RouteManager {
                 lineIndex = lastFastestLineIndex
                 selectedLineIp = null
                 selectedLineDomain = null
+                if (!savedDomain.isNullOrBlank()) persistLineEndpoint(null, null)
+            } else {
+                lineIndex = 0
+                selectedLineIp = null
+                selectedLineDomain = null
+                if (!savedDomain.isNullOrBlank()) persistLineEndpoint(null, null)
             }
         } catch (_: Exception) {}
     }
@@ -676,7 +661,9 @@ object RouteManager {
         val ctx = DevConfig.appContext ?: return null
         ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
             .getString("probe_img_path", null)?.takeIf { it.startsWith("/") && it.length > 1 }
-    } catch (_: Exception) { null }
+    } catch (_: Exception) {
+        null
+    }
 
     /** 持久化探活图片相对路径。 */
     fun saveProbeImgPath(path: String) {
@@ -772,30 +759,43 @@ object RouteManager {
     }
 
     /**
-     * 应用显式（远程/基线）线路与图源分类（绕过后缀猜测）：
-     * 线路 = 远程 lines（保留各自 http/https）在前 + 内置 LINE_HOSTS 缺失补尾 + Trello 持久化补充线路；
-     * 图源基础集 = sources + 内置 IMG_DOMAINS（章节运行时图源由 chapterImgDomains 另存，不在此处理）。
-     * 尽量保持当前选中线路/图源。
+     * 应用显式的配置线路与图源列表，精确替换当前集合；不得合并内置、本地缓存或运行时学习项。
+     * 若当前选中线路/图源仍存在则保留，否则回到首项并清理失效 pin。
      */
     fun applyBaseLists(lineUrls: List<String>, sourceDomains: List<String>) {
-        val ordered = LinkedHashSet<String>()
-        lineUrls.forEach { u -> normalizeLine(u).takeIf { it.isNotBlank() }?.let { ordered.add(it) } }
-        LINE_HOSTS.forEach { ordered.add(it) }
-        readPersistedServerLines().forEach { u -> if (ordered.none { sameLine(it, u) }) ordered.add(u) }
-        val newLines = ordered.toList()
-        val curLine = lineHosts.getOrNull(lineIndex)
+        val lists = RouteListPolicy.replace(lineUrls, sourceDomains)
+        val oldLine = lineHosts.getOrNull(lineIndex)
+        val oldDomain = selectedLineDomain ?: oldLine?.let(::hostFromLine)
+        val oldIp = selectedLineIp
+        val newLines = lists.lines
         lineHosts = newLines
-        val keptLine = curLine?.let { c -> newLines.indexOfFirst { sameLine(it, c) } }?.takeIf { it >= 0 }
-        lineIndex = keptLine ?: lineIndex.coerceIn(0, newLines.lastIndex)
+        val keptLine = oldDomain?.let { domain -> newLines.indexOfFirst { hostFromLine(it).equals(domain, true) } }
+            ?.takeIf { it >= 0 }
+        lineIndex = keptLine ?: 0
         if (keptLine == null) {
             selectedLineIp = null
             selectedLineDomain = null
             persistLineEndpoint(null, null)
-        } else if (selectedLineIp != null) {
+        } else if (oldIp != null) {
+            selectedLineIp = oldIp
             selectedLineDomain = hostFromLine(newLines[keptLine])
             persistLineEndpoint(selectedLineDomain, selectedLineIp)
+        } else {
+            selectedLineIp = null
+            selectedLineDomain = null
         }
-        setBaselineImgDomains(sourceDomains)
+        setBaselineImgDomains(lists.sources)
+        clearSpeedTestResults()
+        configRevision++
+    }
+
+    /** Remove speed rows for endpoints that may have been removed by the latest configuration. */
+    fun clearSpeedTestResults() {
+        lastLineDelays = emptyMap()
+        lastImgDelays = emptyMap()
+        lastLineIpDelays = emptyMap()
+        lastImgIpDelays = emptyMap()
+        lastImgIpVerdicts = emptyMap()
     }
 
     /** 设置 SNI 绕过域名列表（由 lines+sources 派生，调用方负责计算） */
@@ -1460,7 +1460,7 @@ object RouteManager {
                 // 旧格式兜底：后缀猜测
                 applyLegacyClassification(ruleMap)
             }
-            // SNI 由受管主机派生（含运行时学到的额外 rule 主机），不再读取独立 sni
+            // SNI 由默认配置声明的线路/图源主机派生，不再读取独立 sni。
             setSniDomains(ruleMap.keys - "dns.google")
         } catch (e: Exception) {
             android.util.Log.e("RouteManager", "applyDefaultConfig failed", e)

@@ -93,15 +93,47 @@ class SettingsViewModel {
             remoteChecking.value = true
             try {
                 val r = RemoteConfigFetcher.checkAndApply(manual = true)
-                toast.value = when (r.outcome) {
-                    RemoteConfigFetcher.Outcome.APPLIED -> "网络配置已更新（v${r.version}）"
-                    RemoteConfigFetcher.Outcome.NOT_CHANGED -> "网络配置已是最新"
-                    RemoteConfigFetcher.Outcome.FAILED -> "更新失败：${r.message}"
+                when (r.outcome) {
+                    RemoteConfigFetcher.Outcome.APPLIED -> {
+                        testing.value = true
+                        lineDelays.value = emptyMap()
+                        imgDelays.value = emptyMap()
+                        imgVerdicts.value = emptyMap()
+                        currentLineIndex.value = RouteManager.lineIndex
+                        currentLineIp.value = RouteManager.selectedLineIp
+                        currentImgIndex.value = RouteManager.imgIndex
+                        currentImgIp.value = RouteManager.selectedImgIp
+                        imgPinned.value = RouteManager.pinnedImgDomain
+                        val testResult = runCatching {
+                            SpeedTester.runForCurrentConfig { lines, images, verdicts ->
+                                lineDelays.value = lines
+                                imgDelays.value = images
+                                imgVerdicts.value = verdicts
+                            }
+                        }
+                        testing.value = false
+                        if (testResult.isSuccess) {
+                            currentLineIndex.value = RouteManager.lineIndex
+                            currentLineIp.value = RouteManager.selectedLineIp
+                            currentImgIndex.value = RouteManager.imgIndex
+                            currentImgIp.value = RouteManager.selectedImgIp
+                            val summary = publishImgVerdicts()
+                            val (bestLine, bestImg) = testResult.getOrThrow()
+                            val fastestLine = if (bestLine >= 0) "线路 ${bestLine + 1}" else "线路暂无可用项"
+                            val fastestImage = if (bestImg >= 0) "图源 ${bestImg + 1}" else "图源暂无可用项"
+                            toast.value = "网络配置已更新（v${r.version}）；测速最快 $fastestLine、$fastestImage；$summary"
+                        } else {
+                            toast.value = "配置已更新（v${r.version}），但新列表测速失败：${testResult.exceptionOrNull()?.message ?: "请稍后重试"}"
+                        }
+                    }
+                    RemoteConfigFetcher.Outcome.NOT_CHANGED -> toast.value = "网络配置已是最新"
+                    RemoteConfigFetcher.Outcome.FAILED -> toast.value = "更新失败：${r.message}"
                 }
             } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "checkRemoteConfig failed", e)
                 toast.value = "更新失败：${e.message ?: "请稍后重试"}"
             } finally {
+                testing.value = false
                 remoteChecking.value = false
                 refreshRemoteInfo()
             }
@@ -127,8 +159,9 @@ class SettingsViewModel {
 
     fun loadBlockedTags() {
         scope.launch {
-            try { blockedTags.value = TagRepository.getBlackTags() }
-            catch (e: Exception) {
+            try {
+                blockedTags.value = TagRepository.getBlackTags()
+            } catch (e: Exception) {
                 android.util.Log.e("SettingsViewModel", "loadBlockedTags failed", e)
             }
         }
@@ -295,9 +328,13 @@ class SettingsViewModel {
             currentImgIndex.value = RouteManager.imgIndex
             currentImgIp.value = RouteManager.selectedImgIp
             val summary = publishImgVerdicts()
-            if (SpeedTester.lastRunSkipped) toast.value = "已切换网络模式，但已有测速在跑，本轮未重测"
-            else if (bl < 0) toast.value = "已切换网络模式，但测速未完成，沿用当前线路/图源；$summary"
-            else if (bi < 0) toast.value = "已切换网络模式；线路 ${bl + 1}，图源不可用沿用当前；$summary"
+            if (SpeedTester.lastRunSkipped) {
+                toast.value = "已切换网络模式，但已有测速在跑，本轮未重测"
+            } else if (bl < 0) {
+                toast.value = "已切换网络模式，但测速未完成，沿用当前线路/图源；$summary"
+            } else if (bi < 0) {
+                toast.value = "已切换网络模式；线路 ${bl + 1}，图源不可用沿用当前；$summary"
+            }
         }
     }
 
@@ -362,9 +399,9 @@ class SettingsViewModel {
                 toast.value = when {
                     // 整轮被防重入丢弃：一个域都没探，绝不能显示成"超时"
                     SpeedTester.lastRunSkipped -> "已有测速在跑，本轮未执行（显示的仍是上一次结果）"
-                    bestLine >= 0 && bestImg >= 0 -> "已选择线路 ${bestLine + 1}、图源 ${bestImg + 1}；$summary"
-                    bestLine >= 0 -> "已选择线路 ${bestLine + 1}；$summary"
-                    else -> "线路全部不可用，使用当前线路；$summary"
+                    bestLine >= 0 && bestImg >= 0 -> "测速最快线路 ${bestLine + 1}、图源 ${bestImg + 1}；$summary"
+                    bestLine >= 0 -> "测速最快线路 ${bestLine + 1}；$summary"
+                    else -> "线路全部不可用，沿用当前选择；$summary"
                 }
             } catch (e: Exception) {
                 android.util.Log.e("SpeedTest", "runSpeedTest failed", e)
@@ -400,7 +437,7 @@ class SettingsViewModel {
         imgDelays.value = emptyMap()
         imgVerdicts.value = emptyMap()
         return try {
-            val r = SpeedTester.runAndApply { l, i, v ->
+            val r = SpeedTester.runForCurrentConfig { l, i, v ->
                 lineDelays.value = l
                 imgDelays.value = i
                 imgVerdicts.value = v

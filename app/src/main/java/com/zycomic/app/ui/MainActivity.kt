@@ -1,11 +1,9 @@
 package com.zycomic.app.ui
 
 import android.content.Intent
-import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
-import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -13,11 +11,13 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.History
@@ -25,11 +25,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -68,22 +66,24 @@ import com.zycomic.app.ui.manga.MangaDetailOverlay
 import com.zycomic.app.ui.profile.ProfileScreen
 import com.zycomic.app.ui.search.SearchOverlay
 import com.zycomic.app.ui.settings.AboutScreen
+import com.zycomic.app.ui.settings.BookBlockScreen
 import com.zycomic.app.ui.settings.DataStorageScreen
 import com.zycomic.app.ui.settings.SettingsMainScreen
 import com.zycomic.app.ui.settings.SettingsViewModel
 import com.zycomic.app.ui.settings.SpeedTestScreen
-import com.zycomic.app.ui.settings.BookBlockScreen
 import com.zycomic.app.ui.settings.TagBlockScreen
 import com.zycomic.app.ui.settings.ZYSettingsAppearanceScreen
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
 import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
+import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import android.graphics.Color as AndroidColor
 
 class MainActivity : BaseActivity() {
 
@@ -147,7 +147,13 @@ private fun Intent.shortcutTab(): Int? = when (action) {
 
 /** 设置子页面 Dialog 标识 */
 private enum class SettingsDialog {
-    Appearance, Reader, TagBlock, BookBlock, SpeedTest, DataStorage, About
+    Appearance,
+    Reader,
+    TagBlock,
+    BookBlock,
+    SpeedTest,
+    DataStorage,
+    About,
 }
 
 @Composable
@@ -230,7 +236,7 @@ fun AppContent(
                 Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
             } else {
                 android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}")
-                Toast.makeText(context, "已选择线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "测速最快线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
             }
             com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone = true
             speedTesting = false
@@ -267,107 +273,112 @@ fun AppContent(
     // 测速完成前不渲染底层页面，避免页面用默认线路发起请求；
     // 测速结束后若首启向导未完成，则先全屏进入向导，完成后才进主界面
     if (!speedTesting && onboardingDone) {
-    val browseVm = remember { BrowseViewModel() }
-    val libraryVm = remember { LibraryViewModel(mode = 0) }
-    val historyVm = remember { HistoryViewModel() }
-    androidx.activity.compose.BackHandler(
-        enabled = detailStack.isNotEmpty() || showSearch || loginOpen || settingsDialog != null,
-    ) {
-        when {
-            settingsDialog != null -> settingsDialog = null
-            detailStack.isNotEmpty() -> closeDetail()
-            showSearch -> { showSearch = false }
-            loginOpen -> loginOpen = false
-        }
-    }
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets.navigationBars,
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = bottomTab == 0,
-                    onClick = { bottomTab = 0 },
-                    icon = { Icon(Icons.Default.Home, contentDescription = "分类") },
-                    label = { Text("分类") },
-                )
-                NavigationBarItem(
-                    selected = bottomTab == 1,
-                    onClick = { bottomTab = 1 },
-                    icon = { Icon(Icons.Default.Book, contentDescription = "书架") },
-                    label = { Text("书架") },
-                )
-                NavigationBarItem(
-                    selected = bottomTab == 2,
-                    onClick = { bottomTab = 2 },
-                    icon = { Icon(Icons.Default.History, contentDescription = "历史") },
-                    label = { Text("历史") },
-                )
-                NavigationBarItem(
-                    selected = bottomTab == 3,
-                    onClick = { bottomTab = 3 },
-                    icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
-                    label = { Text("我的") },
-                )
-                NavigationBarItem(
-                    selected = bottomTab == 4,
-                    onClick = { bottomTab = 4 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
-                    label = { Text("设置") },
-                )
-            }
-        },
-    ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            when (bottomTab) {
-                0 -> BrowseScreen(
-                    vm = browseVm,
-                    pendingTag = pendingTag,
-                    onPendingTagConsumed = { pendingTag = null },
-                    onOpenManga = openDetail,
-                    onOpenSearch = { kw -> searchKeyword = kw; showSearch = true },
-                    onRequireLogin = { loginOpen = true },
-                )
-                1 -> LibraryScreen(
-                    vm = libraryVm,
-                    onOpenManga = openDetail,
-                    onRequireLogin = { loginOpen = true },
-                    onOpenSearch = { kw ->
-                        searchKeyword = kw
-                        showSearch = true
-                    },
-                )
-                2 -> HistoryScreen(
-                    vm = historyVm,
-                    onOpenManga = openDetail,
-                    onRequireLogin = { loginOpen = true },
-                    onOpenSearch = { kw ->
-                        searchKeyword = kw
-                        showSearch = true
-                    },
-                )
-                3 -> ProfileScreen(
-                    onRequireLogin = { loginOpen = true },
-                    onNavigateToTab = { bottomTab = it },
-                    onOpenTagBlock = openTagBlock,
-                    onOpenBookBlock = openBookBlock,
-                    onBlockGayTags = blockGayTags,
-                )
-                4 -> SettingsMainScreen(
-                    onOpenAppearance = openAppearance,
-                    onOpenReader = openReader,
-                    onOpenSpeedTest = openSpeedTest,
-                    onOpenDataStorage = openDataStorage,
-                    onOpenAbout = openAbout,
-                    onReplayOnboarding = {
-                        com.zycomic.app.ui.onboarding.OnboardingPrefs.setDone(context, false)
-                        onboardingDone = false
-                    },
-                )
+        val browseVm = remember { BrowseViewModel() }
+        val libraryVm = remember { LibraryViewModel(mode = 0) }
+        val historyVm = remember { HistoryViewModel() }
+        androidx.activity.compose.BackHandler(
+            enabled = detailStack.isNotEmpty() || showSearch || loginOpen || settingsDialog != null,
+        ) {
+            when {
+                settingsDialog != null -> settingsDialog = null
+                detailStack.isNotEmpty() -> closeDetail()
+                showSearch -> {
+                    showSearch = false
+                }
+                loginOpen -> loginOpen = false
             }
         }
-    }
-} else if (!speedTesting) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            contentWindowInsets = WindowInsets.navigationBars,
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = bottomTab == 0,
+                        onClick = { bottomTab = 0 },
+                        icon = { Icon(Icons.Default.Home, contentDescription = "分类") },
+                        label = { Text("分类") },
+                    )
+                    NavigationBarItem(
+                        selected = bottomTab == 1,
+                        onClick = { bottomTab = 1 },
+                        icon = { Icon(Icons.Default.Book, contentDescription = "书架") },
+                        label = { Text("书架") },
+                    )
+                    NavigationBarItem(
+                        selected = bottomTab == 2,
+                        onClick = { bottomTab = 2 },
+                        icon = { Icon(Icons.Default.History, contentDescription = "历史") },
+                        label = { Text("历史") },
+                    )
+                    NavigationBarItem(
+                        selected = bottomTab == 3,
+                        onClick = { bottomTab = 3 },
+                        icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
+                        label = { Text("我的") },
+                    )
+                    NavigationBarItem(
+                        selected = bottomTab == 4,
+                        onClick = { bottomTab = 4 },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
+                        label = { Text("设置") },
+                    )
+                }
+            },
+        ) { innerPadding ->
+            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                when (bottomTab) {
+                    0 -> BrowseScreen(
+                        vm = browseVm,
+                        pendingTag = pendingTag,
+                        onPendingTagConsumed = { pendingTag = null },
+                        onOpenManga = openDetail,
+                        onOpenSearch = { kw ->
+                            searchKeyword = kw
+                            showSearch = true
+                        },
+                        onRequireLogin = { loginOpen = true },
+                    )
+                    1 -> LibraryScreen(
+                        vm = libraryVm,
+                        onOpenManga = openDetail,
+                        onRequireLogin = { loginOpen = true },
+                        onOpenSearch = { kw ->
+                            searchKeyword = kw
+                            showSearch = true
+                        },
+                    )
+                    2 -> HistoryScreen(
+                        vm = historyVm,
+                        onOpenManga = openDetail,
+                        onRequireLogin = { loginOpen = true },
+                        onOpenSearch = { kw ->
+                            searchKeyword = kw
+                            showSearch = true
+                        },
+                    )
+                    3 -> ProfileScreen(
+                        onRequireLogin = { loginOpen = true },
+                        onNavigateToTab = { bottomTab = it },
+                        onOpenTagBlock = openTagBlock,
+                        onOpenBookBlock = openBookBlock,
+                        onBlockGayTags = blockGayTags,
+                    )
+                    4 -> SettingsMainScreen(
+                        onOpenAppearance = openAppearance,
+                        onOpenReader = openReader,
+                        onOpenSpeedTest = openSpeedTest,
+                        onOpenDataStorage = openDataStorage,
+                        onOpenAbout = openAbout,
+                        onReplayOnboarding = {
+                            com.zycomic.app.ui.onboarding.OnboardingPrefs.setDone(context, false)
+                            onboardingDone = false
+                        },
+                    )
+                }
+            }
+        }
+    } else if (!speedTesting) {
         // 测速已结束但首启向导未完成：全屏进入 3 页向导
         com.zycomic.app.ui.onboarding.OnboardingHost(
             settingsVm = settingsVm,

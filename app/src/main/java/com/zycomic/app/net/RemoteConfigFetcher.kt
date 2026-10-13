@@ -56,7 +56,9 @@ object RemoteConfigFetcher {
             require(uri.host in ALLOWED_HOSTS) { "主机不在允许列表: ${uri.host}" }
 
             val builder = Request.Builder().url(REMOTE_CONFIG_URL).get()
-            DevConfig.remoteEtag()?.let { builder.header("If-None-Match", it) }
+            if (!DevConfig.needsRoutePolicyMigration()) {
+                DevConfig.remoteEtag()?.let { builder.header("If-None-Match", it) }
+            }
 
             client.newCall(builder.build()).execute().use { resp ->
                 when (resp.code) {
@@ -101,6 +103,8 @@ object RemoteConfigFetcher {
             val linesArr = root.optJSONArray("lines") ?: throw IllegalArgumentException("缺少 lines")
             val sourcesArr = root.optJSONArray("sources") ?: throw IllegalArgumentException("缺少 sources")
             val ruleObj = root.optJSONObject("rule") ?: throw IllegalArgumentException("缺少 rule")
+            require(linesArr.length() > 0) { "lines 不能为空" }
+            require(sourcesArr.length() > 0) { "sources 不能为空" }
 
             val lineHosts = LinkedHashSet<String>()
             for (i in 0 until linesArr.length()) {

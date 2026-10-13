@@ -2,12 +2,12 @@ package com.zycomic.app.net
 
 import android.content.Context
 import android.util.Log
-import org.json.JSONArray
-import org.json.JSONObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 开发者配置管理（直连模式：自定义 DNS + SNI 移除）。
@@ -32,6 +32,8 @@ object DevConfig {
 
     /** 远程配置持久化 */
     private const val PREFS_REMOTE = "zycomic_remote_config"
+    /** Bump when the interpretation of an already-downloaded remote config changes. */
+    private const val ROUTE_POLICY_VERSION = 1
 
     private var context: Context? = null
     private var cachedJson: String? = null
@@ -235,7 +237,7 @@ object DevConfig {
                 // 旧格式（无 lines/sources）兜底：后缀猜测分类
                 RouteManager.applyLegacyClassification(ruleMap)
             }
-            // SNI 派生：显式 lines+sources，并包含运行时学到的额外 rule 主机
+            // SNI 仅由配置声明的线路/图源主机派生；远程 rule 已在校验时要求主机集合完全匹配。
             val canonical = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
             val sniSet = (canonical + ruleMap.keys) - "dns.google"
             RouteManager.setSniDomains(sniSet)
@@ -259,6 +261,11 @@ object DevConfig {
     fun remoteError(): String? = runCatching { remotePrefs().getString("last_error", null) }.getOrNull()
     fun remoteEnabled(): Boolean = runCatching { remotePrefs().getBoolean("remote_enabled", true) }.getOrDefault(true)
 
+    /** Existing installations must re-fetch once so the same remote version is reapplied with authoritative semantics. */
+    fun needsRoutePolicyMigration(): Boolean = runCatching {
+        remotePrefs().getInt("route_policy_version", 0) < ROUTE_POLICY_VERSION
+    }.getOrDefault(false)
+
     fun setRemoteEnabled(v: Boolean) = runCatching {
         remotePrefs().edit().putBoolean("remote_enabled", v).apply()
     }
@@ -274,54 +281,33 @@ object DevConfig {
             .apply()
     }
 
-    /**
-     * 应用一份**已通过校验**的远程配置（B' 语义），成功返回 true。
-     *  - 远程所含主机 IP 整体覆盖（含内置主机）；
-     *  - 内置主机永不删（远程未含的内置主机保留内置 IP）；
-     *  - 运行时学到（既非内置也非上份远程）的主机原样保留；
-     *  - 上份远程托管、本份已删、且非内置/学到的主机被移除；
-     *  - 版本不更新返回 false；异常回滚上一份可用配置并返回 false。
-     */
+    /** Apply a validated remote config as the complete authority for routes, sources, and IP rules. */
     fun applyRemoteConfig(body: String, etag: String?): Boolean {
         val ctx = context ?: return false
         try {
             val remote = JSONObject(body)
             val rVersion = remote.optInt("version", 0)
             val rp = ctx.getSharedPreferences(PREFS_REMOTE, Context.MODE_PRIVATE)
-            if (rVersion <= rp.getInt("remote_version", 0)) return false
+            val appliedVersion = rp.getInt("remote_version", 0)
+            val policyVersion = rp.getInt("route_policy_version", 0)
+            if (rVersion < appliedVersion) return false
+            if (rVersion == appliedVersion && policyVersion >= ROUTE_POLICY_VERSION) return false
 
             val rLines = remote.getJSONArray("lines")
             val rSources = remote.getJSONArray("sources")
             val rRule = remote.getJSONObject("rule")
 
-            val baseline = JSONObject(RouteManager.DEFAULT_CONFIG_JSON)
-            val bRule = baseline.optJSONObject("rule") ?: JSONObject()
-            val current = JSONObject(getConfigJson())
-            val cRule = current.optJSONObject("rule") ?: JSONObject()
-
-            val baseHosts = jsonKeys(bRule)
-            val prevRemote = jsonArrayToStringSet(rp.getString("remote_hosts", null)?.let(::JSONArray))
             val newRemote = LinkedHashSet<String>()
             for (i in 0 until rLines.length()) newRemote.add(bareHost(rLines.getString(i)))
             for (i in 0 until rSources.length()) newRemote.add(rSources.getString(i))
 
-            val learned = jsonKeys(cRule).filter { it !in baseHosts && it !in prevRemote }
-
-            val outRule = JSONObject()
-            learned.forEach { outRule.put(it, cRule.getJSONArray(it)) }
-            baseHosts.forEach { h -> if (h !in newRemote) outRule.put(h, bRule.getJSONArray(h)) }
-            newRemote.forEach { h ->
-                val ips = rRule.optJSONArray(h) ?: bRule.optJSONArray(h)
-                if (ips != null) outRule.put(h, ips)
-            }
-
             val out = JSONObject()
             out.put("version", rVersion)
             out.put("updated_at", remote.optString("updated_at", ""))
-            out.put("port", remote.optInt("port", baseline.optInt("port", 7891)))
+            out.put("port", remote.getInt("port"))
             out.put("lines", rLines)
             out.put("sources", rSources)
-            out.put("rule", outRule)
+            out.put("rule", rRule)
 
             val previous = getConfigJson()
             rp.edit().putString("last_good_config", previous).apply()
@@ -334,13 +320,14 @@ object DevConfig {
 
             rp.edit()
                 .putInt("remote_version", rVersion)
+                .putInt("route_policy_version", ROUTE_POLICY_VERSION)
                 .putString("remote_etag", etag ?: "")
                 .putString("remote_updated_at", remote.optString("updated_at", ""))
                 .putString("remote_hosts", JSONArray(newRemote.toList()).toString())
                 .putLong("last_success_ts", System.currentTimeMillis())
                 .remove("last_error")
                 .apply()
-            Log.i(TAG, "remote config applied v$rVersion (hosts=${newRemote.size})")
+            Log.i(TAG, "authoritative remote config applied v$rVersion (hosts=${newRemote.size})")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "applyRemoteConfig failed", e)

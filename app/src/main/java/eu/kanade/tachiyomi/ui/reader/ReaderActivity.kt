@@ -25,17 +25,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -49,7 +49,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
@@ -147,6 +146,7 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR
+import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -523,21 +523,22 @@ class ReaderActivity : BaseActivity() {
 
             // 图源切换对话框
             if (showImgSourceDialog) {
-                val chapterDomains = com.zycomic.app.data.repository.ReaderRepository.currentImgDomains
                 val rm = com.zycomic.app.net.RouteManager
                 val currentDomain = rm.imgRewriteTarget ?: rm.imgHost
                 val successfulEndpoints = rm.lastImgIpDelays.entries
                     .filter { (endpoint, delay) ->
-                        delay < Long.MAX_VALUE && rm.lastImgIpVerdicts[endpoint] == com.zycomic.app.net.SpeedTester.ImgVerdict.OK
+                        rm.imgDomains.any { it.equals(endpoint.domain, true) } &&
+                            delay < Long.MAX_VALUE &&
+                            rm.lastImgIpVerdicts[endpoint] == com.zycomic.app.net.SpeedTester.ImgVerdict.OK
                     }
                     .sortedWith(compareBy({ it.value }, { it.key.domain }, { it.key.ip }))
-                val chapterSorted = successfulEndpoints.filter { entry ->
-                    chapterDomains.any { it.equals(entry.key.domain, true) }
-                }
-                val otherSorted = successfulEndpoints.filterNot { entry ->
-                    chapterDomains.any { it.equals(entry.key.domain, true) }
-                }
+                val fastestEndpoint = successfulEndpoints.firstOrNull()?.key
                 val currentIp = rm.selectedImgIp
+                val currentEndpoint = com.zycomic.app.net.ImageEndpointSelectionPolicy.currentEndpoint(
+                    successfulEndpoints.map { it.key },
+                    currentDomain,
+                    currentIp,
+                )
                 var imgTesting by remember { mutableStateOf(false) }
                 val scope = rememberCoroutineScope()
                 val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
@@ -553,7 +554,7 @@ class ReaderActivity : BaseActivity() {
                         ) {
                             item {
                                 Text(
-                                    "仅显示测速成功且可加载图片的域名/IP，按速度排序",
+                                    "仅显示当前配置中测速成功的图源，按速度排序",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 4.dp),
@@ -561,50 +562,19 @@ class ReaderActivity : BaseActivity() {
                             }
                             item {
                                 Text(
-                                    "章节图源",
+                                    "宇总图源",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 4.dp),
                                 )
                             }
-                            if (chapterSorted.isEmpty()) {
-                                item { Text("暂无可用的章节图源 IP", style = MaterialTheme.typography.bodySmall) }
-                            } else {
-                                items(chapterSorted) { entry ->
-                                    val endpoint = entry.key
-                                    val isSelected = endpoint.domain.equals(currentDomain, true) && endpoint.ip == currentIp
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth()
-                                            .clickable {
-                                                showImgSourceDialog = false
-                                                switchImgSource(endpoint.domain, endpoint.ip)
-                                            }
-                                            .padding(vertical = 6.dp),
-                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = if (isSelected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        Text("${entry.value}ms", style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
+                            if (successfulEndpoints.isEmpty()) {
+                                item { Text("暂无测速成功的图源 IP", style = MaterialTheme.typography.bodySmall) }
                             }
-                            item {
-                                Text(
-                                    "非章节图源(有可能能看)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 8.dp),
-                                )
-                            }
-                            if (otherSorted.isEmpty()) {
-                                item { Text("暂无可用的其他图源 IP", style = MaterialTheme.typography.bodySmall) }
-                            }
-                            items(otherSorted) { entry ->
+                            items(successfulEndpoints) { entry ->
                                 val endpoint = entry.key
-                                val isSelected = endpoint.domain.equals(currentDomain, true) && endpoint.ip == currentIp
+                                val isSelected = endpoint == currentEndpoint
+                                val isFastest = endpoint == fastestEndpoint
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clickable {
@@ -619,6 +589,12 @@ class ReaderActivity : BaseActivity() {
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
                                     )
+                                    if (isFastest) {
+                                        Text("最快", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    if (isSelected) {
+                                        Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                                    }
                                     Text("${entry.value}ms", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
@@ -712,8 +688,11 @@ class ReaderActivity : BaseActivity() {
     private fun switchImgSource(domain: String, ip: String) {
         val rm = com.zycomic.app.net.RouteManager
         try {
-            if (rm.imgDomains.none { it.equals(domain, true) }) rm.addChapterImgDomain(domain)
             val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }
+            if (idx < 0) {
+                Toast.makeText(this, "图源不在当前配置中", Toast.LENGTH_SHORT).show()
+                return
+            }
             // 阅读器里的手动选择 = pin（最高优先级），否则会被派生最快域静默覆盖
             rm.pinImgHost(idx, ip)
         } catch (e: Exception) {

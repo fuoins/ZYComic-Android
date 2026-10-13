@@ -6,10 +6,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.Buffer
@@ -64,10 +66,16 @@ object SpeedTester {
 
     /** 防止启动测速与网络变化重测速并发重叠。 */
     private val running = AtomicBoolean(false)
+    private val configRunLock = Mutex()
+
+    @Volatile private var lastCompletedConfigRevision: Long = -1L
+
+    @Volatile private var lastConfigRunResult: Pair<Int, Int> = -1 to -1
 
     /** 最近一次测速完成时间与当时的直连策略，供网络回调判断是否需要重测。 */
     @Volatile var lastRunAt: Long = 0L
         private set
+
     @Volatile var lastRunDirectStrategy: Boolean? = null
         private set
 
@@ -247,7 +255,10 @@ object SpeedTester {
         val first = head[0].toInt() and 0xFF
         if (first == '<'.code || first == '{'.code || first == '['.code) return false
         // 加密图片为高熵二进制：含 NUL/控制字节即视为非文本二进制
-        return head.any { val v = it.toInt() and 0xFF; v == 0 || v in 1..8 || v in 14..31 }
+        return head.any {
+            val v = it.toInt() and 0xFF
+            v == 0 || v in 1..8 || v in 14..31
+        }
     }
 
     private fun hasImageMagic(b: ByteArray): Boolean {
@@ -406,10 +417,14 @@ object SpeedTester {
     private fun aggregateImgVerdicts(verdicts: Map<DomainIp, ImgVerdict>): Map<Int, ImgVerdict> =
         RouteManager.imgDomains.mapIndexedNotNull { index, domain ->
             val values = verdicts.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
-            if (values.isEmpty()) null else index to when {
-                ImgVerdict.OK in values -> ImgVerdict.OK
-                ImgVerdict.NO_IMAGE in values -> ImgVerdict.NO_IMAGE
-                else -> ImgVerdict.UNREACHABLE
+            if (values.isEmpty()) {
+                null
+            } else {
+                index to when {
+                    ImgVerdict.OK in values -> ImgVerdict.OK
+                    ImgVerdict.NO_IMAGE in values -> ImgVerdict.NO_IMAGE
+                    else -> ImgVerdict.UNREACHABLE
+                }
             }
         }.toMap()
 
@@ -497,6 +512,7 @@ object SpeedTester {
                 return@coroutineScope (-1 to -1)
             }
             lastRunSkipped = false
+            val configRevisionAtStart = RouteManager.configRevision
             // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
             lastImgVerdicts = emptyMap()
             lastImgIpVerdicts = emptyMap()
@@ -577,14 +593,49 @@ object SpeedTester {
                         " unreachable=${vc[ImgVerdict.UNREACHABLE] ?: 0} no_image=${vc[ImgVerdict.NO_IMAGE] ?: 0}" +
                         " samplePath=${if (samplePath == null) "null" else "ok"} fastest=[$fastest]",
                 )
-                Log.i(TAG, "runAndApply done in ${System.currentTimeMillis() - startedAt}ms, " +
-                    "bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
-                (bestLineIndex ?: -1) to (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
+                Log.i(
+                    TAG,
+                    "runAndApply done in ${System.currentTimeMillis() - startedAt}ms, " +
+                        "bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy",
+                )
+                val result = (bestLineIndex ?: -1) to
+                    (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
+                lastCompletedConfigRevision = configRevisionAtStart
+                lastConfigRunResult = result
+                result
             } finally {
                 running.set(false)
                 lineClient.releaseProbe()
                 imgClient.releaseProbe()
             }
+        }
+    }
+
+    /**
+     * Run a speed test for the currently active configuration. If a configuration replacement races
+     * an existing test, wait for that test and repeat against the newer revision. Concurrent callers
+     * share a completed result for the same revision instead of starting duplicate probes.
+     */
+    suspend fun runForCurrentConfig(
+        onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
+    ): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        configRunLock.lock()
+        try {
+            while (true) {
+                while (running.get()) delay(50)
+                if (lastRunAt > 0L && lastCompletedConfigRevision == RouteManager.configRevision) {
+                    onProgress?.invoke(RouteManager.lastLineIpDelays, RouteManager.lastImgIpDelays, lastImgIpVerdicts)
+                    return@withContext lastConfigRunResult
+                }
+
+                val result = runAndApply(onProgress)
+                if (!lastRunSkipped && lastCompletedConfigRevision == RouteManager.configRevision) {
+                    return@withContext result
+                }
+            }
+            error("Unreachable")
+        } finally {
+            configRunLock.unlock()
         }
     }
 

@@ -75,9 +75,9 @@ import exh.log.EnhancedFilePrinter
 import exh.log.XLogLogcatLogger
 import exh.log.xLogD
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import logcat.AndroidLogcatLogger
 import logcat.LogPriority
 import logcat.LogcatLogger
@@ -121,7 +121,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         runCatching {
             if (getSharedPreferences("zycomic_data", android.content.Context.MODE_PRIVATE)
                     .getBoolean("auto_clear_chapter_cache", true)
-            ) DevConfig.clearImageCaches()
+            ) {
+                DevConfig.clearImageCaches()
+            }
         }
         // 加载持久化的图源索引
         com.zycomic.app.net.RouteManager.loadImgIndex()
@@ -131,9 +133,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.RouteManager.loadUseFastestImgForAll()
         // 恢复用户手动钉住的图源（pin 优先级高于派生最快域）
         com.zycomic.app.net.RouteManager.loadPinnedImgDomain()
-        // 合并本地缓存的服务端下发线路（只增不减）
-        com.zycomic.app.net.RouteManager.loadServerLinesFromPrefs()
-        // 合并持久化的图源列表
+        // 清除旧版缓存的线路/图源候选；有效列表已从当前 DevConfig 重建
         com.zycomic.app.net.RouteManager.loadImgDomainsFromPrefs()
 
         // 初始化用户仓库（本地用户信息存储）
@@ -150,36 +150,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         ProcessLifecycleOwner.get().lifecycleScope.launch {
             com.zycomic.app.data.repository.UserRepository.verifyLogin()
         }
-        // 启动进入主界面（每进程一次，异步非阻塞）：先拉远程 ruledns；无论成功/未更新/失败，
-        // 随后都再执行 Trello 拉取。Trello 严格只增量补充线路（不覆盖 ruledns 线路/IP、
-        // 不改图源/rule/SNI、不删除），有新增线路则增量测速选最快。
+        // 启动后异步拉取权威远程配置。只有应用成功替换后，才针对新候选列表测速。
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
-            // 1) 远程 ruledns（内部已做 HTTPS 校验/ETag/版本/回退，失败静默保留当前配置）
-            runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }
-            // 2) Trello 始终执行，仅作为线路兜底补充来源
-            try {
-                val lines = com.zycomic.app.net.TrelloConfigFetcher.fetchLines()
-                val added = com.zycomic.app.net.RouteManager.appendTrelloLinesOnly(lines)
-                if (added.isNotEmpty()) {
-                    val delays = com.zycomic.app.net.RouteManager.lastLineIpDelays.toMutableMap()
-                    added.forEach { url ->
-                        delays.putAll(com.zycomic.app.net.SpeedTester.testLineEndpoints(url))
-                    }
-                    val routeManager = com.zycomic.app.net.RouteManager
-                    routeManager.setEndpointDelays(delays, routeManager.lastImgIpDelays, routeManager.lastImgIpVerdicts)
-                    val fastest = com.zycomic.app.net.SpeedTester.fastestLineEndpoint(delays)
-                    val fastestIndex = fastest?.let { endpoint ->
-                        routeManager.lineHosts.indexOfFirst { runCatching { java.net.URI(it).host.equals(endpoint.domain, true) }.getOrDefault(false) }
-                    }?.takeIf { it >= 0 }
-                    if (routeManager.autoSelectEnabled && fastest != null && fastestIndex != null &&
-                        (fastestIndex != routeManager.lineIndex || fastest.ip != routeManager.selectedLineIp)
-                    ) {
-                        routeManager.setLineEndpoint(fastest.domain, fastest.ip)
-                        com.zycomic.app.net.NetworkModule.rebuildApi("Trello 增量线路后选最快")
-                    }
-                    if (fastestIndex != null) routeManager.saveLastFastestLine(fastestIndex)
-                }
-            } catch (_: Exception) {}
+            val result = runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }.getOrNull()
+            if (result?.outcome == com.zycomic.app.net.RemoteConfigFetcher.Outcome.APPLIED) {
+                runCatching { com.zycomic.app.net.SpeedTester.runForCurrentConfig() }
+            }
         }
 
         patchInjekt()
@@ -350,7 +326,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         network: android.net.Network,
     ) {
         val caps = cm.getNetworkCapabilities(network)
-        val sig = "${network}@vpn=${caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)}"
+        val sig = "$network@vpn=${caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)}"
         if (sig == lastNetworkSig) return
         lastNetworkSig = sig
         networkHandler.removeCallbacks(networkRetestRunnable)
@@ -519,7 +495,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     backupStrategy = NeverBackupStrategy()
                 }
         }
-
 
         XLog.init(
             logConfig,

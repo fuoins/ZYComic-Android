@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -32,11 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.zycomic.app.net.ImageEndpointSelectionPolicy
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.ui.components.FilterChip
@@ -56,6 +57,20 @@ fun SettingsScreen() {
     val currentLineIp by vm.currentLineIp.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
     val currentImgIp by vm.currentImgIp.collectAsState()
+    val sortedImgEntries = remember(imgDelays, imgVerdicts) {
+        imgDelays.entries.sortedWith(
+            compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }),
+        )
+    }
+    val successfulImgEndpoints = remember(sortedImgEntries, imgVerdicts) {
+        sortedImgEntries.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
+    }
+    val fastestImgEndpoint = successfulImgEndpoints.firstOrNull()
+    val currentImgEndpoint = remember(sortedImgEntries, successfulImgEndpoints, currentImgIdx, currentImgIp) {
+        val domain = RouteManager.imgDomains.getOrNull(currentImgIdx)
+        ImageEndpointSelectionPolicy.currentEndpoint(successfulImgEndpoints, domain, currentImgIp)
+            ?: ImageEndpointSelectionPolicy.currentEndpoint(sortedImgEntries.map { it.key }, domain, currentImgIp)
+    }
 
     var showGayConfirm by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -158,7 +173,7 @@ fun SettingsScreen() {
                 }
 
             Text("图源（按域名/IP速度排序，点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            imgDelays.entries.sortedWith(compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
+            sortedImgEntries
                 .forEachIndexed { order, entry ->
                     val endpoint = entry.key
                     val index = RouteManager.imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
@@ -172,9 +187,12 @@ fun SettingsScreen() {
                         Text(
                             text = "${order + 1}. ${endpoint.domain} · ${endpoint.ip}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (index == currentImgIdx && endpoint.ip == currentImgIp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            color = if (endpoint == currentImgEndpoint) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
+                        if (endpoint == fastestImgEndpoint) {
+                            Text("最快", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                        }
                         Text(
                             text = "HTTP:${formatDelay(entry.value, verdict)}",
                             style = MaterialTheme.typography.bodySmall,
@@ -311,8 +329,11 @@ private fun AddBlacklistDialog(
             )
 
             // 标签流
-            val filtered = if (keyword.isBlank()) allTags
-            else allTags.filter { it.contains(keyword, ignoreCase = true) }
+            val filtered = if (keyword.isBlank()) {
+                allTags
+            } else {
+                allTags.filter { it.contains(keyword, ignoreCase = true) }
+            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -411,8 +432,11 @@ private fun RemoveBlacklistDialog(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
 
-            val filtered = if (keyword.isBlank()) blockedTags
-            else blockedTags.filter { it.contains(keyword, ignoreCase = true) }
+            val filtered = if (keyword.isBlank()) {
+                blockedTags
+            } else {
+                blockedTags.filter { it.contains(keyword, ignoreCase = true) }
+            }
 
             // 全选按钮（搜索框下方）
             Row(
@@ -422,8 +446,11 @@ private fun RemoveBlacklistDialog(
                 androidx.compose.material3.TextButton(
                     onClick = {
                         allSelected = !allSelected
-                        selected = if (allSelected) filtered.toSet()
-                        else selected - filtered.toSet()
+                        selected = if (allSelected) {
+                            filtered.toSet()
+                        } else {
+                            selected - filtered.toSet()
+                        }
                     },
                 ) { Text(if (allSelected) "取消全选" else "全选(已加载出的)") }
             }

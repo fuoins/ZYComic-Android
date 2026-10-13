@@ -2,19 +2,9 @@ package com.zycomic.app.data.repository
 
 import android.util.Log
 import com.zycomic.app.data.dto.ChapterContent
-import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
-import com.zycomic.app.net.SpeedTester
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /**
  * 章节内容 LRU 缓存：最近 5 章的页面 URL 列表。
@@ -25,7 +15,9 @@ import java.util.concurrent.TimeUnit
 class ChapterCache(private val maxSize: Int = 5) {
 
     private val map = object : LinkedHashMap<String, List<String>>(
-        maxSize, 0.75f, true
+        maxSize,
+        0.75f,
+        true,
     ) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean {
             return size > maxSize
@@ -94,7 +86,7 @@ object ReaderRepository {
 
             // 自动选择图源：优先用 _CURRENT_IMG_DOMAIN
             if (data.currentImgDomain.isNotBlank()) {
-                autoSelectImgDomain(data.currentImgDomain, data.imgDomains)
+                autoSelectImgDomain(data.currentImgDomain)
             }
 
             return data
@@ -104,110 +96,16 @@ object ReaderRepository {
         }
     }
 
-    /**
-     * 自动选择图源：
-     * - 已有图源：切换到该图源，用测速结果选最快IP
-     * 新图源：DoH查询IP + 添加配置 + 动态更新代理 + 切换
-     */
-    private suspend fun autoSelectImgDomain(domain: String, allDomains: List<String>) {
-        withContext(Dispatchers.IO) {
-            try {
-                // 1. 检查是否是已有图源
-                val existingIndex = RouteManager.imgDomains.indexOf(domain)
-                if (existingIndex >= 0) {
-                    // 已有图源：切换
-                    if (RouteManager.imgIndex != existingIndex) {
-                        RouteManager.setImgHost(existingIndex)
-                        Log.d(TAG, "切换到已有图源: $domain (index=$existingIndex)")
-                    }
-                    return@withContext
-                }
-
-                // 2. 新图源：DoH 查询 IP
-                Log.d(TAG, "发现新图源: $domain，开始 DoH 查询 IP")
-                val ips = queryDohAli(domain)
-                if (ips.isEmpty()) {
-                    Log.w(TAG, "DoH 查询失败，新图源 $domain 无 IP，跳过配置更新")
-                    // 即使没有IP也切换图源，用系统DNS尝试
-                    addNewImgDomainToRouteManager(domain)
-                    return@withContext
-                }
-
-                // 3. 添加到 DevConfig rule（SNI 由 lines+sources∪rule 派生，无需单独写 sni）
-                val currentConfig = DevConfig.getConfigJson()
-                val root = JSONObject(currentConfig)
-                val ruleObj = root.optJSONObject("rule") ?: JSONObject()
-                ruleObj.put(domain, org.json.JSONArray(ips))
-                root.put("rule", ruleObj)
-                DevConfig.applyConfig(root.toString())
-                Log.d(TAG, "新图源 $domain 已添加到配置（${ips.size}个IP）")
-
-                // 4. 更新 RouteManager 图源列表并切换
-                addNewImgDomainToRouteManager(domain)
-
-                // 5. 后台测速新图源，更快则切过去（fire-and-forget）
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        val previousFastest = RouteManager.fastestImgEndpoint
-                        val previousIndex = RouteManager.imgIndex
-                        SpeedTester.testSingleImgHost(domain)
-                        val fastest = RouteManager.fastestImgEndpoint
-                        if (RouteManager.useFastestImgForAll && RouteManager.pinnedImgDomain.isNullOrBlank() && fastest != null) {
-                            RouteManager.applyFastestImgEndpoint(fastest)
-                            if (fastest != previousFastest || RouteManager.imgIndex != previousIndex) {
-                                NetworkModule.rebindImageRoute("新增章节图源逐 IP 测速")
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "自动选择图源失败: $domain", e)
-            }
+    /** 配置外的服务器推荐图源不加入候选列表，也不写入本地 DNS/rule。 */
+    private fun autoSelectImgDomain(domain: String) {
+        val index = RouteManager.imgDomains.indexOfFirst { it.equals(domain, ignoreCase = true) }
+        if (index < 0) {
+            Log.w(TAG, "章节推荐图源不在当前权威配置中，忽略全局切换: $domain")
+            return
         }
-    }
-
-    /** 添加新图源（章节运行时图源）到 RouteManager 并切换。 */
-    private fun addNewImgDomainToRouteManager(domain: String) {
-        // 章节接口/DoH 学到的图源进章节集，远程基线刷新不会清除
-        RouteManager.addChapterImgDomain(domain)
-        val index = RouteManager.imgDomains.indexOf(domain)
-        if (index >= 0 && RouteManager.imgIndex != index) {
+        if (RouteManager.pinnedImgDomain.isNullOrBlank() && RouteManager.imgIndex != index) {
             RouteManager.setImgHost(index)
-            Log.d(TAG, "切换到新图源: $domain (index=$index)")
-        }
-    }
-
-    /**
-     * 阿里云 DoH 查询 A 记录。
-     * @return IP 列表，失败返回空列表
-     */
-    private suspend fun queryDohAli(domain: String): List<String> = withContext(Dispatchers.IO) {
-        try {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .build()
-            val url = "https://dns.alidns.com/resolve?name=$domain&type=A"
-            val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext emptyList()
-                val body = resp.body?.string() ?: return@withContext emptyList()
-                val json = JSONObject(body)
-                val answer = json.optJSONArray("Answer") ?: return@withContext emptyList()
-                val ips = mutableListOf<String>()
-                for (i in 0 until answer.length()) {
-                    val item = answer.getJSONObject(i)
-                    if (item.optInt("type") == 1) {
-                        ips.add(item.getString("data"))
-                    }
-                }
-                Log.d(TAG, "DoH查询 $domain -> $ips")
-                ips
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "DoH查询失败: $domain", e)
-            emptyList()
+            Log.d(TAG, "切换到配置内章节推荐图源: $domain (index=$index)")
         }
     }
 
@@ -225,7 +123,9 @@ object ReaderRepository {
             if (path.startsWith("http://") || path.startsWith("https://")) {
                 if (!target.isNullOrBlank()) {
                     path.replace(Regex("https?://[^/]+"), "https://$target")
-                } else path
+                } else {
+                    path
+                }
             } else {
                 val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"
                 "https://$domain$sep$path"

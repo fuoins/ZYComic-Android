@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.zycomic.app.net.ImageEndpointSelectionPolicy
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -56,6 +57,15 @@ fun SpeedTestScreen(
     }
     val imgOrder = remember(imgDelays, imgVerdicts) {
         imgDelays.entries.sortedWith(compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
+    }
+    val successfulImgEndpoints = remember(imgOrder, imgVerdicts) {
+        imgOrder.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
+    }
+    val fastestImgEndpoint = successfulImgEndpoints.firstOrNull()
+    val currentImgEndpoint = remember(imgOrder, imgVerdicts, currentImgIdx, currentImgIp) {
+        val domain = RouteManager.imgDomains.getOrNull(currentImgIdx)
+        ImageEndpointSelectionPolicy.currentEndpoint(successfulImgEndpoints, domain, currentImgIp)
+            ?: ImageEndpointSelectionPolicy.currentEndpoint(imgOrder.map { it.key }, domain, currentImgIp)
     }
 
     Scaffold(
@@ -99,8 +109,11 @@ fun SpeedTestScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("自动选择最快线路", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (autoSel) "已开启，当前自动选中线路 ${currentLineIdx + 1}（手动点击线路将关闭自动）"
-                                else "已关闭，纯手动模式",
+                                if (autoSel) {
+                                    "已开启，当前自动选中线路 ${currentLineIdx + 1}（手动点击线路将关闭自动）"
+                                } else {
+                                    "已关闭，纯手动模式"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -116,8 +129,11 @@ fun SpeedTestScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("封面和章节用测速最快图源", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (useFastestImg) "已开启：封面和章节图片都用测速最快图源"
-                                else "已关闭：封面用当前图源，章节用服务端推荐",
+                                if (useFastestImg) {
+                                    "已开启：封面和章节图片都用测速最快图源"
+                                } else {
+                                    "已关闭：封面用当前图源，章节用服务端推荐"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -133,8 +149,11 @@ fun SpeedTestScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("当前图源", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (pinnedImg.isNullOrBlank()) "自动：由测速结果选择最快图源"
-                                else "已固定：$pinnedImg（不会被测速结果覆盖）",
+                                if (pinnedImg.isNullOrBlank()) {
+                                    "自动：由测速结果选择最快图源"
+                                } else {
+                                    "已固定：$pinnedImg（不会被测速结果覆盖）"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -152,8 +171,11 @@ fun SpeedTestScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("自动跟随系统 VPN", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (followVpn) "已开启：系统 VPN 开则图片走 VPN、关则直连"
-                                else "已关闭：强制直连（硬编码IP+去SNI），即使开着系统 VPN 也不走 VPN，用于抓包调试",
+                                if (followVpn) {
+                                    "已开启：系统 VPN 开则图片走 VPN、关则直连"
+                                } else {
+                                    "已关闭：强制直连（硬编码IP+去SNI），即使开着系统 VPN 也不走 VPN，用于抓包调试"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -197,7 +219,8 @@ fun SpeedTestScreen(
                         host = "${endpoint.domain} · ${endpoint.ip}",
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
-                        isSelected = index == currentImgIdx && endpoint.ip == currentImgIp,
+                        isSelected = endpoint == currentImgEndpoint,
+                        isFastest = endpoint == fastestImgEndpoint,
                         onClick = { if (index >= 0) vm.selectImgHost(index, endpoint.ip) },
                     )
                 }
@@ -223,6 +246,7 @@ private fun SpeedRow(
     delay: Long?,
     isSelected: Boolean,
     verdict: SpeedTester.ImgVerdict? = null,
+    isFastest: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -251,6 +275,9 @@ private fun SpeedRow(
         )
         if (isSelected) {
             Text(" ←", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        }
+        if (isFastest) {
+            Text(" 最快", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
