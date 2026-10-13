@@ -171,22 +171,49 @@ object NetworkModule {
     private val netContext: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     /**
-     * 切换线路后重建 Retrofit（必须挂起：内部网络操作在 IO 串行执行）。
-     * 同时清理 apiClient/imageClient 连接池 + 取消在途请求，让手动切换立即生效。
+     * 兼容别名：语义上等价于 [rebuildApi]。历史调用点几乎都是"换线路后重建 Retrofit"，
+     * 而它们顺带 cancelAll 掉了图片侧——这正是 [rebindImageRoute] 要避免的。
+     * 新代码请直接使用 [rebuildApi] / [rebindImageRoute]。
      */
-    suspend fun rebuild() {
-        withContext(netContext) { rebuildLocked() }
+    suspend fun rebuild(reason: String = "legacy rebuild") = rebuildApi(reason)
+
+    /**
+     * **只清 API 侧**：取消在途接口请求 + 驱逐 API 连接池 + 重建 Retrofit（baseUrl 变了）。
+     *
+     * 不再动 imageClient：它被封面（`CoverCallFactory`/`CoverArtHelper`）与阅读页
+     * （`ManwaSource.client` → `HttpPageLoader`）共用，`dispatcher.cancelAll()` 会杀掉
+     * running + queued 的图片请求且**不可自愈**——`WebtoonPageHolder` 的 `Page.State.Error`
+     * 状态会一直粘住，要用户手动点重试。换线路与图片侧走的是不同域名，本来就不该受影响。
+     */
+    suspend fun rebuildApi(reason: String = "line changed") {
+        withContext(netContext) { rebuildApiLocked(reason) }
     }
 
-    private fun rebuildLocked() {
+    private fun rebuildApiLocked(reason: String) {
+        Log.i("NetworkModule", "rebuildApi: reason=$reason")
         _apiClient?.dispatcher?.cancelAll()
         _apiClient?.connectionPool?.evictAll()
-        _imageClient?.dispatcher?.cancelAll()
-        _imageClient?.connectionPool?.evictAll()
         _retrofit = null
         _api = null
         buildRetrofit()
     }
+
+    /**
+     * **只动图片侧、且不取消在途请求**：换图源时用这个。
+     *
+     * 只驱逐空闲连接（代价是重新握手，可自愈），不 `cancelAll`：旧域的在途图片请求跑完
+     * 仍然是有效图片——`ImageCacheManager` 与解密都以 **originalUrl** 为键，与请求实际打到
+     * 哪个域无关。杀掉它们只会把正在加载的分页打进粘住的 Error 状态。
+     * 清缓存也不做（缓存键不随图源变化），相关待验证项见 `selectImgHost` 的 N1 注释。
+     */
+    suspend fun rebindImageRoute(reason: String = "img domain changed") {
+        withContext(netContext) {
+            Log.i("NetworkModule", "rebindImageRoute: reason=$reason, 仅驱逐空闲连接，不 cancelAll")
+            _imageClient?.connectionPool?.evictAll()
+            CoverCallFactory.rebind()
+        }
+    }
+
 
     // ==================== VPN 加速 / 国内直连策略 ====================
 

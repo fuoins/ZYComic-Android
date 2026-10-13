@@ -485,12 +485,102 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    /** 从 lastImgDelays 取测速最快的图源域名，无数据返回 null。 */
+    /**
+     * 应当用于改写图片/封面 URL 的图源域名。优先级：手动 pin > 本轮测速里排除冷却后的最快。
+     *
+     * 返回 null 表示**不接管**：既没有手动 pin，本轮也没有任何可用测速结论——此时保持
+     * 服务端给的原始域名。选择器里的 `CHAPTER_NAMED` / `FIRST_IN_LIST` 两档需要章节上下文
+     * 才有意义，留给 [effectiveImgDomain] 使用。
+     */
     val fastestImgDomain: String?
         get() {
-            val idx = lastImgDelays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key ?: return null
-            return imgDomains.getOrNull(idx)
+            val choice = ImgDomainSelector.select(
+                candidates = imgDomains,
+                delays = imgDelaysByHost(),
+                cooled = imgCooldown.snapshot(),
+                pinned = pinnedImgDomain,
+                chapterNamed = emptyList(),
+            )
+            return if (choice.reason == ImgDomainSelector.Reason.FIRST_IN_LIST) null else choice.domain
         }
+
+    /**
+     * 统一决策入口：这次图片/封面请求应当改写到哪个图源；返回 null 表示**不接管**（用原始域名）。
+     *
+     * 优先级：手动 pin >（`useFastestImgForAll` 开启时）本轮排除冷却后的最快。
+     * 开关关闭且没有 pin 时保持服务端给的域名，这是既有行为。
+     * 所有改写点（两个拦截器、封面拼 URL、章节 URL 拼接、Coil 封面 fetcher）都只读这一个属性，
+     * 避免"手动切图源被派生最快域静默覆盖"的问题再次出现在某个新增调用点上。
+     */
+    val imgRewriteTarget: String?
+        get() = pinnedImgDomainInList ?: if (useFastestImgForAll) fastestImgDomain else null
+
+    /** pin 指向的域仍在当前图源列表里才算有效（远程配置可能已把它删掉）。 */
+    private val pinnedImgDomainInList: String?
+        get() = pinnedImgDomain?.takeIf { p -> imgDomains.any { it.equals(p, ignoreCase = true) } }
+
+    /**
+     * 带章节上下文的完整优先级：手动 pin > 最快（排除冷却）> 章节接口点名 > 列表首个。
+     * [chapterNamed] 传章节内容给的域名（`currentImgDomain` 在前，其后 `imgDomains`）。
+     */
+    fun effectiveImgDomain(chapterNamed: List<String>): String? =
+        ImgDomainSelector.select(
+            candidates = imgDomains,
+            delays = imgDelaysByHost(),
+            cooled = imgCooldown.snapshot(),
+            pinned = pinnedImgDomain,
+            chapterNamed = chapterNamed,
+        ).domain
+
+    /** [lastImgDelays] 以 index 为键，这里转成选择器需要的「域名 -> 延迟」。 */
+    private fun imgDelaysByHost(): Map<String, Long> {
+        val out = HashMap<String, Long>(lastImgDelays.size)
+        lastImgDelays.forEach { (index, ms) -> imgDomains.getOrNull(index)?.let { out[it] = ms } }
+        return out
+    }
+
+    // ---- 手动 pin 图源（持久化，直到用户点「恢复自动」）----
+    /**
+     * 用户手动钉住的图源域名。
+     *
+     * 修复点：此前 `useFastestImgForAll` 为 true 时，拦截器只读派生的最快域，
+     * 阅读器/设置页里的手动切换图源对实际请求**完全无效**（空操作）。现在手动选择
+     * 一律写入本字段，并由选择器置于最高优先级。
+     */
+    @Volatile var pinnedImgDomain: String? = null
+        private set
+
+    /** 手动选定图源：同时更新 imgIndex（UI 显示）与 pin（实际生效）。 */
+    fun pinImgHost(index: Int) {
+        val domain = imgDomains.getOrNull(index.coerceIn(0, imgDomains.lastIndex)) ?: return
+        setImgHost(index)
+        pinnedImgDomain = domain
+        persistPinnedImgDomain(domain)
+    }
+
+    /** 恢复自动：清除手动 pin，重新由测速结果决定。 */
+    fun clearPinnedImgDomain() {
+        pinnedImgDomain = null
+        persistPinnedImgDomain(null)
+    }
+
+    /** 启动时恢复 pin；域名已被移出当前图源列表时由选择器自动忽略，这里不额外校验。 */
+    fun loadPinnedImgDomain() {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            pinnedImgDomain = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                .getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {}
+    }
+
+    private fun persistPinnedImgDomain(domain: String?) {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            if (domain == null) editor.remove("pinned_img_domain") else editor.putString("pinned_img_domain", domain)
+            editor.apply()
+        } catch (_: Exception) {}
+    }
 
     // ---- 图域探活样本路径（真实封面相对路径，测速用）----
     /** 读取上次成功获取的探活图片相对路径（如 /static/upload/xxx.jpg）。 */
@@ -510,32 +600,44 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    // ---- 图域失败冷却与失败轮换（图片请求兜底）----
-    /** host -> 冷却到期时间戳（ms）。 */
-    private val imgFailUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    /** 图域失败冷却时长：30 分钟。 */
-    private const val IMG_FAIL_COOLDOWN_MS = 30L * 60L * 1000L
+    // ---- 图域失败标记与失败轮换（图片请求兜底）----
+    /**
+     * 失败标记表：**本轮测速内永久**，只有 [clearImgDomainCooldown]（每轮测速/测活开始）才恢复。
+     *
+     * 原先的「30 分钟到期自然恢复」已按设计取消：跨轮的数据本就该被新一轮探测覆盖，
+     * 留着只会污染新一轮选域；代价是偶发一次 reset 会把该域踢出本轮，已知悉并接受。
+     */
+    private val imgCooldown = ImgCooldown()
 
-    /** 标记某图域本次失败（403/reset/超时/非图片），进入短期冷却。 */
+    /** 标记某图域本次失败（403/reset/超时/非图片），本轮内不再被选中。 */
     fun markImgDomainFailed(host: String?) {
         host ?: return
-        imgFailUntil[host] = System.currentTimeMillis() + IMG_FAIL_COOLDOWN_MS
+        imgCooldown.mark(host)
     }
 
-    /** 图域当前是否可用（未在冷却期）。 */
+    /** 图域当前是否可用（本轮未被标记失败）。 */
     fun isImgDomainAvailable(host: String?): Boolean {
         host ?: return true
-        val until = imgFailUntil[host] ?: return true
-        if (until <= System.currentTimeMillis()) {
-            imgFailUntil.remove(host)
-            return true
-        }
-        return false
+        return !imgCooldown.isCooling(host)
+    }
+
+    /** 本轮被标记失败的图源（小写快照），供测速日志与选域使用。 */
+    fun imgCooldownSnapshot(): Set<String> = imgCooldown.snapshot()
+
+    /**
+     * 每轮测速 / 测活开始前调用，整表清空。
+     * 注意：**被防重入丢弃的那一轮不能清**，否则会白白丢掉已有标记。
+     */
+    fun clearImgDomainCooldown() {
+        imgCooldown.clear()
     }
 
     /**
-     * 从 [currentHost] 起按图域列表顺序取下一个"未冷却"图域；没有可用域返回 null。
-     * 仅遍历一轮，不重复返回 currentHost。
+     * 从 [currentHost] 起按图域列表顺序取下一个未被标记失败的图域。
+     *
+     * 降级：若全部域都已被标记（整轮候选被掏空），**忽略标记**继续轮换——否则一次网络抖动
+     * 就会把 `ImageInterceptor` 的换域兜底整体废掉。选域侧的同类降级见
+     * [ImgDomainSelector.Reason.FASTEST_COOLDOWN_IGNORED]。仅遍历一轮，不重复返回 currentHost。
      */
     fun nextAvailableImgDomain(currentHost: String?): String? {
         val all = imgDomains
@@ -546,6 +648,10 @@ object RouteManager {
         for (step in 1..n) {
             val cand = all[(start + step) % n]
             if (!cand.equals(currentHost, ignoreCase = true) && isImgDomainAvailable(cand)) return cand
+        }
+        for (step in 1..n) {
+            val cand = all[(start + step) % n]
+            if (!cand.equals(currentHost, ignoreCase = true)) return cand
         }
         return null
     }
@@ -574,7 +680,8 @@ object RouteManager {
     private fun failover() {
         CoroutineScope(Dispatchers.IO).launch {
             selectNextLine()
-            NetworkModule.rebuild()
+            // 只清 API 侧：自动换线时不能 cancelAll 掉正在下载的图片分页
+            NetworkModule.rebuildApi("自动换线")
             NetworkModule.cookieJar.syncToAllLines()
         }
     }

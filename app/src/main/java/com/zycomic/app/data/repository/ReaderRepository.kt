@@ -212,19 +212,21 @@ object ReaderRepository {
      * @return 完整图片 URL 列表
      */
     fun getImageUrls(chapterContent: ChapterContent): List<String> {
-        val domain = if (RouteManager.useFastestImgForAll) {
-            RouteManager.fastestImgDomain ?: chapterContent.currentImgDomain.ifBlank {
-                chapterContent.imgDomains.firstOrNull() ?: return emptyList()
+        val chapterNamed = listOf(chapterContent.currentImgDomain) + chapterContent.imgDomains
+        val autoOrPinned = RouteManager.useFastestImgForAll || RouteManager.pinnedImgDomain != null
+        // 完整优先级：手动 pin > 本轮最快（排除冷却）> 章节接口点名 > 列表首个
+        val domain = (
+            if (autoOrPinned) {
+                RouteManager.effectiveImgDomain(chapterNamed)
+            } else {
+                chapterNamed.firstOrNull { it.isNotBlank() }
             }
-        } else {
-            chapterContent.currentImgDomain.ifBlank {
-                chapterContent.imgDomains.firstOrNull() ?: return emptyList()
-            }
-        }
+            ) ?: return emptyList()
+        val target = RouteManager.imgRewriteTarget
         return chapterContent.piclist.map { path ->
             if (path.startsWith("http://") || path.startsWith("https://")) {
-                if (RouteManager.useFastestImgForAll && !RouteManager.fastestImgDomain.isNullOrBlank()) {
-                    path.replace(Regex("https?://[^/]+"), "https://${RouteManager.fastestImgDomain}")
+                if (!target.isNullOrBlank()) {
+                    path.replace(Regex("https?://[^/]+"), "https://$target")
                 } else path
             } else {
                 val sep = if (domain.endsWith("/") || path.startsWith("/")) "" else "/"

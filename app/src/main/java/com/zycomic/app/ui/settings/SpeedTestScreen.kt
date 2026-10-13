@@ -135,6 +135,26 @@ fun SpeedTestScreen(
                     }
                 }
                 item {
+                    val pinned by vm.imgPinned.collectAsState()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("当前图源", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (pinned.isNullOrBlank()) "自动：由本轮测速结果选最快且未失败的图源"
+                                else "已固定：$pinned（不会被测速结果覆盖）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (!pinned.isNullOrBlank()) {
+                            Button(onClick = { vm.resetImgHostToAuto() }) { Text("恢复自动") }
+                        }
+                    }
+                }
+                item {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,

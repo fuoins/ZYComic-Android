@@ -386,6 +386,9 @@ object SpeedTester {
                 return@coroutineScope (-1 to -1)
             }
             lastRunSkipped = false
+            // 本轮开始：清空上一轮的图源失败标记（标记改为"本轮内永久"，靠这里整表重置）。
+            // 被防重入丢弃的那轮走不到这里，所以不会白白丢掉已有标记。
+            RouteManager.clearImgDomainCooldown()
             // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
             lastImgVerdicts = emptyMap()
             val startedAt = System.currentTimeMillis()
@@ -407,7 +410,8 @@ object SpeedTester {
                 if (bestLine != null) {
                     RouteManager.setLine(bestLine)
                     RouteManager.saveLastFastestLine(bestLine)
-                    NetworkModule.rebuild() // 让阶段 2 取样本走最快线路
+                    // 让阶段 2 取样本走最快线路：只重建 API 侧，不打断正在下载的图片
+                    NetworkModule.rebuildApi("测速选出线路")
                 }
                 Log.i(TAG, "line test done, best=$bestLine")
 
@@ -436,10 +440,14 @@ object SpeedTester {
                 // 结果一次性写入，fastestImgDomain 据此派生
                 RouteManager.setLastDelays(lines, imgs)
                 val bestImg = imgs.filterValues { it < MAX }.minByOrNull { it.value }?.key
-                if (bestImg != null && bestImg != RouteManager.imgIndex) {
+                // 自动选出的图源只更新 imgIndex，**不 pin**：pin 专属于用户手动选择。
+                val imgDomainChanged = bestImg != null && bestImg != RouteManager.imgIndex
+                if (imgDomainChanged && bestImg != null) {
                     RouteManager.setImgHost(bestImg)
                 }
-                if (bestLine != null || bestImg != null) NetworkModule.rebuild()
+                // 按侧清理：线路变了只重建 API 侧；图源变了只驱逐图片侧空闲连接（不 cancelAll）。
+                if (bestLine != null) NetworkModule.rebuildApi("测速应用线路")
+                if (imgDomainChanged) NetworkModule.rebindImageRoute("测速应用图源")
                 RouteManager.markSpeedTestToday()
 
                 lastRunAt = System.currentTimeMillis()

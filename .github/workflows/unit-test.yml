@@ -1,0 +1,61 @@
+name: Unit Test
+
+# 目的：让纯逻辑单测在每次 push main 时自动跑，不必手动 dispatch Build APK
+# 才能看到红灯（quick 模式的打包任务里带 `-x test`，测不到这一点）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            **/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Setup SDK (auto install platforms + licenses)
+        continue-on-error: true
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            echo "android-36 platform missing, downloading platform-36_r02.zip ..."
+            TMP_DIR="$(mktemp -d)"
+            curl -fsSL -o "$TMP_DIR/platform-36.zip" "https://dl.google.com/android/repository/platform-36_r02.zip"
+            unzip -q "$TMP_DIR/platform-36.zip" -d "$ANDROID_HOME/platforms"
+          fi
+          test -d "$ANDROID_HOME/platforms/android-36" && echo "android-36 platform ready"
+
+      - name: Run JVM unit tests
+        run: |
+          ./gradlew :app:testReleaseUnitTest --console=plain \
+            -Dorg.gradle.jvmargs="-Xmx4g" \
+            --build-cache
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
