@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -37,6 +39,7 @@ object SpeedTester {
 
     private const val TAG = "SpeedTester"
     private const val MAX = Long.MAX_VALUE
+    private val probeSemaphore = Semaphore(24)
 
     /** 探活只取前 2KB，避免逐域拉整张图/整个 JSON。 */
     private const val PROBE_BYTES = 2048L
@@ -117,6 +120,10 @@ object SpeedTester {
 
     /** 最近一轮图域探活的逐域结论（index -> 结论），供 UI/排查区分"没测/连不上/无图"。 */
     @Volatile var lastImgVerdicts: Map<Int, ImgVerdict> = emptyMap()
+        private set
+
+    /** Per-domain/IP image verdicts from the latest pass. */
+    @Volatile var lastImgIpVerdicts: Map<DomainIp, ImgVerdict> = emptyMap()
         private set
 
     /** 最近一次 runAndApply 是否因为"已有测速在跑"被整轮丢弃（被丢弃时一个域都没探）。 */
@@ -311,52 +318,158 @@ object SpeedTester {
 
     // ==================== 对外：全量/单点 ====================
 
-    /** 线路全量探活（只返回延迟，不应用结果）。 */
-    suspend fun testAllLines(): Map<Int, Long> = withContext(Dispatchers.IO) {
-        coroutineScope {
-            val client = NetworkModule.newLineProbeClient()
-            try {
-                RouteManager.lineHosts.mapIndexed { index, lineUrl ->
-                    async { index to measureLineOnce(client, lineUrl) }
-                }.awaitAll().toMap()
-            } finally {
-                client.releaseProbe()
-            }
-        }
-    }
+    private data class LineTarget(val endpoint: DomainIp, val url: String)
 
-    /** 图域全量探活（ReaderActivity 手动入口用）；样本路径取缓存，作固定封面 404 时的兜底。 */
-    suspend fun testAllImgHosts(): Map<Int, Long> = withContext(Dispatchers.IO) {
-        coroutineScope {
-            val client = NetworkModule.newSpeedTestClient()
-            try {
-                val samplePath = RouteManager.loadProbeImgPath()
-                RouteManager.imgDomains.mapIndexed { index, domain ->
-                    async { index to measureImg(client, domain, samplePath).delayMs }
-                }.awaitAll().toMap()
-            } finally {
-                client.releaseProbe()
-            }
-        }
-    }
+    private fun lineDomain(url: String): String? =
+        runCatching { java.net.URI(url).host }.getOrNull()?.takeIf { it.isNotBlank() }
 
-    suspend fun testSingleImgHost(domain: String): Long = withContext(Dispatchers.IO) {
-        val client = NetworkModule.newSpeedTestClient()
-        try {
-            measureImg(client, domain, RouteManager.loadProbeImgPath()).delayMs
+    private fun lineTargets(): List<LineTarget> = RouteManager.lineHosts.flatMap { url ->
+        val domain = lineDomain(url) ?: return@flatMap emptyList()
+        NetworkModule.resolveProbeIps(domain).map { ip -> LineTarget(DomainIp(domain, ip), url) }
+    }.distinctBy { it.endpoint }
+
+    private fun imgTargets(domains: List<String> = RouteManager.imgDomains): List<DomainIp> = domains.flatMap { domain ->
+        NetworkModule.resolveProbeIps(domain).map { ip -> DomainIp(domain, ip) }
+    }.distinct()
+
+    private suspend fun measureLineAtIp(client: OkHttpClient, target: LineTarget): Long {
+        val routed = NetworkModule.newProbeClientForIp(client, target.endpoint.domain, target.endpoint.ip)
+        return try {
+            measureLineOnce(routed, target.url)
         } finally {
-            client.releaseProbe()
+            routed.releaseProbe()
         }
     }
 
-    suspend fun testSingleLine(lineUrl: String): Long = withContext(Dispatchers.IO) {
+    private suspend fun measureImgAtIp(client: OkHttpClient, endpoint: DomainIp, samplePath: String?): ImgProbe {
+        val routed = NetworkModule.newProbeClientForIp(client, endpoint.domain, endpoint.ip)
+        return try {
+            measureImg(routed, endpoint.domain, samplePath)
+        } finally {
+            routed.releaseProbe()
+        }
+    }
+
+    /** Probe each currently configured or DNS-resolved API IP once. */
+    suspend fun testAllLineEndpoints(
+        onResult: ((DomainIp, Long) -> Unit)? = null,
+    ): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
         val client = NetworkModule.newLineProbeClient()
         try {
-            measureLineOnce(client, lineUrl)
+            val targets = lineTargets()
+            coroutineScope {
+                targets.map { target ->
+                    async {
+                        probeSemaphore.withPermit {
+                            val delay = measureLineAtIp(client, target)
+                            onResult?.invoke(target.endpoint, delay)
+                            target.endpoint to delay
+                        }
+                    }
+                }.awaitAll().toMap()
+            }
         } finally {
             client.releaseProbe()
         }
     }
+
+    /** Probe each image domain/IP using the same real-image validation as startup. */
+    suspend fun testAllImgEndpoints(
+        samplePath: String? = RouteManager.loadProbeImgPath(),
+        onResult: ((DomainIp, Long, ImgVerdict) -> Unit)? = null,
+        domains: List<String> = RouteManager.imgDomains,
+    ): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
+        val client = NetworkModule.newSpeedTestClient()
+        try {
+            val verdicts = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
+            val delays = coroutineScope {
+                imgTargets(domains).map { endpoint ->
+                    async {
+                        probeSemaphore.withPermit {
+                            val result = measureImgAtIp(client, endpoint, samplePath)
+                            verdicts[endpoint] = result.verdict
+                            lastImgIpVerdicts = verdicts.toMap()
+                            onResult?.invoke(endpoint, result.delayMs, result.verdict)
+                            endpoint to result.delayMs
+                        }
+                    }
+                }.awaitAll().toMap()
+            }
+            lastImgIpVerdicts = verdicts.toMap()
+            lastImgVerdicts = aggregateImgVerdicts(verdicts)
+            delays
+        } finally {
+            client.releaseProbe()
+        }
+    }
+
+    private fun aggregateImgVerdicts(verdicts: Map<DomainIp, ImgVerdict>): Map<Int, ImgVerdict> =
+        RouteManager.imgDomains.mapIndexedNotNull { index, domain ->
+            val values = verdicts.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to when {
+                ImgVerdict.OK in values -> ImgVerdict.OK
+                ImgVerdict.NO_IMAGE in values -> ImgVerdict.NO_IMAGE
+                else -> ImgVerdict.UNREACHABLE
+            }
+        }.toMap()
+
+    /** Backward-compatible domain summary for older settings surfaces. */
+    suspend fun testAllLines(): Map<Int, Long> {
+        val results = testAllLineEndpoints()
+        return RouteManager.lineHosts.mapIndexedNotNull { index, url ->
+            val host = lineDomain(url) ?: return@mapIndexedNotNull null
+            val values = results.filterKeys { it.domain.equals(host, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to (values.filter { it < MAX }.minOrNull() ?: MAX)
+        }.toMap()
+    }
+
+    /** Backward-compatible per-domain image summary. */
+    suspend fun testAllImgHosts(): Map<Int, Long> {
+        val results = testAllImgEndpoints()
+        return RouteManager.imgDomains.mapIndexedNotNull { index, domain ->
+            val values = results.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to (values.filter { it < MAX }.minOrNull() ?: MAX)
+        }.toMap()
+    }
+
+    suspend fun testSingleImgHost(domain: String): Long {
+        val previousDelays = RouteManager.lastImgIpDelays
+        val previousVerdicts = RouteManager.lastImgIpVerdicts
+        val results = testAllImgEndpoints(domains = listOf(domain))
+        val newVerdicts = lastImgIpVerdicts
+        val combinedDelays = previousDelays + results
+        val combinedVerdicts = previousVerdicts + newVerdicts
+        lastImgIpVerdicts = combinedVerdicts
+        lastImgVerdicts = aggregateImgVerdicts(combinedVerdicts)
+        RouteManager.setEndpointDelays(RouteManager.lastLineIpDelays, combinedDelays, combinedVerdicts)
+        return results.filterKeys { it.domain.equals(domain, ignoreCase = true) }
+            .values.filter { it < MAX }.minOrNull() ?: MAX
+    }
+
+    suspend fun testLineEndpoints(lineUrl: String): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
+        val host = lineDomain(lineUrl) ?: return@withContext emptyMap()
+        val client = NetworkModule.newLineProbeClient()
+        try {
+            val targets = NetworkModule.resolveProbeIps(host).map { LineTarget(DomainIp(host, it), lineUrl) }
+            coroutineScope {
+                targets.map { target ->
+                    async {
+                        probeSemaphore.withPermit { target.endpoint to measureLineAtIp(client, target) }
+                    }
+                }.awaitAll().toMap()
+            }
+        } finally {
+            client.releaseProbe()
+        }
+    }
+
+    suspend fun testSingleLine(lineUrl: String): Long {
+        val results = testLineEndpoints(lineUrl)
+        return results.values.filter { it < MAX }.minOrNull() ?: MAX
+    }
+
+    fun fastestLineEndpoint(delays: Map<DomainIp, Long>): DomainIp? =
+        delays.filterValues { it < MAX }.minByOrNull { it.value }?.key
 
     fun selectFastestLine(delays: Map<Int, Long>): Int =
         delays.filterValues { it < MAX }.minByOrNull { it.value }?.key ?: 0
@@ -364,20 +477,18 @@ object SpeedTester {
     // ==================== 测速 + 应用（启动 / 设置页 / 网络变化三处复用）====================
 
     /**
-     * 两阶段测速并应用结果：
-     * 1) 线路探活（走签名解密的分类接口）→ 选最快线路并重建 Retrofit；
-     * 2) 取兜底封面路径 → 图域探活（固定封面）→ 选最快图域；
-     * 3) 成功才替换当前线路/图域；全部失败保留现状。
+     * 三阶段测速并应用结果：线路域名的每个 IP、图源域名的每个 IP 各自探测，
+     * 只应用成功端点中的最快线路/IP与最快图源/IP。
      *
      * 全程在 IO：内部的 [NetworkModule.rebuild] 是 suspend 且固定在 IO 串行执行，
      * 取样本与写 prefs 也都在 IO，任何调用方（含主线程 `LaunchedEffect`）都不会触发
      * `NetworkOnMainThreadException`。
      *
-     * @param onProgress 每出一条结果回调一次（线路 Map、图域 Map 的不可变快照），供 UI 逐条刷新。
-     * @return (最快线路 index, 最快图域 index)，失败项为 -1。已有测速在跑时直接返回 (-1,-1)。
+     * @param onProgress 每出一条端点结果回调一次，供 UI 逐条刷新。
+     * @return (最快线路 index, 最快图源 index)，失败项为 -1。已有测速在跑时直接返回 (-1,-1)。
      */
     suspend fun runAndApply(
-        onProgress: ((line: Map<Int, Long>, img: Map<Int, Long>) -> Unit)? = null,
+        onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             if (!running.compareAndSet(false, true)) {
@@ -388,25 +499,33 @@ object SpeedTester {
             lastRunSkipped = false
             // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
             lastImgVerdicts = emptyMap()
+            lastImgIpVerdicts = emptyMap()
             val startedAt = System.currentTimeMillis()
             val lineClient = NetworkModule.newLineProbeClient()
             val imgClient = NetworkModule.newSpeedTestClient()
+            val previousImgIndex = RouteManager.imgIndex
+            val previousImgIp = RouteManager.selectedImgIp
             try {
-                // 阶段 1：线路（签名+解密全链路的分类接口）
-                val lineAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
-                val lineJobs = RouteManager.lineHosts.mapIndexed { index, lineUrl ->
+                // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
+                val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
+                val lineJobs = lineTargets().map { target ->
                     async {
-                        val v = measureLineOnce(lineClient, lineUrl)
-                        lineAcc[index] = v
-                        onProgress?.invoke(lineAcc.toSortedMap(), emptyMap())
-                        index to v
+                        probeSemaphore.withPermit {
+                            val delay = measureLineAtIp(lineClient, target)
+                            lineAcc[target.endpoint] = delay
+                            onProgress?.invoke(lineAcc.toMap(), emptyMap(), emptyMap())
+                            target.endpoint to delay
+                        }
                     }
                 }
                 val lines = lineJobs.awaitAll().toMap()
-                val bestLine = lines.filterValues { it < MAX }.minByOrNull { it.value }?.key
-                if (bestLine != null) {
-                    RouteManager.setLine(bestLine)
-                    RouteManager.saveLastFastestLine(bestLine)
+                val bestLine = fastestLineEndpoint(lines)
+                val bestLineIndex = bestLine?.let { endpoint ->
+                    RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
+                }?.takeIf { it >= 0 }
+                if (bestLine != null && bestLineIndex != null) {
+                    RouteManager.setLineEndpoint(bestLine.domain, bestLine.ip)
+                    RouteManager.saveLastFastestLine(bestLineIndex)
                     // 让阶段 2 取样本走最快线路：只重建 API 侧，不打断正在下载的图片
                     NetworkModule.rebuildApi("测速选出线路")
                 }
@@ -416,56 +535,51 @@ object SpeedTester {
                 val samplePath = obtainProbePath()
                 Log.i(TAG, "img probe sample path=$samplePath")
 
-                // 阶段 3：图域（固定真实封面；非连接层失败才回退取样路径）
-                val imgAcc = java.util.concurrent.ConcurrentHashMap<Int, Long>()
-                val verdictAcc = java.util.concurrent.ConcurrentHashMap<Int, ImgVerdict>()
-                val imgJobs = RouteManager.imgDomains.mapIndexed { index, domain ->
+                // 阶段 3：逐条图源域名/IP探测（包含真实图片内容校验）。
+                val imgAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
+                val verdictAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
+                val imgJobs = imgTargets().map { endpoint ->
                     async {
-                        val r = measureImg(imgClient, domain, samplePath)
-                        imgAcc[index] = r.delayMs
-                        verdictAcc[index] = r.verdict
-                        // 逐域发布快照：启动路径有 8s 整体超时，中途被取消时 UI 至少能看到
-                        // 已完成的那些域的真实结论，而不是把"没来得及探"也算成"超时"。
-                        lastImgVerdicts = verdictAcc.toSortedMap()
-                        onProgress?.invoke(lines, imgAcc.toSortedMap())
-                        index to r.delayMs
+                        probeSemaphore.withPermit {
+                            val result = measureImgAtIp(imgClient, endpoint, samplePath)
+                            imgAcc[endpoint] = result.delayMs
+                            verdictAcc[endpoint] = result.verdict
+                            lastImgIpVerdicts = verdictAcc.toMap()
+                            lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
+                            onProgress?.invoke(lines, imgAcc.toMap(), verdictAcc.toMap())
+                            endpoint to result.delayMs
+                        }
                     }
                 }
                 val imgs = imgJobs.awaitAll().toMap()
-                lastImgVerdicts = verdictAcc.toSortedMap()
+                lastImgIpVerdicts = verdictAcc.toMap()
+                lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
 
-                // 结果一次性写入，fastestImgDomain 据此派生
-                RouteManager.setLastDelays(lines, imgs)
-                val bestImg = imgs.filterValues { it < MAX }.minByOrNull { it.value }?.key
-                // 自动选出的图源只更新 imgIndex，**不 pin**：pin 专属于用户手动选择
-                val imgDomainChanged = bestImg != null && bestImg != RouteManager.imgIndex
-                if (imgDomainChanged && bestImg != null) {
-                    RouteManager.setImgHost(bestImg)
-                }
+                RouteManager.setEndpointDelays(lines, imgs, verdictAcc)
+                val bestImg = RouteManager.fastestImgEndpoint
+                val imgDomainChanged = bestImg != null && RouteManager.pinnedImgDomain.isNullOrBlank() &&
+                    (bestImg.domain != RouteManager.imgDomains.getOrNull(previousImgIndex) || bestImg.ip != previousImgIp)
+                if (bestImg != null) RouteManager.applyFastestImgEndpoint(bestImg)
                 // 按侧清理：线路变了只重建 API 侧；图源变了只驱逐图片侧空闲连接
-                if (bestLine != null) NetworkModule.rebuildApi("测速应用线路")
                 if (imgDomainChanged) NetworkModule.rebindImageRoute("测速应用图源")
                 RouteManager.markSpeedTestToday()
 
                 lastRunAt = System.currentTimeMillis()
                 lastRunDirectStrategy = NetworkModule.shouldUseDirectStrategy()
 
-                // 汇总：把"连不上"和"连上了但没有图"分开计数，并列出最快的几个域。
-                // 只有失败才打逐条日志、成功不打，是此前"看不出哪些域没测过"的直接原因。
-                val vc = lastImgVerdicts.values.groupingBy { it }.eachCount()
-                val domains = RouteManager.imgDomains
-                val fastest = lastImgVerdicts.entries.filter { it.value == ImgVerdict.OK }
-                    .mapNotNull { e -> imgs[e.key]?.let { e.key to it } }.sortedBy { it.second }.take(5)
-                    .joinToString(", ") { (idx, ms) -> "${domains.getOrElse(idx) { "??" }}=${ms}ms" }
+                val vc = verdictAcc.values.groupingBy { it }.eachCount()
+                val fastest = imgs.entries.filter { it.value < MAX && verdictAcc[it.key] == ImgVerdict.OK }
+                    .sortedBy { it.value }.take(5)
+                    .joinToString(", ") { (endpoint, ms) -> "${endpoint.domain}(${endpoint.ip})=${ms}ms" }
                 Log.i(
                     TAG,
-                    "img probe summary total=${lastImgVerdicts.size} ok=${vc[ImgVerdict.OK] ?: 0}" +
+                    "img probe summary total=${verdictAcc.size} ok=${vc[ImgVerdict.OK] ?: 0}" +
                         " unreachable=${vc[ImgVerdict.UNREACHABLE] ?: 0} no_image=${vc[ImgVerdict.NO_IMAGE] ?: 0}" +
                         " samplePath=${if (samplePath == null) "null" else "ok"} fastest=[$fastest]",
                 )
                 Log.i(TAG, "runAndApply done in ${System.currentTimeMillis() - startedAt}ms, " +
                     "bestLine=$bestLine bestImg=$bestImg direct=$lastRunDirectStrategy")
-                (bestLine ?: -1) to (bestImg ?: -1)
+                (bestLineIndex ?: -1) to (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
             } finally {
                 running.set(false)
                 lineClient.releaseProbe()

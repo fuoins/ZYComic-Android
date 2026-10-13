@@ -524,44 +524,22 @@ class ReaderActivity : BaseActivity() {
             // 图源切换对话框
             if (showImgSourceDialog) {
                 val chapterDomains = com.zycomic.app.data.repository.ReaderRepository.currentImgDomains
-                val allDomains = com.zycomic.app.net.RouteManager.imgDomains
-                val otherDomains = allDomains.filterNot { d -> chapterDomains.any { it.equals(d, true) } }
                 val rm = com.zycomic.app.net.RouteManager
-                // 与运行时改写目标保持一致：手动 pin 的域才是"当前图源"
                 val currentDomain = rm.imgRewriteTarget ?: rm.imgHost
+                val successfulEndpoints = rm.lastImgIpDelays.entries
+                    .filter { (endpoint, delay) ->
+                        delay < Long.MAX_VALUE && rm.lastImgIpVerdicts[endpoint] == com.zycomic.app.net.SpeedTester.ImgVerdict.OK
+                    }
+                    .sortedWith(compareBy({ it.value }, { it.key.domain }, { it.key.ip }))
+                val chapterSorted = successfulEndpoints.filter { entry ->
+                    chapterDomains.any { it.equals(entry.key.domain, true) }
+                }
+                val otherSorted = successfulEndpoints.filterNot { entry ->
+                    chapterDomains.any { it.equals(entry.key.domain, true) }
+                }
+                val currentIp = rm.selectedImgIp
                 var imgTesting by remember { mutableStateOf(false) }
                 val scope = rememberCoroutineScope()
-                fun delayOf(domain: String): String {
-                    val idx = allDomains.indexOfFirst { it.equals(domain, true) }
-                    val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
-                    return when {
-                        d == null -> "--"
-                        d == Long.MAX_VALUE -> "超时"
-                        else -> "${d}ms"
-                    }
-                }
-                @Composable
-                fun delayColor(domain: String): androidx.compose.ui.graphics.Color {
-                    val idx = allDomains.indexOfFirst { it.equals(domain, true) }
-                    val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
-                    return when {
-                        d == null || d == Long.MAX_VALUE -> MaterialTheme.colorScheme.onSurfaceVariant
-                        d < 300 -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                }
-                // 仅用于展示排序：两组各自按测速延迟升序（快→慢），未测(null)/超时(MAX)沉底；
-                // 并列时按域名在全量图源列表中的原始顺序稳定。点击切换仍传域名，不改变切换行为。
-                fun imgRank(domain: String): Long {
-                    val idx = allDomains.indexOfFirst { it.equals(domain, true) }
-                    if (idx < 0) return Long.MAX_VALUE
-                    val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
-                    return if (d == null || d == Long.MAX_VALUE) Long.MAX_VALUE else d
-                }
-                fun imgStableIndex(domain: String): Int =
-                    allDomains.indexOfFirst { it.equals(domain, true) }.let { if (it < 0) Int.MAX_VALUE else it }
-                val chapterSorted = chapterDomains.sortedWith(compareBy({ imgRank(it) }, { imgStableIndex(it) }))
-                val otherSorted = otherDomains.sortedWith(compareBy({ imgRank(it) }, { imgStableIndex(it) }))
                 val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
@@ -575,7 +553,7 @@ class ReaderActivity : BaseActivity() {
                         ) {
                             item {
                                 Text(
-                                    "两组均按测速延迟升序，未测/超时项排在最后",
+                                    "仅显示测速成功且可加载图片的域名/IP，按速度排序",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 4.dp),
@@ -590,26 +568,27 @@ class ReaderActivity : BaseActivity() {
                                 )
                             }
                             if (chapterSorted.isEmpty()) {
-                                item { Text("暂无章节图源信息", style = MaterialTheme.typography.bodySmall) }
+                                item { Text("暂无可用的章节图源 IP", style = MaterialTheme.typography.bodySmall) }
                             } else {
-                                items(chapterSorted) { domain ->
-                                val isSelected = domain.equals(currentDomain, true)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth()
-                                        .clickable {
-                                            showImgSourceDialog = false
-                                            switchImgSource(domain)
-                                        }
-                                        .padding(vertical = 6.dp),
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = if (isSelected) "● $domain" else "○ $domain",
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Text(delayOf(domain), style = MaterialTheme.typography.bodySmall, color = delayColor(domain))
-                                }
+                                items(chapterSorted) { entry ->
+                                    val endpoint = entry.key
+                                    val isSelected = endpoint.domain.equals(currentDomain, true) && endpoint.ip == currentIp
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .clickable {
+                                                showImgSourceDialog = false
+                                                switchImgSource(endpoint.domain, endpoint.ip)
+                                            }
+                                            .padding(vertical = 6.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = if (isSelected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Text("${entry.value}ms", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
                             }
                             item {
@@ -620,23 +599,27 @@ class ReaderActivity : BaseActivity() {
                                     modifier = Modifier.padding(top = 8.dp),
                                 )
                             }
-                            items(otherSorted) { domain ->
-                                val isSelected = domain.equals(currentDomain, true)
+                            if (otherSorted.isEmpty()) {
+                                item { Text("暂无可用的其他图源 IP", style = MaterialTheme.typography.bodySmall) }
+                            }
+                            items(otherSorted) { entry ->
+                                val endpoint = entry.key
+                                val isSelected = endpoint.domain.equals(currentDomain, true) && endpoint.ip == currentIp
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clickable {
                                             showImgSourceDialog = false
-                                            switchImgSource(domain)
+                                            switchImgSource(endpoint.domain, endpoint.ip)
                                         }
                                         .padding(vertical = 6.dp),
                                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        text = if (isSelected) "● $domain" else "○ $domain",
+                                        text = if (isSelected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
                                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    Text(delayOf(domain), style = MaterialTheme.typography.bodySmall, color = delayColor(domain))
+                                    Text("${entry.value}ms", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
@@ -649,13 +632,13 @@ class ReaderActivity : BaseActivity() {
                                     scope.launch(Dispatchers.IO) {
                                         try {
                                             val rm = com.zycomic.app.net.RouteManager
-                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgHosts()
-                                            rm.setLastDelays(rm.lastLineDelays, delays)
-                                            if (rm.useFastestImgForAll) {
-                                                val fastest = delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-                                                if (fastest != null && fastest != rm.imgIndex) {
-                                                    // 自动选最快：只更新 imgIndex，不 pin
-                                                    rm.setImgHost(fastest)
+                                            val previous = rm.fastestImgEndpoint
+                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgEndpoints()
+                                            rm.setEndpointDelays(rm.lastLineIpDelays, delays, com.zycomic.app.net.SpeedTester.lastImgIpVerdicts)
+                                            val fastest = rm.fastestImgEndpoint
+                                            if (rm.useFastestImgForAll && rm.pinnedImgDomain.isNullOrBlank() && fastest != null) {
+                                                rm.applyFastestImgEndpoint(fastest)
+                                                if (fastest != previous) {
                                                     // 图源变了只驱逐图片侧空闲连接；不动 API 侧、不 cancelAll 在途图片
                                                     com.zycomic.app.net.NetworkModule.rebindImageRoute("测速后切换最快图源")
                                                     com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
@@ -726,13 +709,13 @@ class ReaderActivity : BaseActivity() {
      * 重建网络里的 evictAll/cancelAll 会真正关 socket，属网络操作，绝不能跑在主线程，
      * 否则抛 NetworkOnMainThreadException（这里原先被外层 try/catch 吃掉，表现为"切了没反应/切换失败"）。
      */
-    private fun switchImgSource(domain: String) {
+    private fun switchImgSource(domain: String, ip: String) {
         val rm = com.zycomic.app.net.RouteManager
         try {
             if (rm.imgDomains.none { it.equals(domain, true) }) rm.addChapterImgDomain(domain)
             val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }
             // 阅读器里的手动选择 = pin（最高优先级），否则会被派生最快域静默覆盖
-            rm.pinImgHost(idx)
+            rm.pinImgHost(idx, ip)
         } catch (e: Exception) {
             android.util.Log.e("ReaderActivity", "切换图源失败", e)
             Toast.makeText(this, "切换图源失败", Toast.LENGTH_SHORT).show()

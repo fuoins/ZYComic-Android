@@ -305,6 +305,9 @@ object RouteManager {
         private set
     @Volatile var imgIndex: Int = 0
         private set
+    @Volatile var selectedLineIp: String? = null
+        private set
+    @Volatile private var selectedLineDomain: String? = null
 
     // ---- 测速结果持久化（切换页面后不丢失）----
     /** 最近一次线路测速结果：index -> 毫秒，失败为 Long.MAX_VALUE */
@@ -317,10 +320,42 @@ object RouteManager {
     var lastImgDelays: Map<Int, Long> = emptyMap()
         private set
 
+    @Volatile
+    var lastLineIpDelays: Map<DomainIp, Long> = emptyMap()
+        private set
+
+    @Volatile
+    var lastImgIpDelays: Map<DomainIp, Long> = emptyMap()
+        private set
+
+    @Volatile
+    var lastImgIpVerdicts: Map<DomainIp, SpeedTester.ImgVerdict> = emptyMap()
+        private set
+
     /** 写入最近一次测速结果（SettingsViewModel 测速完成后调用）。 */
     fun setLastDelays(line: Map<Int, Long>, img: Map<Int, Long>) {
         lastLineDelays = line
         lastImgDelays = img
+    }
+
+    /** Write per-IP measurements and maintain the legacy per-domain summaries. */
+    fun setEndpointDelays(
+        line: Map<DomainIp, Long>,
+        img: Map<DomainIp, Long>,
+        imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
+    ) {
+        lastLineIpDelays = line.toMap()
+        lastImgIpDelays = img.toMap()
+        lastImgIpVerdicts = imgVerdicts.toMap()
+        lastLineDelays = lineHosts.mapIndexedNotNull { index, url ->
+            val host = hostFromLine(url)
+            val values = line.filterKeys { it.domain.equals(host, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
+        }.toMap()
+        lastImgDelays = imgDomains.mapIndexedNotNull { index, domain ->
+            val values = img.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
+        }.toMap()
     }
 
     fun isSpeedTestToday(): Boolean = try {
@@ -349,7 +384,13 @@ object RouteManager {
 
     /** 当前线路 host（不含 scheme） */
     val lineHost: String
-        get() = baseUrl.removePrefix("https://").removePrefix("http://").substringBefore('/')
+        get() = hostFromLine(baseUrl)
+
+    private fun hostFromLine(url: String): String =
+        url.trim().removePrefix("https://").removePrefix("http://").substringBefore('/').substringBefore(':')
+
+    private fun lineIndexForDomain(domain: String): Int =
+        lineHosts.indexOfFirst { hostFromLine(it).equals(domain, ignoreCase = true) }
 
     // ---- 预设 IP 映射 ----
     /** 6 个线路域名统一 IP 组 */
@@ -392,9 +433,22 @@ object RouteManager {
     var sniDomains: Set<String> = emptySet()
         private set
 
-    /** 切换线路 */
+    /** 切换线路；域名级选择清除旧 IP pin，避免把另一线路的地址误用于新 host。 */
     fun setLine(index: Int) {
         lineIndex = index.coerceIn(0, lineHosts.lastIndex)
+        selectedLineIp = null
+        selectedLineDomain = null
+        persistLineEndpoint(null, null)
+    }
+
+    /** 精确选择线路域名/IP组合，并记住该组合。 */
+    fun setLineEndpoint(domain: String, ip: String) {
+        val index = lineIndexForDomain(domain)
+        if (index < 0) return
+        lineIndex = index
+        selectedLineIp = ip
+        selectedLineDomain = hostFromLine(lineHosts[index])
+        persistLineEndpoint(selectedLineDomain, ip)
     }
 
     /** 切换图源 */
@@ -433,15 +487,24 @@ object RouteManager {
     var lastFastestLineIndex: Int = 0
         private set
 
-    /** 从 SP 恢复自动选线偏好，开启时用上次最快线路作为当前线路。 */
+    /** 从 SP 恢复选线偏好及最近选择的线路/IP。 */
     fun loadAutoSelectPrefs() {
         try {
             val ctx = DevConfig.appContext ?: return
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
             autoSelectEnabled = prefs.getBoolean("auto_select", true)
             lastFastestLineIndex = prefs.getInt("last_fastest_line", 0)
-            if (autoSelectEnabled && lastFastestLineIndex in 0..lineHosts.lastIndex) {
+            val savedDomain = prefs.getString("selected_line_domain", null)
+            val savedIp = prefs.getString("selected_line_ip", null)
+            val savedIndex = savedDomain?.let(::lineIndexForDomain)?.takeIf { it >= 0 }
+            if (savedIndex != null) {
+                lineIndex = savedIndex
+                selectedLineIp = savedIp
+                selectedLineDomain = hostFromLine(lineHosts[savedIndex])
+            } else if (autoSelectEnabled && lastFastestLineIndex in 0..lineHosts.lastIndex) {
                 lineIndex = lastFastestLineIndex
+                selectedLineIp = null
+                selectedLineDomain = null
             }
         } catch (_: Exception) {}
     }
@@ -464,6 +527,22 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
+    private fun persistLineEndpoint(domain: String?, ip: String?) {
+        try {
+            val ctx = DevConfig.appContext ?: return
+            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            if (domain == null) editor.remove("selected_line_domain") else editor.putString("selected_line_domain", domain)
+            if (ip == null) editor.remove("selected_line_ip") else editor.putString("selected_line_ip", ip)
+            editor.apply()
+        } catch (_: Exception) {}
+    }
+
+    /** Current selected API IP, only for the active API hostname. */
+    fun lineIpFor(domain: String): String? =
+        selectedLineIp?.takeIf {
+            lineHost.equals(domain, ignoreCase = true) && selectedLineDomain.equals(domain, ignoreCase = true)
+        }
+
     // ---- 封面/章节统一用测速最快图源 ----
     var useFastestImgForAll: Boolean by androidx.compose.runtime.mutableStateOf(true)
         private set
@@ -485,11 +564,25 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    /** 从 lastImgDelays 取测速最快的图源域名，无数据返回 null。 */
+    /** Fastest reachable image domain/IP combination from the most recent run. */
+    val fastestImgEndpoint: DomainIp?
+        get() = lastImgIpDelays.entries
+            .filter { it.value < Long.MAX_VALUE && lastImgIpVerdicts[it.key] == SpeedTester.ImgVerdict.OK }
+            .minByOrNull { it.value }?.key
+
+    /** 从逐 IP 测速结果派生最快图源域名，无数据返回 null。 */
     val fastestImgDomain: String?
+        get() = fastestImgEndpoint?.domain
+
+    /** 当前生效图源的精确 IP（手动 pin 优先，否则跟随自动最快组合）。 */
+    val selectedImgIp: String?
         get() {
-            val idx = lastImgDelays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key ?: return null
-            return imgDomains.getOrNull(idx)
+            val target = imgRewriteTarget ?: imgHost
+            pinnedImgIp?.takeIf { pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
+            if (useFastestImgForAll) {
+                return fastestImgEndpoint?.takeIf { it.domain.equals(target, ignoreCase = true) }?.ip
+            }
+            return null
         }
 
     // ---- 手动 pin 图源（持久化，直到用户点「恢复自动」）----
@@ -505,36 +598,63 @@ object RouteManager {
         private set
 
     /** 手动选定图源：同时更新 imgIndex（UI 显示）与 pin（实际生效）。 */
-    fun pinImgHost(index: Int) {
+    fun pinImgHost(index: Int, ip: String? = null) {
         val safe = index.coerceIn(0, imgDomains.lastIndex)
         val domain = imgDomains.getOrNull(safe) ?: return
         setImgHost(safe)
         pinnedImgDomain = domain
-        persistPinnedImgDomain(domain)
+        pinnedImgIp = ip
+        persistPinnedImgDomain(domain, ip)
+    }
+
+    /** Apply the fastest measured combination unless the user has pinned a source. */
+    fun applyFastestImgEndpoint(endpoint: DomainIp?): Boolean {
+        endpoint ?: return false
+        val index = imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
+        if (index < 0) return false
+        val changed = imgIndex != index || selectedImgIp != endpoint.ip
+        if (pinnedImgDomain.isNullOrBlank()) setImgHost(index)
+        return changed
     }
 
     /** 恢复自动：清除手动 pin，重新由测速结果决定。 */
     fun clearPinnedImgDomain() {
         pinnedImgDomain = null
-        persistPinnedImgDomain(null)
+        pinnedImgIp = null
+        persistPinnedImgDomain(null, null)
+        fastestImgEndpoint?.let(::applyFastestImgEndpoint)
     }
 
     /** 启动时恢复 pin；域名已被移出当前图源列表时由策略自动忽略。 */
     fun loadPinnedImgDomain() {
         try {
             val ctx = DevConfig.appContext ?: return
-            pinnedImgDomain = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
+            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            pinnedImgDomain = prefs.getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
+            pinnedImgIp = prefs.getString("pinned_img_ip", null)?.takeIf { it.isNotBlank() }
         } catch (_: Exception) {}
     }
 
-    private fun persistPinnedImgDomain(domain: String?) {
+    @Volatile private var pinnedImgIp: String? = null
+
+    private fun persistPinnedImgDomain(domain: String?, ip: String?) {
         try {
             val ctx = DevConfig.appContext ?: return
             val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
             if (domain == null) editor.remove("pinned_img_domain") else editor.putString("pinned_img_domain", domain)
+            if (ip == null) editor.remove("pinned_img_ip") else editor.putString("pinned_img_ip", ip)
             editor.apply()
         } catch (_: Exception) {}
+    }
+
+    /** Return an exact user/auto-selected address only for the corresponding host. */
+    fun preferredIp(domain: String): String? {
+        lineIpFor(domain)?.let { return it }
+        val target = imgRewriteTarget ?: return null
+        if (!target.equals(domain, ignoreCase = true)) return null
+        pinnedImgIp?.takeIf { pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
+        if (!useFastestImgForAll) return null
+        return fastestImgEndpoint?.takeIf { it.domain.equals(target, ignoreCase = true) }?.ip
     }
 
     /**
@@ -611,6 +731,9 @@ object RouteManager {
     /** 临时切换到下一条线路（不持久化）。 */
     fun selectNextLine() {
         lineIndex = (lineIndex + 1) % lineHosts.size
+        selectedLineIp = null
+        selectedLineDomain = null
+        persistLineEndpoint(null, null)
     }
 
     // ---- 故障自动切换 ----
@@ -664,6 +787,14 @@ object RouteManager {
         lineHosts = newLines
         val keptLine = curLine?.let { c -> newLines.indexOfFirst { sameLine(it, c) } }?.takeIf { it >= 0 }
         lineIndex = keptLine ?: lineIndex.coerceIn(0, newLines.lastIndex)
+        if (keptLine == null) {
+            selectedLineIp = null
+            selectedLineDomain = null
+            persistLineEndpoint(null, null)
+        } else if (selectedLineIp != null) {
+            selectedLineDomain = hostFromLine(newLines[keptLine])
+            persistLineEndpoint(selectedLineDomain, selectedLineIp)
+        }
         setBaselineImgDomains(sourceDomains)
     }
 
@@ -681,8 +812,10 @@ object RouteManager {
      * @return IP 列表，空表示无预设（走系统 DNS）。
      */
     fun resolveIp(host: String): List<String> {
-        customRule[host]?.let { if (it.isNotEmpty()) return it }
-        return STATIC_IP[host].orEmpty()
+        customRule.entries.firstOrNull { it.key.equals(host, ignoreCase = true) }
+            ?.value?.takeIf { it.isNotEmpty() }?.let { return it }
+        return STATIC_IP.entries.firstOrNull { it.key.equals(host, ignoreCase = true) }
+            ?.value.orEmpty()
     }
 
     // ==================== 默认配置 ====================

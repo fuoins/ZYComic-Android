@@ -40,7 +40,9 @@ fun SpeedTestScreen(
     val imgDelays by vm.imgDelays.collectAsState()
     val imgVerdicts by vm.imgVerdicts.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
+    val currentLineIp by vm.currentLineIp.collectAsState()
     val currentImgIdx by vm.currentImgIndex.collectAsState()
+    val currentImgIp by vm.currentImgIp.collectAsState()
     val pinnedImg by vm.imgPinned.collectAsState()
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg by vm.useFastestImgForAll.collectAsState()
@@ -48,24 +50,12 @@ fun SpeedTestScreen(
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
 
-    // 仅用于展示：线路、图源两组各自按测速延迟升序（快→慢）。
-    // 未测(null)/超时(MAX_VALUE)统一沉底，并列时按原始 index 稳定排序；
-    // 排序结果的元素仍是“原始 index”，点击/选中/Toast 等交互全部沿用原 index，不受排序影响。
+    // 每个域名/IP独立排序；不可用端点沉底并保留在测速日志中。
     val lineOrder = remember(lineDelays) {
-        RouteManager.lineHosts.indices.sortedWith(
-            compareBy(
-                { idx -> lineDelays[idx]?.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE },
-                { idx -> idx },
-            ),
-        )
+        lineDelays.entries.sortedWith(compareBy({ it.value.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
     }
-    val imgOrder = remember(imgDelays) {
-        RouteManager.imgDomains.indices.sortedWith(
-            compareBy(
-                { idx -> imgDelays[idx]?.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE },
-                { idx -> idx },
-            ),
-        )
+    val imgOrder = remember(imgDelays, imgVerdicts) {
+        imgDelays.entries.sortedWith(compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
     }
 
     Scaffold(
@@ -173,7 +163,7 @@ fun SpeedTestScreen(
                 }
                 item {
                     Text(
-                        "按测速延迟升序（快→慢），未测/连不上/无图项排在最后；连不上=网络不通，无图=能连但取不到图片",
+                        "按每个域名/IP测速延迟升序；失败端点留在日志末尾，阅读器只显示成功项",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 16.dp, top = 8.dp),
@@ -182,27 +172,33 @@ fun SpeedTestScreen(
                 item {
                     Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(lineOrder) { index ->
+                items(lineOrder.withIndex().toList()) { (position, entry) ->
+                    val endpoint = entry.key
+                    val index = RouteManager.lineHosts.indexOfFirst {
+                        runCatching { java.net.URI(it).host.equals(endpoint.domain, ignoreCase = true) }.getOrDefault(false)
+                    }
                     SpeedRow(
-                        index = index,
-                        host = RouteManager.lineHosts[index].removePrefix("https://").removePrefix("http://").substringBefore('/'),
-                        delay = lineDelays[index],
-                        isSelected = index == currentLineIdx,
-                        onClick = { vm.selectLine(index) },
+                        index = position,
+                        host = "${endpoint.domain} · ${endpoint.ip}",
+                        delay = entry.value,
+                        isSelected = index == currentLineIdx && endpoint.ip == currentLineIp,
+                        onClick = { if (index >= 0) vm.selectLine(index, endpoint.ip) },
                     )
                 }
 
                 item {
                     Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(imgOrder) { index ->
+                items(imgOrder.withIndex().toList()) { (position, entry) ->
+                    val endpoint = entry.key
+                    val index = RouteManager.imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
                     SpeedRow(
-                        index = index,
-                        host = RouteManager.imgDomains[index],
-                        delay = imgDelays[index],
-                        verdict = imgVerdicts[index],
-                        isSelected = index == currentImgIdx,
-                        onClick = { vm.selectImgHost(index) },
+                        index = position,
+                        host = "${endpoint.domain} · ${endpoint.ip}",
+                        delay = entry.value,
+                        verdict = imgVerdicts[endpoint],
+                        isSelected = index == currentImgIdx && endpoint.ip == currentImgIp,
+                        onClick = { if (index >= 0) vm.selectImgHost(index, endpoint.ip) },
                     )
                 }
 

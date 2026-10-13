@@ -133,10 +133,39 @@ object NetworkModule {
             sslSocketFactory(SniRemovingSocketFactory(baseSslContext.socketFactory), trustAllManager)
         } else {
             // 跟随系统 VPN：系统 DNS + 保留 SNI（trust-all 已在 enableTrustAll 中设置默认 SSL）
-            dns(Dns.SYSTEM)
+            dns(SystemRouteDns)
         }
         return this
     }
+
+    /** Enumerate the exact IP candidates used for per-address probing. */
+    fun resolveProbeIps(hostname: String): List<String> {
+        val configured = RouteManager.resolveIp(hostname)
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+        if (configured.isNotEmpty()) return configured
+        return runCatching {
+            Dns.SYSTEM.lookup(hostname)
+                .map { it.hostAddress.substringBefore('%') }
+                .distinct()
+        }.getOrDefault(emptyList())
+    }
+
+    /** Create a one-address child client while retaining all transport and interceptor policy. */
+    fun newProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient =
+        client.newBuilder()
+            .dns(object : Dns {
+                override fun lookup(requestedHost: String): List<InetAddress> =
+                    if (requestedHost.equals(hostname, ignoreCase = true)) {
+                        listOf(InetAddress.getByName(ip))
+                    } else {
+                        client.dns.lookup(requestedHost)
+                    }
+            })
+            // Never let an existing pooled connection make a probe appear to have used another IP.
+            .connectionPool(ConnectionPool(1, 1, TimeUnit.SECONDS))
+            .build()
 
     private fun OkHttpClient.Builder.applyNetworkConfig(withFailover: Boolean = false): OkHttpClient.Builder {
         applyTransportStrategy()
@@ -419,10 +448,21 @@ object NetworkModule {
      */
     private object RuleDns : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            val ips = DevConfig.getRule()[hostname]
+            RouteManager.preferredIp(hostname)?.let { return listOf(InetAddress.getByName(it)) }
+            val ips = DevConfig.getRule().entries
+                .firstOrNull { it.key.equals(hostname, ignoreCase = true) }
+                ?.value
             if (!ips.isNullOrEmpty()) {
                 return ips.map { InetAddress.getByName(it) }
             }
+            return Dns.SYSTEM.lookup(hostname)
+        }
+    }
+
+    /** Follow-system-DNS mode still honors an explicit selected endpoint. */
+    private object SystemRouteDns : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            RouteManager.preferredIp(hostname)?.let { return listOf(InetAddress.getByName(it)) }
             return Dns.SYSTEM.lookup(hostname)
         }
     }

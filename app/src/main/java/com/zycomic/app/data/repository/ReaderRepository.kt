@@ -148,11 +148,15 @@ object ReaderRepository {
                 // 5. 后台测速新图源，更快则切过去（fire-and-forget）
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        val newDelay = SpeedTester.testSingleImgHost(domain)
-                        val curDelay = SpeedTester.testSingleImgHost(RouteManager.imgHost)
-                        if (newDelay < curDelay) {
-                            val idx = RouteManager.imgDomains.indexOf(domain)
-                            if (idx >= 0 && RouteManager.imgIndex != idx) RouteManager.setImgHost(idx)
+                        val previousFastest = RouteManager.fastestImgEndpoint
+                        val previousIndex = RouteManager.imgIndex
+                        SpeedTester.testSingleImgHost(domain)
+                        val fastest = RouteManager.fastestImgEndpoint
+                        if (RouteManager.useFastestImgForAll && RouteManager.pinnedImgDomain.isNullOrBlank() && fastest != null) {
+                            RouteManager.applyFastestImgEndpoint(fastest)
+                            if (fastest != previousFastest || RouteManager.imgIndex != previousIndex) {
+                                NetworkModule.rebindImageRoute("新增章节图源逐 IP 测速")
+                            }
                         }
                     } catch (_: Exception) {}
                 }

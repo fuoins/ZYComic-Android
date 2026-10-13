@@ -5,6 +5,7 @@ import com.zycomic.app.data.repository.BookBlockRepository
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.DevConfig
+import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
@@ -42,9 +43,11 @@ class SettingsViewModel {
 
     // 测速
     val currentLineIndex = MutableStateFlow(RouteManager.lineIndex)
+    val currentLineIp = MutableStateFlow(RouteManager.selectedLineIp)
     /** 用户手动固定的图源域名；null = 自动（由测速结果决定）。 */
     val imgPinned = MutableStateFlow(RouteManager.pinnedImgDomain)
     val currentImgIndex = MutableStateFlow(RouteManager.imgIndex)
+    val currentImgIp = MutableStateFlow(RouteManager.selectedImgIp)
     val autoSelectEnabled = MutableStateFlow(RouteManager.autoSelectEnabled)
     val useFastestImgForAll = MutableStateFlow(RouteManager.useFastestImgForAll)
     /** 自动跟随系统 VPN 开关（默认开启；关闭=强制直连，用于抓包调试） */
@@ -53,15 +56,15 @@ class SettingsViewModel {
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
     val autoSelecting = MutableStateFlow(false)
-    /** 线路延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
-    val lineDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastLineDelays)
-    /** 图源延迟：index -> 毫秒，失败为 Long.MAX_VALUE（初始化时从 RouteManager 恢复上次测速结果） */
-    val imgDelays = MutableStateFlow<Map<Int, Long>>(RouteManager.lastImgDelays)
+    /** 线路延迟：域名/IP -> 毫秒。 */
+    val lineDelays = MutableStateFlow<Map<DomainIp, Long>>(RouteManager.lastLineIpDelays)
+    /** 图源延迟：域名/IP -> 毫秒。 */
+    val imgDelays = MutableStateFlow<Map<DomainIp, Long>>(RouteManager.lastImgIpDelays)
     /**
-     * 本轮图源探活逐域结论（index -> 连不上/无图/正常）。
+     * 本轮图源探活逐 IP 结论（域名/IP -> 连不上/无图/正常）。
      * 没有它的时候"超时"这一种显示会同时掩盖三件不同的事：连不上、连上了但拿不到图、这一轮压根没探。
      */
-    val imgVerdicts = MutableStateFlow<Map<Int, SpeedTester.ImgVerdict>>(emptyMap())
+    val imgVerdicts = MutableStateFlow<Map<DomainIp, SpeedTester.ImgVerdict>>(RouteManager.lastImgIpVerdicts)
 
     /** 远程 ruledns 手动检查进行中 */
     val remoteChecking = MutableStateFlow(false)
@@ -235,13 +238,16 @@ class SettingsViewModel {
     }
 
     /** 切换线路：重建网络后验证登录态，失效则自动登出。手动选线会关闭自动模式。 */
-    fun selectLine(index: Int) {
+    fun selectLine(index: Int, ip: String? = null) {
         if (autoSelectEnabled.value) {
             RouteManager.setAutoSelectEnabled(false)
             autoSelectEnabled.value = false
         }
-        RouteManager.setLine(index)
+        val url = RouteManager.lineHosts.getOrNull(index)
+        val domain = url?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+        if (ip != null && domain != null) RouteManager.setLineEndpoint(domain, ip) else RouteManager.setLine(index)
         currentLineIndex.value = index
+        currentLineIp.value = RouteManager.selectedLineIp
         toast.value = "已切换到线路 ${index + 1}"
         // rebuild() 内部要关 socket（evictAll/cancelAll），属网络操作：必须在 IO，
         // 直接在主线程调会抛 NetworkOnMainThreadException。登录态校验一并放同一个 IO 块，
@@ -279,12 +285,15 @@ class SettingsViewModel {
         scope.launch {
             imgVerdicts.value = emptyMap()
             NetworkModule.onVpnOrNetworkChanged("follow vpn toggled")
-            val (bl, bi) = SpeedTester.runAndApply { l, i ->
+            val (bl, bi) = SpeedTester.runAndApply { l, i, v ->
                 lineDelays.value = l
                 imgDelays.value = i
+                imgVerdicts.value = v
             }
             currentLineIndex.value = RouteManager.lineIndex
+            currentLineIp.value = RouteManager.selectedLineIp
             currentImgIndex.value = RouteManager.imgIndex
+            currentImgIp.value = RouteManager.selectedImgIp
             val summary = publishImgVerdicts()
             if (SpeedTester.lastRunSkipped) toast.value = "已切换网络模式，但已有测速在跑，本轮未重测"
             else if (bl < 0) toast.value = "已切换网络模式，但测速未完成，沿用当前线路/图源；$summary"
@@ -298,9 +307,10 @@ class SettingsViewModel {
      * 修既有空操作 bug：以前这里只改 imgIndex，而拦截器读的是派生最快域，
      * 开关开着时手动选择完全不生效。
      */
-    fun selectImgHost(index: Int) {
-        RouteManager.pinImgHost(index)
+    fun selectImgHost(index: Int, ip: String? = null) {
+        RouteManager.pinImgHost(index, ip)
         currentImgIndex.value = index
+        currentImgIp.value = RouteManager.selectedImgIp
         imgPinned.value = RouteManager.pinnedImgDomain
         // 清除内存 + 磁盘缓存，强制用新图源重新加载图片
         DevConfig.clearImageCaches()
@@ -316,6 +326,8 @@ class SettingsViewModel {
     fun resetImgHostToAuto() {
         RouteManager.clearPinnedImgDomain()
         imgPinned.value = null
+        currentImgIndex.value = RouteManager.imgIndex
+        currentImgIp.value = RouteManager.selectedImgIp
         toast.value = "已恢复自动选择图源"
         scope.launch {
             withContext(Dispatchers.IO) {
@@ -337,12 +349,15 @@ class SettingsViewModel {
             imgDelays.value = emptyMap()
             imgVerdicts.value = emptyMap()
             try {
-                val (bestLine, bestImg) = SpeedTester.runAndApply { l, i ->
+                val (bestLine, bestImg) = SpeedTester.runAndApply { l, i, v ->
                     lineDelays.value = l
                     imgDelays.value = i
+                    imgVerdicts.value = v
                 }
                 currentLineIndex.value = RouteManager.lineIndex
+                currentLineIp.value = RouteManager.selectedLineIp
                 currentImgIndex.value = RouteManager.imgIndex
+                currentImgIp.value = RouteManager.selectedImgIp
                 val summary = publishImgVerdicts()
                 toast.value = when {
                     // 整轮被防重入丢弃：一个域都没探，绝不能显示成"超时"
@@ -355,8 +370,6 @@ class SettingsViewModel {
                 android.util.Log.e("SpeedTest", "runSpeedTest failed", e)
                 toast.value = "测速异常：${e.message ?: "请稍后重试"}"
             } finally {
-                // 缺失 key 统一补"超时"，杜绝"--"
-                fillMissingAsTimeout()
                 testing.value = false
             }
         }
@@ -368,7 +381,7 @@ class SettingsViewModel {
      * 后者是链路通但该域没有这个图片对象/被防盗链（是探活目标或 Referer 的问题）。
      */
     private fun publishImgVerdicts(): String {
-        val v = SpeedTester.lastImgVerdicts
+        val v = SpeedTester.lastImgIpVerdicts
         imgVerdicts.value = v
         if (v.isEmpty()) return "本轮未采集到图源结论"
         val ok = v.count { it.value == SpeedTester.ImgVerdict.OK }
@@ -387,40 +400,21 @@ class SettingsViewModel {
         imgDelays.value = emptyMap()
         imgVerdicts.value = emptyMap()
         return try {
-            val r = SpeedTester.runAndApply { l, i ->
+            val r = SpeedTester.runAndApply { l, i, v ->
                 lineDelays.value = l
                 imgDelays.value = i
+                imgVerdicts.value = v
             }
             currentLineIndex.value = RouteManager.lineIndex
+            currentLineIp.value = RouteManager.selectedLineIp
             currentImgIndex.value = RouteManager.imgIndex
+            currentImgIp.value = RouteManager.selectedImgIp
             r
         } finally {
-            // 被 8s 整体超时取消时，NonCancellable 中保留已增量发布的结果，缺失 key 补"超时"
             withContext(NonCancellable) {
                 publishImgVerdicts()
-                fillMissingAsTimeout()
             }
             autoSelecting.value = false
-        }
-    }
-
-    /**
-     * F3：对当前线路/图源列表中缺失延迟 key 的 index 统一补 Long.MAX_VALUE（显示"超时"），杜绝"--"。
-     * StateFlow Map 用不可变 copy + 原子 update，保证线程安全。
-     */
-    fun fillMissingAsTimeout() {
-        lineDelays.update { cur ->
-            val m = cur.toMutableMap()
-            RouteManager.lineHosts.indices.forEach { if (it !in m) m[it] = Long.MAX_VALUE }
-            m
-        }
-        // 本轮有逐域结论时**不再**补 MAX：缺席的域就是"没探到"，把它显示成"超时"
-        // 会让人以为探过了。只有没有结论信息（例如从旧版本持久化的历史延迟）时才沿用补全。
-        if (imgVerdicts.value.isNotEmpty()) return
-        imgDelays.update { cur ->
-            val m = cur.toMutableMap()
-            RouteManager.imgDomains.indices.forEach { if (it !in m) m[it] = Long.MAX_VALUE }
-            m
         }
     }
 

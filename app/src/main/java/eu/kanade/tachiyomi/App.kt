@@ -161,18 +161,23 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 val lines = com.zycomic.app.net.TrelloConfigFetcher.fetchLines()
                 val added = com.zycomic.app.net.RouteManager.appendTrelloLinesOnly(lines)
                 if (added.isNotEmpty()) {
-                    val delays = com.zycomic.app.net.RouteManager.lastLineDelays.toMutableMap()
+                    val delays = com.zycomic.app.net.RouteManager.lastLineIpDelays.toMutableMap()
                     added.forEach { url ->
-                        val idx = com.zycomic.app.net.RouteManager.lineHosts.indexOf(url)
-                        if (idx >= 0) delays[idx] = com.zycomic.app.net.SpeedTester.testSingleLine(url)
+                        delays.putAll(com.zycomic.app.net.SpeedTester.testLineEndpoints(url))
                     }
-                    com.zycomic.app.net.RouteManager.setLastDelays(delays, com.zycomic.app.net.RouteManager.lastImgDelays)
-                    val fastest = com.zycomic.app.net.SpeedTester.selectFastestLine(delays)
-                    if (com.zycomic.app.net.RouteManager.autoSelectEnabled && fastest != com.zycomic.app.net.RouteManager.lineIndex) {
-                        com.zycomic.app.net.RouteManager.setLine(fastest)
+                    val routeManager = com.zycomic.app.net.RouteManager
+                    routeManager.setEndpointDelays(delays, routeManager.lastImgIpDelays, routeManager.lastImgIpVerdicts)
+                    val fastest = com.zycomic.app.net.SpeedTester.fastestLineEndpoint(delays)
+                    val fastestIndex = fastest?.let { endpoint ->
+                        routeManager.lineHosts.indexOfFirst { runCatching { java.net.URI(it).host.equals(endpoint.domain, true) }.getOrDefault(false) }
+                    }?.takeIf { it >= 0 }
+                    if (routeManager.autoSelectEnabled && fastest != null && fastestIndex != null &&
+                        (fastestIndex != routeManager.lineIndex || fastest.ip != routeManager.selectedLineIp)
+                    ) {
+                        routeManager.setLineEndpoint(fastest.domain, fastest.ip)
                         com.zycomic.app.net.NetworkModule.rebuildApi("Trello 增量线路后选最快")
                     }
-                    com.zycomic.app.net.RouteManager.saveLastFastestLine(fastest)
+                    if (fastestIndex != null) routeManager.saveLastFastestLine(fastestIndex)
                 }
             } catch (_: Exception) {}
         }
