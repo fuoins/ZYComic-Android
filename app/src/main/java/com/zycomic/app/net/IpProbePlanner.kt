@@ -110,6 +110,9 @@ object IpProbePlanner {
     fun orderIps(ips: List<String>, scores: Map<String, Long>): List<String> =
         ips.sortedBy { scores[it] ?: UNAVAILABLE }
 
+    /** 是否为合法点分 IPv4（供 DoH 结果过滤、CF 段判定共用同一口径）。 */
+    fun isIpv4(ip: String): Boolean = ipv4ToLong(ip) != null
+
     private fun ipv4ToLong(ip: String): Long? {
         val parts = ip.trim().split('.')
         if (parts.size != 4) return null

@@ -9,6 +9,7 @@ import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
+import com.zycomic.app.net.ImgVerdict
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -61,7 +62,7 @@ class SettingsViewModel {
      * 本轮图源探活逐域结论（index -> 连不上/无图/正常）。
      * 没有它的时候"超时"这一种显示会同时掩盖三件不同的事：连不上、连上了但拿不到图、这一轮压根没探。
      */
-    val imgVerdicts = MutableStateFlow<Map<Int, SpeedTester.ImgVerdict>>(emptyMap())
+    val imgVerdicts = MutableStateFlow<Map<Int, ImgVerdict>>(emptyMap())
 
     /** 远程 ruledns 手动检查进行中 */
     val remoteChecking = MutableStateFlow(false)
@@ -373,9 +374,9 @@ class SettingsViewModel {
         val v = SpeedTester.lastImgVerdicts
         imgVerdicts.value = v
         if (v.isEmpty()) return "本轮未采集到图源结论"
-        val ok = v.count { it.value == SpeedTester.ImgVerdict.OK }
-        val un = v.count { it.value == SpeedTester.ImgVerdict.UNREACHABLE }
-        val no = v.count { it.value == SpeedTester.ImgVerdict.NO_IMAGE }
+        val ok = v.count { it.value == ImgVerdict.OK }
+        val un = v.count { it.value == ImgVerdict.UNREACHABLE }
+        val no = v.count { it.value == ImgVerdict.NO_IMAGE }
         return "图源 可用$ok/连不上$un/无图$no"
     }
 
@@ -397,7 +398,8 @@ class SettingsViewModel {
             currentImgIndex.value = RouteManager.imgIndex
             r
         } finally {
-            // 被 8s 整体超时取消时，NonCancellable 中保留已增量发布的结果，缺失 key 补"超时"
+            // 本轮被取消时（1.0.4 起已没有"整体 8s 超时"，只剩调用方主动取消），
+            // 在 NonCancellable 里保留已增量发布的结果，缺失 key 再补"超时"
             withContext(NonCancellable) {
                 publishImgVerdicts()
                 fillMissingAsTimeout()

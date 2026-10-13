@@ -14,14 +14,16 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * 线路与图源管理。
  *
- * - 7 条控制面线路（接口域名），可切换。
- * - 6 个数据面图源（图片 CDN 域名），可切换。
+ * - 控制面线路（接口域名）与数据面图源（图片 CDN 域名），都可切换。
+ *   下面两个内置列表只是**基线**：实际生效的列表来自远程 ruledns 下发 + Trello 补充 +
+ *   运行时章节学到，线上 v5 已经是 12 条线路 / 103 个图源（1.0.x 注释里写的 7 / 6 早就过时），
+ *   所以任何统计与判据都必须用 [lineHosts] / [imgDomains] 现取，不要引用内置列表的字面数量。
  * - 预设 IP 映射表，供 RuleDns 做 IP 直连。
  * - SNI 绕过域名列表，供 SniRemovingSocketFactory 移除 SNI。
  */
 object RouteManager {
 
-    // ---- 8 条线路 ----
+    // ---- 内置线路基线（实际生效看 lineHosts）----
     val LINE_HOSTS: List<String> = listOf(
         "https://mseeowpm.online",
         "https://mseeowpm.cc",

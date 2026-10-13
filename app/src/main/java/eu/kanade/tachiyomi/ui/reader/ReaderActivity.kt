@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader
 
+import com.zycomic.app.net.ImgVerdict
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.assist.AssistContent
@@ -534,10 +535,16 @@ class ReaderActivity : BaseActivity() {
                 fun delayOf(domain: String): String {
                     val idx = allDomains.indexOfFirst { it.equals(domain, true) }
                     val d = com.zycomic.app.net.RouteManager.lastImgDelays[idx]
-                    return when {
-                        d == null -> "--"
-                        d == Long.MAX_VALUE -> "超时"
-                        else -> "${d}ms"
+                    // 三态优先：连不上（网络问题，换 VPN/网络才有解）与无图（能连但取不到这张图，
+                    // 该改 ruledns）完全不同，一律显示"超时"会把两者混掉。
+                    return when (com.zycomic.app.net.SpeedTester.lastImgVerdicts[idx]) {
+                        ImgVerdict.UNREACHABLE -> "连不上"
+                        ImgVerdict.NO_IMAGE -> "无图"
+                        else -> when {
+                            d == null -> "--"
+                            d == Long.MAX_VALUE -> "超时"
+                            else -> "${d}ms"
+                        }
                     }
                 }
                 @Composable
@@ -565,7 +572,7 @@ class ReaderActivity : BaseActivity() {
                 val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
-                    title = { Text("切换图源") },
+                    title = { Text("切换图源（延迟为按机器测速的派生值，「重新测活」看真实可用性）") },
                     text = {
                         ScrollbarLazyColumn(
                             modifier = Modifier
@@ -648,37 +655,21 @@ class ReaderActivity : BaseActivity() {
                                     imgTesting = true
                                     scope.launch(Dispatchers.IO) {
                                         try {
-                                            val rm = com.zycomic.app.net.RouteManager
-                                            // 逐域测活同样是"新一轮探测"：先清空上一轮的失败标记
-                                            rm.clearImgDomainCooldown()
-                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgHosts()
-                                            rm.setLastDelays(rm.lastLineDelays, delays)
-                                            if (rm.useFastestImgForAll) {
-                                                val fastest = delays.filterValues { it < Long.MAX_VALUE }.minByOrNull { it.value }?.key
-                                                if (fastest != null && fastest != rm.imgIndex) {
-                                                    // 自动选最快：只更新 imgIndex，不 pin
-                                                    rm.setImgHost(fastest)
-                                                    // 图源变了只驱逐图片侧空闲连接；不动 API 侧、不 cancelAll 在途图片
-                                                    com.zycomic.app.net.NetworkModule.rebindImageRoute("测活后切换最快图源")
-                                                    com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
-                                                    launch(Dispatchers.Main) {
-                                                        showImgSourceDialog = false
-                                                        Toast.makeText(this@ReaderActivity, "已切换到最快图源", Toast.LENGTH_SHORT).show()
-                                                        val intent = intent
-                                                        finish()
-                                                        startActivity(intent)
-                                                    }
-                                                } else {
-                                                    launch(Dispatchers.Main) {
-                                                        imgTesting = false
-                                                        Toast.makeText(this@ReaderActivity, "测速完成，当前已是最快", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                            } else {
-                                                launch(Dispatchers.Main) {
-                                                    imgTesting = false
-                                                    Toast.makeText(this@ReaderActivity, "测速完成", Toast.LENGTH_SHORT).show()
-                                                }
+                                            // 「重新测活」：逐域用"运行时会拨的那个 IP"打一次真实封面路径。
+                                            // 只回答能不能取到图，**不改选域、不重启阅读器**；
+                                            // 结果每域一行写进 logcat（-s SpeedTester:V），照着更新 doh.json。
+                                            com.zycomic.app.net.SpeedTester.revalidateImgHosts()
+                                            val v = com.zycomic.app.net.SpeedTester.lastImgVerdicts.values
+                                            val ok = v.count { it == ImgVerdict.OK }
+                                            val un = v.count { it == ImgVerdict.UNREACHABLE }
+                                            val no = v.count { it == ImgVerdict.NO_IMAGE }
+                                            launch(Dispatchers.Main) {
+                                                imgTesting = false
+                                                Toast.makeText(
+                                                    this@ReaderActivity,
+                                                    "测活完成 可用" + ok + "/连不上" + un + "/无图" + no + "（详见 logcat SpeedTester）",
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
                                             }
                                         } catch (e: Exception) {
                                             launch(Dispatchers.Main) {
@@ -689,7 +680,7 @@ class ReaderActivity : BaseActivity() {
                                     }
                                 },
                                 enabled = !imgTesting,
-                            ) { Text(if (imgTesting) "测速中..." else "重新测速") }
+                            ) { Text(if (imgTesting) "测活中..." else "重新测活") }
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = { showImgSourceDialog = false }) { Text("取消") }
                         }

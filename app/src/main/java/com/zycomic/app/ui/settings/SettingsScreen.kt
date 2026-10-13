@@ -39,6 +39,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
+import com.zycomic.app.net.ImgVerdict
 import com.zycomic.app.ui.components.FilterChip
 
 @Composable
@@ -229,8 +230,8 @@ fun SettingsScreen() {
                             text = " HTTP:${formatDelay(delay, verdict)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = when {
-                                verdict == SpeedTester.ImgVerdict.OK && (delay ?: 0) < 300 -> MaterialTheme.colorScheme.primary
-                                verdict != null && verdict != SpeedTester.ImgVerdict.OK -> MaterialTheme.colorScheme.error
+                                verdict == ImgVerdict.OK && (delay ?: 0) < 300 -> MaterialTheme.colorScheme.primary
+                                verdict != null && verdict != ImgVerdict.OK -> MaterialTheme.colorScheme.error
                                 delay == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                 delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
                                 delay < 300 -> MaterialTheme.colorScheme.primary
@@ -333,9 +334,9 @@ fun SettingsScreen() {
  * 图源行传 [verdict] 时进一步区分"连不上"（网络层不通）与"无图"（能连但取不到图片对象）
  * ——这两种曾经都显示成"超时"，导致排查时分不清该换网络还是该改探活目标。
  */
-private fun formatDelay(delay: Long?, verdict: SpeedTester.ImgVerdict? = null): String = when {
-    verdict == SpeedTester.ImgVerdict.UNREACHABLE -> "连不上"
-    verdict == SpeedTester.ImgVerdict.NO_IMAGE -> "无图"
+private fun formatDelay(delay: Long?, verdict: ImgVerdict? = null): String = when {
+    verdict == ImgVerdict.UNREACHABLE -> "连不上"
+    verdict == ImgVerdict.NO_IMAGE -> "无图"
     delay == null -> "未测"
     delay == Long.MAX_VALUE -> "超时"
     else -> "${delay}ms"
