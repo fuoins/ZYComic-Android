@@ -130,6 +130,8 @@ object SpeedTester {
         val contentType: String?,
         val failureCategory: SpeedTestFailureCategory?,
         val elapsedMs: Long,
+        val networkEvents: List<SpeedTestNetworkEvent> = emptyList(),
+        val sniDecisions: List<SpeedTestSniDecision> = emptyList(),
     ) {
         fun toAttempt(probe: String) = SpeedTestProbeAttempt(
             probe = probe,
@@ -138,6 +140,8 @@ object SpeedTester {
             httpStatus = httpCode.takeIf { it >= 0 },
             contentType = contentType,
             failureCategory = failureCategory,
+            networkEvents = networkEvents,
+            sniDecisions = sniDecisions,
         )
 
         fun toLineDiagnostic(): SpeedTestEndpointDiagnostic {
@@ -286,47 +290,80 @@ object SpeedTester {
             val start = System.nanoTime()
             var code = -1
             var contentType: String? = null
+            val trace = ProbeAttemptTrace()
+            val tracedRequest = req.newBuilder()
+                .tag(ProbeAttemptTrace::class.java, trace)
+                .build()
             try {
-                client.newCall(req).execute().use { resp ->
-                    code = resp.code
-                    contentType = resp.header("Content-Type")
-                        ?.lowercase(java.util.Locale.ROOT)
-                        ?.takeIf(String::isNotBlank)
-                    val head = readHead(resp, PROBE_BYTES)
-                    val failureCategory = when {
-                        code !in 200..299 -> SpeedTestFailureCategory.HTTP_STATUS
-                        requireJson && !isJsonLike(head) -> SpeedTestFailureCategory.INVALID_JSON
-                        strictImage && !isImageLike(contentType.orEmpty(), head) -> SpeedTestFailureCategory.INVALID_IMAGE
-                        else -> null
-                    }
-                    val elapsedMs = (System.nanoTime() - start) / 1_000_000
-                    if (failureCategory == null) {
-                        ProbeOutcome(elapsedMs, code, contentType, null, elapsedMs)
-                    } else {
-                        Log.d(
-                            TAG,
-                            "probe reject url=${req.url} code=$code ct=$contentType len=${head.size}",
-                        )
-                        ProbeOutcome(MAX, code, contentType, failureCategory, elapsedMs)
+                ProbeAttemptTraceContext.withTrace(trace) {
+                    client.newCall(tracedRequest).execute().use { resp ->
+                        code = resp.code
+                        contentType = resp.header("Content-Type")
+                            ?.lowercase(java.util.Locale.ROOT)
+                            ?.takeIf(String::isNotBlank)
+                        val head = readHead(resp, PROBE_BYTES)
+                        val failureCategory = when {
+                            code !in 200..299 -> SpeedTestFailureCategory.HTTP_STATUS
+                            requireJson && !isJsonLike(head) -> SpeedTestFailureCategory.INVALID_JSON
+                            strictImage && !isImageLike(contentType.orEmpty(), head) -> SpeedTestFailureCategory.INVALID_IMAGE
+                            else -> null
+                        }
+                        val elapsedMs = (System.nanoTime() - start) / 1_000_000
+                        if (failureCategory == null) {
+                            ProbeOutcome(
+                                delayMs = elapsedMs,
+                                httpCode = code,
+                                contentType = contentType,
+                                failureCategory = null,
+                                elapsedMs = elapsedMs,
+                                networkEvents = trace.networkEvents(),
+                                sniDecisions = trace.sniDecisions(),
+                            )
+                        } else {
+                            Log.d(
+                                TAG,
+                                "probe reject url=${req.url} code=$code ct=$contentType len=${head.size}",
+                            )
+                            ProbeOutcome(
+                                delayMs = MAX,
+                                httpCode = code,
+                                contentType = contentType,
+                                failureCategory = failureCategory,
+                                elapsedMs = elapsedMs,
+                                networkEvents = trace.networkEvents(),
+                                sniDecisions = trace.sniDecisions(),
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {
                 // 状态码已拿到就如实带上（404 后能否回退取样路径依赖它）
                 Log.d(TAG, "probe fail url=${req.url} code=$code err=${e.message}")
+                trace.recordProbeFailure(e)
                 val elapsedMs = (System.nanoTime() - start) / 1_000_000
-                ProbeOutcome(MAX, code, contentType, classifyFailure(e), elapsedMs)
+                ProbeOutcome(
+                    delayMs = MAX,
+                    httpCode = code,
+                    contentType = contentType,
+                    failureCategory = classifyFailure(e),
+                    elapsedMs = elapsedMs,
+                    networkEvents = trace.networkEvents(),
+                    sniDecisions = trace.sniDecisions(),
+                )
             }
         }
 
     private fun classifyFailure(error: Exception): SpeedTestFailureCategory = when (error) {
         is java.net.SocketTimeoutException,
         is java.io.InterruptedIOException,
-        is java.util.concurrent.TimeoutException -> SpeedTestFailureCategory.TIMEOUT
+        is java.util.concurrent.TimeoutException,
+        -> SpeedTestFailureCategory.TIMEOUT
         is java.net.UnknownHostException -> SpeedTestFailureCategory.DNS
         is javax.net.ssl.SSLException -> SpeedTestFailureCategory.TLS
         is java.net.ConnectException,
         is java.net.NoRouteToHostException,
-        is java.net.SocketException -> SpeedTestFailureCategory.CONNECTION
+        is java.net.SocketException,
+        -> SpeedTestFailureCategory.CONNECTION
         is java.io.IOException -> SpeedTestFailureCategory.IO
         else -> SpeedTestFailureCategory.OTHER
     }
@@ -647,6 +684,8 @@ object SpeedTester {
                 followSystemVpnEnabled = followSystemVpnEnabled,
                 systemVpnActive = systemVpnActive,
                 directStrategy = !followSystemVpnEnabled || !systemVpnActive,
+                androidApiLevel = android.os.Build.VERSION.SDK_INT,
+                androidRelease = android.os.Build.VERSION.RELEASE,
             )
             val lineClient = NetworkModule.newLineProbeClient()
             val imgClient = NetworkModule.newSpeedTestClient()

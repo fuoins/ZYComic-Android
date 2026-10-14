@@ -21,6 +21,8 @@ data class SpeedTestProbeAttempt(
     val httpStatus: Int?,
     val contentType: String?,
     val failureCategory: SpeedTestFailureCategory?,
+    val networkEvents: List<SpeedTestNetworkEvent> = emptyList(),
+    val sniDecisions: List<SpeedTestSniDecision> = emptyList(),
 )
 
 /** Safe per-endpoint result retained only for a completed, full speed-test pass. */
@@ -39,4 +41,6 @@ data class SpeedTestNetworkPath(
     val followSystemVpnEnabled: Boolean,
     val systemVpnActive: Boolean,
     val directStrategy: Boolean,
+    val androidApiLevel: Int? = null,
+    val androidRelease: String? = null,
 )

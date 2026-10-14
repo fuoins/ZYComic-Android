@@ -414,6 +414,7 @@ object NetworkModule {
             .noRedirect()
             .enableTrustAll()
             .applyTransportStrategy()
+            .eventListenerFactory(ProbeEventListener.Companion)
             .build()
     }
 
@@ -448,6 +449,7 @@ object NetworkModule {
             .noRedirect()
             .enableTrustAll()
             .applyTransportStrategy()
+            .eventListenerFactory(ProbeEventListener.Companion)
             .addInterceptor(manwaInterceptor)
             .build()
     }
@@ -565,39 +567,117 @@ object NetworkModule {
 
         private fun removeSniIfNeeded(socket: java.net.Socket, host: String?) {
             if (socket !is SSLSocket) return
-            if (host == null) return
-            if (!DevConfig.getSniDomains().contains(host)) return
+            val peerIp = socket.inetAddress?.hostAddress?.substringBefore('%')
+            if (host == null) {
+                recordProbeSniDecision(socket, null, peerIp, false, false, "host_missing")
+                return
+            }
+            val configuredDomainMatch = DevConfig.getSniDomains().contains(host)
+            if (!configuredDomainMatch) {
+                recordProbeSniDecision(socket, host, peerIp, false, false, "domain_not_configured")
+                return
+            }
             // Cloudflare 网段强制要求 SNI：实测对 104.21.72.208 不带 SNI 直接
             // SSLV3_ALERT_HANDSHAKE_FAILURE，去了 SNI 只会把一个本来能通的 CDN 域打死。
             // （嵌套类不能非限定访问外层 object 成员，必须写 NetworkModule.）
-            if (NetworkModule.isInCloudflare(socket.inetAddress)) return
+            val cloudflareExempt = NetworkModule.isInCloudflare(socket.inetAddress)
+            if (cloudflareExempt) {
+                recordProbeSniDecision(socket, host, peerIp, true, true, "cloudflare_exempt")
+                return
+            }
 
             // OkHttp 5.3.2 creates this layered socket with createSocket(rawSocket, host, port, true),
             // then configures TLS extensions. The app's minimum API is 26, where that step only
-            // configures ALPN and does not overwrite SSLParameters.serverNames.
+            // configures ALPN and does not overwrite SSLParameters.serverNames. This records
+            // client-side parameter readback only; it does not observe the emitted ClientHello.
             var originalServerNames: List<SNIServerName>? = null
             var originalServerNamesCaptured = false
+            var serverNamesBeforeCount: Int? = null
             try {
                 val params = socket.sslParameters
                 originalServerNames = params.serverNames
+                serverNamesBeforeCount = originalServerNames?.size
                 originalServerNamesCaptured = true
                 // null means provider defaults; an empty list explicitly disables the SNI extension.
                 params.serverNames = emptyList()
                 socket.sslParameters = params
-                if (socket.sslParameters.serverNames.isNullOrEmpty()) {
+                val serverNamesAfter = socket.sslParameters.serverNames
+                val readbackEmpty = serverNamesAfter.isNullOrEmpty()
+                if (readbackEmpty) {
+                    recordProbeSniDecision(
+                        socket,
+                        host,
+                        peerIp,
+                        configuredDomainMatch,
+                        cloudflareExempt,
+                        "parameters_empty_after_set",
+                        serverNamesBeforeCount,
+                        serverNamesAfter?.size,
+                        parameterReadbackEmpty = true,
+                    )
                     Log.d("NetworkModule", "SNI disabled for configured host=$host")
                     return
                 }
 
                 restoreServerNames(socket, host, originalServerNames)
+                recordProbeSniDecision(
+                    socket,
+                    host,
+                    peerIp,
+                    configuredDomainMatch,
+                    cloudflareExempt,
+                    "parameters_nonempty_restore_attempted",
+                    serverNamesBeforeCount,
+                    serverNamesAfter?.size,
+                    parameterReadbackEmpty = false,
+                )
                 Log.w("NetworkModule", "SNI disablement did not stick for host=$host; using provider-default SNI")
             } catch (e: Exception) {
                 if (originalServerNamesCaptured) {
                     restoreServerNames(socket, host, originalServerNames)
                 }
+                recordProbeSniDecision(
+                    socket,
+                    host,
+                    peerIp,
+                    configuredDomainMatch,
+                    cloudflareExempt,
+                    "setter_exception_restore_attempted",
+                    serverNamesBeforeCount,
+                    failureClass = e.javaClass.name,
+                )
                 // Failure to alter SNI must not fail the TLS connection: keep the provider default.
                 Log.w("NetworkModule", "Could not disable SNI for host=$host; keeping platform defaults", e)
             }
+        }
+
+        private fun recordProbeSniDecision(
+            socket: SSLSocket,
+            host: String?,
+            peerIp: String?,
+            configuredDomainMatch: Boolean,
+            cloudflareExempt: Boolean,
+            decision: String,
+            serverNamesBeforeCount: Int? = null,
+            serverNamesAfterCount: Int? = null,
+            parameterReadbackEmpty: Boolean? = null,
+            failureClass: String? = null,
+        ) {
+            val trace = ProbeAttemptTraceContext.current() ?: return
+            trace.addSniDecision(
+                SpeedTestSniDecision(
+                    host = host,
+                    peerIp = peerIp,
+                    socketClass = socket.javaClass.name,
+                    configuredDomainMatch = configuredDomainMatch,
+                    cloudflareExempt = cloudflareExempt,
+                    decision = decision,
+                    serverNamesBeforeCount = serverNamesBeforeCount,
+                    serverNamesAfterCount = serverNamesAfterCount,
+                    parameterReadbackEmpty = parameterReadbackEmpty,
+                    failureClass = failureClass,
+                ),
+            )
         }
 
         private fun restoreServerNames(

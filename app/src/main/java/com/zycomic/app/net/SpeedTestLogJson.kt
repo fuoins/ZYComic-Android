@@ -28,7 +28,7 @@ internal object SpeedTestLogJson {
         val networkPath = requireNotNull(snapshot.networkPath)
 
         return buildJsonObject {
-            put("schemaVersion", JsonPrimitive(1))
+            put("schemaVersion", JsonPrimitive(2))
             put("appVersion", JsonPrimitive(appVersion))
             put("startedAt", JsonPrimitive(Instant.ofEpochMilli(startedAt).toString()))
             put("completedAt", JsonPrimitive(Instant.ofEpochMilli(completedAt).toString()))
@@ -41,6 +41,10 @@ internal object SpeedTestLogJson {
                     put("directStrategy", JsonPrimitive(networkPath.directStrategy))
                     put("systemVpnActive", JsonPrimitive(networkPath.systemVpnActive))
                     put("followSystemVpnEnabled", JsonPrimitive(networkPath.followSystemVpnEnabled))
+                    put("androidApiLevel", networkPath.androidApiLevel?.let { JsonPrimitive(it) } ?: JsonNull)
+                    put("androidRelease", networkPath.androidRelease?.let { JsonPrimitive(it) } ?: JsonNull)
+                    put("sniWireObserved", JsonPrimitive(false))
+                    put("sniObservationNote", JsonPrimitive("serverNames parameter readback is not a ClientHello capture"))
                 },
             )
             put(
@@ -92,6 +96,37 @@ internal object SpeedTestLogJson {
         put("httpStatus", attempt.httpStatus?.let { JsonPrimitive(it) } ?: JsonNull)
         put("contentType", attempt.contentType?.let { JsonPrimitive(it) } ?: JsonNull)
         put("failureCategory", attempt.failureCategory?.let { JsonPrimitive(it.jsonValue()) } ?: JsonNull)
+        put("networkEvents", JsonArray(attempt.networkEvents.map(::networkEventJson)))
+        put("sniDecisions", JsonArray(attempt.sniDecisions.map(::sniDecisionJson)))
+    }
+
+    private fun networkEventJson(event: SpeedTestNetworkEvent): JsonObject = buildJsonObject {
+        put("event", JsonPrimitive(event.event))
+        put("phase", event.phase?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("host", event.host?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("proxy", event.proxy?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("proxyCandidates", JsonArray(event.proxyCandidates.map { JsonPrimitive(it) }))
+        put("socketAddress", event.socketAddress?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("resolvedAddresses", JsonArray(event.resolvedAddresses.map { JsonPrimitive(it) }))
+        put("protocol", event.protocol?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("tlsVersion", event.tlsVersion?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("cipherSuite", event.cipherSuite?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("exceptionClass", event.exceptionClass?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("causeClass", event.causeClass?.let { JsonPrimitive(it) } ?: JsonNull)
+    }
+
+    private fun sniDecisionJson(decision: SpeedTestSniDecision): JsonObject = buildJsonObject {
+        put("host", decision.host?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("peerIp", decision.peerIp?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("socketClass", JsonPrimitive(decision.socketClass))
+        put("configuredDomainMatch", JsonPrimitive(decision.configuredDomainMatch))
+        put("cloudflareExempt", JsonPrimitive(decision.cloudflareExempt))
+        put("decision", JsonPrimitive(decision.decision))
+        put("serverNamesBeforeCount", decision.serverNamesBeforeCount?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("serverNamesAfterCount", decision.serverNamesAfterCount?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("parameterReadbackEmpty", decision.parameterReadbackEmpty?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("failureClass", decision.failureClass?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("wireObserved", JsonPrimitive(decision.wireObserved))
     }
 
     private fun summaryJson(

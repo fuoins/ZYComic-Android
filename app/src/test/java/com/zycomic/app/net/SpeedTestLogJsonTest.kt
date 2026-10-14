@@ -30,7 +30,33 @@ class SpeedTestLogJsonTest {
                     elapsedMs = 42L,
                     failureCategory = null,
                     attempts = listOf(
-                        SpeedTestProbeAttempt("line_api", true, 42L, 200, "application/json", null),
+                        SpeedTestProbeAttempt(
+                            "line_api",
+                            true,
+                            42L,
+                            200,
+                            "application/json",
+                            null,
+                            networkEvents = listOf(
+                                SpeedTestNetworkEvent(
+                                    event = "connect_start",
+                                    phase = "tcp_connect",
+                                    proxy = "DIRECT",
+                                    socketAddress = "203.0.113.10:443",
+                                ),
+                            ),
+                            sniDecisions = listOf(
+                                SpeedTestSniDecision(
+                                    host = "line.example",
+                                    peerIp = "203.0.113.10",
+                                    socketClass = "test.SSLSocket",
+                                    configuredDomainMatch = true,
+                                    cloudflareExempt = false,
+                                    decision = "parameters_empty_after_set",
+                                    parameterReadbackEmpty = true,
+                                ),
+                            ),
+                        ),
                     ),
                 ),
             ),
@@ -66,6 +92,8 @@ class SpeedTestLogJsonTest {
                 followSystemVpnEnabled = true,
                 systemVpnActive = false,
                 directStrategy = true,
+                androidApiLevel = 35,
+                androidRelease = "15",
             ),
             isComplete = true,
         )
@@ -76,15 +104,22 @@ class SpeedTestLogJsonTest {
         val imageRecord = endpoints.first { it.jsonObject.getValue("domain").jsonPrimitive.content == "image.example" }.jsonObject
         val summary = root.getValue("summary").jsonObject
 
+        assertEquals(2, root.getValue("schemaVersion").jsonPrimitive.content.toInt())
         assertEquals("1.0.5", root.getValue("appVersion").jsonPrimitive.content)
         assertEquals(17, root.getValue("remoteConfigVersion").jsonPrimitive.content.toInt())
         assertEquals("direct", root.getValue("networkPath").jsonObject.getValue("mode").jsonPrimitive.content)
+        assertFalse(root.getValue("networkPath").jsonObject.getValue("sniWireObserved").jsonPrimitive.content.toBoolean())
+        assertEquals(35, root.getValue("networkPath").jsonObject.getValue("androidApiLevel").jsonPrimitive.content.toInt())
         assertEquals(3, endpoints.size)
         assertEquals(1, summary.getValue("line").jsonObject.getValue("successfulEndpoints").jsonPrimitive.content.toInt())
         assertEquals(1, summary.getValue("image").jsonObject.getValue("successfulDomains").jsonPrimitive.content.toInt())
         assertTrue(imageRecord.getValue("fallbackAttempted").jsonPrimitive.content.toBoolean())
         assertEquals(2, imageRecord.getValue("attempts").jsonArray.size)
         assertEquals("image/jpeg", imageRecord.getValue("contentType").jsonPrimitive.content)
+        val lineRecord = endpoints.first { it.jsonObject.getValue("type").jsonPrimitive.content == "line" }.jsonObject
+        val lineAttempt = lineRecord.getValue("attempts").jsonArray.first().jsonObject
+        assertEquals("203.0.113.10:443", lineAttempt.getValue("networkEvents").jsonArray.first().jsonObject.getValue("socketAddress").jsonPrimitive.content)
+        assertFalse(lineAttempt.getValue("sniDecisions").jsonArray.first().jsonObject.getValue("wireObserved").jsonPrimitive.content.toBoolean())
         assertFalse(json.contains("X-Token", ignoreCase = true))
         assertFalse(json.contains("cookie", ignoreCase = true))
         assertFalse(json.contains("deviceid", ignoreCase = true))
