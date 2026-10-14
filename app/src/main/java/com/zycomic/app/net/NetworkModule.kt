@@ -540,7 +540,14 @@ object NetworkModule {
         override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
 
         override fun createSocket(s: java.net.Socket?, host: String?, port: Int, autoClose: Boolean): java.net.Socket {
-            val socket = delegate.createSocket(s, host, port, autoClose)
+            val peerAddress = s?.inetAddress
+            val shouldOmitHostname = host != null &&
+                DevConfig.getSniDomains().contains(host) &&
+                peerAddress != null &&
+                !NetworkModule.isInCloudflare(peerAddress)
+            // The connected TCP socket already selects the destination. Omitting the hostname
+            // prevents Conscrypt from inferring SNI from the peer host during socket creation.
+            val socket = delegate.createSocket(s, if (shouldOmitHostname) null else host, port, autoClose)
             removeSniIfNeeded(socket, host)
             return socket
         }
