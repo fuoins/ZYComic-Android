@@ -1,5 +1,8 @@
 package com.zycomic.app.ui.settings
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,16 +27,26 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.ImageEndpointSelectionPolicy
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
+import com.zycomic.app.net.SpeedTestLogJson
 import com.zycomic.app.net.SpeedTester
+import eu.kanade.tachiyomi.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
+import tachiyomi.presentation.core.i18n.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +54,11 @@ fun SpeedTestScreen(
     vm: SettingsViewModel,
     onClose: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val exportScope = rememberCoroutineScope()
+    val fullSnapshot by RouteManager.completedSpeedTestSnapshot.collectAsState()
+    val speedTesterRunning by SpeedTester.isRunningFlow.collectAsState()
+    val autoSelecting by vm.autoSelecting.collectAsState()
     val testing by vm.testing.collectAsState()
     val lineDelays by vm.lineDelays.collectAsState()
     val imgDelays by vm.imgDelays.collectAsState()
@@ -58,6 +76,42 @@ fun SpeedTestScreen(
     val configRetest by RemoteConfigFetcher.configRetest.collectAsState()
     val speedTestResultVersion by vm.speedTestResultVersion.collectAsState()
     val speedTestProgress by vm.speedTestProgress.collectAsState()
+    val pendingExport = remember { mutableStateOf<Pair<RouteManager.SpeedTestSnapshot, String>?>(null) }
+    val exportSuccessMessage = stringResource(KMR.strings.speed_test_export_success)
+    val exportFailedMessage = stringResource(KMR.strings.speed_test_export_failed)
+    val noCompleteResultMessage = stringResource(KMR.strings.speed_test_export_no_complete_result)
+    val exportInProgressMessage = stringResource(KMR.strings.speed_test_export_in_progress)
+    val speedTestActive = testing || autoSelecting || configRetest != null || speedTesterRunning
+    val canExport = fullSnapshot.canExport && !speedTestActive
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        val pending = pendingExport.value
+        pendingExport.value = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        if (SpeedTester.isRunning) {
+            Toast.makeText(context, exportInProgressMessage, Toast.LENGTH_LONG).show()
+            return@rememberLauncherForActivityResult
+        }
+        if (RouteManager.completedSpeedTestSnapshot.value != pending.first) {
+            Toast.makeText(context, noCompleteResultMessage, Toast.LENGTH_LONG).show()
+            return@rememberLauncherForActivityResult
+        }
+        exportScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use {
+                        it.write(pending.second)
+                    } ?: error("Unable to open the selected document")
+                }
+            }
+            Toast.makeText(
+                context,
+                if (result.isSuccess) exportSuccessMessage else exportFailedMessage,
+                if (result.isSuccess) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
 
     // 每个域名/IP独立排序；不可用端点沉底并保留在测速日志中。
     val lineOrder = remember(lineDelays) {
@@ -282,12 +336,50 @@ fun SpeedTestScreen(
                 }
 
                 item {
-                    Button(
-                        onClick = { vm.runSpeedTest() },
-                        enabled = !testing,
-                        modifier = Modifier.padding(16.dp),
+                    if (!canExport) {
+                        Text(
+                            if (speedTestActive) exportInProgressMessage else noCompleteResultMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(if (testing) "测速中..." else "重新测速")
+                        Button(
+                            onClick = {
+                                val snapshot = fullSnapshot
+                                if (!canExport || !snapshot.canExport || SpeedTester.isRunning) {
+                                    Toast.makeText(
+                                        context,
+                                        if (SpeedTester.isRunning) exportInProgressMessage else noCompleteResultMessage,
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                } else {
+                                    runCatching { SpeedTestLogJson.encode(snapshot, BuildConfig.VERSION_NAME) }
+                                        .onSuccess { json ->
+                                            pendingExport.value = snapshot to json
+                                            exportLauncher.launch("speed_test_log.json")
+                                        }
+                                        .onFailure {
+                                            Toast.makeText(context, exportFailedMessage, Toast.LENGTH_LONG).show()
+                                        }
+                                }
+                            },
+                            enabled = canExport,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(KMR.strings.speed_test_export_log))
+                        }
+                        Button(
+                            onClick = { vm.runSpeedTest() },
+                            enabled = !speedTestActive,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (speedTestActive) "测速中..." else "重新测速")
+                        }
                     }
                 }
             }

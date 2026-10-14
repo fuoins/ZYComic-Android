@@ -238,4 +238,10 @@
     <string name="pref_discord_show_download_button_summary">Displays a button to download the app</string>
     <string name="pref_discord_show_discord_button">Show Discord Button</string>
     <string name="pref_discord_show_discord_button_summary">Displays a button to join the Discord server</string>
+    <!-- Speed test log export -->
+    <string name="speed_test_export_log">Export speed test log</string>
+    <string name="speed_test_export_success">Speed test log exported</string>
+    <string name="speed_test_export_failed">Failed to export speed test log</string>
+    <string name="speed_test_export_no_complete_result">No complete diagnostic result is available</string>
+    <string name="speed_test_export_in_progress">A speed test is in progress. Try exporting after it finishes.</string>
 </resources>

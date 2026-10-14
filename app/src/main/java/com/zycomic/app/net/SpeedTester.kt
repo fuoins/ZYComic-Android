@@ -3,13 +3,13 @@ package com.zycomic.app.net
 import android.util.Log
 import com.zycomic.app.data.dto.Manga
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -69,6 +69,9 @@ object SpeedTester {
 
     /** 防止启动测速与网络变化重测速并发重叠。 */
     private val running = AtomicBoolean(false)
+    private val _isRunning = MutableStateFlow(false)
+    val isRunningFlow: StateFlow<Boolean> = _isRunning.asStateFlow()
+    val isRunning: Boolean get() = running.get()
     private val configRunLock = Mutex()
 
     @Volatile private var lastCompletedConfigRevision: Long = -1L
@@ -120,14 +123,44 @@ object SpeedTester {
 
     // ==================== 单次测量 ====================
 
-    /** 一次探活的结果：[delayMs] 为 [MAX] 表示判负；[httpCode] 为 -1 表示根本没拿到响应。 */
-    private data class ProbeOutcome(val delayMs: Long, val httpCode: Int)
+    /** 一次探活的结果；不保存 URL、响应正文或原始异常文本。 */
+    private data class ProbeOutcome(
+        val delayMs: Long,
+        val httpCode: Int,
+        val contentType: String?,
+        val failureCategory: SpeedTestFailureCategory?,
+        val elapsedMs: Long,
+    ) {
+        fun toAttempt(probe: String) = SpeedTestProbeAttempt(
+            probe = probe,
+            success = delayMs < MAX,
+            elapsedMs = elapsedMs,
+            httpStatus = httpCode.takeIf { it >= 0 },
+            contentType = contentType,
+            failureCategory = failureCategory,
+        )
+
+        fun toLineDiagnostic(): SpeedTestEndpointDiagnostic {
+            val attempt = toAttempt("line_api")
+            return SpeedTestEndpointDiagnostic(
+                success = attempt.success,
+                latencyMs = delayMs.takeIf { it < MAX },
+                elapsedMs = elapsedMs,
+                failureCategory = failureCategory,
+                attempts = listOf(attempt),
+            )
+        }
+    }
 
     /** 图域探活结论，用于把"连不上"和"连上了但拿不到图"分开——UI 上一律显示"超时"会掩盖两种完全不同的问题。 */
     enum class ImgVerdict { OK, UNREACHABLE, NO_IMAGE }
 
-    /** 图域探活结论 + 延迟。 */
-    private data class ImgProbe(val delayMs: Long, val verdict: ImgVerdict)
+    /** 图域探活结论、延迟与每次样本探测的安全诊断字段。 */
+    private data class ImgProbe(
+        val delayMs: Long,
+        val verdict: ImgVerdict,
+        val diagnostic: SpeedTestEndpointDiagnostic,
+    )
 
     /** 最近一轮图域探活的逐域结论（index -> 结论），供 UI/排查区分"没测/连不上/无图"。 */
     @Volatile var lastImgVerdicts: Map<Int, ImgVerdict> = emptyMap()
@@ -172,8 +205,8 @@ object SpeedTester {
         private set
 
     /** 线路探活：2xx **且解密后 body 是 JSON 对象** 才计成功。 */
-    private suspend fun measureLine(client: OkHttpClient, req: Request): Long =
-        probe(client, req, requireJson = true, strictImage = false).delayMs
+    private suspend fun measureLine(client: OkHttpClient, req: Request): ProbeOutcome =
+        probe(client, req, requireJson = true, strictImage = false)
 
     /**
      * 图域探活（含回退）：固定封面 → 失败时换取样路径再试。
@@ -192,11 +225,25 @@ object SpeedTester {
         }
         var sawConnectionFailure = false
         var lastCode = -1
+        val attempts = mutableListOf<SpeedTestProbeAttempt>()
         for ((i, path) in candidates.withIndex()) {
             val outcome = probe(client, imgProbeRequest(domain, path), requireJson = false, strictImage = true)
+            attempts += outcome.toAttempt(if (i == 0) "fixed_cover" else "fallback_sample")
             if (outcome.delayMs < MAX) {
                 if (i > 0) Log.i(TAG, "img probe fallback ok domain=$domain path=$path")
-                return ImgProbe(outcome.delayMs, ImgVerdict.OK)
+                return ImgProbe(
+                    delayMs = outcome.delayMs,
+                    verdict = ImgVerdict.OK,
+                    diagnostic = SpeedTestEndpointDiagnostic(
+                        success = true,
+                        latencyMs = outcome.delayMs,
+                        elapsedMs = attempts.sumOf { it.elapsedMs },
+                        failureCategory = null,
+                        imageVerdict = ImgVerdict.OK.name.lowercase(java.util.Locale.ROOT),
+                        fallbackAttempted = i > 0,
+                        attempts = attempts.toList(),
+                    ),
+                )
             }
             if (outcome.httpCode == -1) {
                 sawConnectionFailure = true
@@ -206,10 +253,22 @@ object SpeedTester {
         }
         val verdict = if (sawConnectionFailure) ImgVerdict.UNREACHABLE else ImgVerdict.NO_IMAGE
         if (verdict == ImgVerdict.NO_IMAGE) Log.d(TAG, "img no-image domain=$domain lastCode=$lastCode")
-        return ImgProbe(MAX, verdict)
+        return ImgProbe(
+            delayMs = MAX,
+            verdict = verdict,
+            diagnostic = SpeedTestEndpointDiagnostic(
+                success = false,
+                latencyMs = null,
+                elapsedMs = attempts.sumOf { it.elapsedMs },
+                failureCategory = attempts.lastOrNull()?.failureCategory,
+                imageVerdict = verdict.name.lowercase(java.util.Locale.ROOT),
+                fallbackAttempted = attempts.any { it.probe == "fallback_sample" },
+                attempts = attempts.toList(),
+            ),
+        )
     }
 
-    private suspend fun measureLineOnce(client: OkHttpClient, lineUrl: String): Long =
+    private suspend fun measureLineOnce(client: OkHttpClient, lineUrl: String): ProbeOutcome =
         measureLine(client, lineRequest(lineUrl))
 
     /**
@@ -226,31 +285,51 @@ object SpeedTester {
         withContext(Dispatchers.IO) {
             val start = System.nanoTime()
             var code = -1
+            var contentType: String? = null
             try {
                 client.newCall(req).execute().use { resp ->
                     code = resp.code
-                    val contentType = resp.header("Content-Type").orEmpty().lowercase()
+                    contentType = resp.header("Content-Type")
+                        ?.lowercase(java.util.Locale.ROOT)
+                        ?.takeIf(String::isNotBlank)
                     val head = readHead(resp, PROBE_BYTES)
-                    val ok = code in 200..299 && when {
-                        requireJson -> isJsonLike(head)
-                        else -> !strictImage || isImageLike(contentType, head)
+                    val failureCategory = when {
+                        code !in 200..299 -> SpeedTestFailureCategory.HTTP_STATUS
+                        requireJson && !isJsonLike(head) -> SpeedTestFailureCategory.INVALID_JSON
+                        strictImage && !isImageLike(contentType.orEmpty(), head) -> SpeedTestFailureCategory.INVALID_IMAGE
+                        else -> null
                     }
-                    if (ok) {
-                        ProbeOutcome((System.nanoTime() - start) / 1_000_000, code)
+                    val elapsedMs = (System.nanoTime() - start) / 1_000_000
+                    if (failureCategory == null) {
+                        ProbeOutcome(elapsedMs, code, contentType, null, elapsedMs)
                     } else {
                         Log.d(
                             TAG,
                             "probe reject url=${req.url} code=$code ct=$contentType len=${head.size}",
                         )
-                        ProbeOutcome(MAX, code)
+                        ProbeOutcome(MAX, code, contentType, failureCategory, elapsedMs)
                     }
                 }
             } catch (e: Exception) {
                 // 状态码已拿到就如实带上（404 后能否回退取样路径依赖它）
                 Log.d(TAG, "probe fail url=${req.url} code=$code err=${e.message}")
-                ProbeOutcome(MAX, code)
+                val elapsedMs = (System.nanoTime() - start) / 1_000_000
+                ProbeOutcome(MAX, code, contentType, classifyFailure(e), elapsedMs)
             }
         }
+
+    private fun classifyFailure(error: Exception): SpeedTestFailureCategory = when (error) {
+        is java.net.SocketTimeoutException,
+        is java.io.InterruptedIOException,
+        is java.util.concurrent.TimeoutException -> SpeedTestFailureCategory.TIMEOUT
+        is java.net.UnknownHostException -> SpeedTestFailureCategory.DNS
+        is javax.net.ssl.SSLException -> SpeedTestFailureCategory.TLS
+        is java.net.ConnectException,
+        is java.net.NoRouteToHostException,
+        is java.net.SocketException -> SpeedTestFailureCategory.CONNECTION
+        is java.io.IOException -> SpeedTestFailureCategory.IO
+        else -> SpeedTestFailureCategory.OTHER
+    }
 
     /**
      * 读取响应前 [maxBytes] 字节。
@@ -376,7 +455,7 @@ object SpeedTester {
         NetworkModule.resolveProbeIps(domain).map { ip -> DomainIp(domain, ip) }
     }.distinct()
 
-    private suspend fun measureLineAtIp(client: OkHttpClient, target: LineTarget): Long {
+    private suspend fun measureLineAtIp(client: OkHttpClient, target: LineTarget): ProbeOutcome {
         val routed = NetworkModule.newProbeClientForIp(client, target.endpoint.domain, target.endpoint.ip)
         return try {
             measureLineOnce(routed, target.url)
@@ -405,7 +484,7 @@ object SpeedTester {
                 targets.map { target ->
                     async {
                         probeSemaphore.withPermit {
-                            val delay = measureLineAtIp(client, target)
+                            val delay = measureLineAtIp(client, target).delayMs
                             onResult?.invoke(target.endpoint, delay)
                             target.endpoint to delay
                         }
@@ -502,7 +581,9 @@ object SpeedTester {
             coroutineScope {
                 targets.map { target ->
                     async {
-                        probeSemaphore.withPermit { target.endpoint to measureLineAtIp(client, target) }
+                        probeSemaphore.withPermit {
+                            target.endpoint to measureLineAtIp(client, target).delayMs
+                        }
                     }
                 }.awaitAll().toMap()
             }
@@ -554,11 +635,19 @@ object SpeedTester {
                 return@coroutineScope (-1 to -1)
             }
             lastRunSkipped = false
+            _isRunning.value = true
             reportStage(Progress(Phase.PREPARING_LINES))
             // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
             lastImgVerdicts = emptyMap()
             lastImgIpVerdicts = emptyMap()
             val startedAt = System.currentTimeMillis()
+            val followSystemVpnEnabled = DevConfig.isFollowSystemVpnEnabled()
+            val systemVpnActive = NetworkModule.isSystemVpnActive()
+            val networkPath = SpeedTestNetworkPath(
+                followSystemVpnEnabled = followSystemVpnEnabled,
+                systemVpnActive = systemVpnActive,
+                directStrategy = !followSystemVpnEnabled || !systemVpnActive,
+            )
             val lineClient = NetworkModule.newLineProbeClient()
             val imgClient = NetworkModule.newSpeedTestClient()
             val previousImgIndex = RouteManager.imgIndex
@@ -571,8 +660,8 @@ object SpeedTester {
                 val lineJobs = resolvedLines.map { target ->
                     async {
                         probeSemaphore.withPermit {
-                            val delay = measureLineAtIp(lineClient, target)
-                            lineAcc[target.endpoint] = delay
+                            val outcome = measureLineAtIp(lineClient, target)
+                            lineAcc[target.endpoint] = outcome.delayMs
                             if (configRevisionAtStart == RouteManager.configRevision) {
                                 onProgress?.invoke(lineAcc.toMap(), emptyMap(), emptyMap())
                             }
@@ -586,11 +675,13 @@ object SpeedTester {
                                     failed = lineAcc.size - successful,
                                 ),
                             )
-                            target.endpoint to delay
+                            target.endpoint to outcome
                         }
                     }
                 }
-                val lines = lineJobs.awaitAll().toMap()
+                val lineOutcomes = lineJobs.awaitAll().toMap()
+                val lines = lineOutcomes.mapValues { it.value.delayMs }
+                val lineDiagnostics = lineOutcomes.mapValues { it.value.toLineDiagnostic() }
                 if (configRevisionAtStart != RouteManager.configRevision) {
                     return@coroutineScope (-1 to -1)
                 }
@@ -624,6 +715,7 @@ object SpeedTester {
                 // 阶段 3：逐条图源域名/IP探测（包含真实图片内容校验）。
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val verdictAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
+                val imageDiagnosticAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, SpeedTestEndpointDiagnostic>()
                 reportStage(Progress(Phase.PREPARING_IMAGES))
                 val resolvedImages = imgTargets()
                 reportStage(Progress(Phase.TESTING_IMAGES, total = resolvedImages.size))
@@ -633,6 +725,7 @@ object SpeedTester {
                             val result = measureImgAtIp(imgClient, endpoint, samplePath)
                             imgAcc[endpoint] = result.delayMs
                             verdictAcc[endpoint] = result.verdict
+                            imageDiagnosticAcc[endpoint] = result.diagnostic
                             lastImgIpVerdicts = verdictAcc.toMap()
                             lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
                             if (configRevisionAtStart == RouteManager.configRevision) {
@@ -653,6 +746,7 @@ object SpeedTester {
                     }
                 }
                 val imgs = imgJobs.awaitAll().toMap()
+                val imageDiagnostics = imageDiagnosticAcc.toMap()
                 lastImgIpVerdicts = verdictAcc.toMap()
                 lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
 
@@ -684,8 +778,25 @@ object SpeedTester {
                 if (imgDomainChanged) NetworkModule.rebindImageRoute("测速应用图源")
                 RouteManager.markSpeedTestToday()
 
-                lastRunAt = System.currentTimeMillis()
-                lastRunDirectStrategy = NetworkModule.shouldUseDirectStrategy()
+                val completedAt = System.currentTimeMillis()
+                if (!RouteManager.setEndpointDelays(
+                        line = lines,
+                        img = imgs,
+                        imgVerdicts = verdictAcc,
+                        remoteVersion = configVersionAtStart,
+                        expectedConfigRevision = configRevisionAtStart,
+                        lineDiagnostics = lineDiagnostics,
+                        imageDiagnostics = imageDiagnostics,
+                        startedAtEpochMs = startedAt,
+                        completedAtEpochMs = completedAt,
+                        networkPath = networkPath,
+                        completeSnapshot = true,
+                    )
+                ) {
+                    return@coroutineScope (-1 to -1)
+                }
+                lastRunAt = completedAt
+                lastRunDirectStrategy = networkPath.directStrategy
 
                 val vc = verdictAcc.values.groupingBy { it }.eachCount()
                 val fastest = imgs.entries.filter { it.value < MAX && verdictAcc[it.key] == ImgVerdict.OK }
@@ -710,6 +821,7 @@ object SpeedTester {
                 result
             } finally {
                 running.set(false)
+                _isRunning.value = false
                 lineClient.releaseProbe()
                 imgClient.releaseProbe()
             }

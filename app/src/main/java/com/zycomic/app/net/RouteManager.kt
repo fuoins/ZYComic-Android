@@ -24,10 +24,39 @@ object RouteManager {
         val imgDelays: Map<DomainIp, Long> = emptyMap(),
         val imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict> = emptyMap(),
         val remoteVersion: Int? = null,
-    )
+        val lineDiagnostics: Map<DomainIp, SpeedTestEndpointDiagnostic> = emptyMap(),
+        val imageDiagnostics: Map<DomainIp, SpeedTestEndpointDiagnostic> = emptyMap(),
+        val startedAtEpochMs: Long? = null,
+        val completedAtEpochMs: Long? = null,
+        val networkPath: SpeedTestNetworkPath? = null,
+        val isComplete: Boolean = false,
+    ) {
+        val canExport: Boolean
+            get() = isComplete &&
+                startedAtEpochMs != null &&
+                completedAtEpochMs != null &&
+                networkPath != null &&
+                lineDiagnostics.keys == lineDelays.keys &&
+                imageDiagnostics.keys == imgDelays.keys &&
+                imgVerdicts.keys == imgDelays.keys &&
+                lineDelays.all { (endpoint, delay) -> lineDiagnostics[endpoint]?.success == (delay < Long.MAX_VALUE) } &&
+                imgDelays.all { (endpoint, delay) ->
+                    imageDiagnostics[endpoint]?.success == (delay < Long.MAX_VALUE) &&
+                        imageDiagnostics[endpoint]?.imageVerdict == imgVerdicts[endpoint]?.name?.lowercase(java.util.Locale.ROOT)
+                } &&
+                lineDiagnostics.values.all { diagnostic ->
+                    diagnostic.attempts.size == 1 && diagnostic.attempts.single().probe == "line_api"
+                } &&
+                imageDiagnostics.values.all { diagnostic ->
+                    diagnostic.attempts.firstOrNull()?.probe == "fixed_cover" &&
+                        diagnostic.fallbackAttempted == diagnostic.attempts.any { it.probe == "fallback_sample" }
+                }
+    }
 
     private val _speedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
     val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _speedTestSnapshot.asStateFlow()
+    private val _completedSpeedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
+    val completedSpeedTestSnapshot: StateFlow<SpeedTestSnapshot> = _completedSpeedTestSnapshot.asStateFlow()
 
     // Candidate routes and image sources are populated only from validated remote configuration.
     @Volatile var lineHosts: List<String> = emptyList()
@@ -172,8 +201,30 @@ object RouteManager {
         imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
         remoteVersion: Int? = activeRemoteConfigVersion,
         expectedConfigRevision: Long? = null,
+        lineDiagnostics: Map<DomainIp, SpeedTestEndpointDiagnostic> = emptyMap(),
+        imageDiagnostics: Map<DomainIp, SpeedTestEndpointDiagnostic> = emptyMap(),
+        startedAtEpochMs: Long? = null,
+        completedAtEpochMs: Long? = null,
+        networkPath: SpeedTestNetworkPath? = null,
+        completeSnapshot: Boolean = false,
     ): Boolean {
         if (expectedConfigRevision != null && expectedConfigRevision != configRevision) return false
+        if (completeSnapshot && (
+                startedAtEpochMs == null || completedAtEpochMs == null || networkPath == null ||
+                    lineDiagnostics.keys != line.keys ||
+                    imageDiagnostics.keys != img.keys ||
+                    imgVerdicts.keys != img.keys ||
+                    line.any { (endpoint, delay) -> lineDiagnostics[endpoint]?.success != (delay < Long.MAX_VALUE) } ||
+                    img.any { (endpoint, delay) ->
+                        imageDiagnostics[endpoint]?.success != (delay < Long.MAX_VALUE) ||
+                            imageDiagnostics[endpoint]?.imageVerdict != imgVerdicts[endpoint]?.name?.lowercase(java.util.Locale.ROOT) ||
+                            imageDiagnostics[endpoint]?.attempts?.isEmpty() != false
+                    } ||
+                    lineDiagnostics.values.any { it.attempts.size != 1 || it.attempts.single().probe != "line_api" }
+                )
+        ) {
+            return false
+        }
         lastLineIpDelays = line.toMap()
         lastImgIpDelays = img.toMap()
         lastImgIpVerdicts = imgVerdicts.toMap()
@@ -186,12 +237,20 @@ object RouteManager {
             val values = img.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
             if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
         }.toMap()
-        _speedTestSnapshot.value = SpeedTestSnapshot(
+        val snapshot = SpeedTestSnapshot(
             lineDelays = line.toMap(),
             imgDelays = img.toMap(),
             imgVerdicts = imgVerdicts.toMap(),
             remoteVersion = remoteVersion,
+            lineDiagnostics = if (completeSnapshot) lineDiagnostics.toMap() else emptyMap(),
+            imageDiagnostics = if (completeSnapshot) imageDiagnostics.toMap() else emptyMap(),
+            startedAtEpochMs = startedAtEpochMs.takeIf { completeSnapshot },
+            completedAtEpochMs = completedAtEpochMs.takeIf { completeSnapshot },
+            networkPath = networkPath.takeIf { completeSnapshot },
+            isComplete = completeSnapshot,
         )
+        _speedTestSnapshot.value = snapshot
+        if (completeSnapshot) _completedSpeedTestSnapshot.value = snapshot
         return true
     }
 
@@ -669,6 +728,7 @@ object RouteManager {
         lastImgIpDelays = emptyMap()
         lastImgIpVerdicts = emptyMap()
         _speedTestSnapshot.value = SpeedTestSnapshot()
+        _completedSpeedTestSnapshot.value = SpeedTestSnapshot()
     }
 
     /** 设置 SNI 绕过域名列表（由 lines+sources 派生，调用方负责计算） */
