@@ -250,6 +250,7 @@ fun AppContent(
 
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
+    val speedTestProgress by settingsVm.speedTestProgress.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
 
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
@@ -434,9 +435,25 @@ fun AppContent(
                 Spacer(modifier = Modifier.height(24.dp))
                 CircularProgressIndicator(modifier = Modifier.size(64.dp), strokeWidth = 4.dp)
                 Spacer(modifier = Modifier.height(24.dp))
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp))
+                if (speedTestProgress.total > 0 &&
+                    speedTestProgress.phase in setOf(
+                        com.zycomic.app.net.SpeedTester.Phase.TESTING_LINES,
+                        com.zycomic.app.net.SpeedTester.Phase.TESTING_IMAGES,
+                    )
+                ) {
+                    LinearProgressIndicator(
+                        progress = { speedTestProgress.completed.toFloat() / speedTestProgress.total },
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp))
+                }
                 Spacer(modifier = Modifier.height(24.dp))
-                Text("正在选择最快线路...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    settingsVm.speedTestProgressMessage(speedTestProgress),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

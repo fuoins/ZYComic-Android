@@ -56,6 +56,29 @@ class SettingsViewModel {
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
     val autoSelecting = MutableStateFlow(false)
+    /** 当前测速阶段与按真实解析端点统计的进度。 */
+    val speedTestProgress = MutableStateFlow(SpeedTester.Progress())
+
+    fun speedTestProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {
+        SpeedTester.Phase.PREPARING_LINES -> "正在解析线路域名和 IP…"
+        SpeedTester.Phase.TESTING_LINES -> if (progress.total == 0) {
+            "未解析到线路 IP，准备继续检测图源"
+        } else {
+            "正在测试线路 IP：${progress.completed}/${progress.total}（可用 ${progress.successful}，失败 ${progress.failed}）"
+        }
+        SpeedTester.Phase.APPLYING_LINE -> "线路检测完成（可用 ${progress.successful}，失败 ${progress.failed}），正在选择最快线路"
+        SpeedTester.Phase.FETCHING_SAMPLE -> "正在获取图源验证样本…"
+        SpeedTester.Phase.PREPARING_IMAGES -> "正在解析图源域名和 IP…"
+        SpeedTester.Phase.TESTING_IMAGES -> if (progress.total == 0) {
+            "未解析到图源 IP，正在整理测速结果"
+        } else {
+            "正在测试图源 IP：${progress.completed}/${progress.total}（可用 ${progress.successful}，连不上 ${progress.failed}，无图 ${progress.noImage}）"
+        }
+        SpeedTester.Phase.APPLYING_RESULTS -> "端点检测完成，正在应用最快线路和图源…"
+        SpeedTester.Phase.COMPLETE -> "测速完成，最快线路和图源已应用"
+        SpeedTester.Phase.FAILED -> "测速中断，继续使用当前线路和图源"
+        SpeedTester.Phase.SKIPPED -> "已有测速任务正在运行，本轮未重复检测"
+    }
     /** 线路延迟：域名/IP -> 毫秒。 */
     val lineDelays = MutableStateFlow<Map<DomainIp, Long>>(RouteManager.lastLineIpDelays)
     /** 图源延迟：域名/IP -> 毫秒。 */
@@ -96,6 +119,7 @@ class SettingsViewModel {
                 when (r.outcome) {
                     RemoteConfigFetcher.Outcome.APPLIED -> {
                         testing.value = true
+                        speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
                         lineDelays.value = emptyMap()
                         imgDelays.value = emptyMap()
                         imgVerdicts.value = emptyMap()
@@ -105,11 +129,14 @@ class SettingsViewModel {
                         currentImgIp.value = RouteManager.selectedImgIp
                         imgPinned.value = RouteManager.pinnedImgDomain
                         val testResult = runCatching {
-                            SpeedTester.runForCurrentConfig { lines, images, verdicts ->
-                                lineDelays.value = lines
-                                imgDelays.value = images
-                                imgVerdicts.value = verdicts
-                            }
+                            SpeedTester.runForCurrentConfig(
+                                onProgress = { lines, images, verdicts ->
+                                    lineDelays.value = lines
+                                    imgDelays.value = images
+                                    imgVerdicts.value = verdicts
+                                },
+                                onStageProgress = { speedTestProgress.value = it },
+                            )
                         }
                         testing.value = false
                         if (testResult.isSuccess) {
@@ -382,15 +409,19 @@ class SettingsViewModel {
     fun runSpeedTest() {
         scope.launch {
             testing.value = true
+            speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
             lineDelays.value = emptyMap()
             imgDelays.value = emptyMap()
             imgVerdicts.value = emptyMap()
             try {
-                val (bestLine, bestImg) = SpeedTester.runAndApply { l, i, v ->
-                    lineDelays.value = l
-                    imgDelays.value = i
-                    imgVerdicts.value = v
-                }
+                val (bestLine, bestImg) = SpeedTester.runAndApply(
+                    onProgress = { l, i, v ->
+                        lineDelays.value = l
+                        imgDelays.value = i
+                        imgVerdicts.value = v
+                    },
+                    onStageProgress = { speedTestProgress.value = it },
+                )
                 currentLineIndex.value = RouteManager.lineIndex
                 currentLineIp.value = RouteManager.selectedLineIp
                 currentImgIndex.value = RouteManager.imgIndex
@@ -405,8 +436,12 @@ class SettingsViewModel {
                 }
             } catch (e: Exception) {
                 android.util.Log.e("SpeedTest", "runSpeedTest failed", e)
+                speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.FAILED)
                 toast.value = "测速异常：${e.message ?: "请稍后重试"}"
             } finally {
+                if (SpeedTester.lastRunSkipped) {
+                    speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.SKIPPED)
+                }
                 testing.value = false
             }
         }
@@ -433,20 +468,27 @@ class SettingsViewModel {
     suspend fun autoSelectFastest(): Pair<Int, Int> {
         android.util.Log.d("SpeedTest", "autoSelectFastest start")
         autoSelecting.value = true
+        speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
         lineDelays.value = emptyMap()
         imgDelays.value = emptyMap()
         imgVerdicts.value = emptyMap()
         return try {
-            val r = SpeedTester.runForCurrentConfig { l, i, v ->
-                lineDelays.value = l
-                imgDelays.value = i
-                imgVerdicts.value = v
-            }
+            val r = SpeedTester.runForCurrentConfig(
+                onProgress = { l, i, v ->
+                    lineDelays.value = l
+                    imgDelays.value = i
+                    imgVerdicts.value = v
+                },
+                onStageProgress = { speedTestProgress.value = it },
+            )
             currentLineIndex.value = RouteManager.lineIndex
             currentLineIp.value = RouteManager.selectedLineIp
             currentImgIndex.value = RouteManager.imgIndex
             currentImgIp.value = RouteManager.selectedImgIp
             r
+        } catch (e: Exception) {
+            speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.FAILED)
+            throw e
         } finally {
             withContext(NonCancellable) {
                 publishImgVerdicts()

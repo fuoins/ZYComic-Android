@@ -79,6 +79,7 @@ fun SearchScreen(
     val vm = remember { SearchViewModel() }
     val keyword by vm.keyword.collectAsState()
     val mangas by vm.mangas.collectAsState()
+    val error by vm.error.collectAsState()
     val loading by vm.loading.collectAsState()
     val appending by vm.appending.collectAsState()
     val hasMore by vm.hasMore.collectAsState()
@@ -173,6 +174,15 @@ fun SearchScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 loading && mangas.isEmpty() -> LoadingFooter()
+                mangas.isEmpty() && !loading && keyword.isNotBlank() && error != null -> Column(
+                    modifier = Modifier.align(Alignment.Center).fillMaxWidth().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("搜索失败，可能是网络请求异常", style = MaterialTheme.typography.titleMedium)
+                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { vm.doSearch() }) { Text("点击重试") }
+                }
                 mangas.isEmpty() && !loading && keyword.isNotBlank() -> EmptyView("没有搜索到「$keyword」")
                 keyword.isBlank() -> SearchHistorySection(vm = vm)
                 mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")

@@ -540,7 +540,7 @@ private fun BrowseFilterDialog(
     onOpenTagDialog: () -> Unit,
     displayOnly: Boolean = false,
 ) {
-    val titles = if (displayOnly) persistentListOf("显示") else persistentListOf("筛选", "显示")
+    val titles = if (displayOnly) persistentListOf("显示") else persistentListOf("重新筛选（不更改默认）", "显示")
     TabbedDialog(
         onDismissRequest = onDismiss,
         tabTitles = titles,

@@ -134,6 +134,28 @@ object SpeedTester {
     @Volatile var lastImgIpVerdicts: Map<DomainIp, ImgVerdict> = emptyMap()
         private set
 
+    enum class Phase {
+        PREPARING_LINES,
+        TESTING_LINES,
+        APPLYING_LINE,
+        FETCHING_SAMPLE,
+        PREPARING_IMAGES,
+        TESTING_IMAGES,
+        APPLYING_RESULTS,
+        COMPLETE,
+        FAILED,
+        SKIPPED,
+    }
+
+    data class Progress(
+        val phase: Phase = Phase.PREPARING_LINES,
+        val completed: Int = 0,
+        val total: Int = 0,
+        val successful: Int = 0,
+        val failed: Int = 0,
+        val noImage: Int = 0,
+    )
+
     /** 最近一次 runAndApply 是否因为"已有测速在跑"被整轮丢弃（被丢弃时一个域都没探）。 */
     @Volatile var lastRunSkipped: Boolean = false
         private set
@@ -504,10 +526,13 @@ object SpeedTester {
      */
     suspend fun runAndApply(
         onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
+        onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
+            onStageProgress?.invoke(Progress(Phase.PREPARING_LINES))
             if (!running.compareAndSet(false, true)) {
                 lastRunSkipped = true
+                onStageProgress?.invoke(Progress(Phase.SKIPPED))
                 Log.w(TAG, "runAndApply skipped: another speed test is running（本轮一个域都没探）")
                 return@coroutineScope (-1 to -1)
             }
@@ -524,17 +549,39 @@ object SpeedTester {
             try {
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
-                val lineJobs = lineTargets().map { target ->
+                val resolvedLines = lineTargets()
+                onStageProgress?.invoke(Progress(Phase.TESTING_LINES, total = resolvedLines.size))
+                val lineJobs = resolvedLines.map { target ->
                     async {
                         probeSemaphore.withPermit {
                             val delay = measureLineAtIp(lineClient, target)
                             lineAcc[target.endpoint] = delay
                             onProgress?.invoke(lineAcc.toMap(), emptyMap(), emptyMap())
+                            val successful = lineAcc.values.count { it < MAX }
+                            onStageProgress?.invoke(
+                                Progress(
+                                    phase = Phase.TESTING_LINES,
+                                    completed = lineAcc.size,
+                                    total = resolvedLines.size,
+                                    successful = successful,
+                                    failed = lineAcc.size - successful,
+                                ),
+                            )
                             target.endpoint to delay
                         }
                     }
                 }
                 val lines = lineJobs.awaitAll().toMap()
+                val successfulLines = lines.values.count { it < MAX }
+                onStageProgress?.invoke(
+                    Progress(
+                        phase = Phase.APPLYING_LINE,
+                        completed = lines.size,
+                        total = resolvedLines.size,
+                        successful = successfulLines,
+                        failed = lines.size - successfulLines,
+                    ),
+                )
                 val bestLine = fastestLineEndpoint(lines)
                 val bestLineIndex = bestLine?.let { endpoint ->
                     RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
@@ -548,13 +595,17 @@ object SpeedTester {
                 Log.i(TAG, "line test done, best=$bestLine")
 
                 // 阶段 2：兜底样本路径（固定封面 404 时才用到）
+                onStageProgress?.invoke(Progress(Phase.FETCHING_SAMPLE))
                 val samplePath = obtainProbePath()
                 Log.i(TAG, "img probe sample path=$samplePath")
 
                 // 阶段 3：逐条图源域名/IP探测（包含真实图片内容校验）。
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val verdictAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
-                val imgJobs = imgTargets().map { endpoint ->
+                onStageProgress?.invoke(Progress(Phase.PREPARING_IMAGES))
+                val resolvedImages = imgTargets()
+                onStageProgress?.invoke(Progress(Phase.TESTING_IMAGES, total = resolvedImages.size))
+                val imgJobs = resolvedImages.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
                             val result = measureImgAtIp(imgClient, endpoint, samplePath)
@@ -563,6 +614,16 @@ object SpeedTester {
                             lastImgIpVerdicts = verdictAcc.toMap()
                             lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
                             onProgress?.invoke(lines, imgAcc.toMap(), verdictAcc.toMap())
+                            onStageProgress?.invoke(
+                                Progress(
+                                    phase = Phase.TESTING_IMAGES,
+                                    completed = imgAcc.size,
+                                    total = resolvedImages.size,
+                                    successful = verdictAcc.values.count { it == ImgVerdict.OK },
+                                    failed = verdictAcc.values.count { it == ImgVerdict.UNREACHABLE },
+                                    noImage = verdictAcc.values.count { it == ImgVerdict.NO_IMAGE },
+                                ),
+                            )
                             endpoint to result.delayMs
                         }
                     }
@@ -571,6 +632,16 @@ object SpeedTester {
                 lastImgIpVerdicts = verdictAcc.toMap()
                 lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
 
+                onStageProgress?.invoke(
+                    Progress(
+                        phase = Phase.APPLYING_RESULTS,
+                        completed = imgs.size,
+                        total = resolvedImages.size,
+                        successful = verdictAcc.values.count { it == ImgVerdict.OK },
+                        failed = verdictAcc.values.count { it == ImgVerdict.UNREACHABLE },
+                        noImage = verdictAcc.values.count { it == ImgVerdict.NO_IMAGE },
+                    ),
+                )
                 RouteManager.setEndpointDelays(lines, imgs, verdictAcc)
                 val bestImg = RouteManager.fastestImgEndpoint
                 val imgDomainChanged = bestImg != null && RouteManager.pinnedImgDomain.isNullOrBlank() &&
@@ -602,6 +673,7 @@ object SpeedTester {
                     (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
                 lastCompletedConfigRevision = configRevisionAtStart
                 lastConfigRunResult = result
+                onStageProgress?.invoke(Progress(Phase.COMPLETE))
                 result
             } finally {
                 running.set(false)
@@ -618,6 +690,7 @@ object SpeedTester {
      */
     suspend fun runForCurrentConfig(
         onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
+        onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         configRunLock.lock()
         try {
@@ -625,10 +698,11 @@ object SpeedTester {
                 while (running.get()) delay(50)
                 if (lastRunAt > 0L && lastCompletedConfigRevision == RouteManager.configRevision) {
                     onProgress?.invoke(RouteManager.lastLineIpDelays, RouteManager.lastImgIpDelays, lastImgIpVerdicts)
+                    onStageProgress?.invoke(Progress(Phase.COMPLETE))
                     return@withContext lastConfigRunResult
                 }
 
-                val result = runAndApply(onProgress)
+                val result = runAndApply(onProgress, onStageProgress)
                 if (!lastRunSkipped && lastCompletedConfigRevision == RouteManager.configRevision) {
                     return@withContext result
                 }

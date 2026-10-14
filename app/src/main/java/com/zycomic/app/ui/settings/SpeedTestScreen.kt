@@ -10,9 +10,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -24,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.ImageEndpointSelectionPolicy
 import com.zycomic.app.net.RouteManager
@@ -50,6 +54,7 @@ fun SpeedTestScreen(
     val followVpn by vm.followSystemVpn.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
+    val speedTestProgress by vm.speedTestProgress.collectAsState()
 
     // 每个域名/IP独立排序；不可用端点沉底并保留在测速日志中。
     val lineOrder = remember(lineDelays) {
@@ -81,6 +86,39 @@ fun SpeedTestScreen(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text(
+                        "网络维护提醒",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Text(
+                        "本软件在每日晚上18:00前网络流畅,18:00后进行网络维护,会出现卡顿情况",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
+            if (testing) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    Text(vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
+                    if (speedTestProgress.total > 0 &&
+                        speedTestProgress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
+                    ) {
+                        LinearProgressIndicator(
+                            progress = { speedTestProgress.completed.toFloat() / speedTestProgress.total },
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    }
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,

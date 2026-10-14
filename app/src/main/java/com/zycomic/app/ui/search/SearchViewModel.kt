@@ -105,7 +105,10 @@ class SearchViewModel {
     private var currentPage = 1
     private var hasSearched = false
 
-    fun updateKeyword(k: String) { keyword.value = k }
+    fun updateKeyword(k: String) {
+        if (keyword.value != k) _error.value = null
+        keyword.value = k
+    }
 
     fun doSearch() {
         val k = keyword.value.trim()
@@ -131,6 +134,8 @@ class SearchViewModel {
         if (reset) {
             currentPage = 1
             _hasMore.value = true
+            _mangas.value = emptyList()
+            _error.value = null
             _loading.value = true
         } else {
             _appending.value = true
