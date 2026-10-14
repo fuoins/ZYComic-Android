@@ -345,11 +345,11 @@ class SettingsViewModel {
         scope.launch {
             imgVerdicts.value = emptyMap()
             NetworkModule.onVpnOrNetworkChanged("follow vpn toggled")
-            val (bl, bi) = SpeedTester.runAndApply { l, i, v ->
+            val (bl, bi) = SpeedTester.runAndApply(onProgress = { l, i, v ->
                 lineDelays.value = l
                 imgDelays.value = i
                 imgVerdicts.value = v
-            }
+            })
             currentLineIndex.value = RouteManager.lineIndex
             currentLineIp.value = RouteManager.selectedLineIp
             currentImgIndex.value = RouteManager.imgIndex
