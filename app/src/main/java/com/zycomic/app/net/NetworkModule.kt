@@ -190,6 +190,32 @@ object NetworkModule {
             .connectionPool(ConnectionPool(1, 1, TimeUnit.SECONDS))
             .build()
 
+    /**
+     * Create an isolated runtime image client for one measured domain/IP endpoint.
+     * The outer ImageInterceptor owns retries, so this client removes that interceptor,
+     * disables transport retries/redirects, and uses a private connection pool to prevent
+     * connection reuse from silently targeting another measured IP.
+     */
+    fun newImageClientForIp(hostname: String, ip: String): OkHttpClient {
+        val base = imageClient
+        val builder = base.newBuilder()
+        builder.interceptors().removeAll { it is ImageInterceptor }
+        return builder
+            .dns(object : Dns {
+                override fun lookup(requestedHost: String): List<InetAddress> =
+                    if (requestedHost.equals(hostname, ignoreCase = true)) {
+                        listOf(InetAddress.getByName(ip))
+                    } else {
+                        base.dns.lookup(requestedHost)
+                    }
+            })
+            .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+            .retryOnConnectionFailure(false)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
+
     private fun OkHttpClient.Builder.applyNetworkConfig(withFailover: Boolean = false): OkHttpClient.Builder {
         applyTransportStrategy()
         if (withFailover) addInterceptor(LineFailoverInterceptor())

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test
  * `fastestImgDomain`，而 `setImgHost` 改的是 `imgIndex`——它根本没参与改写。于是阅读器与
  * 设置页里的手动切换图源对实际请求完全无效（空操作）。
  *
- * 这里只定优先级，不涉及冷却/探测那些已按决定移除的部分。
+ * 这里只验证改写目标优先级；测速端点排序与失败冷却由对应网络策略负责。
  */
 class ImgDomainPolicyTest {
 
@@ -115,5 +115,45 @@ class ImgDomainPolicyTest {
         )
 
         assertNull(target)
+    }
+
+    @Test
+    fun `successful configured endpoints are ranked by delay and failed endpoints are excluded`() {
+        val fastest = DomainIp("a.cc", "1.1.1.1")
+        val tied = DomainIp("b.cc", "2.2.2.2")
+        val slower = DomainIp("a.cc", "3.3.3.3")
+        val failed = DomainIp("c.cc", "4.4.4.4")
+        val removed = DomainIp("removed.cc", "5.5.5.5")
+
+        val ranked = ImageEndpointSelectionPolicy.rankedSuccessfulEndpoints(
+            delays = mapOf(fastest to 20L, tied to 20L, slower to 50L, failed to Long.MAX_VALUE, removed to 1L),
+            verdicts = mapOf(
+                fastest to SpeedTester.ImgVerdict.OK,
+                tied to SpeedTester.ImgVerdict.OK,
+                slower to SpeedTester.ImgVerdict.OK,
+                failed to SpeedTester.ImgVerdict.UNREACHABLE,
+                removed to SpeedTester.ImgVerdict.OK,
+            ),
+            configuredDomains = listOf("a.cc", "b.cc", "c.cc"),
+        )
+
+        assertEquals(listOf(fastest, tied, slower), ranked)
+    }
+
+    @Test
+    fun `retry order starts after preferred endpoint and wraps through speed ranks`() {
+        val first = DomainIp("a.cc", "1.1.1.1")
+        val second = DomainIp("b.cc", "2.2.2.2")
+        val third = DomainIp("c.cc", "3.3.3.3")
+        val pinned = DomainIp("manual.cc", "4.4.4.4")
+
+        assertEquals(
+            listOf(second, third, first),
+            ImageEndpointSelectionPolicy.retryOrder(second, listOf(first, second, third)),
+        )
+        assertEquals(
+            listOf(pinned, first, second, third),
+            ImageEndpointSelectionPolicy.retryOrder(pinned, listOf(first, second, third)),
+        )
     }
 }

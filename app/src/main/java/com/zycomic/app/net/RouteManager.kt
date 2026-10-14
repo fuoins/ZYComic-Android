@@ -412,11 +412,17 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
+    /** Successful configured image endpoints ordered exactly like the speed table. */
+    fun rankedSuccessfulImgEndpoints(): List<DomainIp> =
+        ImageEndpointSelectionPolicy.rankedSuccessfulEndpoints(
+            delays = lastImgIpDelays,
+            verdicts = lastImgIpVerdicts,
+            configuredDomains = imgDomains,
+        )
+
     /** Fastest reachable image domain/IP combination from the most recent run. */
     val fastestImgEndpoint: DomainIp?
-        get() = lastImgIpDelays.entries
-            .filter { it.value < Long.MAX_VALUE && lastImgIpVerdicts[it.key] == SpeedTester.ImgVerdict.OK }
-            .minByOrNull { it.value }?.key
+        get() = rankedSuccessfulImgEndpoints().firstOrNull()
 
     /** 从逐 IP 测速结果派生最快图源域名，无数据返回 null。 */
     val fastestImgDomain: String?
@@ -539,44 +545,43 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    // ---- 图域失败冷却与失败轮换（图片请求兜底）----
-    /** host -> 冷却到期时间戳（ms）。 */
-    private val imgFailUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    /** 图域失败冷却时长：30 分钟。 */
+    // ---- 图域端点失败冷却（图片请求兜底）----
+    /** DomainIp -> cooldown expiry timestamp (ms); memory-only for the current process. */
+    private val imgEndpointFailUntil = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
+    /** 图源端点网络失败冷却时长：30 分钟。 */
     private const val IMG_FAIL_COOLDOWN_MS = 30L * 60L * 1000L
 
-    /** 标记某图域本次失败（403/reset/超时/非图片），进入短期冷却。 */
-    fun markImgDomainFailed(host: String?) {
-        host ?: return
-        imgFailUntil[host] = System.currentTimeMillis() + IMG_FAIL_COOLDOWN_MS
+    private fun normalizedEndpoint(endpoint: DomainIp): DomainIp =
+        DomainIp(endpoint.domain.lowercase(java.util.Locale.ROOT), endpoint.ip.trim().lowercase(java.util.Locale.ROOT))
+
+    /** Mark one exact endpoint after a transport failure; HTTP/content failures stay page-local. */
+    fun markImgEndpointFailed(endpoint: DomainIp) {
+        imgEndpointFailUntil[normalizedEndpoint(endpoint)] = System.currentTimeMillis() + IMG_FAIL_COOLDOWN_MS
     }
 
-    /** 图域当前是否可用（未在冷却期）。 */
-    fun isImgDomainAvailable(host: String?): Boolean {
-        host ?: return true
-        val until = imgFailUntil[host] ?: return true
+    /** Whether one exact domain/IP endpoint is not in cooldown. */
+    fun isImgEndpointAvailable(endpoint: DomainIp): Boolean {
+        val key = normalizedEndpoint(endpoint)
+        val until = imgEndpointFailUntil[key] ?: return true
         if (until <= System.currentTimeMillis()) {
-            imgFailUntil.remove(host)
+            imgEndpointFailUntil.remove(key, until)
             return true
         }
         return false
     }
 
     /**
-     * 从 [currentHost] 起按图域列表顺序取下一个"未冷却"图域；没有可用域返回 null。
-     * 仅遍历一轮，不重复返回 currentHost。
+     * Build the per-request order: selected/manual endpoint first, then successful endpoints by
+     * speed. A null entry means the current request host has no measured endpoint, so the caller
+     * may resolve one IP for its first attempt before continuing with measured candidates.
      */
-    fun nextAvailableImgDomain(currentHost: String?): String? {
-        val all = imgDomains
-        if (all.isEmpty()) return null
-        val curIdx = all.indexOfFirst { it.equals(currentHost, ignoreCase = true) }
-        val start = if (curIdx >= 0) curIdx else imgIndex
-        val n = all.size
-        for (step in 1..n) {
-            val cand = all[(start + step) % n]
-            if (!cand.equals(currentHost, ignoreCase = true) && isImgDomainAvailable(cand)) return cand
-        }
-        return null
+    fun imageRetryEndpoints(requestedDomain: String): List<DomainIp?> {
+        val ranked = rankedSuccessfulImgEndpoints()
+        val selectedIp = preferredIp(requestedDomain)
+        val preferred = selectedIp?.let { DomainIp(requestedDomain, it) }
+            ?: ranked.firstOrNull { it.domain.equals(requestedDomain, ignoreCase = true) }
+        if (preferred == null) return listOf(null) + ranked
+        return ImageEndpointSelectionPolicy.retryOrder(preferred, ranked)
     }
 
     /** 临时切换到下一条线路（不持久化）。 */
