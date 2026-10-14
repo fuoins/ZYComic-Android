@@ -1,6 +1,9 @@
 package com.zycomic.app.net
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,6 +36,19 @@ object RemoteConfigFetcher {
     enum class Outcome { APPLIED, NOT_CHANGED, FAILED }
 
     data class Result(val outcome: Outcome, val message: String, val version: Int)
+
+    data class ConfigRetest(val version: Int, val duringStartup: Boolean)
+
+    private val _configRetest = MutableStateFlow<ConfigRetest?>(null)
+    val configRetest: StateFlow<ConfigRetest?> = _configRetest.asStateFlow()
+
+    fun beginConfigRetest(version: Int, duringStartup: Boolean) {
+        _configRetest.value = ConfigRetest(version, duringStartup)
+    }
+
+    fun finishConfigRetest(version: Int) {
+        if (_configRetest.value?.version == version) _configRetest.value = null
+    }
 
     // 独立客户端：系统 DNS + 默认证书校验 + 正常超时；不接 RuleDns / trust-all / 去 SNI。
     private val client: OkHttpClient by lazy {

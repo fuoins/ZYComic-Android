@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -15,6 +18,16 @@ import kotlinx.coroutines.launch
  * - SNI 绕过域名列表，供 SniRemovingSocketFactory 移除 SNI。
  */
 object RouteManager {
+
+    data class SpeedTestSnapshot(
+        val lineDelays: Map<DomainIp, Long> = emptyMap(),
+        val imgDelays: Map<DomainIp, Long> = emptyMap(),
+        val imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict> = emptyMap(),
+        val remoteVersion: Int? = null,
+    )
+
+    private val _speedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
+    val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _speedTestSnapshot.asStateFlow()
 
     // Candidate routes and image sources are populated only from validated remote configuration.
     @Volatile var lineHosts: List<String> = emptyList()
@@ -28,6 +41,10 @@ object RouteManager {
 
     /** Increased whenever an authoritative route/source configuration replaces the active lists. */
     @Volatile var configRevision: Long = 0L
+        private set
+
+    /** Remote configuration version that supplied the currently active route/source lists. */
+    @Volatile var activeRemoteConfigVersion: Int? = null
         private set
 
     /** Replace image-source candidates with the exact remote list; never merge local or learned entries. */
@@ -148,11 +165,15 @@ object RouteManager {
     }
 
     /** Write per-IP measurements and maintain the legacy per-domain summaries. */
+    @Synchronized
     fun setEndpointDelays(
         line: Map<DomainIp, Long>,
         img: Map<DomainIp, Long>,
         imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
-    ) {
+        remoteVersion: Int? = activeRemoteConfigVersion,
+        expectedConfigRevision: Long? = null,
+    ): Boolean {
+        if (expectedConfigRevision != null && expectedConfigRevision != configRevision) return false
         lastLineIpDelays = line.toMap()
         lastImgIpDelays = img.toMap()
         lastImgIpVerdicts = imgVerdicts.toMap()
@@ -165,6 +186,13 @@ object RouteManager {
             val values = img.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
             if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
         }.toMap()
+        _speedTestSnapshot.value = SpeedTestSnapshot(
+            lineDelays = line.toMap(),
+            imgDelays = img.toMap(),
+            imgVerdicts = imgVerdicts.toMap(),
+            remoteVersion = remoteVersion,
+        )
+        return true
     }
 
     fun isSpeedTestToday(): Boolean = try {
@@ -201,6 +229,7 @@ object RouteManager {
         get() = lineHosts.isNotEmpty() && imgDomains.isNotEmpty() && customRule.isNotEmpty()
 
     /** Clear every route/rule when no valid cached remote configuration exists. */
+    @Synchronized
     fun clearConfiguration() {
         lineHosts = emptyList()
         baselineImgDomains = emptyList()
@@ -211,6 +240,7 @@ object RouteManager {
         selectedLineDomain = null
         setCustomRule(emptyMap())
         setSniDomains(emptySet())
+        activeRemoteConfigVersion = null
         clearSpeedTestResults()
         clearPersistedCandidateLists()
         configRevision++
@@ -592,8 +622,10 @@ object RouteManager {
      * 应用显式的配置线路与图源列表，精确替换当前集合；不得合并内置、本地缓存或运行时学习项。
      * 若当前选中线路/图源仍存在则保留，否则回到首项并清理失效 pin。
      */
-    fun applyBaseLists(lineUrls: List<String>, sourceDomains: List<String>) {
+    @Synchronized
+    fun applyBaseLists(lineUrls: List<String>, sourceDomains: List<String>, remoteVersion: Int? = null) {
         val lists = RouteListPolicy.replace(lineUrls, sourceDomains)
+        activeRemoteConfigVersion = remoteVersion
         val oldLine = lineHosts.getOrNull(lineIndex)
         val savedSelection = runCatching {
             DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
@@ -624,12 +656,14 @@ object RouteManager {
     }
 
     /** Remove speed rows for endpoints that may have been removed by the latest configuration. */
+    @Synchronized
     fun clearSpeedTestResults() {
         lastLineDelays = emptyMap()
         lastImgDelays = emptyMap()
         lastLineIpDelays = emptyMap()
         lastImgIpDelays = emptyMap()
         lastImgIpVerdicts = emptyMap()
+        _speedTestSnapshot.value = SpeedTestSnapshot()
     }
 
     /** 设置 SNI 绕过域名列表（由 lines+sources 派生，调用方负责计算） */

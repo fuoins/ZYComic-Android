@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,6 +94,25 @@ class SettingsViewModel {
     val remoteChecking = MutableStateFlow(false)
     /** 远程配置版本/更新时间/错误的汇总文案 */
     val remoteInfo = MutableStateFlow(buildRemoteInfo())
+    /** 最近一次完整测速结果实际使用的远程配置版本。 */
+    val speedTestResultVersion = MutableStateFlow(RouteManager.speedTestSnapshot.value.remoteVersion)
+
+    init {
+        scope.launch {
+            RouteManager.speedTestSnapshot.collect { snapshot ->
+                lineDelays.value = snapshot.lineDelays
+                imgDelays.value = snapshot.imgDelays
+                imgVerdicts.value = snapshot.imgVerdicts
+                speedTestResultVersion.value = snapshot.remoteVersion
+            }
+        }
+        scope.launch {
+            SpeedTester.progress.collect { speedTestProgress.value = it }
+        }
+        scope.launch {
+            DevConfig.remoteVersionFlow.collect { refreshRemoteInfo() }
+        }
+    }
 
     /** 重新读取远程配置状态文案（版本/更新时间/错误）。 */
     fun refreshRemoteInfo() {
@@ -128,15 +148,20 @@ class SettingsViewModel {
                         currentImgIndex.value = RouteManager.imgIndex
                         currentImgIp.value = RouteManager.selectedImgIp
                         imgPinned.value = RouteManager.pinnedImgDomain
-                        val testResult = runCatching {
-                            SpeedTester.runForCurrentConfig(
-                                onProgress = { lines, images, verdicts ->
-                                    lineDelays.value = lines
-                                    imgDelays.value = images
-                                    imgVerdicts.value = verdicts
-                                },
-                                onStageProgress = { speedTestProgress.value = it },
-                            )
+                        RemoteConfigFetcher.beginConfigRetest(r.version, duringStartup = false)
+                        val testResult = try {
+                            runCatching {
+                                SpeedTester.runForCurrentConfig(
+                                    onProgress = { lines, images, verdicts ->
+                                        lineDelays.value = lines
+                                        imgDelays.value = images
+                                        imgVerdicts.value = verdicts
+                                    },
+                                    onStageProgress = { speedTestProgress.value = it },
+                                )
+                            }
+                        } finally {
+                            RemoteConfigFetcher.finishConfigRetest(r.version)
                         }
                         testing.value = false
                         if (testResult.isSuccess) {

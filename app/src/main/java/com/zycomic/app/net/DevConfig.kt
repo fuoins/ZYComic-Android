@@ -43,6 +43,9 @@ object DevConfig {
     private val _routeConfigState = MutableStateFlow<RouteConfigState>(RouteConfigState.Loading)
     val routeConfigState: StateFlow<RouteConfigState> = _routeConfigState.asStateFlow()
 
+    private val _remoteVersionFlow = MutableStateFlow(0)
+    val remoteVersionFlow: StateFlow<Int> = _remoteVersionFlow.asStateFlow()
+
     /** 全局 ApplicationContext，供 RouteManager 等使用。 */
     val appContext: Context? get() = context
 
@@ -54,6 +57,7 @@ object DevConfig {
         val configPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val remotePrefs = ctx.getSharedPreferences(PREFS_REMOTE, Context.MODE_PRIVATE)
         val version = remotePrefs.getInt("remote_version", 0)
+        _remoteVersionFlow.value = version
         val remoteHosts = runCatching {
             val array = JSONArray(remotePrefs.getString("remote_hosts", "[]"))
             (0 until array.length()).map { array.getString(it).lowercase() }.toSet()
@@ -238,7 +242,8 @@ object DevConfig {
         val sources = strList("sources")
         require(lines.isNotEmpty() && sources.isNotEmpty()) { "Remote routes and sources must not be empty" }
         RouteManager.setCustomRule(ruleMap)
-        RouteManager.applyBaseLists(lines, sources)
+        val version = root["version"]?.jsonPrimitive?.content?.toIntOrNull()
+        RouteManager.applyBaseLists(lines, sources, version)
         val canonical = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
         RouteManager.setSniDomains((canonical + ruleMap.keys) - "dns.google")
     }
@@ -318,6 +323,7 @@ object DevConfig {
                 .putLong("last_success_ts", System.currentTimeMillis())
                 .remove("last_error")
             if (!editor.commit()) editor.apply()
+            _remoteVersionFlow.value = version
             Log.i(TAG, "authoritative remote config applied v$version (hosts=${hosts.size})")
             true
         } catch (e: Exception) {

@@ -154,7 +154,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             val result = runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }.getOrNull()
             if (result?.outcome == com.zycomic.app.net.RemoteConfigFetcher.Outcome.APPLIED) {
-                runCatching { com.zycomic.app.net.SpeedTester.runForCurrentConfig() }
+                com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
+                try {
+                    runCatching { com.zycomic.app.net.SpeedTester.runForCurrentConfig() }
+                } finally {
+                    com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
+                }
             }
         }
 

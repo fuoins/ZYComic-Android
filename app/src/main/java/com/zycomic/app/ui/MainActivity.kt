@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -251,7 +253,9 @@ fun AppContent(
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
     val speedTestProgress by settingsVm.speedTestProgress.collectAsState()
+    val configRetest by com.zycomic.app.net.RemoteConfigFetcher.configRetest.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
+    val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
 
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
     var onboardingDone by remember {
@@ -316,7 +320,7 @@ fun AppContent(
 
     // 测速完成前不渲染底层页面，避免页面用默认线路发起请求；
     // 测速结束后若首启向导未完成，则先全屏进入向导，完成后才进主界面
-    if (!speedTesting && onboardingDone) {
+    if (!blockingSpeedTest && onboardingDone) {
         val browseVm = remember { BrowseViewModel() }
         val libraryVm = remember { LibraryViewModel(mode = 0) }
         val historyVm = remember { HistoryViewModel() }
@@ -422,7 +426,7 @@ fun AppContent(
                 }
             }
         }
-    } else if (!speedTesting) {
+    } else if (!blockingSpeedTest) {
         // 测速已结束但首启向导未完成：全屏进入 3 页向导
         com.zycomic.app.ui.onboarding.OnboardingHost(
             settingsVm = settingsVm,
@@ -431,10 +435,38 @@ fun AppContent(
     } else {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 48.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text(
+                            "网络维护提醒",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Text(
+                            "本软件在每日晚上18:00前网络流畅,18:00后进行网络维护,会出现卡顿情况",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
                 Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(24.dp))
                 CircularProgressIndicator(modifier = Modifier.size(64.dp), strokeWidth = 4.dp)
                 Spacer(modifier = Modifier.height(24.dp))
+                if (configRetest?.duringStartup == true) {
+                    Text(
+                        "检测到网络配置更新（v${configRetest?.version}），正在使用新配置重新测速…",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 if (speedTestProgress.total > 0 &&
                     speedTestProgress.phase in setOf(
                         com.zycomic.app.net.SpeedTester.Phase.TESTING_LINES,

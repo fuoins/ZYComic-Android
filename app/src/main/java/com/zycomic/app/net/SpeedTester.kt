@@ -3,6 +3,9 @@ package com.zycomic.app.net
 import android.util.Log
 import com.zycomic.app.data.dto.Manga
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -155,6 +158,14 @@ object SpeedTester {
         val failed: Int = 0,
         val noImage: Int = 0,
     )
+
+    private val _progress = MutableStateFlow(Progress())
+    val progress: StateFlow<Progress> = _progress.asStateFlow()
+
+    private fun publishProgress(progress: Progress, callback: ((Progress) -> Unit)?) {
+        _progress.value = progress
+        callback?.invoke(progress)
+    }
 
     /** 最近一次 runAndApply 是否因为"已有测速在跑"被整轮丢弃（被丢弃时一个域都没探）。 */
     @Volatile var lastRunSkipped: Boolean = false
@@ -529,7 +540,13 @@ object SpeedTester {
         onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
-            onStageProgress?.invoke(Progress(Phase.PREPARING_LINES))
+            val configRevisionAtStart = RouteManager.configRevision
+            val configVersionAtStart = RouteManager.activeRemoteConfigVersion
+            fun reportStage(progress: Progress) {
+                if (configRevisionAtStart == RouteManager.configRevision) {
+                    publishProgress(progress, onStageProgress)
+                }
+            }
             if (!running.compareAndSet(false, true)) {
                 lastRunSkipped = true
                 onStageProgress?.invoke(Progress(Phase.SKIPPED))
@@ -537,7 +554,7 @@ object SpeedTester {
                 return@coroutineScope (-1 to -1)
             }
             lastRunSkipped = false
-            val configRevisionAtStart = RouteManager.configRevision
+            reportStage(Progress(Phase.PREPARING_LINES))
             // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
             lastImgVerdicts = emptyMap()
             lastImgIpVerdicts = emptyMap()
@@ -550,15 +567,17 @@ object SpeedTester {
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val resolvedLines = lineTargets()
-                onStageProgress?.invoke(Progress(Phase.TESTING_LINES, total = resolvedLines.size))
+                reportStage(Progress(Phase.TESTING_LINES, total = resolvedLines.size))
                 val lineJobs = resolvedLines.map { target ->
                     async {
                         probeSemaphore.withPermit {
                             val delay = measureLineAtIp(lineClient, target)
                             lineAcc[target.endpoint] = delay
-                            onProgress?.invoke(lineAcc.toMap(), emptyMap(), emptyMap())
+                            if (configRevisionAtStart == RouteManager.configRevision) {
+                                onProgress?.invoke(lineAcc.toMap(), emptyMap(), emptyMap())
+                            }
                             val successful = lineAcc.values.count { it < MAX }
-                            onStageProgress?.invoke(
+                            reportStage(
                                 Progress(
                                     phase = Phase.TESTING_LINES,
                                     completed = lineAcc.size,
@@ -572,8 +591,11 @@ object SpeedTester {
                     }
                 }
                 val lines = lineJobs.awaitAll().toMap()
+                if (configRevisionAtStart != RouteManager.configRevision) {
+                    return@coroutineScope (-1 to -1)
+                }
                 val successfulLines = lines.values.count { it < MAX }
-                onStageProgress?.invoke(
+                reportStage(
                     Progress(
                         phase = Phase.APPLYING_LINE,
                         completed = lines.size,
@@ -595,16 +617,16 @@ object SpeedTester {
                 Log.i(TAG, "line test done, best=$bestLine")
 
                 // 阶段 2：兜底样本路径（固定封面 404 时才用到）
-                onStageProgress?.invoke(Progress(Phase.FETCHING_SAMPLE))
+                reportStage(Progress(Phase.FETCHING_SAMPLE))
                 val samplePath = obtainProbePath()
                 Log.i(TAG, "img probe sample path=$samplePath")
 
                 // 阶段 3：逐条图源域名/IP探测（包含真实图片内容校验）。
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val verdictAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
-                onStageProgress?.invoke(Progress(Phase.PREPARING_IMAGES))
+                reportStage(Progress(Phase.PREPARING_IMAGES))
                 val resolvedImages = imgTargets()
-                onStageProgress?.invoke(Progress(Phase.TESTING_IMAGES, total = resolvedImages.size))
+                reportStage(Progress(Phase.TESTING_IMAGES, total = resolvedImages.size))
                 val imgJobs = resolvedImages.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
@@ -613,8 +635,10 @@ object SpeedTester {
                             verdictAcc[endpoint] = result.verdict
                             lastImgIpVerdicts = verdictAcc.toMap()
                             lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
-                            onProgress?.invoke(lines, imgAcc.toMap(), verdictAcc.toMap())
-                            onStageProgress?.invoke(
+                            if (configRevisionAtStart == RouteManager.configRevision) {
+                                onProgress?.invoke(lines, imgAcc.toMap(), verdictAcc.toMap())
+                            }
+                            reportStage(
                                 Progress(
                                     phase = Phase.TESTING_IMAGES,
                                     completed = imgAcc.size,
@@ -632,7 +656,7 @@ object SpeedTester {
                 lastImgIpVerdicts = verdictAcc.toMap()
                 lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
 
-                onStageProgress?.invoke(
+                reportStage(
                     Progress(
                         phase = Phase.APPLYING_RESULTS,
                         completed = imgs.size,
@@ -642,7 +666,16 @@ object SpeedTester {
                         noImage = verdictAcc.values.count { it == ImgVerdict.NO_IMAGE },
                     ),
                 )
-                RouteManager.setEndpointDelays(lines, imgs, verdictAcc)
+                if (!RouteManager.setEndpointDelays(
+                        lines,
+                        imgs,
+                        verdictAcc,
+                        remoteVersion = configVersionAtStart,
+                        expectedConfigRevision = configRevisionAtStart,
+                    )
+                ) {
+                    return@coroutineScope (-1 to -1)
+                }
                 val bestImg = RouteManager.fastestImgEndpoint
                 val imgDomainChanged = bestImg != null && RouteManager.pinnedImgDomain.isNullOrBlank() &&
                     (bestImg.domain != RouteManager.imgDomains.getOrNull(previousImgIndex) || bestImg.ip != previousImgIp)
@@ -673,7 +706,7 @@ object SpeedTester {
                     (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
                 lastCompletedConfigRevision = configRevisionAtStart
                 lastConfigRunResult = result
-                onStageProgress?.invoke(Progress(Phase.COMPLETE))
+                reportStage(Progress(Phase.COMPLETE))
                 result
             } finally {
                 running.set(false)
@@ -698,7 +731,7 @@ object SpeedTester {
                 while (running.get()) delay(50)
                 if (lastRunAt > 0L && lastCompletedConfigRevision == RouteManager.configRevision) {
                     onProgress?.invoke(RouteManager.lastLineIpDelays, RouteManager.lastImgIpDelays, lastImgIpVerdicts)
-                    onStageProgress?.invoke(Progress(Phase.COMPLETE))
+                    publishProgress(Progress(Phase.COMPLETE), onStageProgress)
                     return@withContext lastConfigRunResult
                 }
 

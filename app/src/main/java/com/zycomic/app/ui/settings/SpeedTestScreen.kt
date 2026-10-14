@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.ImageEndpointSelectionPolicy
+import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -54,6 +55,8 @@ fun SpeedTestScreen(
     val followVpn by vm.followSystemVpn.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
+    val configRetest by RemoteConfigFetcher.configRetest.collectAsState()
+    val speedTestResultVersion by vm.speedTestResultVersion.collectAsState()
     val speedTestProgress by vm.speedTestProgress.collectAsState()
 
     // 每个域名/IP独立排序；不可用端点沉底并保留在测速日志中。
@@ -104,8 +107,16 @@ fun SpeedTestScreen(
                     )
                 }
             }
-            if (testing) {
+            if (testing || configRetest != null) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    configRetest?.let {
+                        Text(
+                            "检测到网络配置更新（v${it.version}），正在使用新配置重新测速…",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Text(vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
                     if (speedTestProgress.total > 0 &&
                         speedTestProgress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
@@ -138,6 +149,15 @@ fun SpeedTestScreen(
             }
 
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
+                item {
+                    Text(
+                        speedTestResultVersion?.let { "测速结果对应配置：远程配置 v$it" }
+                            ?: "测速结果对应配置：暂无当前配置的完整测速结果",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
