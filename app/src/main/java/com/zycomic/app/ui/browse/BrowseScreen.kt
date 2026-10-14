@@ -540,10 +540,22 @@ private fun BrowseFilterDialog(
     onOpenTagDialog: () -> Unit,
     displayOnly: Boolean = false,
 ) {
-    val titles = if (displayOnly) persistentListOf("显示") else persistentListOf("重新筛选（不更改默认）", "显示")
+    var showInfo by remember { mutableStateOf(false) }
+    val titles = if (displayOnly) persistentListOf("显示") else persistentListOf("重新筛选", "显示")
     TabbedDialog(
         onDismissRequest = onDismiss,
         tabTitles = titles,
+        tabHeaderAction = if (displayOnly) null else {
+            {
+                IconButton(onClick = { showInfo = true }) {
+                    Icon(
+                        imageVector = Icons.Outlined.Info,
+                        contentDescription = "筛选说明",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
     ) { page ->
         Column(
             modifier = Modifier
@@ -564,6 +576,16 @@ private fun BrowseFilterDialog(
                 DisplayFilter(vm, orientation)
             }
         }
+    }
+    if (showInfo) {
+        AlertDialog(
+            onDismissRequest = { showInfo = false },
+            title = { Text("说明") },
+            text = {
+                Text("重新筛选按本次修改展示，不会修改默认筛选；切换离开该 Tab 再返回或重进软件时会恢复默认配置。若要将标签配置固定为一个 Tab，请点击 Tab 栏最右侧按钮进行配置。")
+            },
+            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("确认") } },
+        )
     }
 }
 

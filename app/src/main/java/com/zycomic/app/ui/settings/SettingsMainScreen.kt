@@ -12,17 +12,22 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -39,12 +44,13 @@ import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 fun SettingsMainScreen(
     onOpenAppearance: () -> Unit,
     onOpenReader: () -> Unit,
-    onOpenSpeedTest: () -> Unit,
+    onOpenDeveloperSettings: () -> Unit,
     onOpenDataStorage: () -> Unit,
     onOpenAbout: () -> Unit,
     onReplayOnboarding: () -> Unit,
 ) {
     val context = LocalContext.current
+    var showDeveloperWarning by remember { mutableStateOf(false) }
     val topBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
 
@@ -82,10 +88,10 @@ fun SettingsMainScreen(
             item { HorizontalDivider() }
             item {
                 TextPreferenceWidget(
-                    title = "测速日志",
-                    subtitle = "查看线路/图源延迟，手动测速",
-                    icon = Icons.Outlined.Speed,
-                    onPreferenceClick = onOpenSpeedTest,
+                    title = "开发者设置",
+                    subtitle = "测速日志与可用域名工具",
+                    icon = Icons.Outlined.Code,
+                    onPreferenceClick = { showDeveloperWarning = true },
                 )
             }
             item {
@@ -126,5 +132,28 @@ fun SettingsMainScreen(
                 )
             }
         }
+    }
+
+    if (showDeveloperWarning) {
+        AlertDialog(
+            onDismissRequest = { showDeveloperWarning = false },
+            title = { Text("开发者设置") },
+            text = { Text("如果你不知道你在干什么，请不要点击此按钮！这可能会影响漫画的正常运行。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeveloperWarning = false
+                        onOpenDeveloperSettings()
+                    },
+                ) {
+                    Text("继续")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeveloperWarning = false }) {
+                    Text("取消")
+                }
+            },
+        )
     }
 }

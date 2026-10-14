@@ -44,6 +44,7 @@ fun TabbedDialog(
     tabTitles: ImmutableList<String>,
     modifier: Modifier = Modifier,
     tabOverflowMenuContent: (@Composable ColumnScope.(() -> Unit) -> Unit)? = null,
+    tabHeaderAction: (@Composable () -> Unit)? = null,
     pagerState: PagerState = rememberPagerState { tabTitles.size },
     content: @Composable (Int) -> Unit,
 ) {
@@ -71,6 +72,7 @@ fun TabbedDialog(
                     }
                 }
 
+                tabHeaderAction?.invoke()
                 tabOverflowMenuContent?.let { MoreMenu(it) }
             }
             HorizontalDivider()

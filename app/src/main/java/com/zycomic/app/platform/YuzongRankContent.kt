@@ -20,8 +20,13 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +65,7 @@ fun YuzongRankContent(
     var items by remember { mutableStateOf<List<PlatformRankItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showInfo by remember { mutableStateOf(false) }
 
     fun reload(p: PlatformMeta, s: String) {
         loading = true
@@ -89,6 +95,7 @@ fun YuzongRankContent(
                 subId = p.defaultSub
                 PlatformPrefs.save(context, p, subId)
             },
+            onInfoClick = { showInfo = true },
         )
         SubChipRow(
             platform = platform,
@@ -125,10 +132,24 @@ fun YuzongRankContent(
             }
         }
     }
+    if (showInfo) {
+        AlertDialog(
+            onDismissRequest = { showInfo = false },
+            title = { Text("说明") },
+            text = {
+                Text("所有排行榜会在打开或切换平台/分类时自动抓取最新官方数据。点击漫画会通过非官方图源进行搜索查询，不直接跳转漫画详情页；其他 Tab 正常跳转。")
+            },
+            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("确认") } },
+        )
+    }
 }
 
 @Composable
-private fun PlatformChipRow(selected: PlatformMeta, onSelect: (PlatformMeta) -> Unit) {
+private fun PlatformChipRow(
+    selected: PlatformMeta,
+    onSelect: (PlatformMeta) -> Unit,
+    onInfoClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -140,6 +161,13 @@ private fun PlatformChipRow(selected: PlatformMeta, onSelect: (PlatformMeta) -> 
                 selected = p.id == selected.id,
                 onClick = { onSelect(p) },
                 label = { Text(p.label) },
+            )
+        }
+        IconButton(onClick = onInfoClick) {
+            Icon(
+                imageVector = Icons.Outlined.Info,
+                contentDescription = "宇总排行说明",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
