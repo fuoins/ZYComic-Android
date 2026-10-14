@@ -21,6 +21,7 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.SNIServerName
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -570,17 +571,44 @@ object NetworkModule {
             // SSLV3_ALERT_HANDSHAKE_FAILURE，去了 SNI 只会把一个本来能通的 CDN 域打死。
             // （嵌套类不能非限定访问外层 object 成员，必须写 NetworkModule.）
             if (NetworkModule.isInCloudflare(socket.inetAddress)) return
+
+            // OkHttp 5.3.2 creates this layered socket with createSocket(rawSocket, host, port, true),
+            // then configures TLS extensions. The app's minimum API is 26, where that step only
+            // configures ALPN and does not overwrite SSLParameters.serverNames.
+            var originalServerNames: List<SNIServerName>? = null
+            var originalServerNamesCaptured = false
             try {
                 val params = socket.sslParameters
-                params.serverNames = null
+                originalServerNames = params.serverNames
+                originalServerNamesCaptured = true
+                // null means provider defaults; an empty list explicitly disables the SNI extension.
+                params.serverNames = emptyList()
                 socket.sslParameters = params
-            } catch (_: Exception) {
-                try {
-                    val field = socket.javaClass.getDeclaredField("serverNames")
-                    field.isAccessible = true
-                    field.set(socket, null)
-                } catch (_: Exception) {
+                if (socket.sslParameters.serverNames.isNullOrEmpty()) {
+                    Log.d("NetworkModule", "SNI disabled for configured host=$host")
+                    return
                 }
+
+                restoreServerNames(socket, host, originalServerNames)
+                Log.w("NetworkModule", "SNI disablement did not stick for host=$host; using provider-default SNI")
+            } catch (e: Exception) {
+                if (originalServerNamesCaptured) {
+                    restoreServerNames(socket, host, originalServerNames)
+                }
+                // Failure to alter SNI must not fail the TLS connection: keep the provider default.
+                Log.w("NetworkModule", "Could not disable SNI for host=$host; keeping platform defaults", e)
+            }
+        }
+
+        private fun restoreServerNames(
+            socket: SSLSocket,
+            host: String,
+            serverNames: List<SNIServerName>?,
+        ) {
+            try {
+                socket.sslParameters = socket.sslParameters.apply { this.serverNames = serverNames }
+            } catch (e: Exception) {
+                Log.w("NetworkModule", "Could not restore platform SNI defaults for host=$host", e)
             }
         }
     }
