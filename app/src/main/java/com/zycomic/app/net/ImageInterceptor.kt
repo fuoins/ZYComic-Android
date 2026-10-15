@@ -400,7 +400,7 @@ class ImageInterceptor : Interceptor {
                         val buffer = ByteArray(32 * 1024)
                         while (true) {
                             if (scope?.isCurrent == false) return Outcome.Fail.Cancelled
-                            if (call.isCanceled) {
+                            if (call.isCanceled()) {
                                 if (scope?.reasonFor(call) == null) throw SocketTimeoutException("Image call ended without an owner cancellation")
                                 return Outcome.Fail.Cancelled
                             }

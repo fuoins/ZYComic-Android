@@ -199,6 +199,13 @@ internal class HttpPageLoader(
         return true
     }
 
+    /** Preserve the EHentai reader's immediate-load action using the current viewer-owned queue. */
+    fun boostPage(page: ReaderPage) {
+        if (page.status == Page.State.Queue) {
+            workerScope.launchIO { loadPage(page) }
+        }
+    }
+
     override fun retryPage(page: ReaderPage) {
         val sourceKey = RouteManager.imgRewriteTarget ?: RouteManager.imgHost
         if (page.retryBudgetSource != sourceKey) {

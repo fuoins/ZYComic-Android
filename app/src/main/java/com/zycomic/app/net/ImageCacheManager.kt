@@ -97,7 +97,7 @@ object ImageCacheManager {
 
     fun commit(url: String) {
         val temp = File(cacheDirectory(), "${md5(url)}.tmp-legacy")
-        commitAttempt(url, temp) { true }
+        commitAttempt(url, temp, stillOwner = { true })
     }
 
     private fun cacheDirectory(): File = cacheDir ?: error("ImageCacheManager.init() must be called first")
