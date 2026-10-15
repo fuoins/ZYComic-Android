@@ -20,15 +20,15 @@ sealed interface ReaderPageLoadStatus {
 
     val label: String
         get() = when (this) {
-            Queued -> "排队中"
-            WaitingForRequest -> "排队等待请求额度"
+            Queued -> "等待加入普通队列中"
+            WaitingForRequest -> "请求线程加载"
             ResolvingImageUrl -> "正在获取图片地址"
-            Requesting -> "正在请求图片"
-            is Receiving -> percentage?.let { "正在下载（$it%）" } ?: "正在接收图片数据"
+            Requesting -> "正在请求图片端点"
+            is Receiving -> "正在接收图片数据"
             is TryingFallback -> automaticRetryRound?.let {
                 "自动重试（第 $it/${PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS} 轮）"
             }
-                ?: "自动重试/尝试备用节点（第 $attempt/$total 个）"
+                ?: "自动重试/保持原请求且触发竞速加载（第 $attempt/$total 个）"
             Idle -> ""
         }
 }

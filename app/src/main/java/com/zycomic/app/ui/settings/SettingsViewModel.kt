@@ -537,7 +537,9 @@ class SettingsViewModel {
             SpeedTester.Phase.FAILED,
             SpeedTester.Phase.SKIPPED,
         )
-        val active = SpeedTester.isRunning || preparingTest
+        // MainActivity begins its launch test from LaunchedEffect; a splash-page tap can arrive
+        // just before autoSelecting flips true, so treat the not-yet-completed startup test as active.
+        val active = SpeedTester.isRunning || preparingTest || !autoTestDone
         if (!active) {
             imageReuseNotice.value = "本轮线路测速后将使用上次图源结果"
             runSpeedTest(keepImageReuseNotice = true)

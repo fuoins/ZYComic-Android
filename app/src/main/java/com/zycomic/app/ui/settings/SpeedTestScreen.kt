@@ -74,12 +74,9 @@ fun SpeedTestScreen(
     val followVpn by vm.followSystemVpn.collectAsState()
     val vpnOnlyAutoRetest by vm.vpnOnlyAutoRetest.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
-    val remoteInfo by vm.remoteInfo.collectAsState()
     val configRetest by RemoteConfigFetcher.configRetest.collectAsState()
     val speedTestResultVersion by vm.speedTestResultVersion.collectAsState()
     val speedTestProgress by vm.speedTestProgress.collectAsState()
-    val imageReuseNotice by vm.imageReuseNotice.collectAsState()
-    val reusableImageSnapshot by RouteManager.reusableImageSpeedTestSnapshot.collectAsState()
     val pendingExport = remember { mutableStateOf<Pair<RouteManager.SpeedTestSnapshot, String>?>(null) }
     val exportSuccessMessage = stringResource(KMR.strings.speed_test_export_success)
     val exportFailedMessage = stringResource(KMR.strings.speed_test_export_failed)
@@ -166,14 +163,9 @@ fun SpeedTestScreen(
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    remoteInfo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
                 Button(
                     enabled = !remoteChecking,
                     onClick = { vm.checkRemoteConfig() },
@@ -210,13 +202,6 @@ fun SpeedTestScreen(
                         )
                     }
                     Text(vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
-                    imageReuseNotice?.let { notice ->
-                        Text(
-                            notice,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
                     if (speedTestProgress.total > 0 &&
                         speedTestProgress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
                     ) {
@@ -434,21 +419,6 @@ fun SpeedTestScreen(
                         ) {
                             Text(if (speedTestActive) "测速中..." else "重新测速")
                         }
-                    }
-                    if (reusableImageSnapshot != null) {
-                        Button(
-                            onClick = { vm.usePreviousImageResults() },
-                            enabled = imageReuseNotice == null,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        ) {
-                            Text("使用上次的图源测速结果")
-                        }
-                        Text(
-                            "建议短期内测速使用此功能，会节省大量时间，间隔时间过长可能出现图片加载不出来，若已选择并卡顿，可在漫画里切换图源点击重新测速",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        )
                     }
                 }
             }

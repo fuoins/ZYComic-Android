@@ -66,8 +66,11 @@ class ImageAttemptCoordinator(primaryCapacity: Int = 4) : Closeable {
         false
     }
 
-    fun scheduleWatchdog(task: Runnable): ScheduledFuture<*> =
+    fun scheduleWatchdog(task: Runnable): ScheduledFuture<*>? = try {
         watchdog.scheduleAtFixedRate(task, 250, 250, TimeUnit.MILLISECONDS)
+    } catch (_: RejectedExecutionException) {
+        null
+    }
 
     override fun close() {
         raceExecutor.shutdownNow()

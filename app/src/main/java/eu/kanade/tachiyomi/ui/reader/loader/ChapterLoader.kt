@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import mihon.core.archive.archiveReader
 import mihon.core.archive.epubReader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
@@ -22,6 +23,7 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.io.Format
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Loader used to retrieve the [PageLoader] for a given chapter.
@@ -42,7 +44,24 @@ class ChapterLoader(
     ),
     // SY <--
 ) {
+    private val loadedPageLoaders = ConcurrentHashMap<PageLoader, ReaderChapter>()
+
+    @Volatile
+    private var isRecycled = false
+
+    @Synchronized
     fun recycle() {
+        if (isRecycled) return
+        isRecycled = true
+        loadedPageLoaders.forEach { (pageLoader, chapter) ->
+            if (!pageLoader.isRecycled) {
+                pageLoader.deactivateForReading()
+                pageLoader.recycle()
+            }
+            if (chapter.pageLoader === pageLoader) chapter.pageLoader = null
+            if (chapter.state is ReaderChapter.State.Loaded) chapter.state = ReaderChapter.State.Wait
+        }
+        loadedPageLoaders.clear()
         imageAttemptCoordinator.close()
     }
 
@@ -61,7 +80,11 @@ class ChapterLoader(
         imageLoadingBarrier: ReaderChapter? = null,
     ) {
         chapter.loadMutex.withLock {
+            if (isRecycled) throw CancellationException("Chapter loader has already been recycled")
             if (chapterIsReady(chapter)) {
+                synchronized(this@ChapterLoader) {
+                    if (isRecycled) throw CancellationException("Chapter loader has already been recycled")
+                }
                 chapter.pageLoader?.let { pageLoader ->
                     pageLoader.setNextChapterGatePageCount(nextChapterGatePageCount())
                     pageLoader.setImageLoadingBarrier(imageLoadingBarrier)
@@ -74,9 +97,16 @@ class ChapterLoader(
                 logcat { "Loading pages for ${chapter.chapter.name}" }
                 try {
                     val loader = getPageLoader(chapter)
+                    synchronized(this@ChapterLoader) {
+                        if (isRecycled) {
+                            loader.recycle()
+                            throw CancellationException("Chapter loader has already been recycled")
+                        }
+                        loadedPageLoaders[loader] = chapter
+                        chapter.pageLoader = loader
+                    }
                     loader.setNextChapterGatePageCount(nextChapterGatePageCount())
                     loader.setImageLoadingBarrier(imageLoadingBarrier)
-                    chapter.pageLoader = loader
 
                     val pages = loader.getPages()
                         .onEach { it.chapter = chapter }
@@ -97,11 +127,20 @@ class ChapterLoader(
                         chapter.requestedPage = /* SY --> */ page ?: /* SY <-- */ chapter.chapter.last_page_read
                     }
 
-                    chapter.state = ReaderChapter.State.Loaded(pages)
+                    synchronized(this@ChapterLoader) {
+                        if (isRecycled || chapter.pageLoader !== loader) {
+                            throw CancellationException("Chapter loader has already been recycled")
+                        }
+                        chapter.state = ReaderChapter.State.Loaded(pages)
+                    }
                 } catch (e: Throwable) {
-                    chapter.pageLoader?.recycle()
+                    chapter.pageLoader?.takeIf { !it.isRecycled }?.recycle()
                     chapter.pageLoader = null
-                    chapter.state = ReaderChapter.State.Error(e)
+                    chapter.state = if (e is CancellationException) {
+                        ReaderChapter.State.Wait
+                    } else {
+                        ReaderChapter.State.Error(e)
+                    }
                     throw e
                 }
             }

@@ -22,10 +22,14 @@ import exh.source.isEhBasedSource
 import exh.util.DataSaver
 import exh.util.DataSaver.Companion.getImage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
@@ -60,6 +64,7 @@ internal class HttpPageLoader(
     private val nearForegroundSize = min(9, preloadTaskLimit)
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
+    private val activeWorkerJobs = ConcurrentHashMap<ReaderPage, Job>()
     private val pendingDisposition = ConcurrentHashMap<ReaderPage, ImageCancelReason>()
     private val terminalErrors = ConcurrentHashMap<ReaderPage, Throwable>()
     private val decodeFailures = ConcurrentHashMap<String, AtomicInteger>()
@@ -78,6 +83,8 @@ internal class HttpPageLoader(
 
     @Volatile private var readingOrderInitialized = false
 
+    @Volatile private var schedulingEnabled = true
+
     @Volatile private var chapterPageOrder: List<ReaderPage> = emptyList()
 
     @Volatile private var rollingPages: List<ReaderPage> = emptyList()
@@ -93,13 +100,29 @@ internal class HttpPageLoader(
                         synchronized(page) {
                             val ownsEntry = page.queuedToken.get() == entry.generation
                             if (ownsEntry) page.queuedToken.compareAndSet(entry.generation, -1)
-                            ownsEntry && entry.generation == page.generation.get() &&
+                            ownsEntry && schedulingEnabled && page !in activeWorkerJobs &&
+                                entry.generation == page.generation.get() &&
                                 page.status == Page.State.Queue && readingOrderInitialized &&
                                 page in currentWindow
                         }
                     }
                     if (!shouldLoad) continue
-                    internalLoadPage(page, entry.queuedAtNanos)
+                    val pageJob = CoroutineScope(currentCoroutineContext()).launch(start = CoroutineStart.LAZY) {
+                        internalLoadPage(page, entry.queuedAtNanos)
+                    }
+                    if (activeWorkerJobs.putIfAbsent(page, pageJob) != null) {
+                        pageJob.cancel()
+                        continue
+                    }
+                    try {
+                        pageJob.start()
+                        pageJob.join()
+                    } finally {
+                        activeWorkerJobs.remove(page, pageJob)
+                        if (schedulingEnabled && !isRecycled && page.status == Page.State.Queue && page in currentWindow) {
+                            enqueue(page, priorityFor(page))
+                        }
+                    }
                 }
             }
         }
@@ -122,7 +145,7 @@ internal class HttpPageLoader(
     }
 
     override suspend fun loadPage(page: ReaderPage) = withIOContext {
-        if (!readingOrderInitialized) return@withIOContext
+        if (!schedulingEnabled || isRecycled || !readingOrderInitialized) return@withIOContext
         if (page.status == Page.State.Ready && page.imageUrl != null && !chapterCache.isImageInCache(page.imageUrl!!)) {
             successfullyCachedPages.remove(page)
             page.status = Page.State.Queue
@@ -148,6 +171,9 @@ internal class HttpPageLoader(
             .filterNot { it is InsertPage }
             .distinctBy { it.index }
             .toList()
+        // A transition or transient viewer refresh can report no page order. Keep the last
+        // window intact; in particular, do not turn an empty order into a fresh rolling preload.
+        if (normalizedVisible.isEmpty() && normalizedSuccessors.isEmpty() && chapterOrder.isEmpty()) return
         val oldVisiblePages = visiblePages
         val oldVisible = oldVisiblePages.toSet()
         val newVisible = normalizedVisible.toSet()
@@ -172,7 +198,12 @@ internal class HttpPageLoader(
                     .distinctBy { it.index }
             }
             readingOrderInitialized = true
+            if (!schedulingEnabled) return@synchronized emptyList()
             fillRollingWindowLocked(normalizedVisible, oldVisiblePages)
+        }
+        if (!schedulingEnabled) {
+            synchronized(queueLock) { currentWindow = emptySet() }
+            return
         }
         val newWindow = (normalizedVisible + nextRollingPages).toSet()
 
@@ -202,13 +233,61 @@ internal class HttpPageLoader(
         (normalizedVisible + nextRollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
     }
 
+    override fun activateForReading() {
+        super.activateForReading()
+        if (isRecycled || schedulingEnabled) return
+        schedulingEnabled = true
+        val next = synchronized(preloadLock) { fillRollingWindowLocked() }
+        val window = (visiblePages + next).toSet()
+        synchronized(queueLock) { currentWindow = if (schedulingEnabled) window else emptySet() }
+        if (!schedulingEnabled) return
+        (visiblePages + next).distinctBy { it.index }.forEach(::enqueueIfLoadable)
+    }
+
+    override fun deactivateForReading() {
+        if (!schedulingEnabled || isRecycled) return
+        schedulingEnabled = false
+        visiblePages.forEach { it.readerVisible = false }
+
+        synchronized(queueLock) {
+            queueSnapshot().forEach { entry ->
+                synchronized(entry.page) {
+                    if (entry.page.queuedToken.get() == entry.generation) {
+                        entry.page.queuedToken.compareAndSet(entry.generation, -1)
+                    }
+                }
+            }
+            queue.clear()
+            workerSignals.clear()
+            currentWindow = emptySet()
+        }
+        visiblePages = emptyList()
+        successors = emptyList()
+        readingRanks = emptyMap()
+
+        val scopedPages = activeScopes.keys.toSet()
+        scopedPages.forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
+        activeWorkerJobs.entries.toList().forEach { (page, job) ->
+            if (page !in scopedPages) {
+                synchronized(page) { page.generation.incrementAndGet() }
+                page.stream = null
+                page.raceActive = false
+                page.progress = 0
+                page.slow = false
+                page.loadStatus = ReaderPageLoadStatus.Queued
+                page.status = Page.State.Queue
+            }
+            job.cancel(CancellationException("Reader chapter is no longer active"))
+        }
+    }
+
     private fun priorityFor(page: ReaderPage): Int = if (page in visiblePages) 2 else 1
 
     private fun queueSnapshot(): List<PriorityPage> = queue.toArray(emptyArray<PriorityPage>()).asList()
 
     private fun enqueue(page: ReaderPage, priority: Int) {
         synchronized(queueLock) {
-            if (!readingOrderInitialized || page !in currentWindow || page.status != Page.State.Queue) return
+            if (!schedulingEnabled || isRecycled || !readingOrderInitialized || page !in currentWindow || page.status != Page.State.Queue) return
             synchronized(page) {
                 val generation = page.generation.get()
                 if (page.queuedToken.get() == generation) return
@@ -258,13 +337,16 @@ internal class HttpPageLoader(
     }
 
     private fun refillRollingWindow() {
+        if (!schedulingEnabled || isRecycled) return
         val next = synchronized(preloadLock) { fillRollingWindowLocked() }
         val window = (visiblePages + next).toSet()
-        synchronized(queueLock) { currentWindow = window }
+        synchronized(queueLock) { currentWindow = if (schedulingEnabled) window else emptySet() }
+        if (!schedulingEnabled) return
         next.forEach(::enqueueIfLoadable)
     }
 
     private fun enqueueIfLoadable(page: ReaderPage) {
+        if (!schedulingEnabled || isRecycled) return
         if (page.status == Page.State.Ready && page.imageUrl != null && !chapterCache.isImageInCache(page.imageUrl!!)) {
             successfullyCachedPages.remove(page)
             page.status = Page.State.Queue
@@ -276,6 +358,7 @@ internal class HttpPageLoader(
     }
 
     private fun onPageLoadFinished(page: ReaderPage) {
+        if (!schedulingEnabled || isRecycled) return
         if (page.status == Page.State.Ready) {
             (visiblePages + rollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
         }
@@ -292,7 +375,7 @@ internal class HttpPageLoader(
 
     /** Cancel exactly one active far-foreground attempt; queued items are not worker capacity. */
     private fun maybePreemptForVisiblePage() {
-        if (activeScopes.size < readerThreads) return
+        if (!schedulingEnabled || activeScopes.size < readerThreads) return
         val visible = visiblePages.toSet()
         val nearForeground = successors.take(nearForegroundSize).toSet()
         val anchorPosition = visiblePages.lastOrNull()
@@ -427,10 +510,14 @@ internal class HttpPageLoader(
         page.retryBudgetSource = null
     }
 
+    @Synchronized
     override fun recycle() {
+        if (isRecycled) return
+        deactivateForReading()
         super.recycle()
         visiblePages.forEach { it.readerVisible = false }
         activeScopes.keys.toList().forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
+        activeWorkerJobs.values.forEach { it.cancel(CancellationException("Reader loader recycled")) }
         workerScope.cancel()
         queue.clear()
         workerSignals.clear()
@@ -447,7 +534,7 @@ internal class HttpPageLoader(
     }
 
     private suspend fun internalLoadPage(page: ReaderPage, queuedAtNanos: Long) {
-        if (!readingOrderInitialized || page !in currentWindow) return
+        if (!schedulingEnabled || !readingOrderInitialized || page !in currentWindow) return
         val queueWaitNanos = (System.nanoTime() - queuedAtNanos).coerceAtLeast(0L)
         if (visiblePages.firstOrNull()?.let { it !== page } == true) {
             val homePage = visiblePages.first()
@@ -466,7 +553,7 @@ internal class HttpPageLoader(
             }
         }
         val myGeneration = synchronized(queueLock) {
-            if (!readingOrderInitialized || page !in currentWindow) return
+            if (!schedulingEnabled || !readingOrderInitialized || page !in currentWindow) return
             synchronized(page) { page.generation.incrementAndGet() }
         }
         var attempt: PageAttemptScope? = null
@@ -494,7 +581,7 @@ internal class HttpPageLoader(
             if (!chapterCache.isImageInCache(imageUrl)) {
                 if (!owns(page, myGeneration)) return
                 val currentAttempt = synchronized(queueLock) {
-                    if (!readingOrderInitialized || page !in currentWindow || !owns(page, myGeneration)) {
+                    if (!schedulingEnabled || !readingOrderInitialized || page !in currentWindow || !owns(page, myGeneration)) {
                         null
                     } else {
                         page.status = Page.State.DownloadImage
@@ -523,14 +610,14 @@ internal class HttpPageLoader(
                     return
                 }
                 attempt = currentAttempt
-                slowWatch = coordinator.watchdog.scheduleAtFixedRate({
+                slowWatch = coordinator.scheduleWatchdog {
                     val isNear = page in visiblePages || successors.take(nearForegroundSize).any { it === page }
                     val requestStartedAt = currentAttempt.requestStartedAtNanos.get()
                     val quietFor = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - currentAttempt.lastProgressAtNanos.get())
                     if (currentAttempt.isCurrent && currentAttempt.hasActiveEndpointRequest && requestStartedAt > 0L && isNear && quietFor >= 1_500L) {
                         page.slow = true
                     }
-                }, 250, 250, TimeUnit.MILLISECONDS)
+                }
 
                 val response = source.getImage(page, dataSaver)
                 if (!owns(page, myGeneration) || !currentAttempt.isCurrent) {
@@ -664,7 +751,7 @@ internal class HttpPageLoader(
     }
 
     private fun owns(page: ReaderPage, generation: Int): Boolean =
-        !isRecycled && page.generation.get() == generation
+        schedulingEnabled && !isRecycled && page.generation.get() == generation
 
     /** Decode a bounded preview so a complete HTTP body with a valid header but corrupt pixels cannot become Ready. */
     private fun validateCachedImage(file: java.io.File): Boolean {

@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -256,6 +257,14 @@ fun AppContent(
     val settingsVm = remember { SettingsViewModel() }
     val speedTestProgress by settingsVm.speedTestProgress.collectAsState()
     val configRetest by com.zycomic.app.net.RemoteConfigFetcher.configRetest.collectAsState()
+    val remoteInfo by settingsVm.remoteInfo.collectAsState()
+    val imageReuseNotice by settingsVm.imageReuseNotice.collectAsState()
+    val reusableImageSnapshot by com.zycomic.app.net.RouteManager.reusableImageSpeedTestSnapshot.collectAsState()
+    val reusableImageSnapshotIsValid = remember(reusableImageSnapshot) {
+        reusableImageSnapshot?.let {
+            com.zycomic.app.net.RouteManager.isReusableImageSpeedTestSnapshotValid(it)
+        } == true
+    }
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
 
@@ -438,6 +447,14 @@ fun AppContent(
     } else {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 48.dp)) {
+                Text(
+                    "网络配置：${remoteInfo.substringBefore("　上次错误：")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
@@ -489,6 +506,32 @@ fun AppContent(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (imageReuseNotice != null && configRetest?.duringStartup != true) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        imageReuseNotice.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                if (reusableImageSnapshotIsValid && configRetest?.duringStartup != true) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { settingsVm.usePreviousImageResults() },
+                        enabled = imageReuseNotice == null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("使用上次的图源测速结果")
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "建议短期内测速使用此功能，会节省大量时间，间隔时间过长可能出现图片加载不出来，若已选择并卡顿，可在漫画里切换图源点击重新测速",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
     }

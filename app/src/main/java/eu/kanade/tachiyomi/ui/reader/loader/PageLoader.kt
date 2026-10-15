@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,10 +31,13 @@ abstract class PageLoader {
     private val chapterReadingOrder = MutableStateFlow(ChapterReadingOrder(emptyList(), emptySet(), false, false))
 
     @Volatile
-    private var imageLoadingBarrier: PageLoader? = null
+    private var imageLoadingBarrierChapter: ReaderChapter? = null
 
     @Volatile
-    private var imageLoadingBarrierChapter: ReaderChapter? = null
+    private var imageLoadingBarrierJob: Job? = null
+
+    @Volatile
+    private var imageLoadingBarrierReleased = false
 
     private val imageLoadingBarrierScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -70,23 +74,32 @@ abstract class PageLoader {
 
     /** Delays next-chapter image requests until the current chapter's tail window is ready. */
     fun setImageLoadingBarrier(predecessor: ReaderChapter?) {
-        if (predecessor == null || imageLoadingBarrierChapter === predecessor || isRecycled) return
+        if (predecessor == null || imageLoadingBarrierChapter === predecessor || imageLoadingBarrierReleased || isRecycled) return
         synchronized(this) {
-            if (imageLoadingBarrierChapter != null || isRecycled) return
+            if (imageLoadingBarrierChapter != null || imageLoadingBarrierReleased || isRecycled) return
             val predecessorLoader = predecessor.pageLoader ?: return
             predecessor.ref()
             imageLoadingBarrierChapter = predecessor
-            imageLoadingBarrier = predecessorLoader
             val referenceReleased = AtomicBoolean(false)
             val releaseReference = { if (referenceReleased.compareAndSet(false, true)) predecessor.unref() }
-            imageLoadingBarrierScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val barrierJob = imageLoadingBarrierScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 try {
                     predecessorLoader.awaitNextChapterImagesAllowed()
                 } finally {
                     releaseReference()
                 }
-            }.invokeOnCompletion { releaseReference() }
+            }
+            imageLoadingBarrierJob = barrierJob
+            barrierJob.invokeOnCompletion { releaseReference() }
         }
+    }
+
+    /** Releases any predecessor-tail wait when this chapter becomes the active reader chapter. */
+    @Synchronized
+    fun releaseImageLoadingBarrier() {
+        imageLoadingBarrierReleased = true
+        imageLoadingBarrierJob?.cancel()
+        imageLoadingBarrierJob = null
     }
 
     /** Waits for the current page to enter the preloaded tail and for that tail to settle. */
@@ -157,9 +170,17 @@ abstract class PageLoader {
         val viewerOrderKnown: Boolean,
     )
 
+    /** Called only when a chapter is actually selected, not when its pages are merely preloaded. */
+    open fun activateForReading() {
+        releaseImageLoadingBarrier()
+    }
+
+    /** Stops new work for a chapter while preserving its pages and cache for a later return. */
+    open fun deactivateForReading() {}
+
     /** Common holder entry point; the barrier is awaited before any loader-specific image work. */
     suspend fun loadPageWhenAllowed(page: ReaderPage) {
-        imageLoadingBarrier?.awaitNextChapterImagesAllowed()
+        imageLoadingBarrierJob?.join()
         loadPage(page)
     }
 
@@ -190,6 +211,7 @@ abstract class PageLoader {
     @Synchronized
     open fun recycle() {
         isRecycled = true
+        releaseImageLoadingBarrier()
         imageLoadingBarrierScope.cancel()
     }
 

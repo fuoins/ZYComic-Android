@@ -241,6 +241,9 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private var loader: ChapterLoader? = null
 
+    /** The chapter whose page loader is currently allowed to schedule reader work. */
+    private var activeChapterForReading: ReaderChapter? = null
+
     /**
      * The time the chapter was started reading
      */
@@ -550,6 +553,7 @@ class ReaderViewModel @JvmOverloads constructor(
         )
 
         withUIContext {
+            activateChapterForReading(chapter)
             mutableState.update {
                 // Add new references first to avoid unnecessary recycling
                 newChapters.ref()
@@ -563,6 +567,15 @@ class ReaderViewModel @JvmOverloads constructor(
             }
         }
         return newChapters
+    }
+
+    private fun activateChapterForReading(chapter: ReaderChapter) {
+        val previous = activeChapterForReading
+        if (previous?.chapter?.id != chapter.chapter.id) {
+            previous?.pageLoader?.deactivateForReading()
+            activeChapterForReading = chapter
+        }
+        chapter.pageLoader?.activateForReading()
     }
 
     /**
@@ -696,6 +709,7 @@ class ReaderViewModel @JvmOverloads constructor(
 
         if (selectedChapter != getCurrentChapter()) {
             logcat { "Setting ${selectedChapter.chapter.url} as active" }
+            activateChapterForReading(selectedChapter)
             loadNewChapter(selectedChapter)
         }
 

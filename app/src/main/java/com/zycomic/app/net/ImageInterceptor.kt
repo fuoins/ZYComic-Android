@@ -91,11 +91,7 @@ class ImageInterceptor : Interceptor {
             throw IOException("图源临时不可用，正在重新测速：$originalUrl")
         }
         val outcomes = if (scope?.canRace == true && endpoints.size > 1) {
-            if (scope.page.index == 0) {
-                stagedRaceCandidates(imgReq, originalUrl, endpoints, scope)
-            } else {
-                raceCandidates(imgReq, originalUrl, endpoints, scope)
-            }
+            stagedRaceCandidates(imgReq, originalUrl, endpoints, scope)
         } else {
             sequentialCandidates(imgReq, originalUrl, endpoints, scope)
         }
@@ -226,10 +222,7 @@ class ImageInterceptor : Interceptor {
         return outcomes
     }
 
-    /**
-     * The first page starts with the highest-ranked endpoint alone. If it fails, try the next
-     * endpoint immediately; only hedge after 1.5 seconds without new image-byte progress.
-     */
+    /** Visible pages keep the primary alive and add up to two candidates after 1.5 seconds without new bytes. */
     private fun stagedRaceCandidates(
         request: Request,
         originalUrl: String,
@@ -252,32 +245,37 @@ class ImageInterceptor : Interceptor {
             var openedRace = false
             for (index in 1 until minOf(endpoints.size, MAX_ENDPOINT_ATTEMPTS)) {
                 if (!scope.coordinator.tryAcquireRace()) continue
-                activeRaces.incrementAndGet()
-                if (!openedRace) {
-                    scope.beginRace()
-                    openedRace = true
-                }
-                val submitted = scope.coordinator.submitRace {
-                    var outcome: Outcome = Outcome.Fail.Invalid
-                    try {
-                        outcome = executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
-                    } finally {
-                        completed.offer(outcome)
-                        activeRaces.decrementAndGet()
+                var raceCounted = false
+                var submitted = false
+                try {
+                    activeRaces.incrementAndGet()
+                    raceCounted = true
+                    if (!openedRace) {
+                        scope.beginRace()
+                        openedRace = true
+                    }
+                    submitted = scope.coordinator.submitRace {
+                        var outcome: Outcome = Outcome.Fail.Invalid
+                        try {
+                            outcome = executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
+                        } finally {
+                            completed.offer(outcome)
+                            activeRaces.decrementAndGet()
+                            scope.coordinator.releaseRaceAttempt()
+                        }
+                    }
+                    if (submitted) submittedIds += index
+                } finally {
+                    if (!submitted) {
+                        if (raceCounted) activeRaces.decrementAndGet()
                         scope.coordinator.releaseRaceAttempt()
                     }
-                }
-                if (submitted) {
-                    submittedIds += index
-                } else {
-                    activeRaces.decrementAndGet()
-                    scope.coordinator.releaseRaceAttempt()
                 }
             }
             if (activeRaces.get() == 0) scope.endRace()
         }
 
-        val hedgeWatch = scope.coordinator.watchdog.scheduleAtFixedRate({
+        val hedgeWatch = scope.coordinator.scheduleWatchdog {
             val lastProgress = scope.lastProgressAtNanos.get()
             if (!primaryFinished.get() && scope.isCurrent && scope.canRace &&
                 scope.hasActiveEndpointRequest && lastProgress > 0L &&
@@ -285,7 +283,7 @@ class ImageInterceptor : Interceptor {
             ) {
                 launchOtherCandidates()
             }
-        }, 250, 250, TimeUnit.MILLISECONDS)
+        }
 
         try {
             val primary = try {
@@ -297,7 +295,7 @@ class ImageInterceptor : Interceptor {
             outcomes += primary
             if (primary is Outcome.Success) return outcomes
             if (!scope.isCurrent) return outcomes
-            if (primary is Outcome.Fail.Cancelled && submittedIds.isEmpty()) return outcomes
+            if (primary is Outcome.Fail.Cancelled && !raceStarted.get()) return outcomes
 
             if (!raceStarted.get()) {
                 // A clear primary failure beats the hedge timer: immediately try candidates serially.
@@ -336,76 +334,7 @@ class ImageInterceptor : Interceptor {
             }
             return outcomes
         } finally {
-            hedgeWatch.cancel(false)
-            scope.cancelLosers(Int.MIN_VALUE)
-            scope.endRace()
-        }
-    }
-
-    /** Visible pages start up to three distinct, validated candidates together; background work remains serial. */
-    private fun raceCandidates(
-        request: Request,
-        originalUrl: String,
-        endpoints: List<DomainIp>,
-        scope: PageAttemptScope,
-    ): List<Outcome> {
-        val outcomes = mutableListOf<Outcome>()
-        val completed = LinkedBlockingQueue<Outcome>()
-        val activeRaces = AtomicInteger(0)
-        val submittedIds = mutableSetOf<Int>()
-        if (!acquirePermit(scope)) return listOf(Outcome.Fail.Cancelled)
-
-        for (index in 1 until minOf(endpoints.size, MAX_ENDPOINT_ATTEMPTS)) {
-            if (!scope.coordinator.tryAcquireRace()) continue
-            activeRaces.incrementAndGet()
-            scope.beginRace()
-            val submitted = scope.coordinator.submitRace {
-                var outcome: Outcome = Outcome.Fail.Invalid
-                try {
-                    outcome = executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
-                } finally {
-                    completed.offer(outcome)
-                    activeRaces.decrementAndGet()
-                    scope.coordinator.releaseRaceAttempt()
-                }
-            }
-            if (submitted) {
-                submittedIds += index
-            } else {
-                activeRaces.decrementAndGet()
-                scope.coordinator.releaseRaceAttempt()
-            }
-        }
-
-        try {
-            val primary = try {
-                executeSafely(request, originalUrl, endpoints[0], scope, 0, endpoints.size)
-            } finally {
-                scope.coordinator.releasePrimaryAttempt()
-            }
-            outcomes += primary
-            if (primary is Outcome.Success) return outcomes
-
-            while (scope.isCurrent && (activeRaces.get() > 0 || completed.isNotEmpty())) {
-                val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
-                outcomes += result
-                if (result is Outcome.Success) return outcomes
-            }
-            scope.endRace()
-
-            // If a race slot was unavailable, use that candidate serially on this existing worker.
-            endpoints.indices.filter { it > 0 && it !in submittedIds }.forEach { index ->
-                if (!scope.isCurrent || !acquirePermit(scope)) return outcomes
-                val result = try {
-                    executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
-                } finally {
-                    scope.coordinator.releasePrimaryAttempt()
-                }
-                outcomes += result
-                if (result is Outcome.Success) return outcomes
-            }
-            return outcomes
-        } finally {
+            hedgeWatch?.cancel(false)
             scope.cancelLosers(Int.MIN_VALUE)
             scope.endRace()
         }

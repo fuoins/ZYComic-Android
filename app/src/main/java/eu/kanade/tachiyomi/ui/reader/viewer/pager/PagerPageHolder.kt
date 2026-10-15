@@ -4,8 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.view.LayoutInflater
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.widget.FrameLayout
 import androidx.annotation.ColorInt
 import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
@@ -15,7 +13,6 @@ import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
-import eu.kanade.tachiyomi.ui.reader.viewer.SlowPageOverlay
 import com.zycomic.app.net.RouteManager
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
@@ -67,9 +64,6 @@ class PagerPageHolder(
      * Error layout to show when the image fails to load.
      */
     private var errorLayout: ReaderErrorBinding? = null
-
-    private var slowOverlay: SlowPageOverlay? = null
-    private var slowOverlayTarget: ReaderPage? = null
 
     private val scope = MainScope()
 
@@ -131,15 +125,8 @@ class PagerPageHolder(
                 loader.loadPageWhenAllowed(page)
             }
             launch {
-                page.slowFlow.collectLatest { updateSlowOverlay() }
-            }
-            launch {
-                page.readerVisibleFlow.collectLatest { updateSlowOverlay() }
-            }
-            launch {
                 page.loadStatusFlow.collectLatest { status ->
                     progressIndicator?.setStatus(status.label)
-                    updateSlowOverlay()
                 }
             }
             page.statusFlow.collectLatest { state ->
@@ -445,7 +432,6 @@ class PagerPageHolder(
      */
     private fun setError(error: Throwable?) {
         progressIndicator?.hide()
-        removeSlowOverlay()
         showErrorLayout(error)
     }
 
@@ -454,7 +440,6 @@ class PagerPageHolder(
         progressIndicator?.hide()
         page.chapter.pageLoader?.markImageDecodeSuccess(page)
         extraPage?.let { it.chapter.pageLoader?.markImageDecodeSuccess(it) }
-        updateSlowOverlay()
     }
 
     /**
@@ -464,29 +449,6 @@ class PagerPageHolder(
         if (page.chapter.pageLoader?.invalidatePage(page) == true) return
         super.onImageLoadError(error)
         setError(error)
-    }
-
-    private fun updateSlowOverlay() {
-        val target = listOfNotNull(page, extraPage).firstOrNull { it.slow && it.readerVisible }
-        if (target == null) {
-            removeSlowOverlay()
-            return
-        }
-        if (slowOverlayTarget !== target) {
-            removeSlowOverlay()
-            slowOverlayTarget = target
-            val overlay = SlowPageOverlay(context, target.loadStatus.label)
-            slowOverlay = overlay
-            addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        }
-        slowOverlay?.setStatus(target.loadStatus.label)
-        slowOverlay?.bringToFront()
-    }
-
-    private fun removeSlowOverlay() {
-        slowOverlay?.let(::removeView)
-        slowOverlay = null
-        slowOverlayTarget = null
     }
 
     /**

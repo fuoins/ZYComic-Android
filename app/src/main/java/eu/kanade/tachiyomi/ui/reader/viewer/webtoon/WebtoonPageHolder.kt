@@ -18,7 +18,6 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
-import eu.kanade.tachiyomi.ui.reader.viewer.SlowPageOverlay
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
 import kotlinx.coroutines.Job
@@ -67,7 +66,6 @@ class WebtoonPageHolder(
      * Error layout to show when the image fails to load.
      */
     private var errorLayout: ReaderErrorBinding? = null
-    private var slowOverlay: SlowPageOverlay? = null
 
     /**
      * Getter to retrieve the height of the recycler view.
@@ -103,7 +101,6 @@ class WebtoonPageHolder(
      * Binds the given [page] with this view holder, subscribing to its state.
      */
     fun bind(page: ReaderPage) {
-        removeSlowOverlay()
         this.page = page
         loadJob?.cancel()
         loadJob = scope.launch { loadPageAndProcessStatus() }
@@ -130,7 +127,6 @@ class WebtoonPageHolder(
         loadJob = null
 
         removeErrorLayout()
-        removeSlowOverlay()
         frame.recycle()
         progressIndicator.setProgress(0)
         progressContainer.isVisible = true
@@ -151,15 +147,8 @@ class WebtoonPageHolder(
                 loader.loadPageWhenAllowed(page)
             }
             launch {
-                page.slowFlow.collectLatest { updateSlowOverlay() }
-            }
-            launch {
-                page.readerVisibleFlow.collectLatest { updateSlowOverlay() }
-            }
-            launch {
                 page.loadStatusFlow.collectLatest { status ->
                     progressIndicator.setStatus(status.label)
-                    updateSlowOverlay()
                 }
             }
             page.statusFlow.collectLatest { state ->
@@ -234,7 +223,6 @@ class WebtoonPageHolder(
                     ),
                 )
                 removeErrorLayout()
-                updateSlowOverlay()
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
@@ -278,7 +266,6 @@ class WebtoonPageHolder(
     private fun setError(error: Throwable?) {
         progressIndicator.hide()
         progressContainer.isVisible = false
-        removeSlowOverlay()
         initErrorLayout(error)
     }
 
@@ -290,27 +277,6 @@ class WebtoonPageHolder(
         progressContainer.isVisible = false
         removeErrorLayout()
         page?.let { current -> current.chapter.pageLoader?.markImageDecodeSuccess(current) }
-        updateSlowOverlay()
-    }
-
-    private fun updateSlowOverlay() {
-        val target = page?.takeIf { it.slow && it.readerVisible }
-        if (target == null) {
-            removeSlowOverlay()
-            return
-        }
-        if (slowOverlay == null) {
-            val overlay = SlowPageOverlay(context, target.loadStatus.label)
-            slowOverlay = overlay
-            frame.addView(overlay, MATCH_PARENT, MATCH_PARENT)
-        }
-        slowOverlay?.setStatus(target.loadStatus.label)
-        slowOverlay?.bringToFront()
-    }
-
-    private fun removeSlowOverlay() {
-        slowOverlay?.let { frame.removeView(it) }
-        slowOverlay = null
     }
 
     /**
