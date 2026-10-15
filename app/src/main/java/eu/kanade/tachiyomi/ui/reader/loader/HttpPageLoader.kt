@@ -100,7 +100,7 @@ internal class HttpPageLoader(
                         synchronized(page) {
                             val ownsEntry = page.queuedToken.get() == entry.generation
                             if (ownsEntry) page.queuedToken.compareAndSet(entry.generation, -1)
-                            ownsEntry && schedulingEnabled && page !in activeWorkerJobs &&
+                            ownsEntry && schedulingEnabled && !activeWorkerJobs.containsKey(page) &&
                                 entry.generation == page.generation.get() &&
                                 page.status == Page.State.Queue && readingOrderInitialized &&
                                 page in currentWindow
