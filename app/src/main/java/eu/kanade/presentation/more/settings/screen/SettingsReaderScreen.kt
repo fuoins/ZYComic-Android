@@ -577,7 +577,8 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.readerThreads(),
                     title = stringResource(SYMR.strings.download_threads),
                     subtitle = stringResource(SYMR.strings.download_threads_summary),
-                    entries = List(5) { it }.associateWith { it.toString() }.toImmutableMap(),
+                    entries = (mapOf(0 to stringResource(SYMR.strings.download_threads_current_page_only)) +
+                        (1..10).associateWith { it.toString() }).toImmutableMap(),
                 ),
                 Preference.PreferenceItem.ListPreference(
                     preference = readerPreferences.cacheSize(),

@@ -53,12 +53,16 @@ class SettingsViewModel {
     val useFastestImgForAll = MutableStateFlow(RouteManager.useFastestImgForAll)
     /** 自动跟随系统 VPN 开关（默认开启；关闭=强制直连，用于抓包调试） */
     val followSystemVpn = MutableStateFlow(DevConfig.isFollowSystemVpnEnabled())
+    /** VPN 单独变化后自动测速并应用排名；独立偏好默认关闭。 */
+    val vpnOnlyAutoRetest = MutableStateFlow(DevConfig.isVpnOnlyAutoRetestEnabled())
     /** 手动测速进行中（设置页"重新测速"按钮） */
     val testing = MutableStateFlow(false)
     /** 启动时自动测速进行中（全屏加载层） */
     val autoSelecting = MutableStateFlow(false)
     /** 当前测速阶段与按真实解析端点统计的进度。 */
     val speedTestProgress = MutableStateFlow(SpeedTester.Progress())
+    /** 用户请求复用图源旧结果后的阶段提示。 */
+    val imageReuseNotice = MutableStateFlow<String?>(null)
 
     fun speedTestProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {
         SpeedTester.Phase.PREPARING_LINES -> "正在解析线路域名和 IP…"
@@ -76,7 +80,11 @@ class SettingsViewModel {
             "正在测试图源 IP：${progress.completed}/${progress.total}（可用 ${progress.successful}，连不上 ${progress.failed}，无图 ${progress.noImage}）"
         }
         SpeedTester.Phase.APPLYING_RESULTS -> "端点检测完成，正在更新排名并应用可自动切换的结果…"
-        SpeedTester.Phase.COMPLETE -> "测速完成；自动模式应用最快结果，临时手动选择保持不变"
+        SpeedTester.Phase.COMPLETE -> if (progress.reusedImages > 0) {
+            "图源结果来源：本次新测 ${progress.freshImages} 项，复用上次 ${progress.reusedImages} 项；混合结果不可导出为完整诊断日志"
+        } else {
+            "测速完成；自动模式应用最快结果，临时手动选择保持不变"
+        }
         SpeedTester.Phase.FAILED -> "测速中断，继续使用当前线路和图源"
         SpeedTester.Phase.SKIPPED -> "已有测速任务正在运行，本轮未重复检测"
     }
@@ -98,6 +106,7 @@ class SettingsViewModel {
     val speedTestResultVersion = MutableStateFlow(RouteManager.speedTestSnapshot.value.remoteVersion)
 
     init {
+        RouteManager.refreshReusableImageSpeedTestSnapshot()
         scope.launch {
             RouteManager.lineSelectionState.collect { selection ->
                 currentLineIndex.value = selection.index
@@ -113,7 +122,23 @@ class SettingsViewModel {
             }
         }
         scope.launch {
-            SpeedTester.progress.collect { speedTestProgress.value = it }
+            SpeedTester.progress.collect { progress ->
+                speedTestProgress.value = progress
+                if (imageReuseNotice.value != null) {
+                    imageReuseNotice.value = when (progress.phase) {
+                        SpeedTester.Phase.PREPARING_LINES,
+                        SpeedTester.Phase.TESTING_LINES,
+                        SpeedTester.Phase.APPLYING_LINE,
+                        -> "等待线路测速完成后使用上次图源结果"
+                        SpeedTester.Phase.FETCHING_SAMPLE,
+                        SpeedTester.Phase.PREPARING_IMAGES,
+                        -> "线路测速完成，正在准备使用上次图源结果"
+                        SpeedTester.Phase.TESTING_IMAGES ->
+                            "图源测速进行中：已启动的端点继续测速；未启动端点优先复用匹配的上次结果"
+                        else -> imageReuseNotice.value
+                    }
+                }
+            }
         }
         scope.launch {
             DevConfig.remoteVersionFlow.collect { refreshRemoteInfo() }
@@ -409,6 +434,12 @@ class SettingsViewModel {
         }
     }
 
+    /** 只切换 VPN-only 变化后的自动测速行为，不改变路由策略或连接清理。 */
+    fun setVpnOnlyAutoRetest(enabled: Boolean) {
+        DevConfig.setVpnOnlyAutoRetestEnabled(enabled)
+        vpnOnlyAutoRetest.value = enabled
+    }
+
     /** 手动切换图源：只作本次进程临时覆盖，不关闭自动选择开关。 */
     fun selectImgHost(index: Int, ip: String? = null) {
         RouteManager.pinImgHost(index, ip)
@@ -449,8 +480,9 @@ class SettingsViewModel {
     // ==================== HTTP 测速（主体在 SpeedTester.runAndApply，三处复用）====================
 
     /** 设置页"重新测速"按钮：测速后自动选最快、重建网络并 Toast。 */
-    fun runSpeedTest() {
+    fun runSpeedTest(keepImageReuseNotice: Boolean = false) {
         scope.launch {
+            if (!keepImageReuseNotice) imageReuseNotice.value = null
             testing.value = true
             speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
             lineDelays.value = emptyMap()
@@ -486,7 +518,37 @@ class SettingsViewModel {
                     speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.SKIPPED)
                 }
                 testing.value = false
+                imageReuseNotice.value = null
             }
+        }
+    }
+
+    /** Re-run line probes and reuse eligible image results, or update the active test's upcoming image phase. */
+    fun usePreviousImageResults() {
+        val snapshot = RouteManager.reusableImageSpeedTestSnapshotOrNull()
+        if (snapshot == null || !SpeedTester.requestPreviousImageResults()) {
+            imageReuseNotice.value = null
+            toast.value = "暂无当前网络配置下有效的上次图源测速结果"
+            return
+        }
+        val phase = speedTestProgress.value.phase
+        val preparingTest = (testing.value || autoSelecting.value) && phase !in setOf(
+            SpeedTester.Phase.COMPLETE,
+            SpeedTester.Phase.FAILED,
+            SpeedTester.Phase.SKIPPED,
+        )
+        val active = SpeedTester.isRunning || preparingTest
+        if (!active) {
+            imageReuseNotice.value = "本轮线路测速后将使用上次图源结果"
+            runSpeedTest(keepImageReuseNotice = true)
+            return
+        }
+        imageReuseNotice.value = when (phase) {
+            SpeedTester.Phase.PREPARING_LINES,
+            SpeedTester.Phase.TESTING_LINES,
+            SpeedTester.Phase.APPLYING_LINE,
+            -> "等待线路测速完成后使用上次图源结果"
+            else -> "图源测速进行中：已启动的端点继续测速；未启动端点优先复用匹配的上次结果"
         }
     }
 

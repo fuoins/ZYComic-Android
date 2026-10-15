@@ -28,10 +28,12 @@ data class ReaderChapter(val chapter: Chapter) {
 
     constructor(chapter: tachiyomi.domain.chapter.model.Chapter) : this(chapter.toDbChapter())
 
+    @Synchronized
     fun ref() {
         references++
     }
 
+    @Synchronized
     fun unref() {
         references--
         if (references == 0) {

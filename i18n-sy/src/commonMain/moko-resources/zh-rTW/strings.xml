@@ -255,6 +255,7 @@
     <!-- Reader Settings -->
     <string name="page_downloading">頁面下載</string>
     <string name="download_threads">下載執行緒</string>
+    <string name="download_threads_current_page_only">僅目前頁面</string>
     <string name="download_threads_summary">較高的值可以明顯加快頁面載入速度，同時容易被停權。建議值為 2 或 3。現在的值為：%s</string>
     <string name="aggressively_load_pages">積極地載入頁面</string>
     <string name="aggressively_load_pages_summary">在閱讀時緩慢地下載整個章節，而不是只載入您正在閱讀的頁面。</string>

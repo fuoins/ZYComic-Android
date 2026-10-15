@@ -245,6 +245,7 @@ abstract class PagerViewer(
             is ReaderPage -> item
             else -> null
         }
+        fun readingPage(item: ReaderItem?): ReaderPage? = (item as? InsertPage)?.parent ?: actualPage(item)
         val visible = listOfNotNull(actualPage(active.first), actualPage(active.second))
             .ifEmpty { listOf(reference) }
             .distinctBy { it.index }
@@ -252,14 +253,21 @@ abstract class PagerViewer(
             .drop(position + 1)
             .asSequence()
             .flatMap { sequenceOf(it.first, it.second) }
-            .mapNotNull(::actualPage)
+            .mapNotNull(::readingPage)
+            .filter { it.chapter == reference.chapter }
+            .distinctBy { it.index }
+            .toList()
+        val chapterOrder = adapter.joinedItems
+            .asSequence()
+            .flatMap { sequenceOf(it.first, it.second) }
+            .mapNotNull(::readingPage)
             .filter { it.chapter == reference.chapter }
             .distinctBy { it.index }
             .toList()
         val loader = reference.chapter.pageLoader
         if (readingOrderLoader !== loader) readingOrderLoader?.updateReadingOrder(emptyList(), emptyList())
         readingOrderLoader = loader
-        loader?.updateReadingOrder(visible, orderedSuccessors)
+        loader?.updateReadingOrder(visible, orderedSuccessors, chapterOrder)
     }
 
     private fun checkAllowPreload(page: ReaderPage?): Boolean {

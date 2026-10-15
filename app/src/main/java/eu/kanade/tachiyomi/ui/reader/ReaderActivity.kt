@@ -27,6 +27,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -547,6 +549,8 @@ class ReaderActivity : BaseActivity() {
                     serverFallbackDomain = ReaderRepository.currentImgDomains.firstOrNull(),
                 )
                 var imgTesting by remember { mutableStateOf(false) }
+                var imgTestCompleted by remember { mutableStateOf(0) }
+                var imgTestTotal by remember { mutableStateOf(0) }
                 val scope = rememberCoroutineScope()
                 val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
                 AlertDialog(
@@ -559,6 +563,25 @@ class ReaderActivity : BaseActivity() {
                                 .heightIn(max = dialogMaxHeight),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
+                            if (imgTesting) {
+                                item {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                                        Text(
+                                            if (imgTestTotal > 0) "图源测速进度：$imgTestCompleted/$imgTestTotal"
+                                            else "正在解析图源测速端点…",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        if (imgTestTotal > 0) {
+                                            LinearProgressIndicator(
+                                                progress = { (imgTestCompleted.toFloat() / imgTestTotal).coerceIn(0f, 1f) },
+                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                            )
+                                        } else {
+                                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                                        }
+                                    }
+                                }
+                            }
                             item {
                                 Text(
                                     "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
@@ -628,11 +651,20 @@ class ReaderActivity : BaseActivity() {
                             TextButton(
                                 onClick = {
                                     imgTesting = true
+                                    imgTestCompleted = 0
+                                    imgTestTotal = 0
                                     scope.launch(Dispatchers.IO) {
                                         try {
                                             val rm = com.zycomic.app.net.RouteManager
                                             val previous = rm.fastestImgEndpoint
-                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgEndpoints()
+                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgEndpoints(
+                                                onStageProgress = { completed, total ->
+                                                    launch(Dispatchers.Main) {
+                                                        imgTestCompleted = maxOf(imgTestCompleted, completed)
+                                                        imgTestTotal = total
+                                                    }
+                                                },
+                                            )
                                             rm.setEndpointDelays(rm.lastLineIpDelays, delays, com.zycomic.app.net.SpeedTester.lastImgIpVerdicts)
                                             val fastest = rm.fastestImgEndpoint
                                             if (rm.useFastestImgForAll && rm.pinnedImgDomain.isNullOrBlank() && fastest != null) {

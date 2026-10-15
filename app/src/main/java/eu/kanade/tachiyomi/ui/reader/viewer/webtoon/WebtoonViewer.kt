@@ -18,6 +18,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
+import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -354,6 +355,7 @@ class WebtoonViewer(
         val visible = adapter.items
             .subList(firstVisible, (lastVisible + 1).coerceAtMost(adapter.items.size))
             .filterIsInstance<ReaderPage>()
+            .map { if (it is InsertPage) it.parent else it }
             .distinctBy { it.index }
         val groups = visible.groupBy { it.chapter.pageLoader }
         val currentLoaders = groups.keys.filterNotNull().toSet()
@@ -366,11 +368,19 @@ class WebtoonViewer(
                 .drop(lastVisible + 1)
                 .asSequence()
                 .filterIsInstance<ReaderPage>()
+                .map { if (it is InsertPage) it.parent else it }
+                .filter { it.chapter == reference.chapter }
+                .distinctBy { it.index }
+                .toList()
+            val chapterOrder = adapter.items
+                .asSequence()
+                .filterIsInstance<ReaderPage>()
+                .map { if (it is InsertPage) it.parent else it }
                 .filter { it.chapter == reference.chapter }
                 .distinctBy { it.index }
                 .toList()
             readingOrderLoaders += loader
-            loader.updateReadingOrder(chapterVisible, orderedSuccessors)
+            loader.updateReadingOrder(chapterVisible, orderedSuccessors, chapterOrder)
         }
     }
 

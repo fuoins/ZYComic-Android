@@ -38,7 +38,7 @@ class ChapterLoader(
     private val mergedReferences: List<MergedMangaReference>,
     private val mergedManga: Map<Long, Manga>?,
     private val imageAttemptCoordinator: ImageAttemptCoordinator = ImageAttemptCoordinator(
-        readerPrefs.readerThreads().get().coerceIn(1, 4),
+        readerPrefs.readerThreads().get().coerceIn(1, 10),
     ),
     // SY <--
 ) {
@@ -46,23 +46,41 @@ class ChapterLoader(
         imageAttemptCoordinator.close()
     }
 
+    private fun nextChapterGatePageCount(): Int {
+        val configuredReaderThreads = readerPrefs.readerThreads().get().coerceIn(0, 10)
+        return if (configuredReaderThreads == 0) 0 else readerPrefs.preloadSize().get().coerceIn(0, 10)
+    }
+
     /**
      * Assigns the chapter's page loader and loads the its pages. Returns immediately if the chapter
      * is already loaded.
      */
-    suspend fun loadChapter(chapter: ReaderChapter /* SY --> */, page: Int? = null/* SY <-- */) {
+    suspend fun loadChapter(
+        chapter: ReaderChapter /* SY --> */,
+        page: Int? = null/* SY <-- */,
+        imageLoadingBarrier: ReaderChapter? = null,
+    ) {
         chapter.loadMutex.withLock {
-            if (chapterIsReady(chapter)) return@withLock
+            if (chapterIsReady(chapter)) {
+                chapter.pageLoader?.let { pageLoader ->
+                    pageLoader.setNextChapterGatePageCount(nextChapterGatePageCount())
+                    pageLoader.setImageLoadingBarrier(imageLoadingBarrier)
+                }
+                return@withLock
+            }
 
             chapter.state = ReaderChapter.State.Loading
             withIOContext {
                 logcat { "Loading pages for ${chapter.chapter.name}" }
                 try {
                     val loader = getPageLoader(chapter)
+                    loader.setNextChapterGatePageCount(nextChapterGatePageCount())
+                    loader.setImageLoadingBarrier(imageLoadingBarrier)
                     chapter.pageLoader = loader
 
                     val pages = loader.getPages()
                         .onEach { it.chapter = chapter }
+                    loader.setChapterPages(pages)
 
                     if (pages.isEmpty()) {
                         throw Exception(context.stringResource(MR.strings.page_list_empty_error))

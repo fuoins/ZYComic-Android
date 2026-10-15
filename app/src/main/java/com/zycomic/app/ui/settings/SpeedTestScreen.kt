@@ -72,11 +72,14 @@ fun SpeedTestScreen(
     val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg = RouteManager.useFastestImgForAll
     val followVpn by vm.followSystemVpn.collectAsState()
+    val vpnOnlyAutoRetest by vm.vpnOnlyAutoRetest.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
     val configRetest by RemoteConfigFetcher.configRetest.collectAsState()
     val speedTestResultVersion by vm.speedTestResultVersion.collectAsState()
     val speedTestProgress by vm.speedTestProgress.collectAsState()
+    val imageReuseNotice by vm.imageReuseNotice.collectAsState()
+    val reusableImageSnapshot by RouteManager.reusableImageSpeedTestSnapshot.collectAsState()
     val pendingExport = remember { mutableStateOf<Pair<RouteManager.SpeedTestSnapshot, String>?>(null) }
     val exportSuccessMessage = stringResource(KMR.strings.speed_test_export_success)
     val exportFailedMessage = stringResource(KMR.strings.speed_test_export_failed)
@@ -161,6 +164,23 @@ fun SpeedTestScreen(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    remoteInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    enabled = !remoteChecking,
+                    onClick = { vm.checkRemoteConfig() },
+                ) {
+                    Text(if (remoteChecking) "检查中…" else "检查更新")
+                }
+            }
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
@@ -179,7 +199,7 @@ fun SpeedTestScreen(
                     )
                 }
             }
-            if (testing || configRetest != null) {
+            if (speedTestActive || (speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.reusedImages > 0)) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     configRetest?.let {
                         Text(
@@ -190,6 +210,13 @@ fun SpeedTestScreen(
                         )
                     }
                     Text(vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
+                    imageReuseNotice?.let { notice ->
+                        Text(
+                            notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     if (speedTestProgress.total > 0 &&
                         speedTestProgress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
                     ) {
@@ -202,24 +229,6 @@ fun SpeedTestScreen(
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    remoteInfo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Button(
-                    enabled = !remoteChecking,
-                    onClick = { vm.checkRemoteConfig() },
-                ) {
-                    Text(if (remoteChecking) "检查中…" else "检查更新")
-                }
-            }
-
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
                 item {
                     Text(
@@ -306,6 +315,25 @@ fun SpeedTestScreen(
                             )
                         }
                         Switch(checked = followVpn, onCheckedChange = { vm.setFollowSystemVpn(it) })
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("VPN 单独变化后自动测速", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "${if (vpnOnlyAutoRetest) "已开启" else "已关闭"}：只控制可确认的 VPN 单独变化后的自动测速和新排名应用；不控制路由选择或连接清理。真实网络变化仍测速，底层网络无法确认时沿用原行为。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = vpnOnlyAutoRetest,
+                            onCheckedChange = { vm.setVpnOnlyAutoRetest(it) },
+                        )
                     }
                 }
                 item {
@@ -406,6 +434,21 @@ fun SpeedTestScreen(
                         ) {
                             Text(if (speedTestActive) "测速中..." else "重新测速")
                         }
+                    }
+                    if (reusableImageSnapshot != null) {
+                        Button(
+                            onClick = { vm.usePreviousImageResults() },
+                            enabled = imageReuseNotice == null,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        ) {
+                            Text("使用上次的图源测速结果")
+                        }
+                        Text(
+                            "建议短期内测速使用此功能，会节省大量时间，间隔时间过长可能出现图片加载不出来，若已选择并卡顿，可在漫画里切换图源点击重新测速",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
                     }
                 }
             }

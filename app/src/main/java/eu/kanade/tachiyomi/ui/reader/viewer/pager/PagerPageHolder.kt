@@ -128,7 +128,7 @@ class PagerPageHolder(
         val loader = page.chapter.pageLoader ?: return
         supervisorScope {
             launchIO {
-                loader.loadPage(page)
+                loader.loadPageWhenAllowed(page)
             }
             launch {
                 page.slowFlow.collectLatest { updateSlowOverlay() }

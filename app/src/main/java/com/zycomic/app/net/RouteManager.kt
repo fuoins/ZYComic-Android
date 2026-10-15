@@ -59,10 +59,20 @@ object RouteManager {
                 }
     }
 
+    data class ReusableImageSpeedTestSnapshot(
+        val imgDelays: Map<DomainIp, Long>,
+        val imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
+        val remoteVersion: Int?,
+        val configFingerprint: String,
+    )
+
     private val _speedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
     val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _speedTestSnapshot.asStateFlow()
     private val _completedSpeedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
     val completedSpeedTestSnapshot: StateFlow<SpeedTestSnapshot> = _completedSpeedTestSnapshot.asStateFlow()
+    private val _reusableImageSpeedTestSnapshot = MutableStateFlow<ReusableImageSpeedTestSnapshot?>(null)
+    val reusableImageSpeedTestSnapshot: StateFlow<ReusableImageSpeedTestSnapshot?> = _reusableImageSpeedTestSnapshot.asStateFlow()
+    private const val REUSABLE_IMAGE_SNAPSHOT_KEY = "reusable_image_speed_test_snapshot"
 
     // Candidate routes and image sources are populated only from validated remote configuration.
     @Volatile var lineHosts: List<String> = emptyList()
@@ -228,6 +238,7 @@ object RouteManager {
         completedAtEpochMs: Long? = null,
         networkPath: SpeedTestNetworkPath? = null,
         completeSnapshot: Boolean = false,
+        invalidateCompletedSnapshot: Boolean = false,
     ): Boolean {
         if (expectedConfigRevision != null && expectedConfigRevision != configRevision) return false
         if (completeSnapshot && (
@@ -271,8 +282,142 @@ object RouteManager {
             isComplete = completeSnapshot,
         )
         _speedTestSnapshot.value = snapshot
-        if (completeSnapshot) _completedSpeedTestSnapshot.value = snapshot
+        if (completeSnapshot) {
+            _completedSpeedTestSnapshot.value = snapshot
+            persistReusableImageSpeedTestSnapshot(snapshot)
+        } else if (invalidateCompletedSnapshot) {
+            _completedSpeedTestSnapshot.value = SpeedTestSnapshot()
+        }
         return true
+    }
+
+    /** Load a completed image-only snapshot and discard it if the active configuration changed. */
+    @Synchronized
+    fun refreshReusableImageSpeedTestSnapshot() {
+        if (lineHosts.isEmpty() || imgDomains.isEmpty()) {
+            _reusableImageSpeedTestSnapshot.value = null
+            return
+        }
+        val prefs = runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+        }.getOrNull() ?: run {
+            _reusableImageSpeedTestSnapshot.value = null
+            return
+        }
+        val raw = prefs.getString(REUSABLE_IMAGE_SNAPSHOT_KEY, null)
+        val snapshot = runCatching { raw?.let(::decodeReusableImageSpeedTestSnapshot) }.getOrNull()
+        if (snapshot == null || !isReusableImageSpeedTestSnapshotValid(snapshot)) {
+            prefs.edit().remove(REUSABLE_IMAGE_SNAPSHOT_KEY).apply()
+            _reusableImageSpeedTestSnapshot.value = null
+        } else {
+            _reusableImageSpeedTestSnapshot.value = snapshot
+        }
+    }
+
+    fun reusableImageSpeedTestSnapshotOrNull(): ReusableImageSpeedTestSnapshot? {
+        val current = _reusableImageSpeedTestSnapshot.value
+        if (current != null && isReusableImageSpeedTestSnapshotValid(current)) return current
+        refreshReusableImageSpeedTestSnapshot()
+        return _reusableImageSpeedTestSnapshot.value
+    }
+
+    fun isReusableImageSpeedTestSnapshotValid(snapshot: ReusableImageSpeedTestSnapshot): Boolean =
+        snapshot.remoteVersion == activeRemoteConfigVersion &&
+            snapshot.configFingerprint == currentSpeedTestConfigFingerprint() &&
+            imgDomains.isNotEmpty() &&
+            snapshot.imgDelays.isNotEmpty() &&
+            snapshot.imgDelays.keys == snapshot.imgVerdicts.keys &&
+            snapshot.imgDelays.all { (endpoint, delay) ->
+                val verdict = snapshot.imgVerdicts[endpoint]
+                delay >= 0L &&
+                    imgDomains.any { it.equals(endpoint.domain, ignoreCase = true) } &&
+                    when (verdict) {
+                        SpeedTester.ImgVerdict.OK -> delay < Long.MAX_VALUE
+                        SpeedTester.ImgVerdict.UNREACHABLE,
+                        SpeedTester.ImgVerdict.NO_IMAGE,
+                        -> delay == Long.MAX_VALUE
+                        null -> false
+                    }
+            }
+
+    private fun currentSpeedTestConfigFingerprint(): String {
+        val configText = buildString {
+            append(activeRemoteConfigVersion ?: "builtin").append('\n')
+            lineHosts.forEach { append(it.trim().lowercase(java.util.Locale.ROOT)).append('\n') }
+            append("--sources--\n")
+            imgDomains.forEach { append(it.trim().lowercase(java.util.Locale.ROOT)).append('\n') }
+            append("--rules--\n")
+            customRule.entries.sortedBy { it.key.lowercase(java.util.Locale.ROOT) }.forEach { (domain, ips) ->
+                append(domain.lowercase(java.util.Locale.ROOT)).append('=')
+                ips.sorted().forEach { append(it).append(',') }
+                append('\n')
+            }
+            append("--raw-config--\n").append(DevConfig.getConfigJson())
+        }
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(configText.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    private fun persistReusableImageSpeedTestSnapshot(snapshot: SpeedTestSnapshot) {
+        if (!snapshot.canExport || snapshot.remoteVersion != activeRemoteConfigVersion || snapshot.imgDelays.isEmpty()) return
+        val reusable = ReusableImageSpeedTestSnapshot(
+            imgDelays = snapshot.imgDelays.toMap(),
+            imgVerdicts = snapshot.imgVerdicts.toMap(),
+            remoteVersion = snapshot.remoteVersion,
+            configFingerprint = currentSpeedTestConfigFingerprint(),
+        )
+        if (!isReusableImageSpeedTestSnapshotValid(reusable)) return
+        val json = org.json.JSONObject().apply {
+            put("formatVersion", 1)
+            put("remoteVersion", reusable.remoteVersion ?: org.json.JSONObject.NULL)
+            put("configFingerprint", reusable.configFingerprint)
+            put("endpoints", org.json.JSONArray().apply {
+                reusable.imgDelays.entries.sortedWith(
+                    compareBy<Map.Entry<DomainIp, Long>>({ it.key.domain.lowercase(java.util.Locale.ROOT) }, { it.key.ip }),
+                ).forEach { (endpoint, delay) ->
+                    put(org.json.JSONObject().apply {
+                        put("domain", endpoint.domain)
+                        put("ip", endpoint.ip)
+                        put("delayMs", delay)
+                        put("verdict", reusable.imgVerdicts.getValue(endpoint).name)
+                    })
+                }
+            })
+        }.toString()
+        runCatching {
+            val prefs = DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                ?: return@runCatching
+            val editor = prefs.edit().putString(REUSABLE_IMAGE_SNAPSHOT_KEY, json)
+            if (!editor.commit()) editor.apply()
+        }
+        _reusableImageSpeedTestSnapshot.value = reusable
+    }
+
+    private fun decodeReusableImageSpeedTestSnapshot(raw: String): ReusableImageSpeedTestSnapshot {
+        val json = org.json.JSONObject(raw)
+        require(json.optInt("formatVersion", -1) == 1)
+        val delays = LinkedHashMap<DomainIp, Long>()
+        val verdicts = LinkedHashMap<DomainIp, SpeedTester.ImgVerdict>()
+        val endpoints = json.getJSONArray("endpoints")
+        for (index in 0 until endpoints.length()) {
+            val item = endpoints.getJSONObject(index)
+            val endpoint = DomainIp(item.getString("domain"), item.getString("ip"))
+            val delay = item.getLong("delayMs")
+            val verdict = SpeedTester.ImgVerdict.valueOf(item.getString("verdict"))
+            require(delay >= 0L)
+            require(delays.put(endpoint, delay) == null)
+            verdicts[endpoint] = verdict
+        }
+        val version = json.opt("remoteVersion")
+            .takeUnless { it == null || it == org.json.JSONObject.NULL }
+            ?.let { (it as Number).toInt() }
+        return ReusableImageSpeedTestSnapshot(
+            imgDelays = delays,
+            imgVerdicts = verdicts,
+            remoteVersion = version,
+            configFingerprint = json.getString("configFingerprint"),
+        )
     }
 
     fun isSpeedTestToday(): Boolean = try {
@@ -326,6 +471,7 @@ object RouteManager {
         clearSpeedTestResults()
         clearPersistedCandidateLists()
         configRevision++
+        invalidateReusableImageSpeedTestSnapshot()
     }
 
     private fun hostFromLine(url: String): String =
@@ -935,6 +1081,15 @@ object RouteManager {
         setBaselineImgDomains(lists.sources)
         clearSpeedTestResults()
         configRevision++
+        refreshReusableImageSpeedTestSnapshot()
+    }
+
+    private fun invalidateReusableImageSpeedTestSnapshot() {
+        runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                ?.edit()?.remove(REUSABLE_IMAGE_SNAPSHOT_KEY)?.apply()
+        }
+        _reusableImageSpeedTestSnapshot.value = null
     }
 
     /** Remove speed rows for endpoints that may have been removed by the latest configuration. */

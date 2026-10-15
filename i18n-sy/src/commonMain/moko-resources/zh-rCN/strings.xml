@@ -212,6 +212,7 @@
     <!-- Reader Settings -->
     <string name="page_downloading">页面下载</string>
     <string name="download_threads">下载线程</string>
+    <string name="download_threads_current_page_only">仅当前页</string>
     <string name="download_threads_summary">较高的值可以明显加快页面加载速度，同时容易触发封禁。推荐值为 2 或 3。现在的值为：%s</string>
     <string name="aggressively_load_pages">积极地加载页面</string>
     <string name="aggressively_load_pages_summary">在阅读时缓慢地下载整个章节，而不是只加载你正在阅读的页面。</string>

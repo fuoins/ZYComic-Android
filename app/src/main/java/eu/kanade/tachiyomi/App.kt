@@ -277,15 +277,38 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     )
     private val networkHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
-    /** 最近一次已处理的网络身份签名，用于去重连发回调。 */
+    private data class DefaultNetworkState(
+        val network: android.net.Network?,
+        val isVpn: Boolean?,
+        /** 非 VPN 网络自身，或 Android 12+ 明确报告的 VPN 底层网络；null 表示无法可靠识别。 */
+        val underlyingNetworks: Set<android.net.Network>?,
+    )
+
+    private val networkRetestLock = Any()
+
+    /** 最近一次默认网络状态，用于去重回调并区分可确认的 VPN-only 变化。 */
     @Volatile
-    private var lastNetworkSig: String? = null
+    private var lastDefaultNetworkState: DefaultNetworkState? = null
+
+    /** 防抖窗口内只要出现真实/未能可靠分类的网络变化，就保留自动测速请求。 */
+    private var pendingNetworkRetest = false
 
     private val networkRetestRunnable = Runnable {
+        val shouldRetest = synchronized(networkRetestLock) {
+            val pending = pendingNetworkRetest
+            pendingNetworkRetest = false
+            pending
+        }
         networkScope.launch {
             try {
-                // 1) 按当前生效策略清理连接池、必要时重建 client（强制直连模式下策略不翻转，仅清池）
-                com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged("default network changed")
+                // VPN-only 关闭时仍按当前策略处理网络栈并清理旧连接，只跳过完整测速。
+                com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged(
+                    if (shouldRetest) "default network changed" else "VPN-only change",
+                )
+                if (!shouldRetest) {
+                    android.util.Log.i("App", "VPN-only change: network stack refreshed, automatic retest disabled")
+                    return@launch
+                }
                 // 2) 30s 内已在相同策略下测速成功则不重复测（避免冷启动回调与启动测速重复）
                 val fresh = System.currentTimeMillis() - com.zycomic.app.net.SpeedTester.lastRunAt < 30_000L
                 val sameStrategy = com.zycomic.app.net.SpeedTester.lastRunDirectStrategy ==
@@ -303,21 +326,29 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     /**
-     * 注册默认网络回调：网络/VPN 状态变化后 2s 防抖，先清连接池、按生效策略重建图片/网络栈，
-     * 再后台自动重测速（成功才替换线路/图域）。
-     * 「自动跟随系统 VPN」关闭（强制直连）期间同样防抖清池与重测，但策略恒为直连，不随 VPN 翻转。
+     * 注册默认网络回调：变化后 2s 防抖，先按生效策略清理/重建网络栈。
+     * 真实网络变化始终自动重测速；只有能确认底层网络未变的 VPN-only 变化才受单独开关控制。
      */
     private fun registerNetworkCallback() {
         try {
             val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                 as? android.net.ConnectivityManager ?: return
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: android.net.Network) = scheduleNetworkRetest(cm, network)
-                override fun onLost(network: android.net.Network) = scheduleNetworkRetest(cm, network)
+                override fun onAvailable(network: android.net.Network) = scheduleNetworkRetest(
+                    network,
+                    cm.getNetworkCapabilities(network),
+                )
+                override fun onLost(network: android.net.Network) {
+                    val activeNetwork = cm.activeNetwork
+                    scheduleNetworkRetest(
+                        activeNetwork,
+                        activeNetwork?.let(cm::getNetworkCapabilities),
+                    )
+                }
                 override fun onCapabilitiesChanged(
                     network: android.net.Network,
                     caps: android.net.NetworkCapabilities,
-                ) = scheduleNetworkRetest(cm, network)
+                ) = scheduleNetworkRetest(network, caps)
             }
             cm.registerDefaultNetworkCallback(callback)
         } catch (e: Exception) {
@@ -325,17 +356,49 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         }
     }
 
-    /** 网络身份去重 + 2s 防抖后触发 [networkRetestRunnable]。 */
+    /** 网络身份去重 + 2s 防抖后触发网络栈处理；VPN-only 的自动测速默认关闭。 */
     private fun scheduleNetworkRetest(
-        cm: android.net.ConnectivityManager,
-        network: android.net.Network,
+        network: android.net.Network?,
+        caps: android.net.NetworkCapabilities?,
     ) {
-        val caps = cm.getNetworkCapabilities(network)
-        val sig = "$network@vpn=${caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)}"
-        if (sig == lastNetworkSig) return
-        lastNetworkSig = sig
+        val isVpn = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+        val underlyingNetworks = when {
+            network == null || isVpn == null -> null
+            !isVpn -> setOf(network)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                caps?.underlyingNetworks?.takeIf { it.isNotEmpty() }?.toSet()
+            }
+            else -> null
+        }
+        val current = DefaultNetworkState(network, isVpn, underlyingNetworks)
+        val previous = synchronized(networkRetestLock) {
+            val old = lastDefaultNetworkState
+            if (current == old) return
+            lastDefaultNetworkState = current
+            old
+        }
+        val vpnOnlyChange = previous?.let { isVpnOnlyChange(it, current) } == true
+        val shouldRetest = !vpnOnlyChange ||
+            com.zycomic.app.net.DevConfig.isVpnOnlyAutoRetestEnabled()
+        synchronized(networkRetestLock) {
+            if (shouldRetest) pendingNetworkRetest = true
+        }
         networkHandler.removeCallbacks(networkRetestRunnable)
         networkHandler.postDelayed(networkRetestRunnable, 2000)
+    }
+
+    /** 只有两侧 VPN/非 VPN 网络都报告同一组非空底层网络时，才将变化视为 VPN-only。 */
+    private fun isVpnOnlyChange(
+        previous: DefaultNetworkState,
+        current: DefaultNetworkState,
+    ): Boolean {
+        if (previous.isVpn == null || current.isVpn == null) return false
+        if (previous.isVpn == false && current.isVpn == false) return false
+        val previousUnderlying = previous.underlyingNetworks ?: return false
+        val currentUnderlying = current.underlyingNetworks ?: return false
+        return previousUnderlying.isNotEmpty() &&
+            currentUnderlying.isNotEmpty() &&
+            previousUnderlying == currentUnderlying
     }
 
     private fun initializeMigrator() {

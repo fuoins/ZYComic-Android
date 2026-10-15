@@ -32,6 +32,7 @@ object DevConfig {
     private const val KEY_PROXY_ENABLED = "proxy_enabled"
     private const val KEY_PROXY_MIGRATED = "proxy_migrated_v1"
     private const val KEY_VPN_ACCEL_ENABLED = "vpn_accel_enabled"
+    private const val KEY_VPN_ONLY_AUTO_RETEST_ENABLED = "vpn_only_auto_retest_enabled"
 
     /** 远程配置持久化 */
     private const val PREFS_REMOTE = "zycomic_remote_config"
@@ -165,6 +166,23 @@ object DevConfig {
         context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             ?.edit()
             ?.putBoolean(KEY_VPN_ACCEL_ENABLED, enabled)
+            ?.apply()
+    }
+
+    /**
+     * VPN 单独变化后是否自动完整测速并应用新排名；默认关闭。
+     * 老安装没有该 key 时也读取为 false。此偏好不影响路由策略或网络变化时的连接清理。
+     */
+    fun isVpnOnlyAutoRetestEnabled(): Boolean {
+        val ctx = context ?: return false
+        return ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_VPN_ONLY_AUTO_RETEST_ENABLED, false)
+    }
+
+    fun setVpnOnlyAutoRetestEnabled(enabled: Boolean) {
+        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putBoolean(KEY_VPN_ONLY_AUTO_RETEST_ENABLED, enabled)
             ?.apply()
     }
 

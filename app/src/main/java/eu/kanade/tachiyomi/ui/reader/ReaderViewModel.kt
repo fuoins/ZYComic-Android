@@ -537,7 +537,10 @@ class ReaderViewModel @JvmOverloads constructor(
         page: Int? = null,
         // SY <--
     ): ViewerChapters {
-        loader.loadChapter(chapter /* SY --> */, page/* SY <-- */)
+        val imageLoadingBarrier = state.value.viewerChapters
+            ?.takeIf { it.nextChapter == chapter }
+            ?.currChapter
+        loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier)
 
         val chapterPos = chapterList.indexOf(chapter)
         val newChapters = ViewerChapters(

@@ -45,7 +45,7 @@ class ImageAttemptCoordinator(primaryCapacity: Int = 4) : Closeable {
     val watchdog: ScheduledExecutorService = ScheduledThreadPoolExecutor(1) { task ->
         Thread(task, "zy-img-watchdog").apply { isDaemon = true }
     }
-    private val primaryInFlight = Semaphore(primaryCapacity.coerceIn(1, 4), true)
+    private val primaryInFlight = Semaphore(primaryCapacity.coerceIn(1, 10), true)
     private val raceInFlight = Semaphore(2, true)
 
     fun tryAcquirePrimary(): Boolean = primaryInFlight.tryAcquire()

@@ -19,6 +19,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.Buffer
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 线路 / 图域测速。
@@ -73,6 +75,15 @@ object SpeedTester {
     val isRunningFlow: StateFlow<Boolean> = _isRunning.asStateFlow()
     val isRunning: Boolean get() = running.get()
     private val configRunLock = Mutex()
+    private val requestedImageSnapshot = AtomicReference<RouteManager.ReusableImageSpeedTestSnapshot?>(null)
+
+    /** Request reuse for the active test, or arm the next test if one has not started yet. */
+    fun requestPreviousImageResults(): Boolean {
+        val snapshot = RouteManager.reusableImageSpeedTestSnapshotOrNull() ?: return false
+        if (!RouteManager.isReusableImageSpeedTestSnapshotValid(snapshot)) return false
+        requestedImageSnapshot.set(snapshot)
+        return true
+    }
 
     @Volatile private var lastCompletedConfigRevision: Long = -1L
 
@@ -194,6 +205,8 @@ object SpeedTester {
         val successful: Int = 0,
         val failed: Int = 0,
         val noImage: Int = 0,
+        val freshImages: Int = 0,
+        val reusedImages: Int = 0,
     )
 
     private val _progress = MutableStateFlow(Progress())
@@ -538,18 +551,23 @@ object SpeedTester {
         samplePath: String? = RouteManager.loadProbeImgPath(),
         onResult: ((DomainIp, Long, ImgVerdict) -> Unit)? = null,
         domains: List<String> = RouteManager.imgDomains,
+        onStageProgress: ((completed: Int, total: Int) -> Unit)? = null,
     ): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
         val client = NetworkModule.newSpeedTestClient()
         try {
             val verdicts = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
+            val targets = imgTargets(domains)
+            val completed = AtomicInteger(0)
+            onStageProgress?.invoke(0, targets.size)
             val delays = coroutineScope {
-                imgTargets(domains).map { endpoint ->
+                targets.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
                             val result = measureImgAtIp(client, endpoint, samplePath)
                             verdicts[endpoint] = result.verdict
                             lastImgIpVerdicts = verdicts.toMap()
                             onResult?.invoke(endpoint, result.delayMs, result.verdict)
+                            onStageProgress?.invoke(completed.incrementAndGet(), targets.size)
                             endpoint to result.delayMs
                         }
                     }
@@ -757,16 +775,35 @@ object SpeedTester {
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val verdictAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
                 val imageDiagnosticAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, SpeedTestEndpointDiagnostic>()
+                val freshImageCount = AtomicInteger(0)
+                val reusedImageCount = AtomicInteger(0)
                 reportStage(Progress(Phase.PREPARING_IMAGES))
                 val resolvedImages = imgTargets()
                 reportStage(Progress(Phase.TESTING_IMAGES, total = resolvedImages.size))
                 val imgJobs = resolvedImages.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
-                            val result = measureImgAtIp(imgClient, endpoint, samplePath)
-                            imgAcc[endpoint] = result.delayMs
-                            verdictAcc[endpoint] = result.verdict
-                            imageDiagnosticAcc[endpoint] = result.diagnostic
+                            val reusable = requestedImageSnapshot.get()?.takeIf {
+                                configRevisionAtStart == RouteManager.configRevision &&
+                                    RouteManager.isReusableImageSpeedTestSnapshotValid(it)
+                            }
+                            val previousDelay = reusable?.imgDelays?.get(endpoint)
+                            val previousVerdict = reusable?.imgVerdicts?.get(endpoint)
+                            val delay: Long
+                            val verdict: ImgVerdict
+                            if (previousDelay != null && previousVerdict != null) {
+                                delay = previousDelay
+                                verdict = previousVerdict
+                                reusedImageCount.incrementAndGet()
+                            } else {
+                                val result = measureImgAtIp(imgClient, endpoint, samplePath)
+                                delay = result.delayMs
+                                verdict = result.verdict
+                                imageDiagnosticAcc[endpoint] = result.diagnostic
+                                freshImageCount.incrementAndGet()
+                            }
+                            imgAcc[endpoint] = delay
+                            verdictAcc[endpoint] = verdict
                             lastImgIpVerdicts = verdictAcc.toMap()
                             lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
                             if (configRevisionAtStart == RouteManager.configRevision) {
@@ -780,14 +817,17 @@ object SpeedTester {
                                     successful = verdictAcc.values.count { it == ImgVerdict.OK },
                                     failed = verdictAcc.values.count { it == ImgVerdict.UNREACHABLE },
                                     noImage = verdictAcc.values.count { it == ImgVerdict.NO_IMAGE },
+                                    freshImages = freshImageCount.get(),
+                                    reusedImages = reusedImageCount.get(),
                                 ),
                             )
-                            endpoint to result.delayMs
+                            endpoint to delay
                         }
                     }
                 }
                 val imgs = imgJobs.awaitAll().toMap()
                 val imageDiagnostics = imageDiagnosticAcc.toMap()
+                val mixedImageResult = reusedImageCount.get() > 0
                 lastImgIpVerdicts = verdictAcc.toMap()
                 lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
 
@@ -799,6 +839,8 @@ object SpeedTester {
                         successful = verdictAcc.values.count { it == ImgVerdict.OK },
                         failed = verdictAcc.values.count { it == ImgVerdict.UNREACHABLE },
                         noImage = verdictAcc.values.count { it == ImgVerdict.NO_IMAGE },
+                        freshImages = freshImageCount.get(),
+                        reusedImages = reusedImageCount.get(),
                     ),
                 )
                 if (!RouteManager.setEndpointDelays(
@@ -807,6 +849,7 @@ object SpeedTester {
                         verdictAcc,
                         remoteVersion = configVersionAtStart,
                         expectedConfigRevision = configRevisionAtStart,
+                        invalidateCompletedSnapshot = mixedImageResult,
                     )
                 ) {
                     return@coroutineScope (-1 to -1)
@@ -820,21 +863,23 @@ object SpeedTester {
                 RouteManager.markSpeedTestToday()
 
                 val completedAt = System.currentTimeMillis()
-                if (!RouteManager.setEndpointDelays(
-                        line = lines,
-                        img = imgs,
-                        imgVerdicts = verdictAcc,
-                        remoteVersion = configVersionAtStart,
-                        expectedConfigRevision = configRevisionAtStart,
-                        lineDiagnostics = lineDiagnostics,
-                        imageDiagnostics = imageDiagnostics,
-                        startedAtEpochMs = startedAt,
-                        completedAtEpochMs = completedAt,
-                        networkPath = networkPath,
-                        completeSnapshot = true,
-                    )
-                ) {
-                    return@coroutineScope (-1 to -1)
+                if (!mixedImageResult) {
+                    if (!RouteManager.setEndpointDelays(
+                            line = lines,
+                            img = imgs,
+                            imgVerdicts = verdictAcc,
+                            remoteVersion = configVersionAtStart,
+                            expectedConfigRevision = configRevisionAtStart,
+                            lineDiagnostics = lineDiagnostics,
+                            imageDiagnostics = imageDiagnostics,
+                            startedAtEpochMs = startedAt,
+                            completedAtEpochMs = completedAt,
+                            networkPath = networkPath,
+                            completeSnapshot = true,
+                        )
+                    ) {
+                        return@coroutineScope (-1 to -1)
+                    }
                 }
                 lastRunAt = completedAt
                 lastRunDirectStrategy = networkPath.directStrategy
@@ -858,9 +903,21 @@ object SpeedTester {
                     (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
                 lastCompletedConfigRevision = configRevisionAtStart
                 lastConfigRunResult = result
-                reportStage(Progress(Phase.COMPLETE))
+                reportStage(
+                    Progress(
+                        phase = Phase.COMPLETE,
+                        completed = imgs.size,
+                        total = resolvedImages.size,
+                        successful = verdictAcc.values.count { it == ImgVerdict.OK },
+                        failed = verdictAcc.values.count { it == ImgVerdict.UNREACHABLE },
+                        noImage = verdictAcc.values.count { it == ImgVerdict.NO_IMAGE },
+                        freshImages = freshImageCount.get(),
+                        reusedImages = reusedImageCount.get(),
+                    ),
+                )
                 result
             } finally {
+                requestedImageSnapshot.set(null)
                 running.set(false)
                 _isRunning.value = false
                 lineClient.releaseProbe()

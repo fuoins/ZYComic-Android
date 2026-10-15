@@ -38,7 +38,6 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
@@ -53,23 +52,21 @@ internal class HttpPageLoader(
 ) : PageLoader() {
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = java.util.concurrent.PriorityBlockingQueue<PriorityPage>()
-    private val retryQueue = java.util.concurrent.PriorityBlockingQueue<PriorityPage>()
     private val workerSignals = LinkedBlockingQueue<Unit>()
-    private val retryWorkerActive = AtomicBoolean(false)
     private val preloadSize = readerPreferences.preloadSize().get().coerceAtLeast(0)
-    private val readerThreads = readerPreferences.readerThreads().get().coerceIn(1, 4)
-    private val rollingWindowSize = if (preloadSize == 0) 1 else min(4, preloadSize + 1)
-    private val nearForegroundSize = min(rollingWindowSize - 1, preloadSize)
+    private val configuredReaderThreads = readerPreferences.readerThreads().get().coerceIn(0, 10)
+    private val readerThreads = configuredReaderThreads.coerceAtLeast(1)
+    private val preloadTaskLimit = if (configuredReaderThreads == 0) 0 else min(10, preloadSize)
+    private val nearForegroundSize = min(9, preloadTaskLimit)
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
-    private val activeRetryLoads = ConcurrentHashMap.newKeySet<ReaderPage>()
-    private val queuedRetryPages = ConcurrentHashMap.newKeySet<ReaderPage>()
     private val pendingDisposition = ConcurrentHashMap<ReaderPage, ImageCancelReason>()
     private val terminalErrors = ConcurrentHashMap<ReaderPage, Throwable>()
     private val decodeFailures = ConcurrentHashMap<String, AtomicInteger>()
     private val successfullyCachedPages = java.util.Collections.newSetFromMap(ConcurrentHashMap<ReaderPage, Boolean>())
     private val queueLock = Any()
     private val preloadLock = Any()
+    private val previouslyVisiblePages = LinkedHashMap<Int, ReaderPage>()
 
     @Volatile private var visiblePages: List<ReaderPage> = emptyList()
 
@@ -83,10 +80,6 @@ internal class HttpPageLoader(
 
     @Volatile private var chapterPageOrder: List<ReaderPage> = emptyList()
 
-    @Volatile private var preloadStartIndex = 0
-
-    @Volatile private var preloadCursor = 0
-
     @Volatile private var rollingPages: List<ReaderPage> = emptyList()
 
     init {
@@ -94,41 +87,19 @@ internal class HttpPageLoader(
             workerScope.launchIO {
                 while (true) {
                     runInterruptible { workerSignals.take() }
-                    val entry = queue.poll() ?: if (!retryWorkerActive.get()) retryQueue.poll() else null
-                    if (entry == null) continue
+                    val entry = queue.poll() ?: continue
                     val page = entry.page
-                    val ownsRetryWorker = entry.isRetry && retryWorkerActive.compareAndSet(false, true)
-                    if (entry.isRetry && !ownsRetryWorker) {
-                        retryQueue.offer(entry)
-                        continue
-                    }
                     val shouldLoad = synchronized(queueLock) {
                         synchronized(page) {
                             val ownsEntry = page.queuedToken.get() == entry.generation
                             if (ownsEntry) page.queuedToken.compareAndSet(entry.generation, -1)
                             ownsEntry && entry.generation == page.generation.get() &&
                                 page.status == Page.State.Queue && readingOrderInitialized &&
-                                (entry.isRetry || page in currentWindow)
+                                page in currentWindow
                         }
                     }
-                    if (entry.isRetry) queuedRetryPages.remove(page)
-                    if (!shouldLoad) {
-                        if (ownsRetryWorker) {
-                            retryWorkerActive.set(false)
-                            workerSignals.offer(Unit)
-                        }
-                        continue
-                    }
-                    if (entry.isRetry) activeRetryLoads.add(page)
-                    try {
-                        internalLoadPage(page, entry.isRetry, entry.queuedAtNanos)
-                    } finally {
-                        if (entry.isRetry) {
-                            activeRetryLoads.remove(page)
-                            retryWorkerActive.set(false)
-                            workerSignals.offer(Unit)
-                        }
-                    }
+                    if (!shouldLoad) continue
+                    internalLoadPage(page, entry.queuedAtNanos)
                 }
             }
         }
@@ -163,7 +134,12 @@ internal class HttpPageLoader(
     }
 
     /** The viewer is the authority for visible pages and real reading order. */
-    override fun updateReadingOrder(visible: List<ReaderPage>, successors: List<ReaderPage>) {
+    override fun updateReadingOrder(
+        visible: List<ReaderPage>,
+        successors: List<ReaderPage>,
+        chapterOrder: List<ReaderPage>,
+    ) {
+        super.updateReadingOrder(visible, successors, chapterOrder)
         val normalizedVisible = visible.asSequence()
             .filterNot { it is InsertPage }
             .distinctBy { it.index }
@@ -172,9 +148,9 @@ internal class HttpPageLoader(
             .filterNot { it is InsertPage }
             .distinctBy { it.index }
             .toList()
-        val oldVisible = visiblePages.toSet()
+        val oldVisiblePages = visiblePages
+        val oldVisible = oldVisiblePages.toSet()
         val newVisible = normalizedVisible.toSet()
-        val newlyVisible = newVisible - oldVisible
         (oldVisible - newVisible).forEach { it.readerVisible = false }
         (newVisible - oldVisible).forEach { it.readerVisible = true }
         visiblePages = normalizedVisible
@@ -183,38 +159,28 @@ internal class HttpPageLoader(
         readingRanks = normalizedSuccessors.withIndex().associate { it.value to it.index }
 
         val nextRollingPages = synchronized(preloadLock) {
-            if (!readingOrderInitialized) {
-                chapterPageOrder = chapter.pages.orEmpty()
+            if (preloadTaskLimit == 0) {
+                normalizedVisible.filterNot(::isPageSettled)
+                    .forEach { previouslyVisiblePages[it.index] = it }
+            }
+            if (normalizedVisible.isNotEmpty() || chapterOrder.isNotEmpty() || !readingOrderInitialized) {
+                val chapterPages = chapter.pages.orEmpty()
                     .filterNot { it is InsertPage }
                     .distinctBy { it.index }
-                    .ifEmpty { (normalizedVisible + normalizedSuccessors).distinctBy { it.index } }
-                readingOrderInitialized = true
+                chapterPageOrder = (normalizedVisible + normalizedSuccessors + chapterOrder + chapterPages)
+                    .filterNot { it is InsertPage }
+                    .distinctBy { it.index }
             }
-            val visiblePositions = normalizedVisible.mapNotNull { page -> chapterPagePosition(page).takeIf { it >= 0 } }
-            val firstSuccessorPosition = normalizedSuccessors.firstOrNull()?.let(::chapterPagePosition)?.takeIf { it >= 0 }
-            val anchor = (visiblePositions.maxOrNull()?.plus(1) ?: firstSuccessorPosition ?: preloadStartIndex)
-                .coerceIn(0, chapterPageOrder.size)
-            preloadStartIndex = visiblePositions.minOrNull() ?: anchor
-            preloadCursor = anchor
-            rollingPages = emptyList()
-            fillRollingWindowLocked(normalizedVisible)
+            readingOrderInitialized = true
+            fillRollingWindowLocked(normalizedVisible, oldVisiblePages)
         }
         val newWindow = (normalizedVisible + nextRollingPages).toSet()
 
-        val promotedRetries = synchronized(queueLock) {
+        synchronized(queueLock) {
             currentWindow = newWindow
             val promoteRegular = queueSnapshot().filter { it.page in newVisible }
             promoteRegular.forEach { entry ->
                 if (queue.remove(entry)) {
-                    synchronized(entry.page) {
-                        if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
-                    }
-                }
-            }
-            val promoteRetries = retryQueueSnapshot().filter { it.page in newlyVisible }
-            promoteRetries.forEach { entry ->
-                if (retryQueue.remove(entry)) {
-                    queuedRetryPages.remove(entry.page)
                     synchronized(entry.page) {
                         if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
                     }
@@ -228,28 +194,17 @@ internal class HttpPageLoader(
                     entry.page.slow = false
                 }
             }
-            (promoteRegular + promoteRetries).map { it.page }.distinctBy { it.index }
         }
 
         activeScopes.values
-            .filter {
-                it.page !in newWindow && it.page !in activeRetryLoads && !it.hasRecentByteProgress()
-            }
+            .filter { it.page !in newWindow }
             .forEach { cancelPage(it.page, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
-        (oldVisible - newVisible).filter { it in activeRetryLoads }
-            .filter { activeScopes[it]?.hasRecentByteProgress() != true }
-            .forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
         (normalizedVisible + nextRollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
-        promotedRetries.forEach { page ->
-            if (page.status == Page.State.Queue) enqueue(page, priorityFor(page))
-        }
     }
 
     private fun priorityFor(page: ReaderPage): Int = if (page in visiblePages) 2 else 1
 
     private fun queueSnapshot(): List<PriorityPage> = queue.toArray(emptyArray<PriorityPage>()).asList()
-
-    private fun retryQueueSnapshot(): List<PriorityPage> = retryQueue.toArray(emptyArray<PriorityPage>()).asList()
 
     private fun enqueue(page: ReaderPage, priority: Int) {
         synchronized(queueLock) {
@@ -258,21 +213,7 @@ internal class HttpPageLoader(
                 val generation = page.generation.get()
                 if (page.queuedToken.get() == generation) return
                 page.queuedToken.set(generation)
-                queue.offer(PriorityPage(page, priority, generation, isRetry = false, queuedAtNanos = System.nanoTime()))
-                workerSignals.offer(Unit)
-            }
-        }
-    }
-
-    private fun enqueueRetry(page: ReaderPage) {
-        synchronized(queueLock) {
-            if (!readingOrderInitialized || page.status != Page.State.Queue) return
-            synchronized(page) {
-                val generation = page.generation.get()
-                if (page.queuedToken.get() == generation) return
-                page.queuedToken.set(generation)
-                queuedRetryPages.add(page)
-                retryQueue.offer(PriorityPage(page, 0, generation, isRetry = true, queuedAtNanos = System.nanoTime()))
+                queue.offer(PriorityPage(page, priority, generation, queuedAtNanos = System.nanoTime()))
                 workerSignals.offer(Unit)
             }
         }
@@ -288,16 +229,30 @@ internal class HttpPageLoader(
         return page.status == Page.State.Ready && chapterCache.isImageInCache(imageUrl)
     }
 
-    private fun fillRollingWindowLocked(visible: List<ReaderPage> = visiblePages): List<ReaderPage> {
-        val capacity = (rollingWindowSize - visible.size).coerceAtLeast(0)
-        val result = rollingPages.filterNot { page ->
-            page in visible || isSuccessfullyCached(page) || page.status is Page.State.Error || page in queuedRetryPages
-        }.toMutableList()
-        while (preloadCursor < chapterPageOrder.size && result.size < capacity) {
-            val page = chapterPageOrder[preloadCursor++]
-            if (page in visible || isSuccessfullyCached(page) || page.status is Page.State.Error || page in queuedRetryPages) continue
-            result += page
+    private fun isPageSettled(page: ReaderPage): Boolean =
+        isSuccessfullyCached(page) || page.status is Page.State.Error
+
+    private fun fillRollingWindowLocked(
+        visible: List<ReaderPage> = visiblePages,
+        previouslyVisible: List<ReaderPage> = emptyList(),
+    ): List<ReaderPage> {
+        val unfinishedVisible = visible.count { !isPageSettled(it) }
+        val capacity = if (preloadTaskLimit == 0) {
+            (10 - unfinishedVisible).coerceAtLeast(0)
+        } else {
+            (preloadTaskLimit - unfinishedVisible).coerceAtLeast(0)
         }
+        val candidates = if (preloadTaskLimit == 0) {
+            (rollingPages + previouslyVisible + previouslyVisiblePages.values).asSequence()
+                .filter { it !in visible && !isPageSettled(it) }
+                .distinctBy { it.index }
+                .sortedBy(::chapterPagePosition)
+                .toList()
+        } else {
+            chapterPageOrder.filter { it !in visible && !isPageSettled(it) }
+        }
+        val result = candidates.take(capacity).toMutableList()
+        result.sortBy(::chapterPagePosition)
         rollingPages = result
         return result
     }
@@ -324,8 +279,13 @@ internal class HttpPageLoader(
         if (page.status == Page.State.Ready) {
             (visiblePages + rollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
         }
-        if (page !in visiblePages && (page.status == Page.State.Ready || page.status is Page.State.Error || page in queuedRetryPages)) {
-            synchronized(preloadLock) { rollingPages = rollingPages.filterNot { it === page } }
+        if (isPageSettled(page)) {
+            synchronized(preloadLock) {
+                previouslyVisiblePages.remove(page.index)
+                if (page !in visiblePages) {
+                    rollingPages = rollingPages.filterNot { it.index == page.index }
+                }
+            }
             refillRollingWindow()
         }
     }
@@ -341,7 +301,7 @@ internal class HttpPageLoader(
         val now = System.nanoTime()
         val target = activeScopes.values.asSequence()
             .map { it.page }
-            .filter { it !in visible && (it in activeRetryLoads || it !in nearForeground) }
+            .filter { it !in visible && it !in nearForeground }
             .filter { page ->
                 val active = page.activeAttempt.get()
                 val lastProgress = active?.lastProgressAtNanos?.get() ?: 0L
@@ -362,7 +322,7 @@ internal class HttpPageLoader(
             .maxByOrNull { it.second }
             ?.first
             ?: return // No active invisible request can be classified as far; leave all current work untouched.
-        // cancelPage records ABANDON_FAR; completion returns a hidden retry to the low-priority queue.
+        // cancelPage records ABANDON_FAR; completion returns the page to the ordinary queue.
         cancelPage(target, ImageCancelReason.ABANDON_FAR, requeue = true)
     }
 
@@ -385,7 +345,7 @@ internal class HttpPageLoader(
     /** Preserve the EHentai reader's immediate-load action using the current viewer-owned queue. */
     fun boostPage(page: ReaderPage) {
         if (page.status == Page.State.Queue) {
-            workerScope.launchIO { loadPage(page) }
+            workerScope.launchIO { loadPageWhenAllowed(page) }
         }
     }
 
@@ -426,11 +386,7 @@ internal class HttpPageLoader(
         synchronized(page) { page.generation.incrementAndGet() }
         if (source.isEhBasedSource()) page.imageUrl = null
         page.status = Page.State.Queue
-        if (page in currentWindow) {
-            enqueue(page, priorityFor(page))
-        } else {
-            enqueueRetry(page)
-        }
+        enqueue(page, priorityFor(page))
     }
 
     override fun invalidatePage(page: ReaderPage): Boolean {
@@ -451,6 +407,7 @@ internal class HttpPageLoader(
                 page.slow = false
                 page.loadStatus = ReaderPageLoadStatus.Idle
                 page.status = Page.State.Error(terminalErrors.remove(page) ?: ImageDecryptFailedException())
+                onPageLoadFinished(page)
             }
             return false
         }
@@ -476,9 +433,7 @@ internal class HttpPageLoader(
         activeScopes.keys.toList().forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
         workerScope.cancel()
         queue.clear()
-        retryQueue.clear()
         workerSignals.clear()
-        queuedRetryPages.clear()
         chapter.pages?.let { pages ->
             launchIO {
                 try {
@@ -491,8 +446,8 @@ internal class HttpPageLoader(
         }
     }
 
-    private suspend fun internalLoadPage(page: ReaderPage, isRetry: Boolean, queuedAtNanos: Long) {
-        if (!readingOrderInitialized || (!isRetry && page !in currentWindow)) return
+    private suspend fun internalLoadPage(page: ReaderPage, queuedAtNanos: Long) {
+        if (!readingOrderInitialized || page !in currentWindow) return
         val queueWaitNanos = (System.nanoTime() - queuedAtNanos).coerceAtLeast(0L)
         if (visiblePages.firstOrNull()?.let { it !== page } == true) {
             val homePage = visiblePages.first()
@@ -502,8 +457,8 @@ internal class HttpPageLoader(
                 page.loadStatus = ReaderPageLoadStatus.WaitingForRequest
                 runCatching {
                     coordinator.watchdog.schedule({
-                        if (!isRecycled && page.status == Page.State.Queue && (isRetry || page in currentWindow)) {
-                            if (isRetry && page !in visiblePages) enqueueRetry(page) else enqueue(page, priorityFor(page))
+                        if (!isRecycled && page.status == Page.State.Queue && page in currentWindow) {
+                            enqueue(page, priorityFor(page))
                         }
                     }, 100, TimeUnit.MILLISECONDS)
                 }
@@ -511,12 +466,13 @@ internal class HttpPageLoader(
             }
         }
         val myGeneration = synchronized(queueLock) {
-            if (!readingOrderInitialized || (!isRetry && page !in currentWindow)) return
+            if (!readingOrderInitialized || page !in currentWindow) return
             synchronized(page) { page.generation.incrementAndGet() }
         }
         var attempt: PageAttemptScope? = null
         var slowWatch: java.util.concurrent.ScheduledFuture<*>? = null
         var deferRetry = false
+        var retryPageAfterAttempt = false
         var urlResolutionNanos = 0L
         try {
             if (page.imageUrl.isNullOrEmpty()) {
@@ -538,7 +494,7 @@ internal class HttpPageLoader(
             if (!chapterCache.isImageInCache(imageUrl)) {
                 if (!owns(page, myGeneration)) return
                 val currentAttempt = synchronized(queueLock) {
-                    if (!readingOrderInitialized || (!isRetry && page !in currentWindow) || !owns(page, myGeneration)) {
+                    if (!readingOrderInitialized || page !in currentWindow || !owns(page, myGeneration)) {
                         null
                     } else {
                         page.status = Page.State.DownloadImage
@@ -640,7 +596,7 @@ internal class HttpPageLoader(
                     page.automaticRetryExhausted = false
                     page.status = Page.State.Queue
                     page.loadStatus = ReaderPageLoadStatus.Queued
-                    enqueueRetry(page)
+                    retryPageAfterAttempt = true
                 } else {
                     page.slow = false
                     page.loadStatus = ReaderPageLoadStatus.Idle
@@ -666,21 +622,22 @@ internal class HttpPageLoader(
                     } else {
                         ReaderPageLoadStatus.Idle
                     }
-                    if (terminalError == null && disposition != ImageCancelReason.PAGE_HIDDEN &&
-                        (isRetry || page in currentWindow) && !isRecycled
-                    ) {
-                        if (isRetry && page !in visiblePages) enqueueRetry(page) else enqueue(page, priorityFor(page))
+                    if (terminalError == null && page in currentWindow && !isRecycled) {
+                        enqueue(page, priorityFor(page))
                     }
                 }
             }
-            if (deferRetry && (isRetry || page in currentWindow) && !isRecycled) {
+            if (deferRetry && page in currentWindow && !isRecycled) {
                 runCatching {
                     coordinator.watchdog.schedule({
-                        if (!isRecycled && page.status == Page.State.Queue && (isRetry || page in currentWindow)) {
-                            if (isRetry && page !in visiblePages) enqueueRetry(page) else enqueue(page, priorityFor(page))
+                        if (!isRecycled && page.status == Page.State.Queue && page in currentWindow) {
+                            enqueue(page, priorityFor(page))
                         }
                     }, 100, TimeUnit.MILLISECONDS)
                 }
+            }
+            if (retryPageAfterAttempt && page in currentWindow && !isRecycled) {
+                enqueue(page, priorityFor(page))
             }
             attempt?.let { current ->
                 logcat {
@@ -738,7 +695,6 @@ internal class HttpPageLoader(
         val page: ReaderPage,
         val priority: Int,
         val generation: Int,
-        val isRetry: Boolean,
         val queuedAtNanos: Long,
     ) : Comparable<PriorityPage> {
         companion object {
