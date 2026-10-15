@@ -744,7 +744,7 @@ object RouteManager {
     private const val IMG_DEAD_MAX_COOLDOWN_MS = 10L * 60L * 1000L
 
     private fun normalizedEndpoint(endpoint: DomainIp): DomainIp =
-        DomainIp(endpoint.domain.lowercase(java.util.Locale.ROOT), endpoint.ip.trim().lowercase(java.util.Locale.ROOT))
+        endpoint.normalizedForComparison()
 
     /** Mark only transport failures; HTTP/content/decryption failures stay page-local. */
     fun markImgEndpointFailed(endpoint: DomainIp, kind: ImgEndpointFailure = ImgEndpointFailure.TRANSIENT) {
@@ -805,13 +805,16 @@ object RouteManager {
      * speed. A null entry means the current request host has no measured endpoint, so the caller
      * may resolve one IP for its first attempt before continuing with measured candidates.
      */
-    fun imageRetryEndpoints(requestedDomain: String): List<DomainIp?> {
+    fun imageRetryEndpoints(requestedDomain: String, excluded: Set<DomainIp> = emptySet()): List<DomainIp?> {
         val ranked = rankedSuccessfulImgEndpoints()
         val selectedIp = preferredIp(requestedDomain)
         val preferred = selectedIp?.let { DomainIp(requestedDomain, it) }
             ?: ranked.firstOrNull { it.domain.equals(requestedDomain, ignoreCase = true) }
         val ordered = if (preferred == null) ranked else ImageEndpointSelectionPolicy.retryOrder(preferred, ranked)
-        val available = ordered.filter(::isImgEndpointAvailable)
+        val normalizedExcluded = excluded.mapTo(HashSet()) { it.normalizedForComparison() }
+        val available = ordered.filterNotNull()
+            .filterNot { it.normalizedForComparison() in normalizedExcluded }
+            .filter(::isImgEndpointAvailable)
         if (available.isNotEmpty()) return available
         // An explicit manual domain pin may be attempted before it has a successful per-IP measurement.
         val domainHasMeasuredEndpoints = ranked.any { it.domain.equals(requestedDomain, ignoreCase = true) }

@@ -82,6 +82,7 @@ class PageAttemptScope(
     val coordinator: ImageAttemptCoordinator,
     canRace: Boolean,
     val isSecondaryVisible: Boolean = false,
+    queueWaitNanos: Long = 0L,
 ) {
     private val cancelReason = AtomicReference<ImageCancelReason?>(null)
     private val attemptReasons = ConcurrentHashMap<Int, ImageCancelReason>()
@@ -93,6 +94,12 @@ class PageAttemptScope(
     val requestStartedAtNanos = AtomicLong(0L)
     val receivedAnyBytes = AtomicBoolean(false)
     private val activeEndpointRequests = AtomicInteger(0)
+    private val queueNanos = AtomicLong(queueWaitNanos.coerceAtLeast(0L))
+    private val networkNanos = AtomicLong(0L)
+    private val decryptNanos = AtomicLong(0L)
+    private val cacheNanos = AtomicLong(0L)
+    private val validationNanos = AtomicLong(0L)
+    private val permitWaitStartedAtNanos = AtomicLong(0L)
     @Volatile
     var raceActive: Boolean = false
         private set
@@ -105,11 +112,14 @@ class PageAttemptScope(
         get() = activeEndpointRequests.get() > 0
 
     fun waitingForRequestPermit() {
+        permitWaitStartedAtNanos.compareAndSet(0L, System.nanoTime())
         if (isCurrent) page.loadStatus = ReaderPageLoadStatus.WaitingForRequest
     }
 
     fun endpointRequestStarted(attemptId: Int, totalAttempts: Int) {
         val now = System.nanoTime()
+        val permitWaitStartedAt = permitWaitStartedAtNanos.getAndSet(0L)
+        if (permitWaitStartedAt > 0L) queueNanos.addAndGet((now - permitWaitStartedAt).coerceAtLeast(0L))
         requestStartedAtNanos.set(now)
         lastProgressAtNanos.set(now)
         activeEndpointRequests.incrementAndGet()
@@ -198,5 +208,61 @@ class PageAttemptScope(
                 -1
             }
         }
+    }
+
+    fun recordEndpointAttempt(endpoint: DomainIp): Boolean =
+        page.attemptedImageEndpoints.add(endpoint.normalizedForComparison()).also { added ->
+            if (added) page.endpointsAttemptedInRound.incrementAndGet()
+        }
+
+    fun beginNextAutomaticRound(): Boolean {
+        while (true) {
+            val round = page.automaticRetryRound.get()
+            if (round >= MAX_AUTOMATIC_RETRY_ROUNDS) return false
+            if (page.automaticRetryRound.compareAndSet(round, round + 1)) {
+                page.endpointsAttemptedInRound.set(0)
+                return true
+            }
+        }
+    }
+
+    fun addNetworkTime(nanos: Long) {
+        networkNanos.addAndGet(nanos.coerceAtLeast(0L))
+    }
+
+    fun addDecryptTime(nanos: Long) {
+        decryptNanos.addAndGet(nanos.coerceAtLeast(0L))
+    }
+
+    fun addCacheTime(nanos: Long) {
+        cacheNanos.addAndGet(nanos.coerceAtLeast(0L))
+    }
+
+    fun addValidationTime(nanos: Long) {
+        validationNanos.addAndGet(nanos.coerceAtLeast(0L))
+    }
+
+    fun timingSummary(): String {
+        val waitStartedAt = permitWaitStartedAtNanos.get()
+        val pendingQueueTime = if (waitStartedAt > 0L) {
+            (System.nanoTime() - waitStartedAt).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val queueTime = queueNanos.get() + pendingQueueTime
+        return listOf(
+            "queue=${millis(queueTime)}ms",
+            "network=${millis(networkNanos.get())}ms",
+            "decrypt=${millis(decryptNanos.get())}ms",
+            "cache=${millis(cacheNanos.get())}ms",
+            "validation=${millis(validationNanos.get())}ms",
+        ).joinToString(" ")
+    }
+
+    private fun millis(nanos: Long): Long = TimeUnit.NANOSECONDS.toMillis(nanos)
+
+    companion object {
+        const val MAX_AUTOMATIC_RETRY_ROUNDS = 3
+        const val MAX_ENDPOINTS_PER_ROUND = 3
     }
 }

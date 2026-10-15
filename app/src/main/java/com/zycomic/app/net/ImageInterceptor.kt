@@ -8,7 +8,6 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -21,6 +20,7 @@ import okio.BufferedSource
 import okio.ForwardingSource
 import okio.buffer
 import okio.source
+import tachiyomi.decoder.ImageDecoder
 import javax.crypto.CipherInputStream
 
 class ImageInterceptor : Interceptor {
@@ -30,7 +30,6 @@ class ImageInterceptor : Interceptor {
         private const val VALUE_X_REQUESTED_WITH = "zycomic.com"
         private const val MAX_ENDPOINT_ATTEMPTS = 3
         private const val MAX_IMAGE_BYTES = 25L * 1024 * 1024
-        private const val SLOW_AFTER_MS = 1_500L
         private const val INVALID_IMAGE_STATUS = 502
     }
 
@@ -40,19 +39,28 @@ class ImageInterceptor : Interceptor {
         if (!isImageRequest(originalUrl)) return chain.proceed(original)
 
         val scope = original.tag(PageAttemptScope::class.java)
-        ImageCacheManager.get(originalUrl)?.let { cached ->
+        val cacheReadStartedAt = System.nanoTime()
+        val cachedImage = ImageCacheManager.get(originalUrl)
+        scope?.addCacheTime(System.nanoTime() - cacheReadStartedAt)
+        cachedImage?.let { cached ->
             if (cached.length() > MAX_IMAGE_BYTES) {
                 ImageCacheManager.remove(originalUrl)
                 return@let
             }
             val responseFile = ImageCacheManager.createResponseTemp()
+            val decryptStartedAt = System.nanoTime()
             val mime = try {
                 decodeToResponseFile(cached, responseFile)
             } catch (_: Exception) {
                 responseFile.delete()
                 null
             }
-            if (mime != null) return buildResponse(original, responseFile, mime)
+            scope?.addDecryptTime(System.nanoTime() - decryptStartedAt)
+            val validationStartedAt = System.nanoTime()
+            val valid = mime != null && validateDecodedImage(responseFile)
+            scope?.addValidationTime(System.nanoTime() - validationStartedAt)
+            if (valid && mime != null) return buildResponse(original, responseFile, mime)
+            responseFile.delete()
             ImageCacheManager.remove(originalUrl)
         }
 
@@ -69,15 +77,15 @@ class ImageInterceptor : Interceptor {
             .header("Connection", "keep-alive")
             .build()
 
-        var endpoints = resolveCandidates(imgReq.url.host)
+        var endpoints = resolveCandidates(imgReq.url.host, scope)
         if (endpoints.isEmpty() && scope?.page?.manualRetryCount?.get()?.let { it > 0 } == true) {
             val recovered = tryRecoveryProbe(imgReq, imgReq.url.host, scope)
-            if (recovered != null) endpoints = resolveCandidates(imgReq.url.host)
+            if (recovered != null) endpoints = resolveCandidates(imgReq.url.host, scope)
         }
         if (endpoints.isEmpty()) {
             throw IOException("图源临时不可用，正在重新测速：$originalUrl")
         }
-        val outcomes = if (scope != null && endpoints.size > 1) {
+        val outcomes = if (scope?.canRace == true && endpoints.size > 1) {
             raceCandidates(imgReq, originalUrl, endpoints, scope)
         } else {
             sequentialCandidates(imgReq, originalUrl, endpoints, scope)
@@ -100,14 +108,28 @@ class ImageInterceptor : Interceptor {
         }
     }
 
-    private fun resolveCandidates(requestedDomain: String): List<DomainIp> {
+    private fun resolveCandidates(requestedDomain: String, scope: PageAttemptScope?): List<DomainIp> {
         val endpoints = mutableListOf<DomainIp>()
-        for (candidate in RouteManager.imageRetryEndpoints(requestedDomain)) {
+        if (scope != null && scope.page.endpointsAttemptedInRound.get() >= PageAttemptScope.MAX_ENDPOINTS_PER_ROUND) {
+            scope.beginNextAutomaticRound()
+        }
+        val roundCapacity = if (scope == null) {
+            MAX_ENDPOINT_ATTEMPTS
+        } else {
+            (PageAttemptScope.MAX_ENDPOINTS_PER_ROUND - scope.page.endpointsAttemptedInRound.get()).coerceAtLeast(0)
+        }
+        val limit = minOf(if (scope?.canRace == true) MAX_ENDPOINT_ATTEMPTS else 1, roundCapacity)
+        if (limit == 0) return emptyList()
+        val tried = scope?.page?.attemptedImageEndpoints?.mapTo(HashSet()) { it.normalizedForComparison() }.orEmpty()
+        for (candidate in RouteManager.imageRetryEndpoints(requestedDomain, tried)) {
             val endpoint = candidate ?: NetworkModule.resolveProbeIps(requestedDomain)
                 .firstOrNull()?.let { DomainIp(requestedDomain, it) }
-            if (endpoint != null && endpoint !in endpoints && RouteManager.isImgEndpointAvailable(endpoint)) {
+            if (endpoint != null && endpoint.normalizedForComparison() !in tried &&
+                endpoints.none { it.normalizedForComparison() == endpoint.normalizedForComparison() } &&
+                RouteManager.isImgEndpointAvailable(endpoint)
+            ) {
                 endpoints += endpoint
-                if (endpoints.size == MAX_ENDPOINT_ATTEMPTS) break
+                if (endpoints.size == limit) break
             }
         }
         return endpoints
@@ -195,7 +217,7 @@ class ImageInterceptor : Interceptor {
         return outcomes
     }
 
-    /** First endpoint stays on the calling OkHttp worker; at most two extra attempts use the bounded race pool. */
+    /** Visible pages start up to three distinct, validated candidates together; background work remains serial. */
     private fun raceCandidates(
         request: Request,
         originalUrl: String,
@@ -204,123 +226,51 @@ class ImageInterceptor : Interceptor {
     ): List<Outcome> {
         val outcomes = mutableListOf<Outcome>()
         val completed = LinkedBlockingQueue<Outcome>()
-        val active = AtomicInteger(1)
-        val nextIndex = AtomicInteger(1)
-        val lastProgressAt = AtomicLong(0L)
-        val primaryStartedAt = AtomicLong(0L)
-        val primaryAcquired = acquirePermit(scope)
-        if (!primaryAcquired) return listOf(Outcome.Fail.Cancelled)
-        active.set(1)
-        var primaryPermitHeld = true
-        val raceStateLock = Any()
-        var raceWindowOpen = true
-        val watch = runCatching {
-            scope.coordinator.scheduleWatchdog {
-                var index = -1
-                var permitAcquired = false
-                var activeReserved = false
-                var submitted = false
+        val activeRaces = AtomicInteger(0)
+        val submittedIds = mutableSetOf<Int>()
+        if (!acquirePermit(scope)) return listOf(Outcome.Fail.Cancelled)
+
+        for (index in 1 until minOf(endpoints.size, MAX_ENDPOINT_ATTEMPTS)) {
+            if (!scope.coordinator.tryAcquireRace()) continue
+            activeRaces.incrementAndGet()
+            scope.beginRace()
+            val submitted = scope.coordinator.submitRace {
+                var outcome: Outcome = Outcome.Fail.Invalid
                 try {
-                    synchronized(raceStateLock) {
-                        if (!raceWindowOpen || !scope.isCurrent || !scope.canRace || nextIndex.get() >= endpoints.size || active.get() >= 3) return@scheduleWatchdog
-                        val requestStartedAt = primaryStartedAt.get()
-                        if (requestStartedAt == 0L) return@scheduleWatchdog
-                        val now = System.nanoTime()
-                        val noProgressFor = TimeUnit.NANOSECONDS.toMillis(now - lastProgressAt.get())
-                        val elapsed = TimeUnit.NANOSECONDS.toMillis(now - requestStartedAt)
-                        if (elapsed < SLOW_AFTER_MS || noProgressFor < SLOW_AFTER_MS) return@scheduleWatchdog
-                        val candidateIndex = nextIndex.getAndIncrement()
-                        if (candidateIndex >= endpoints.size) return@scheduleWatchdog
-                        index = candidateIndex
-                        if (!scope.coordinator.tryAcquireRace()) return@scheduleWatchdog
-                        permitAcquired = true
-                        active.incrementAndGet()
-                        activeReserved = true
-                        scope.beginRace()
-                        lastProgressAt.set(System.nanoTime())
-                        submitted = scope.coordinator.submitRace {
-                            var result: Outcome = Outcome.Fail.Invalid
-                            try {
-                                result = executeSafely(request, originalUrl, endpoints[candidateIndex], scope, candidateIndex, endpoints.size)
-                            } finally {
-                                try {
-                                    completed.offer(result)
-                                } finally {
-                                    active.decrementAndGet()
-                                    scope.coordinator.releaseRaceAttempt()
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {
-                    // Keep the periodic watcher alive; the primary attempt and remaining serial fallbacks still proceed.
+                    outcome = executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
                 } finally {
-                    if (!submitted) {
-                        if (activeReserved) active.decrementAndGet()
-                        if (permitAcquired) scope.coordinator.releaseRaceAttempt()
-                        if (index >= 0) nextIndex.compareAndSet(index + 1, index)
-                    }
+                    completed.offer(outcome)
+                    activeRaces.decrementAndGet()
+                    scope.coordinator.releaseRaceAttempt()
                 }
             }
-        }.getOrNull()
+            if (submitted) {
+                submittedIds += index
+            } else {
+                activeRaces.decrementAndGet()
+                scope.coordinator.releaseRaceAttempt()
+            }
+        }
 
         try {
             val primary = try {
-                executeSafely(
-                    request,
-                    originalUrl,
-                    endpoints[0],
-                    scope,
-                    0,
-                    endpoints.size,
-                    progress = { bytes, length ->
-                        scope.reportProgress(bytes, length)
-                        lastProgressAt.set(System.nanoTime())
-                    },
-                    onRequestStarted = {
-                        val now = System.nanoTime()
-                        primaryStartedAt.compareAndSet(0L, now)
-                        lastProgressAt.compareAndSet(0L, now)
-                    },
-                )
+                executeSafely(request, originalUrl, endpoints[0], scope, 0, endpoints.size)
             } finally {
-                if (primaryPermitHeld) {
-                    primaryPermitHeld = false
-                    scope.coordinator.releasePrimaryAttempt()
-                    active.decrementAndGet()
-                }
+                scope.coordinator.releasePrimaryAttempt()
             }
             outcomes += primary
-            if (primary is Outcome.Success) {
-                scope.cancelLosers(0)
-                return outcomes
-            }
+            if (primary is Outcome.Success) return outcomes
 
-            while (scope.isCurrent && (active.get() > 0 || completed.isNotEmpty())) {
+            while (scope.isCurrent && (activeRaces.get() > 0 || completed.isNotEmpty())) {
                 val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
                 outcomes += result
-                if (result is Outcome.Success) {
-                    scope.cancelLosers(result.attemptId)
-                    return outcomes
-                }
-            }
-
-            // If no stalled attempt launched a race (or all racing candidates failed quickly), continue the remaining endpoints serially.
-            synchronized(raceStateLock) { raceWindowOpen = false }
-            watch?.cancel(false)
-            while (scope.isCurrent && (active.get() > 0 || completed.isNotEmpty())) {
-                val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
-                outcomes += result
-                if (result is Outcome.Success) {
-                    scope.cancelLosers(result.attemptId)
-                    return outcomes
-                }
+                if (result is Outcome.Success) return outcomes
             }
             scope.endRace()
-            var index = nextIndex.get()
-            while (scope.isCurrent && index < endpoints.size) {
-                val acquired = acquirePermit(scope)
-                if (!acquired) break
+
+            // If a race slot was unavailable, use that candidate serially on this existing worker.
+            endpoints.indices.filter { it > 0 && it !in submittedIds }.forEach { index ->
+                if (!scope.isCurrent || !acquirePermit(scope)) return outcomes
                 val result = try {
                     executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
                 } finally {
@@ -328,17 +278,9 @@ class ImageInterceptor : Interceptor {
                 }
                 outcomes += result
                 if (result is Outcome.Success) return outcomes
-                index++
-                nextIndex.set(index)
             }
             return outcomes
         } finally {
-            synchronized(raceStateLock) { raceWindowOpen = false }
-            watch?.cancel(false)
-            if (primaryPermitHeld) {
-                scope.coordinator.releasePrimaryAttempt()
-                active.decrementAndGet()
-            }
             scope.cancelLosers(Int.MIN_VALUE)
             scope.endRace()
         }
@@ -414,12 +356,19 @@ class ImageInterceptor : Interceptor {
         val registration: Closeable? = scope?.registerCall(call, attemptId)
         var responseTransferred = false
         var endpointRequestStarted = false
+        var networkStartedAt = 0L
         try {
+            if (scope != null && !scope.recordEndpointAttempt(endpoint)) return Outcome.Fail.Cancelled
             scope?.endpointRequestStarted(attemptId, totalAttempts)
             endpointRequestStarted = scope != null
             onRequestStarted()
+            networkStartedAt = System.nanoTime()
             call.execute().use { response ->
-                if (!response.isSuccessful) return Outcome.Fail.Http(response.code)
+                if (!response.isSuccessful) {
+                    scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
+                    networkStartedAt = 0L
+                    return Outcome.Fail.Http(response.code)
+                }
                 val body = response.body ?: return Outcome.Fail.Invalid
                 val contentLength = body.contentLength()
                 if (contentLength > MAX_IMAGE_BYTES) return Outcome.Fail.Oversize
@@ -443,23 +392,36 @@ class ImageInterceptor : Interceptor {
                         output.flush()
                     }
                 }
+                scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
+                networkStartedAt = 0L
                 if (bytesRead == 0L) return Outcome.Fail.Invalid
+                val decryptStartedAt = System.nanoTime()
                 val mimeType = try {
                     decodeToResponseFile(rawTemp, responseTemp)
                 } catch (_: Exception) {
+                    scope?.addDecryptTime(System.nanoTime() - decryptStartedAt)
                     return Outcome.Fail.Decrypt
-                } ?: return Outcome.Fail.Invalid
+                }
+                scope?.addDecryptTime(System.nanoTime() - decryptStartedAt)
+                if (mimeType == null) return Outcome.Fail.Invalid
+
+                val validationStartedAt = System.nanoTime()
+                val isValidImage = validateDecodedImage(responseTemp)
+                scope?.addValidationTime(System.nanoTime() - validationStartedAt)
+                if (!isValidImage) return Outcome.Fail.Invalid
 
                 if (scope != null && !scope.claimWinner()) {
                     responseTemp.delete()
                     return Outcome.Fail.Cancelled
                 }
+                val cacheStartedAt = System.nanoTime()
                 val committed = ImageCacheManager.commitAttempt(
                     url = originalUrl,
                     temporary = rawTemp,
                     stillOwner = { scope?.isCurrent != false },
                     ownerLock = scope?.page,
                 )
+                scope?.addCacheTime(System.nanoTime() - cacheStartedAt)
                 if (!committed) {
                     responseTemp.delete()
                     scope?.releaseWinnerClaim()
@@ -471,6 +433,10 @@ class ImageInterceptor : Interceptor {
                 return Outcome.Success(responseTemp, mimeType, endpoint, attemptId)
             }
         } catch (io: IOException) {
+            if (networkStartedAt != 0L) {
+                scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
+                networkStartedAt = 0L
+            }
             responseTemp.delete()
             ImageCacheManager.abortAttempt(rawTemp)
             val cancellation = scope?.reasonFor(call)
@@ -483,17 +449,47 @@ class ImageInterceptor : Interceptor {
             RouteManager.markImgEndpointFailed(endpoint, kind)
             return Outcome.Fail.Io(io)
         } catch (e: Exception) {
+            if (networkStartedAt != 0L) {
+                scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
+                networkStartedAt = 0L
+            }
             responseTemp.delete()
             ImageCacheManager.abortAttempt(rawTemp)
             if (scope?.isCurrent == false) return Outcome.Fail.Cancelled
             return Outcome.Fail.Invalid
         } finally {
+            if (networkStartedAt != 0L) scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
             if (endpointRequestStarted) scope?.endpointRequestFinished()
             if (!responseTransferred) responseTemp.delete()
             registration?.close()
             runCatching { client.connectionPool.evictAll() }
             // A successful raw file was renamed on commit; failures must not leave attempt files behind.
             if (rawTemp.exists() && rawTemp.name.contains(".tmp-")) ImageCacheManager.abortAttempt(rawTemp)
+        }
+    }
+
+    /** Decode a bounded preview so corrupt pixels cannot win against another candidate. */
+    private fun validateDecodedImage(file: File): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        return try {
+            file.inputStream().use { input ->
+                val decoder = ImageDecoder.newInstance(input, false, null) ?: return false
+                try {
+                    val width = decoder.width
+                    val height = decoder.height
+                    if (width <= 0 || height <= 0) return false
+                    var sampleSize = 1
+                    val maxDimension = maxOf(width, height)
+                    while (maxDimension / sampleSize > 512) sampleSize *= 2
+                    val bitmap = decoder.decode(sampleSize = sampleSize) ?: return false
+                    bitmap.recycle()
+                    true
+                } finally {
+                    decoder.recycle()
+                }
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 

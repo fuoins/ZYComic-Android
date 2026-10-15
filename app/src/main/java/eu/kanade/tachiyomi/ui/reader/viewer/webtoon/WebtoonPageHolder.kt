@@ -353,7 +353,11 @@ class WebtoonPageHolder(
         val current = page
         val exhausted = current != null && current.manualRetryCount.get() >= 3 &&
             current.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
-        errorLayout?.actionRetry?.text = if (exhausted) "重新测速 / 切换图源" else "重试"
+        errorLayout?.actionRetry?.text = when {
+            exhausted -> "重新测速 / 切换图源"
+            current?.automaticRetryExhausted == true -> "重试下一轮"
+            else -> "重试"
+        }
 
         val imageUrl = page?.imageUrl
         errorLayout?.actionOpenInWebView?.isVisible = imageUrl != null
@@ -368,8 +372,13 @@ class WebtoonPageHolder(
             }
         }
 
-        errorLayout?.errorMessage?.text = with(context) { error?.formattedMessage }
+        val errorMessage = with(context) { error?.formattedMessage }
             ?: context.stringResource(MR.strings.decode_image_error)
+        errorLayout?.errorMessage?.text = if (current?.automaticRetryExhausted == true) {
+            "$errorMessage\n已测试 ${current.attemptedImageEndpoints.size} 个节点"
+        } else {
+            errorMessage
+        }
 
         return errorLayout!!
     }

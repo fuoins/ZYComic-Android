@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader.model
 
+import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.PageAttemptScope
 import eu.kanade.tachiyomi.source.model.Page
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +50,12 @@ open class ReaderPage(
     /** Generation currently represented by a queue entry; -1 means no queued entry. */
     val queuedToken = AtomicInteger(-1)
     val manualRetryCount = AtomicInteger(0)
+    /** Successful speed-test endpoints already tried for this image URL; attempts never repeat. */
+    val attemptedImageEndpoints: MutableSet<DomainIp> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** Initial request is round one; automatic retries are capped at three total rounds. */
+    val automaticRetryRound = AtomicInteger(1)
+    val endpointsAttemptedInRound = AtomicInteger(0)
+    @Volatile var automaticRetryExhausted: Boolean = false
     @Volatile var retryBudgetSource: String? = null
     private val _slowFlow = MutableStateFlow(false)
     val slowFlow = _slowFlow.asStateFlow()

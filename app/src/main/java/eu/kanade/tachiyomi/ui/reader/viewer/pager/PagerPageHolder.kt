@@ -513,7 +513,11 @@ class PagerPageHolder(
         }
         val exhausted = page.manualRetryCount.get() >= 3 &&
             page.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
-        errorLayout?.actionRetry?.text = if (exhausted) "重新测速 / 切换图源" else "重试"
+        errorLayout?.actionRetry?.text = when {
+            exhausted -> "重新测速 / 切换图源"
+            page.automaticRetryExhausted -> "重试下一轮"
+            else -> "重试"
+        }
 
         val imageUrl = page.imageUrl
         errorLayout?.actionOpenInWebView?.isVisible = imageUrl != null
@@ -529,8 +533,13 @@ class PagerPageHolder(
             }
         }
 
-        errorLayout?.errorMessage?.text = with(context) { error?.formattedMessage }
+        val errorMessage = with(context) { error?.formattedMessage }
             ?: context.stringResource(MR.strings.decode_image_error)
+        errorLayout?.errorMessage?.text = if (page.automaticRetryExhausted) {
+            "$errorMessage\n已测试 ${page.attemptedImageEndpoints.size} 个节点"
+        } else {
+            errorMessage
+        }
 
         errorLayout?.root?.isVisible = true
         return errorLayout!!
