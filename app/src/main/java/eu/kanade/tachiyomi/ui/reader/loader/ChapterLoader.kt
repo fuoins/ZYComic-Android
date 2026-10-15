@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import mihon.core.archive.archiveReader
 import mihon.core.archive.epubReader
+import kotlinx.coroutines.sync.withLock
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
@@ -41,7 +42,6 @@ class ChapterLoader(
     ),
     // SY <--
 ) {
-
     fun recycle() {
         imageAttemptCoordinator.close()
     }
@@ -51,39 +51,41 @@ class ChapterLoader(
      * is already loaded.
      */
     suspend fun loadChapter(chapter: ReaderChapter /* SY --> */, page: Int? = null/* SY <-- */) {
-        if (chapterIsReady(chapter)) {
-            return
-        }
+        chapter.loadMutex.withLock {
+            if (chapterIsReady(chapter)) return@withLock
 
-        chapter.state = ReaderChapter.State.Loading
-        withIOContext {
-            logcat { "Loading pages for ${chapter.chapter.name}" }
-            try {
-                val loader = getPageLoader(chapter)
-                chapter.pageLoader = loader
+            chapter.state = ReaderChapter.State.Loading
+            withIOContext {
+                logcat { "Loading pages for ${chapter.chapter.name}" }
+                try {
+                    val loader = getPageLoader(chapter)
+                    chapter.pageLoader = loader
 
-                val pages = loader.getPages()
-                    .onEach { it.chapter = chapter }
+                    val pages = loader.getPages()
+                        .onEach { it.chapter = chapter }
 
-                if (pages.isEmpty()) {
-                    throw Exception(context.stringResource(MR.strings.page_list_empty_error))
+                    if (pages.isEmpty()) {
+                        throw Exception(context.stringResource(MR.strings.page_list_empty_error))
+                    }
+
+                    // If the chapter is partially read, set the starting page to the last the user read
+                    // otherwise use the requested page.
+                    if (!chapter.chapter.read /* --> EH */ ||
+                        readerPrefs
+                            .preserveReadingPosition()
+                            .get() ||
+                        page != null // <-- EH
+                    ) {
+                        chapter.requestedPage = /* SY --> */ page ?: /* SY <-- */ chapter.chapter.last_page_read
+                    }
+
+                    chapter.state = ReaderChapter.State.Loaded(pages)
+                } catch (e: Throwable) {
+                    chapter.pageLoader?.recycle()
+                    chapter.pageLoader = null
+                    chapter.state = ReaderChapter.State.Error(e)
+                    throw e
                 }
-
-                // If the chapter is partially read, set the starting page to the last the user read
-                // otherwise use the requested page.
-                if (!chapter.chapter.read /* --> EH */ ||
-                    readerPrefs
-                        .preserveReadingPosition()
-                        .get() ||
-                    page != null // <-- EH
-                ) {
-                    chapter.requestedPage = /* SY --> */ page ?: /* SY <-- */ chapter.chapter.last_page_read
-                }
-
-                chapter.state = ReaderChapter.State.Loaded(pages)
-            } catch (e: Throwable) {
-                chapter.state = ReaderChapter.State.Error(e)
-                throw e
             }
         }
     }

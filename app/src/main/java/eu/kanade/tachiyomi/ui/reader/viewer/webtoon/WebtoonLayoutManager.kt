@@ -27,9 +27,7 @@ class WebtoonLayoutManager(context: Context, private val extraLayoutSpace: Int) 
         return extraLayoutSpace
     }
 
-    /**
-     * Returns the position of the last item whose end side is visible on screen.
-     */
+    /** Returns the last item with any portion intersecting the viewport. */
     fun findLastEndVisibleItemPosition(): Int {
         ensureLayoutState()
         val callback = if (mOrientation == HORIZONTAL) {
@@ -43,7 +41,7 @@ class WebtoonLayoutManager(context: Context, private val extraLayoutSpace: Int) 
             val child = getChildAt(i)!!
             val childStart = callback.getChildStart(child)
             val childEnd = callback.getChildEnd(child)
-            if (childEnd <= end || childStart < start) {
+            if (childEnd > start && childStart < end) {
                 return getPosition(child)
             }
         }

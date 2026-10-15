@@ -305,6 +305,16 @@ class WebtoonViewer(
             moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
             recycler.isVisible = true
         }
+        onAdapterItemsUpdated()
+    }
+
+    /** Adapter notifications do not guarantee a scroll callback after a chapter swap. */
+    fun onAdapterItemsUpdated() {
+        if (recycler.isGone) return
+        recycler.post {
+            if (recycler.isGone) return@post
+            recycler.doOnLayout { onScrolled() }
+        }
     }
 
     /**

@@ -83,6 +83,7 @@ object RouteManager {
         private set
 
     /** Replace image-source candidates with the exact remote list; never merge local or learned entries. */
+    @Synchronized
     fun setBaselineImgDomains(sources: List<String>) {
         val previous = persistedSelectedImgDomain() ?: imgDomains.getOrNull(imgIndex)
         val out = LinkedHashMap<String, String>()
@@ -94,7 +95,6 @@ object RouteManager {
         } else {
             baselineImgDomains.indexOfFirst { it.equals(previous, ignoreCase = true) }.takeIf { it >= 0 } ?: 0
         }
-        saveImgIndex()
         val savedPin = pinnedImgDomain ?: runCatching {
             DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
                 ?.getString("pinned_img_domain", null)
@@ -102,8 +102,11 @@ object RouteManager {
         if (!savedPin.isNullOrBlank() && baselineImgDomains.none { it.equals(savedPin, ignoreCase = true) }) {
             pinnedImgDomain = null
             pinnedImgIp = null
+            imgOverrideActive = false
             persistPinnedImgDomain(null, null)
             notifyImgPinDisplayChanged()
+        } else if (!savedPin.isNullOrBlank()) {
+            imgIndex = baselineImgDomains.indexOfFirst { it.equals(savedPin, ignoreCase = true) }
         }
         clearPersistedCandidateLists()
     }
@@ -169,7 +172,18 @@ object RouteManager {
     @Volatile var selectedLineIp: String? = null
         private set
 
+    data class LineSelectionState(val index: Int, val ip: String?)
+
+    private val _lineSelectionState = MutableStateFlow(LineSelectionState(lineIndex, selectedLineIp))
+    val lineSelectionState: StateFlow<LineSelectionState> = _lineSelectionState.asStateFlow()
+
+    private fun publishLineSelection() {
+        _lineSelectionState.value = LineSelectionState(lineIndex, selectedLineIp)
+    }
+
     @Volatile private var selectedLineDomain: String? = null
+    @Volatile private var lineOverrideActive: Boolean = false
+    @Volatile private var routePreferencesLoaded: Boolean = false
 
     // ---- 测速结果持久化（切换页面后不丢失）----
     /** 最近一次线路测速结果：index -> 毫秒，失败为 Long.MAX_VALUE */
@@ -304,6 +318,8 @@ object RouteManager {
         imgIndex = 0
         selectedLineIp = null
         selectedLineDomain = null
+        lineOverrideActive = false
+        publishLineSelection()
         setCustomRule(emptyMap())
         setSniDomains(emptySet())
         activeRemoteConfigVersion = null
@@ -330,25 +346,48 @@ object RouteManager {
         private set
 
     /** 切换线路；域名级选择清除旧 IP pin，避免把另一线路的地址误用于新 host。 */
+    @Synchronized
     fun setLine(index: Int) {
         if (lineHosts.isEmpty()) return
         lineIndex = index.coerceIn(0, lineHosts.lastIndex)
         selectedLineIp = null
-        selectedLineDomain = null
-        persistLineEndpoint(null, null)
+        selectedLineDomain = hostFromLine(lineHosts[lineIndex])
+        lineOverrideActive = autoSelectEnabled
+        persistLineEndpoint(selectedLineDomain.takeUnless { autoSelectEnabled }, null)
+        publishLineSelection()
     }
 
-    /** 精确选择线路域名/IP组合，并记住该组合。 */
+    /** 精确选择线路域名/IP组合；自动模式下只覆盖本次运行，手动模式下持久化。 */
+    @Synchronized
     fun setLineEndpoint(domain: String, ip: String) {
         val index = lineIndexForDomain(domain)
         if (index < 0) return
         lineIndex = index
         selectedLineIp = ip
         selectedLineDomain = hostFromLine(lineHosts[index])
-        persistLineEndpoint(selectedLineDomain, ip)
+        lineOverrideActive = autoSelectEnabled
+        persistLineEndpoint(selectedLineDomain.takeUnless { autoSelectEnabled }, ip.takeUnless { autoSelectEnabled })
+        publishLineSelection()
+    }
+
+    /** Apply the measured fastest endpoint only while automatic selection is enabled and unoverridden. */
+    @Synchronized
+    fun applyFastestLineEndpoint(endpoint: DomainIp?): Boolean {
+        endpoint ?: return false
+        if (!autoSelectEnabled || lineOverrideActive) return false
+        val index = lineIndexForDomain(endpoint.domain)
+        if (index < 0) return false
+        val changed = lineIndex != index || selectedLineIp != endpoint.ip
+        lineIndex = index
+        selectedLineIp = endpoint.ip
+        selectedLineDomain = hostFromLine(lineHosts[index])
+        persistLineEndpoint(null, null)
+        publishLineSelection()
+        return changed
     }
 
     /** 切换图源 */
+    @Synchronized
     fun setImgHost(index: Int) {
         if (imgDomains.isEmpty()) return
         imgIndex = index.coerceIn(0, imgDomains.lastIndex)
@@ -356,11 +395,20 @@ object RouteManager {
     }
 
     /** 从 SharedPreferences 加载图源索引（App启动时调用）。 */
+    @Synchronized
     fun loadImgIndex() {
         try {
             val ctx = DevConfig.appContext ?: return
             if (imgDomains.isEmpty()) {
                 imgIndex = 0
+                return
+            }
+            if (useFastestImgForAll) {
+                imgOverrideActive = false
+                imgIndex = fastestImgDomain?.let { domain ->
+                    imgDomains.indexOfFirst { it.equals(domain, ignoreCase = true) }.takeIf { it >= 0 }
+                } ?: 0
+                saveImgIndex()
                 return
             }
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
@@ -374,14 +422,18 @@ object RouteManager {
     }
 
     /** 保存图源索引到 SharedPreferences。 */
+    @Synchronized
     private fun saveImgIndex() {
         try {
             val ctx = DevConfig.appContext ?: return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit()
-                .putInt("img_index", imgIndex)
-                .putString("selected_img_domain", imgDomains.getOrNull(imgIndex))
-                .apply()
+            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            if (useFastestImgForAll) {
+                editor.remove("img_index").remove("selected_img_domain")
+            } else {
+                editor.putInt("img_index", imgIndex)
+                    .putString("selected_img_domain", imgDomains.getOrNull(imgIndex))
+            }
+            editor.apply()
         } catch (_: Exception) {}
     }
 
@@ -395,40 +447,68 @@ object RouteManager {
         private set
 
     /** 从 SP 恢复选线偏好及最近选择的线路/IP。 */
+    @Synchronized
     fun loadAutoSelectPrefs() {
+        lineOverrideActive = false
         try {
             val ctx = DevConfig.appContext ?: return
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            autoSelectEnabled = prefs.getBoolean("auto_select", true)
+            autoSelectEnabled = prefs.getBoolean("auto_select_enabled", prefs.getBoolean("auto_select", true))
+            prefs.edit().putBoolean("auto_select_enabled", autoSelectEnabled).remove("auto_select").apply()
             lastFastestLineIndex = prefs.getInt("last_fastest_line", 0)
+            routePreferencesLoaded = true
             if (lineHosts.isEmpty()) return
             val savedDomain = prefs.getString("selected_line_domain", null)
             val savedIp = prefs.getString("selected_line_ip", null)
             val savedIndex = savedDomain?.let(::lineIndexForDomain)?.takeIf { it >= 0 }
-            if (savedIndex != null) {
+            if (autoSelectEnabled) {
+                lineIndex = lastFastestLineIndex.takeIf { it in lineHosts.indices } ?: 0
+                selectedLineIp = null
+                selectedLineDomain = null
+                persistLineEndpoint(null, null)
+            } else if (savedIndex != null) {
                 lineIndex = savedIndex
                 selectedLineIp = savedIp
                 selectedLineDomain = hostFromLine(lineHosts[savedIndex])
-            } else if (autoSelectEnabled && lastFastestLineIndex in 0..lineHosts.lastIndex) {
-                lineIndex = lastFastestLineIndex
-                selectedLineIp = null
-                selectedLineDomain = null
-                if (!savedDomain.isNullOrBlank()) persistLineEndpoint(null, null)
             } else {
                 lineIndex = 0
                 selectedLineIp = null
                 selectedLineDomain = null
                 if (!savedDomain.isNullOrBlank()) persistLineEndpoint(null, null)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            publishLineSelection()
+        }
     }
 
+    @Synchronized
     fun setAutoSelectEnabled(v: Boolean) {
         autoSelectEnabled = v
+        routePreferencesLoaded = true
+        lineOverrideActive = false
+        if (v) {
+            selectedLineIp = null
+            selectedLineDomain = null
+            persistLineEndpoint(null, null)
+            if (lastFastestLineIndex in lineHosts.indices) {
+                lineIndex = lastFastestLineIndex
+                val fastestEndpoint = lastLineIpDelays.entries
+                    .asSequence()
+                    .filter { (endpoint, delay) -> lineIndexForDomain(endpoint.domain) == lineIndex && delay < Long.MAX_VALUE }
+                    .minByOrNull { it.value }
+                    ?.key
+                if (fastestEndpoint != null) applyFastestLineEndpoint(fastestEndpoint)
+            }
+        } else {
+            selectedLineDomain = lineHosts.getOrNull(lineIndex)?.let(::hostFromLine)
+            persistLineEndpoint(selectedLineDomain, selectedLineIp)
+        }
+        publishLineSelection()
         try {
             val ctx = DevConfig.appContext ?: return
             ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putBoolean("auto_select", v).apply()
+                .edit().putBoolean("auto_select_enabled", v).apply()
         } catch (_: Exception) {}
     }
 
@@ -461,6 +541,9 @@ object RouteManager {
     var useFastestImgForAll: Boolean by androidx.compose.runtime.mutableStateOf(true)
         private set
 
+    @Volatile private var imgOverrideActive: Boolean = false
+
+    @Synchronized
     fun loadUseFastestImgForAll() {
         try {
             val ctx = DevConfig.appContext ?: return
@@ -469,8 +552,19 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
+    @Synchronized
     fun updateUseFastestImgForAll(v: Boolean) {
         useFastestImgForAll = v
+        if (v) {
+            imgOverrideActive = false
+            clearPinnedImgDomain()
+        } else {
+            if (imgOverrideActive && !pinnedImgDomain.isNullOrBlank()) {
+                persistPinnedImgDomain(pinnedImgDomain, pinnedImgIp)
+                saveImgIndex()
+            }
+            imgOverrideActive = false
+        }
         try {
             val ctx = DevConfig.appContext ?: return
             ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
@@ -505,7 +599,7 @@ object RouteManager {
             return null
         }
 
-    // ---- 手动 pin 图源（持久化，直到用户点「恢复自动」）----
+    // ---- 手动 pin 图源（自动模式中仅覆盖本次运行；手动模式中持久化）----
     /**
      * 用户手动钉住的图源域名。
      *
@@ -526,6 +620,7 @@ object RouteManager {
     }
 
     /** 手动选定图源：同时更新 imgIndex（UI 显示）与 pin（实际生效）。 */
+    @Synchronized
     fun pinImgHost(index: Int, ip: String? = null) {
         if (imgDomains.isEmpty()) return
         val safe = index.coerceIn(0, imgDomains.lastIndex)
@@ -533,36 +628,52 @@ object RouteManager {
         setImgHost(safe)
         pinnedImgDomain = domain
         pinnedImgIp = ip
-        persistPinnedImgDomain(domain, ip)
+        imgOverrideActive = useFastestImgForAll
+        if (useFastestImgForAll) {
+            persistPinnedImgDomain(null, null)
+        } else {
+            persistPinnedImgDomain(domain, ip)
+        }
         notifyImgPinDisplayChanged()
     }
 
     /** Apply the fastest measured combination unless the user has pinned a source. */
+    @Synchronized
     fun applyFastestImgEndpoint(endpoint: DomainIp?): Boolean {
         endpoint ?: return false
+        if (!useFastestImgForAll || imgOverrideActive || !pinnedImgDomain.isNullOrBlank()) return false
         val index = imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
         if (index < 0) return false
-        val changed = imgIndex != index || selectedImgIp != endpoint.ip
         if (pinnedImgDomain.isNullOrBlank()) setImgHost(index)
-        return changed
+        return true
     }
 
     /** 恢复自动：清除手动 pin，重新由测速结果决定。 */
+    @Synchronized
     fun clearPinnedImgDomain() {
         pinnedImgDomain = null
         pinnedImgIp = null
+        imgOverrideActive = false
         persistPinnedImgDomain(null, null)
         notifyImgPinDisplayChanged()
-        fastestImgEndpoint?.let(::applyFastestImgEndpoint)
+        if (useFastestImgForAll) fastestImgEndpoint?.let(::applyFastestImgEndpoint)
     }
 
     /** 启动时恢复 pin；域名已被移出当前图源列表时由策略自动忽略。 */
+    @Synchronized
     fun loadPinnedImgDomain() {
         try {
             val ctx = DevConfig.appContext ?: return
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            pinnedImgDomain = prefs.getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
-            pinnedImgIp = prefs.getString("pinned_img_ip", null)?.takeIf { it.isNotBlank() }
+            imgOverrideActive = false
+            if (useFastestImgForAll) {
+                pinnedImgDomain = null
+                pinnedImgIp = null
+                persistPinnedImgDomain(null, null)
+            } else {
+                pinnedImgDomain = prefs.getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
+                pinnedImgIp = prefs.getString("pinned_img_ip", null)?.takeIf { it.isNotBlank() }
+            }
             notifyImgPinDisplayChanged()
         } catch (_: Exception) {}
     }
@@ -711,12 +822,15 @@ object RouteManager {
     }
 
     /** 临时切换到下一条线路（不持久化）。 */
+    @Synchronized
     fun selectNextLine() {
         if (lineHosts.isEmpty()) return
         lineIndex = (lineIndex + 1) % lineHosts.size
         selectedLineIp = null
         selectedLineDomain = null
+        lineOverrideActive = false
         persistLineEndpoint(null, null)
+        publishLineSelection()
     }
 
     // ---- 故障自动切换 ----
@@ -724,8 +838,9 @@ object RouteManager {
     var consecutiveFailures: Int = 0
         private set
 
+    @Synchronized
     fun recordApiFailure() {
-        if (++consecutiveFailures >= 3 && autoSelectEnabled) {
+        if (++consecutiveFailures >= 3 && autoSelectEnabled && !lineOverrideActive) {
             consecutiveFailures = 0
             failover()
         }
@@ -735,9 +850,10 @@ object RouteManager {
         consecutiveFailures = 0
     }
 
+    @Synchronized
     private fun failover() {
+        selectNextLine()
         CoroutineScope(Dispatchers.IO).launch {
-            selectNextLine()
             // 只清 API 侧：自动换线（连续 3 次 API 失败）不能 cancelAll 掉正在下载的图片
             NetworkModule.rebuildApi("自动换线")
             NetworkModule.cookieJar.syncToAllLines()
@@ -757,6 +873,7 @@ object RouteManager {
     fun applyBaseLists(lineUrls: List<String>, sourceDomains: List<String>, remoteVersion: Int? = null) {
         val lists = RouteListPolicy.replace(lineUrls, sourceDomains)
         activeRemoteConfigVersion = remoteVersion
+        val prefsLoaded = routePreferencesLoaded
         val oldLine = lineHosts.getOrNull(lineIndex)
         val savedSelection = runCatching {
             DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
@@ -766,21 +883,52 @@ object RouteManager {
         val oldIp = selectedLineIp ?: savedSelection?.getString("selected_line_ip", null)
         val newLines = lists.lines
         lineHosts = newLines
+        val keepTemporaryLine = prefsLoaded && autoSelectEnabled && lineOverrideActive
         val keptLine = oldDomain?.let { domain -> newLines.indexOfFirst { hostFromLine(it).equals(domain, true) } }
             ?.takeIf { it >= 0 }
-        lineIndex = keptLine ?: 0
-        if (keptLine == null) {
-            selectedLineIp = null
-            selectedLineDomain = null
-            persistLineEndpoint(null, null)
-        } else if (oldIp != null) {
-            selectedLineIp = oldIp
-            selectedLineDomain = hostFromLine(newLines[keptLine])
-            persistLineEndpoint(selectedLineDomain, selectedLineIp)
-        } else {
-            selectedLineIp = null
-            selectedLineDomain = null
+        when {
+            keepTemporaryLine && keptLine != null -> {
+                lineIndex = keptLine
+                selectedLineIp = oldIp
+                selectedLineDomain = hostFromLine(newLines[keptLine])
+                persistLineEndpoint(null, null)
+            }
+            prefsLoaded && autoSelectEnabled -> {
+                // A changed candidate list invalidates old rankings; use a safe default until the new test completes.
+                lineIndex = 0
+                selectedLineIp = null
+                selectedLineDomain = null
+                lineOverrideActive = false
+                persistLineEndpoint(null, null)
+            }
+            prefsLoaded && !autoSelectEnabled && keptLine != null -> {
+                lineIndex = keptLine
+                selectedLineIp = oldIp
+                selectedLineDomain = hostFromLine(newLines[keptLine])
+                persistLineEndpoint(selectedLineDomain, selectedLineIp)
+            }
+            !prefsLoaded && keptLine != null && oldIp != null -> {
+                // Startup configuration is applied before the saved auto/manual preference is loaded.
+                lineIndex = keptLine
+                selectedLineIp = oldIp
+                selectedLineDomain = hostFromLine(newLines[keptLine])
+                persistLineEndpoint(selectedLineDomain, selectedLineIp)
+            }
+            !prefsLoaded && keptLine != null -> {
+                lineIndex = keptLine
+                selectedLineIp = null
+                selectedLineDomain = null
+            }
+            else -> {
+                lineIndex = 0
+                selectedLineIp = null
+                selectedLineDomain = null
+                lineOverrideActive = false
+                if (prefsLoaded) persistLineEndpoint(null, null)
+            }
         }
+        publishLineSelection()
+        if (prefsLoaded) saveLastFastestLine(0)
         setBaselineImgDomains(lists.sources)
         clearSpeedTestResults()
         configRevision++

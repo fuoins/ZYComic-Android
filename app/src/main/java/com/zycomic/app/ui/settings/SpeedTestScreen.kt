@@ -239,7 +239,7 @@ fun SpeedTestScreen(
                             Text("自动选择最快线路", style = MaterialTheme.typography.bodyLarge)
                             Text(
                                 if (autoSel) {
-                                    "已开启，当前自动选中线路 ${currentLineIdx + 1}（手动点击线路将关闭自动）"
+                                    "已开启，当前线路 ${currentLineIdx + 1}（手动选择仅临时覆盖，重启后恢复自动）"
                                 } else {
                                     "已关闭，纯手动模式"
                                 },

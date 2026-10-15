@@ -286,7 +286,7 @@ fun AppContent(
                 Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
             } else {
                 android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}")
-                Toast.makeText(context, "测速最快线路${result.first + 1} + 图源${result.second + 1}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "测速完成：最快线路${result.first + 1} + 图源${result.second + 1}（仅自动模式应用，临时手动选择保持不变）", Toast.LENGTH_SHORT).show()
             }
             com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone = true
             speedTesting = false

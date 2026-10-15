@@ -124,12 +124,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 DevConfig.clearImageCaches()
             }
         }
-        // 加载持久化的图源索引
-        com.zycomic.app.net.RouteManager.loadImgIndex()
+        // 先恢复自动模式，再决定是否读取持久化的手动图源选择
+        com.zycomic.app.net.RouteManager.loadUseFastestImgForAll()
         // 恢复自动选线偏好（开启时用上次最快线路作为当前线路）
         com.zycomic.app.net.RouteManager.loadAutoSelectPrefs()
-        // 恢复"封面/章节用测速最快图源"偏好
-        com.zycomic.app.net.RouteManager.loadUseFastestImgForAll()
+        // 自动模式下忽略上次运行的临时图源覆盖；手动模式才恢复保存选择
+        com.zycomic.app.net.RouteManager.loadImgIndex()
         // 恢复用户手动钉住的图源（pin 优先级高于派生最快域）
         com.zycomic.app.net.RouteManager.loadPinnedImgDomain()
         // 清除旧版缓存的线路/图源候选；有效列表已从当前 DevConfig 重建

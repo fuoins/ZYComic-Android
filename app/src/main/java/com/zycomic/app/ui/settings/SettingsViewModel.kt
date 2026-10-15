@@ -67,7 +67,7 @@ class SettingsViewModel {
         } else {
             "正在测试线路 IP：${progress.completed}/${progress.total}（可用 ${progress.successful}，失败 ${progress.failed}）"
         }
-        SpeedTester.Phase.APPLYING_LINE -> "线路检测完成（可用 ${progress.successful}，失败 ${progress.failed}），正在选择最快线路"
+        SpeedTester.Phase.APPLYING_LINE -> "线路检测完成（可用 ${progress.successful}，失败 ${progress.failed}），正在更新测速排名"
         SpeedTester.Phase.FETCHING_SAMPLE -> "正在获取图源验证样本…"
         SpeedTester.Phase.PREPARING_IMAGES -> "正在解析图源域名和 IP…"
         SpeedTester.Phase.TESTING_IMAGES -> if (progress.total == 0) {
@@ -75,8 +75,8 @@ class SettingsViewModel {
         } else {
             "正在测试图源 IP：${progress.completed}/${progress.total}（可用 ${progress.successful}，连不上 ${progress.failed}，无图 ${progress.noImage}）"
         }
-        SpeedTester.Phase.APPLYING_RESULTS -> "端点检测完成，正在应用最快线路和图源…"
-        SpeedTester.Phase.COMPLETE -> "测速完成，最快线路和图源已应用"
+        SpeedTester.Phase.APPLYING_RESULTS -> "端点检测完成，正在更新排名并应用可自动切换的结果…"
+        SpeedTester.Phase.COMPLETE -> "测速完成；自动模式应用最快结果，临时手动选择保持不变"
         SpeedTester.Phase.FAILED -> "测速中断，继续使用当前线路和图源"
         SpeedTester.Phase.SKIPPED -> "已有测速任务正在运行，本轮未重复检测"
     }
@@ -98,6 +98,12 @@ class SettingsViewModel {
     val speedTestResultVersion = MutableStateFlow(RouteManager.speedTestSnapshot.value.remoteVersion)
 
     init {
+        scope.launch {
+            RouteManager.lineSelectionState.collect { selection ->
+                currentLineIndex.value = selection.index
+                currentLineIp.value = selection.ip
+            }
+        }
         scope.launch {
             RouteManager.speedTestSnapshot.collect { snapshot ->
                 lineDelays.value = snapshot.lineDelays
@@ -322,18 +328,14 @@ class SettingsViewModel {
         }
     }
 
-    /** 切换线路：重建网络后验证登录态，失效则自动登出。手动选线会关闭自动模式。 */
+    /** 手动切换只覆盖当前进程；重启后自动模式仍会恢复最快线路。 */
     fun selectLine(index: Int, ip: String? = null) {
-        if (autoSelectEnabled.value) {
-            RouteManager.setAutoSelectEnabled(false)
-            autoSelectEnabled.value = false
-        }
         val url = RouteManager.lineHosts.getOrNull(index)
         val domain = url?.let { runCatching { java.net.URI(it).host }.getOrNull() }
         if (ip != null && domain != null) RouteManager.setLineEndpoint(domain, ip) else RouteManager.setLine(index)
-        currentLineIndex.value = index
+        currentLineIndex.value = RouteManager.lineIndex
         currentLineIp.value = RouteManager.selectedLineIp
-        toast.value = "已切换到线路 ${index + 1}"
+        toast.value = if (RouteManager.autoSelectEnabled) "已临时切换到线路 ${RouteManager.lineIndex + 1}（重启后恢复自动选择）" else "已切换到线路 ${RouteManager.lineIndex + 1}"
         // rebuild() 内部要关 socket（evictAll/cancelAll），属网络操作：必须在 IO，
         // 直接在主线程调会抛 NetworkOnMainThreadException。登录态校验一并放同一个 IO 块，
         // 保证"网络已按新线路重建"发生在校验之前。
@@ -348,15 +350,32 @@ class SettingsViewModel {
     }
 
     fun setAutoSelectEnabled(v: Boolean) {
+        val previousIndex = RouteManager.lineIndex
+        val previousIp = RouteManager.selectedLineIp
         RouteManager.setAutoSelectEnabled(v)
         autoSelectEnabled.value = v
+        currentLineIndex.value = RouteManager.lineIndex
+        currentLineIp.value = RouteManager.selectedLineIp
         toast.value = if (v) "已开启自动选线" else "已关闭自动选线（手动模式）"
+        if (v && (previousIndex != RouteManager.lineIndex || previousIp != RouteManager.selectedLineIp)) {
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    runCatching { NetworkModule.rebuildApi("开启自动选线") }
+                    runCatching { NetworkModule.cookieJar.syncToAllLines() }
+                }
+            }
+        }
     }
 
     fun setUseFastestImgForAll(v: Boolean) {
         RouteManager.updateUseFastestImgForAll(v)
         useFastestImgForAll.value = v
         toast.value = if (v) "已开启：封面和章节用测速最快图源" else "已关闭：用服务端推荐图源"
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { NetworkModule.rebindImageRoute("切换自动图源模式") }
+            }
+        }
     }
 
     /**
@@ -390,20 +409,19 @@ class SettingsViewModel {
         }
     }
 
-    /**
-     * 手动切换图源：写入 pin（最高优先级）并驱逐图片侧空闲连接。
-     *
-     * 修既有空操作 bug：以前这里只改 imgIndex，而拦截器读的是派生最快域，
-     * 开关开着时手动选择完全不生效。
-     */
+    /** 手动切换图源：只作本次进程临时覆盖，不关闭自动选择开关。 */
     fun selectImgHost(index: Int, ip: String? = null) {
         RouteManager.pinImgHost(index, ip)
-        currentImgIndex.value = index
+        currentImgIndex.value = RouteManager.imgIndex
         currentImgIp.value = RouteManager.selectedImgIp
         imgPinned.value = RouteManager.pinnedImgDomain
         // 清除内存 + 磁盘缓存，强制用新图源重新加载图片
         DevConfig.clearImageCaches()
-        toast.value = "已固定图源 ${index + 1}（可在测速页恢复自动）"
+        toast.value = if (RouteManager.useFastestImgForAll) {
+            "已临时切换到图源 ${RouteManager.imgIndex + 1}（重启后恢复自动选择）"
+        } else {
+            "已固定图源 ${RouteManager.imgIndex + 1}"
+        }
         scope.launch {
             withContext(Dispatchers.IO) {
                 runCatching { NetworkModule.rebindImageRoute("手动固定图源") }

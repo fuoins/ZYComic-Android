@@ -691,6 +691,7 @@ object SpeedTester {
             val imgClient = NetworkModule.newSpeedTestClient()
             val previousImgIndex = RouteManager.imgIndex
             val previousImgIp = RouteManager.selectedImgIp
+            val previousImgDomain = RouteManager.imgDomains.getOrNull(previousImgIndex)
             try {
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
@@ -739,10 +740,11 @@ object SpeedTester {
                     RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
                 }?.takeIf { it >= 0 }
                 if (bestLine != null && bestLineIndex != null) {
-                    RouteManager.setLineEndpoint(bestLine.domain, bestLine.ip)
                     RouteManager.saveLastFastestLine(bestLineIndex)
-                    // 让阶段 2 取样本走最快线路：只重建 API 侧，不打断正在下载的图片
-                    NetworkModule.rebuildApi("测速选出线路")
+                    if (RouteManager.applyFastestLineEndpoint(bestLine)) {
+                        // 自动模式下让阶段 2 样本走最快线路；临时手动覆盖不被测速改写。
+                        NetworkModule.rebuildApi("测速选出线路")
+                    }
                 }
                 Log.i(TAG, "line test done, best=$bestLine")
 
@@ -810,9 +812,9 @@ object SpeedTester {
                     return@coroutineScope (-1 to -1)
                 }
                 val bestImg = RouteManager.fastestImgEndpoint
-                val imgDomainChanged = bestImg != null && RouteManager.pinnedImgDomain.isNullOrBlank() &&
-                    (bestImg.domain != RouteManager.imgDomains.getOrNull(previousImgIndex) || bestImg.ip != previousImgIp)
-                if (bestImg != null) RouteManager.applyFastestImgEndpoint(bestImg)
+                val imgApplied = bestImg?.let(RouteManager::applyFastestImgEndpoint) == true
+                val imgDomainChanged = imgApplied && bestImg != null &&
+                    (!previousImgDomain.equals(bestImg.domain, ignoreCase = true) || previousImgIp != bestImg.ip)
                 // 按侧清理：线路变了只重建 API 侧；图源变了只驱逐图片侧空闲连接
                 if (imgDomainChanged) NetworkModule.rebindImageRoute("测速应用图源")
                 RouteManager.markSpeedTestToday()

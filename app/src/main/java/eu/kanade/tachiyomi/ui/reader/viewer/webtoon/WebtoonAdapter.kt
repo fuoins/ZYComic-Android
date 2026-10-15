@@ -78,6 +78,7 @@ class WebtoonAdapter(
         val result = DiffUtil.calculateDiff(Callback(items, newItems))
         items = newItems
         result.dispatchUpdatesTo(this)
+        viewer.onAdapterItemsUpdated()
     }
 
     fun refresh() {
@@ -166,8 +167,11 @@ class WebtoonAdapter(
         override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
             val oldItem = oldItems[oldItemPosition]
             val newItem = newItems[newItemPosition]
-
-            return oldItem == newItem
+            return when {
+                oldItem is ChapterTransition && newItem is ChapterTransition ->
+                    oldItem::class == newItem::class && oldItem == newItem
+                else -> oldItem == newItem
+            }
         }
 
         /**
