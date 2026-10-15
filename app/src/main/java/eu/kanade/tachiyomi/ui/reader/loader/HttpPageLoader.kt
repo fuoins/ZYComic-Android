@@ -227,7 +227,7 @@ internal class HttpPageLoader(
             .forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
         (oldVisible - newVisible).filter { it in activeRetryLoads }
             .forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
-        newlyVisible.filter { it in activeScopes && it !in activeRetryLoads }
+        newlyVisible.filter { activeScopes.containsKey(it) && it !in activeRetryLoads }
             .forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
         activeRetryLoads.filter { it in newVisible }.forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
         (normalizedVisible + nextRollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
