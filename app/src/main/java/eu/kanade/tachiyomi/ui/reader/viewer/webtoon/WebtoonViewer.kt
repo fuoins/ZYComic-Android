@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.WebtoonLayoutManager
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -89,6 +90,7 @@ class WebtoonViewer(
      */
     /* [EXH] private */
     var currentPage: Any? = null
+    private val readingOrderLoaders = linkedSetOf<PageLoader>()
 
     private val threshold: Int =
         // KMK -->
@@ -322,6 +324,7 @@ class WebtoonViewer(
 
     fun onScrolled(pos: Int? = null) {
         val position = pos ?: layoutManager.findLastEndVisibleItemPosition()
+        reportReadingOrder(position)
         val item = adapter.items.getOrNull(position)
         val allowPreload = checkAllowPreload(item as? ReaderPage)
         if (item != null && currentPage != item) {
@@ -330,6 +333,34 @@ class WebtoonViewer(
                 is ReaderPage -> onPageSelected(item, allowPreload)
                 is ChapterTransition -> onTransitionSelected(item)
             }
+        }
+    }
+
+    /** Webtoon successors follow adapter order after the last page entering the viewport. */
+    private fun reportReadingOrder(fallbackPosition: Int) {
+        val lastVisible = layoutManager.findLastEndVisibleItemPosition().takeIf { it >= 0 } ?: fallbackPosition
+        val firstVisible = layoutManager.findFirstVisibleItemPosition().takeIf { it >= 0 } ?: fallbackPosition
+        if (firstVisible !in adapter.items.indices || lastVisible !in adapter.items.indices || firstVisible > lastVisible) return
+        val visible = adapter.items
+            .subList(firstVisible, (lastVisible + 1).coerceAtMost(adapter.items.size))
+            .filterIsInstance<ReaderPage>()
+            .distinctBy { it.index }
+        val groups = visible.groupBy { it.chapter.pageLoader }
+        val currentLoaders = groups.keys.filterNotNull().toSet()
+        (readingOrderLoaders - currentLoaders).forEach { it.updateReadingOrder(emptyList(), emptyList()) }
+        readingOrderLoaders.retainAll(currentLoaders)
+        groups.forEach { (loader, chapterVisible) ->
+            loader ?: return@forEach
+            val reference = chapterVisible.last()
+            val orderedSuccessors = adapter.items
+                .drop(lastVisible + 1)
+                .asSequence()
+                .filterIsInstance<ReaderPage>()
+                .filter { it.chapter == reference.chapter }
+                .distinctBy { it.index }
+                .toList()
+            readingOrderLoaders += loader
+            loader.updateReadingOrder(chapterVisible.takeLast(3), orderedSuccessors)
         }
     }
 

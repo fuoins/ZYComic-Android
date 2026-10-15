@@ -152,6 +152,15 @@ class ChapterCache(
         }
     }
 
+    /** Remove one image entry through DiskLruCache so its journal remains consistent. */
+    @Synchronized
+    fun remove(imageUrl: String): Boolean = try {
+        diskCache.remove(DiskUtil.hashKeyForDisk(imageUrl))
+    } catch (e: Exception) {
+        logcat(LogPriority.WARN, e) { "Failed to remove image from chapter cache" }
+        false
+    }
+
     /**
      * Get image file from url.
      *
@@ -172,7 +181,7 @@ class ChapterCache(
      * @throws IOException image error.
      */
     @Throws(IOException::class)
-    fun putImageToCache(imageUrl: String, response: Response) {
+    fun putImageToCache(imageUrl: String, response: Response, stillOwner: () -> Boolean = { true }) {
         // Initialize editor (edits the values for an entry).
         var editor: DiskLruCache.Editor? = null
 
@@ -183,6 +192,9 @@ class ChapterCache(
 
             // Get OutputStream and write image with Okio.
             response.body.source().saveTo(editor.newOutputStream(0))
+
+            // The response may have completed after a page was hidden/preempted; never publish stale bytes.
+            if (!stillOwner()) return
 
             diskCache.flush()
             editor.commit()

@@ -67,6 +67,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.google.android.material.transition.platform.MaterialContainerTransform
 import com.hippo.unifile.UniFile
+import com.zycomic.app.data.repository.ReaderRepository
+import com.zycomic.app.net.ImageSourceDisplayPolicy
 import eu.kanade.core.util.ifSourcesLoaded
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
@@ -524,19 +526,25 @@ class ReaderActivity : BaseActivity() {
             // 图源切换对话框
             if (showImgSourceDialog) {
                 val rm = com.zycomic.app.net.RouteManager
-                val currentDomain = rm.imgRewriteTarget ?: rm.imgHost
-                val successfulEndpoints = rm.lastImgIpDelays.entries
-                    .filter { (endpoint, delay) ->
-                        rm.imgDomains.any { it.equals(endpoint.domain, true) } &&
-                            delay < Long.MAX_VALUE &&
-                            rm.lastImgIpVerdicts[endpoint] == com.zycomic.app.net.SpeedTester.ImgVerdict.OK
-                    }
-                    .sortedWith(compareBy({ it.value }, { it.key.domain }, { it.key.ip }))
-                val currentIp = rm.selectedImgIp
-                val currentEndpoint = com.zycomic.app.net.ImageEndpointSelectionPolicy.currentEndpoint(
-                    successfulEndpoints.map { it.key },
-                    currentDomain,
-                    currentIp,
+                val imageDelaysSnapshot = rm.lastImgIpDelays
+                val imageVerdictsSnapshot = rm.lastImgIpVerdicts
+                val configuredImageDomains = rm.imgDomains
+                val successfulEndpointDelays = com.zycomic.app.net.ImageEndpointSelectionPolicy
+                    .rankedSuccessfulEndpoints(
+                        delays = imageDelaysSnapshot,
+                        verdicts = imageVerdictsSnapshot,
+                        configuredDomains = configuredImageDomains,
+                    )
+                    .mapNotNull { endpoint -> imageDelaysSnapshot[endpoint]?.let { delay -> endpoint to delay } }
+                val successfulEndpoints = successfulEndpointDelays.map { it.first }
+                val currentImageSource = ImageSourceDisplayPolicy.currentSource(
+                    configuredDomains = configuredImageDomains,
+                    successfulEndpoints = successfulEndpoints,
+                    pinnedDomain = rm.pinnedImgDomain,
+                    pinnedIp = rm.selectedImgIp,
+                    useFastestImgForAll = rm.useFastestImgForAll,
+                    serverRecommendedDomain = ReaderRepository.currentRecommendedImgDomain,
+                    serverFallbackDomain = ReaderRepository.currentImgDomains.firstOrNull(),
                 )
                 var imgTesting by remember { mutableStateOf(false) }
                 val scope = rememberCoroutineScope()
@@ -553,7 +561,7 @@ class ReaderActivity : BaseActivity() {
                         ) {
                             item {
                                 Text(
-                                    "仅显示当前配置中测速成功的图源，按速度排序",
+                                    "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 4.dp),
@@ -567,12 +575,32 @@ class ReaderActivity : BaseActivity() {
                                     modifier = Modifier.padding(top = 4.dp),
                                 )
                             }
+                            item {
+                                if (currentImageSource.domain != null && !currentImageSource.hasSuccessfulEndpoint) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = "● ${currentImageSource.notInSuccessfulListDescription()}",
+                                            color = MaterialTheme.colorScheme.tertiary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                } else if (currentImageSource.domain == null) {
+                                    Text(
+                                        currentImageSource.description(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 4.dp),
+                                    )
+                                }
+                            }
                             if (successfulEndpoints.isEmpty()) {
                                 item { Text("暂无测速成功的图源 IP", style = MaterialTheme.typography.bodySmall) }
                             }
-                            items(successfulEndpoints) { entry ->
-                                val endpoint = entry.key
-                                val isSelected = endpoint == currentEndpoint
+                            items(successfulEndpointDelays) { (endpoint, delay) ->
+                                val isSelected = currentImageSource.matchesEndpoint(endpoint)
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clickable {
@@ -588,9 +616,9 @@ class ReaderActivity : BaseActivity() {
                                         modifier = Modifier.weight(1f),
                                     )
                                     if (isSelected) {
-                                        Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                                        Text(currentImageSource.kind.label, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
                                     }
-                                    Text("${entry.value}ms", style = MaterialTheme.typography.bodySmall)
+                                    Text("${delay}ms", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }

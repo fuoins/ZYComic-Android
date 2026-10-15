@@ -17,6 +17,8 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
+import eu.kanade.tachiyomi.ui.reader.viewer.SlowPageOverlay
+import com.zycomic.app.net.RouteManager
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
 import kotlinx.coroutines.Job
@@ -65,6 +67,7 @@ class WebtoonPageHolder(
      * Error layout to show when the image fails to load.
      */
     private var errorLayout: ReaderErrorBinding? = null
+    private var slowOverlay: SlowPageOverlay? = null
 
     /**
      * Getter to retrieve the height of the recycler view.
@@ -88,7 +91,11 @@ class WebtoonPageHolder(
         refreshLayoutParams()
 
         frame.onImageLoaded = { onImageDecoded() }
-        frame.onImageLoadError = { error -> setError(error) }
+        frame.onImageLoadError = { error ->
+            val current = page
+            val retried = current?.let { it.chapter.pageLoader?.invalidatePage(it) == true } == true
+            if (!retried) setError(error)
+        }
         frame.onScaleChanged = { viewer.activity.hideMenu() }
     }
 
@@ -96,6 +103,7 @@ class WebtoonPageHolder(
      * Binds the given [page] with this view holder, subscribing to its state.
      */
     fun bind(page: ReaderPage) {
+        removeSlowOverlay()
         this.page = page
         loadJob?.cancel()
         loadJob = scope.launch { loadPageAndProcessStatus() }
@@ -122,6 +130,7 @@ class WebtoonPageHolder(
         loadJob = null
 
         removeErrorLayout()
+        removeSlowOverlay()
         frame.recycle()
         progressIndicator.setProgress(0)
         progressContainer.isVisible = true
@@ -141,6 +150,12 @@ class WebtoonPageHolder(
             launchIO {
                 loader.loadPage(page)
             }
+            launch {
+                page.slowFlow.collectLatest { updateSlowOverlay() }
+            }
+            launch {
+                page.readerVisibleFlow.collectLatest { updateSlowOverlay() }
+            }
             page.statusFlow.collectLatest { state ->
                 when (state) {
                     Page.State.Queue -> setQueued()
@@ -148,7 +163,7 @@ class WebtoonPageHolder(
                     Page.State.DownloadImage -> {
                         setDownloading()
                         page.progressFlow.collectLatest { value ->
-                            progressIndicator.setProgress(value)
+                            progressIndicator.setProgress(value.takeIf { it in 0..100 } ?: 0)
                         }
                     }
                     Page.State.Ready -> setImage()
@@ -212,11 +227,14 @@ class WebtoonPageHolder(
                     ),
                 )
                 removeErrorLayout()
+                updateSlowOverlay()
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
-            withUIContext {
-                setError(e)
+            val current = page
+            val retried = current?.let { it.chapter.pageLoader?.invalidatePage(it) == true } == true
+            if (!retried) {
+                withUIContext { setError(e) }
             }
         }
     }
@@ -252,6 +270,7 @@ class WebtoonPageHolder(
      */
     private fun setError(error: Throwable?) {
         progressContainer.isVisible = false
+        removeSlowOverlay()
         initErrorLayout(error)
     }
 
@@ -261,6 +280,29 @@ class WebtoonPageHolder(
     private fun onImageDecoded() {
         progressContainer.isVisible = false
         removeErrorLayout()
+        page?.let { current -> current.chapter.pageLoader?.markImageDecodeSuccess(current) }
+        updateSlowOverlay()
+    }
+
+    private fun updateSlowOverlay() {
+        val target = page?.takeIf { it.slow && it.readerVisible }
+        if (target == null) {
+            removeSlowOverlay()
+            return
+        }
+        if (slowOverlay == null) {
+            val overlay = SlowPageOverlay(context) {
+                target.chapter.pageLoader?.retryPage(target)
+            }
+            slowOverlay = overlay
+            frame.addView(overlay, MATCH_PARENT, MATCH_PARENT)
+        }
+        slowOverlay?.bringToFront()
+    }
+
+    private fun removeSlowOverlay() {
+        slowOverlay?.let { frame.removeView(it) }
+        slowOverlay = null
     }
 
     /**
@@ -292,9 +334,20 @@ class WebtoonPageHolder(
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), frame, true)
             errorLayout?.root?.layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, (parentHeight * 0.8).toInt())
             errorLayout?.actionRetry?.setOnClickListener {
-                page?.let { it.chapter.pageLoader?.retryPage(it) }
+                val current = page ?: return@setOnClickListener
+                val exhausted = current.manualRetryCount.get() >= 3 &&
+                    current.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
+                if (exhausted) viewer.activity.showMenu()
+                else {
+                    errorLayout?.actionRetry?.text = "重试"
+                    current.chapter.pageLoader?.retryPage(current)
+                }
             }
         }
+        val current = page
+        val exhausted = current != null && current.manualRetryCount.get() >= 3 &&
+            current.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
+        errorLayout?.actionRetry?.text = if (exhausted) "重新测速 / 切换图源" else "重试"
 
         val imageUrl = page?.imageUrl
         errorLayout?.actionOpenInWebView?.isVisible = imageUrl != null

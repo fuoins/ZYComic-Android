@@ -37,7 +37,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.zycomic.app.net.ImageEndpointSelectionPolicy
+import com.zycomic.app.data.repository.ReaderRepository
+import com.zycomic.app.net.ImageSourceDisplayPolicy
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.ui.components.FilterChip
@@ -55,8 +56,10 @@ fun SettingsScreen() {
     val imgVerdicts by vm.imgVerdicts.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentLineIp by vm.currentLineIp.collectAsState()
-    val currentImgIdx by vm.currentImgIndex.collectAsState()
-    val currentImgIp by vm.currentImgIp.collectAsState()
+    val currentImgIp = RouteManager.selectedImgIp
+    val pinnedImg = RouteManager.pinnedImgDomain
+    val imgPinDisplayRevision = RouteManager.imgPinDisplayRevision
+    val useFastestImg = RouteManager.useFastestImgForAll
     val sortedImgEntries = remember(imgDelays, imgVerdicts) {
         imgDelays.entries.sortedWith(
             compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }),
@@ -65,10 +68,27 @@ fun SettingsScreen() {
     val successfulImgEndpoints = remember(sortedImgEntries, imgVerdicts) {
         sortedImgEntries.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
     }
-    val currentImgEndpoint = remember(sortedImgEntries, successfulImgEndpoints, currentImgIdx, currentImgIp) {
-        val domain = RouteManager.imgDomains.getOrNull(currentImgIdx)
-        ImageEndpointSelectionPolicy.currentEndpoint(successfulImgEndpoints, domain, currentImgIp)
-            ?: ImageEndpointSelectionPolicy.currentEndpoint(sortedImgEntries.map { it.key }, domain, currentImgIp)
+    val serverRecommendedImgDomain = ReaderRepository.currentRecommendedImgDomain
+    val serverFallbackImgDomain = ReaderRepository.currentImgDomains.firstOrNull()
+    val currentImageSource = remember(
+        successfulImgEndpoints,
+        RouteManager.imgDomains,
+        imgPinDisplayRevision,
+        pinnedImg,
+        currentImgIp,
+        useFastestImg,
+        serverRecommendedImgDomain,
+        serverFallbackImgDomain,
+    ) {
+        ImageSourceDisplayPolicy.currentSource(
+            configuredDomains = RouteManager.imgDomains,
+            successfulEndpoints = successfulImgEndpoints,
+            pinnedDomain = pinnedImg,
+            pinnedIp = currentImgIp,
+            useFastestImgForAll = useFastestImg,
+            serverRecommendedDomain = serverRecommendedImgDomain,
+            serverFallbackDomain = serverFallbackImgDomain,
+        )
     }
 
     var showGayConfirm by remember { mutableStateOf(false) }
@@ -172,6 +192,12 @@ fun SettingsScreen() {
                 }
 
             Text("图源（按域名/IP速度排序，点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                currentImageSource.description(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
             sortedImgEntries
                 .forEachIndexed { order, entry ->
                     val endpoint = entry.key
@@ -186,11 +212,11 @@ fun SettingsScreen() {
                         Text(
                             text = "${order + 1}. ${endpoint.domain} · ${endpoint.ip}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (endpoint == currentImgEndpoint) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            color = if (currentImageSource.matchesEndpoint(endpoint)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
-                        if (endpoint == currentImgEndpoint) {
-                            Text("✓", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                        if (currentImageSource.matchesEndpoint(endpoint)) {
+                            Text(currentImageSource.kind.label, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
                         }
                         Text(
                             text = "HTTP:${formatDelay(entry.value, verdict)}",
@@ -203,6 +229,15 @@ fun SettingsScreen() {
                         )
                     }
                 }
+
+            if (currentImageSource.domain != null && sortedImgEntries.none { currentImageSource.matchesEndpoint(it.key) }) {
+                Text(
+                    currentImageSource.notInSuccessfulListDescription(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
 
             Button(onClick = { vm.runSpeedTest() }, enabled = !testing, modifier = Modifier.padding(top = 8.dp)) {
                 Text(if (testing) "测速中..." else "重新测速")

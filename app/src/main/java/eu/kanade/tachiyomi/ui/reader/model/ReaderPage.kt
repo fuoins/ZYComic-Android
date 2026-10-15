@@ -1,7 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.model
 
+import com.zycomic.app.net.PageAttemptScope
 import eu.kanade.tachiyomi.source.model.Page
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.InputStream
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 open class ReaderPage(
     index: Int,
@@ -19,7 +24,32 @@ open class ReaderPage(
 
     open lateinit var chapter: ReaderChapter
 
-    /** Value to check if a page is too wide to be doubled up */
+    /** Ownership epoch. Stale workers cannot publish state or commit after this changes. */
+    val generation = AtomicInteger(0)
+    val activeAttempt = AtomicReference<PageAttemptScope?>(null)
+    /** Generation currently represented by a queue entry; -1 means no queued entry. */
+    val queuedToken = AtomicInteger(-1)
+    val manualRetryCount = AtomicInteger(0)
+    @Volatile var retryBudgetSource: String? = null
+    private val _slowFlow = MutableStateFlow(false)
+    val slowFlow = _slowFlow.asStateFlow()
+    private val _readerVisibleFlow = MutableStateFlow(false)
+    val readerVisibleFlow = _readerVisibleFlow.asStateFlow()
+    @Volatile
+    var slow: Boolean = false
+        set(value) {
+            field = value
+            _slowFlow.value = value
+        }
+    @Volatile
+    var readerVisible: Boolean = false
+        set(value) {
+            field = value
+            _readerVisibleFlow.value = value
+        }
+    @Volatile var raceActive: Boolean = false
+
+    /** Value to check if the page is too wide to be doubled up */
     var fullPage: Boolean = false
         set(value) {
             field = value

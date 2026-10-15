@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
+import com.zycomic.app.net.ImageAttemptCoordinator
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.source.Source
@@ -35,8 +36,13 @@ class ChapterLoader(
     private val readerPrefs: ReaderPreferences,
     private val mergedReferences: List<MergedMangaReference>,
     private val mergedManga: Map<Long, Manga>?,
+    private val imageAttemptCoordinator: ImageAttemptCoordinator = ImageAttemptCoordinator(),
     // SY <--
 ) {
+
+    fun recycle() {
+        imageAttemptCoordinator.close()
+    }
 
     /**
      * Assigns the chapter's page loader and loads the its pages. Returns immediately if the chapter
@@ -127,7 +133,7 @@ class ChapterLoader(
                         downloadManager = downloadManager,
                         downloadProvider = downloadProvider,
                     )
-                    source is HttpSource -> HttpPageLoader(chapter, source)
+                    source is HttpSource -> HttpPageLoader(chapter, source, coordinator = imageAttemptCoordinator)
                     source is LocalSource -> source.getFormat(chapter.chapter).let { format ->
                         when (format) {
                             is Format.Directory -> DirectoryPageLoader(format.file)
@@ -153,7 +159,7 @@ class ChapterLoader(
                     is Format.Epub -> EpubPageLoader(format.file.epubReader(context))
                 }
             }
-            source is HttpSource -> HttpPageLoader(chapter, source)
+            source is HttpSource -> HttpPageLoader(chapter, source, coordinator = imageAttemptCoordinator)
             source is StubSource -> error(context.stringResource(MR.strings.source_not_installed, source.toString()))
             else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
         }

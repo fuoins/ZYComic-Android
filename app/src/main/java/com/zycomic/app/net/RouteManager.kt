@@ -10,6 +10,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+enum class ImgEndpointFailure {
+    SLOW,
+    TRANSIENT,
+    DEAD,
+}
+
 /**
  * 线路与图源管理。
  *
@@ -97,6 +103,7 @@ object RouteManager {
             pinnedImgDomain = null
             pinnedImgIp = null
             persistPinnedImgDomain(null, null)
+            notifyImgPinDisplayChanged()
         }
         clearPersistedCandidateLists()
     }
@@ -510,6 +517,14 @@ object RouteManager {
     @Volatile var pinnedImgDomain: String? = null
         private set
 
+    /** Compose-only invalidation for display consumers that read the volatile pin fields. */
+    var imgPinDisplayRevision: Int by mutableStateOf(0)
+        private set
+
+    private fun notifyImgPinDisplayChanged() {
+        imgPinDisplayRevision++
+    }
+
     /** 手动选定图源：同时更新 imgIndex（UI 显示）与 pin（实际生效）。 */
     fun pinImgHost(index: Int, ip: String? = null) {
         if (imgDomains.isEmpty()) return
@@ -519,6 +534,7 @@ object RouteManager {
         pinnedImgDomain = domain
         pinnedImgIp = ip
         persistPinnedImgDomain(domain, ip)
+        notifyImgPinDisplayChanged()
     }
 
     /** Apply the fastest measured combination unless the user has pinned a source. */
@@ -536,6 +552,7 @@ object RouteManager {
         pinnedImgDomain = null
         pinnedImgIp = null
         persistPinnedImgDomain(null, null)
+        notifyImgPinDisplayChanged()
         fastestImgEndpoint?.let(::applyFastestImgEndpoint)
     }
 
@@ -546,6 +563,7 @@ object RouteManager {
             val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
             pinnedImgDomain = prefs.getString("pinned_img_domain", null)?.takeIf { it.isNotBlank() }
             pinnedImgIp = prefs.getString("pinned_img_ip", null)?.takeIf { it.isNotBlank() }
+            notifyImgPinDisplayChanged()
         } catch (_: Exception) {}
     }
 
@@ -604,26 +622,68 @@ object RouteManager {
         } catch (_: Exception) {}
     }
 
-    // ---- 图域端点失败冷却（图片请求兜底）----
-    /** DomainIp -> cooldown expiry timestamp (ms); memory-only for the current process. */
-    private val imgEndpointFailUntil = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
-    /** 图源端点网络失败冷却时长：30 分钟。 */
-    private const val IMG_FAIL_COOLDOWN_MS = 30L * 60L * 1000L
+    // ---- 图域端点分级冷却（与 API 线路健康分离）----
+    private data class ImgEndpointHealth(val until: Long, val deadCount: Int)
+    private val imgEndpointHealth = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgEndpointHealth>()
+    private val imgEndpointDeadCounts = java.util.concurrent.ConcurrentHashMap<DomainIp, Int>()
+    private val imgProbeLastAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val IMG_PROBE_INTERVAL_MS = 60L * 1000L
+    private const val IMG_TRANSIENT_COOLDOWN_MS = 60L * 1000L
+    private const val IMG_DEAD_BASE_COOLDOWN_MS = 30L * 1000L
+    private const val IMG_DEAD_MAX_COOLDOWN_MS = 10L * 60L * 1000L
 
     private fun normalizedEndpoint(endpoint: DomainIp): DomainIp =
         DomainIp(endpoint.domain.lowercase(java.util.Locale.ROOT), endpoint.ip.trim().lowercase(java.util.Locale.ROOT))
 
-    /** Mark one exact endpoint after a transport failure; HTTP/content failures stay page-local. */
-    fun markImgEndpointFailed(endpoint: DomainIp) {
-        imgEndpointFailUntil[normalizedEndpoint(endpoint)] = System.currentTimeMillis() + IMG_FAIL_COOLDOWN_MS
+    /** Mark only transport failures; HTTP/content/decryption failures stay page-local. */
+    fun markImgEndpointFailed(endpoint: DomainIp, kind: ImgEndpointFailure = ImgEndpointFailure.TRANSIENT) {
+        val key = normalizedEndpoint(endpoint)
+        val deadCount = if (kind == ImgEndpointFailure.DEAD) {
+            synchronized(imgEndpointDeadCounts) {
+                ((imgEndpointDeadCounts[key] ?: 0) + 1).coerceAtMost(6).also { imgEndpointDeadCounts[key] = it }
+            }
+        } else {
+            imgEndpointDeadCounts[key] ?: 0
+        }
+        val cooldown = when (kind) {
+            ImgEndpointFailure.SLOW, ImgEndpointFailure.TRANSIENT -> IMG_TRANSIENT_COOLDOWN_MS
+            ImgEndpointFailure.DEAD -> (IMG_DEAD_BASE_COOLDOWN_MS * (1L shl (deadCount - 1).coerceAtMost(5)))
+                .coerceAtMost(IMG_DEAD_MAX_COOLDOWN_MS)
+        }
+        imgEndpointHealth[key] = ImgEndpointHealth(System.currentTimeMillis() + cooldown, deadCount)
+    }
+
+    /** A fully validated image clears the exact endpoint's failure history. */
+    fun markImgEndpointHealthy(endpoint: DomainIp) {
+        val key = normalizedEndpoint(endpoint)
+        imgEndpointHealth.remove(key)
+        imgEndpointDeadCounts.remove(key)
+    }
+
+    /** Reserve one recovery probe per image-source domain per minute, using only a known-good endpoint. */
+    fun reserveImgRecoveryProbe(domain: String): DomainIp? {
+        val key = domain.lowercase(java.util.Locale.ROOT)
+        val now = System.currentTimeMillis()
+        val endpoint = rankedSuccessfulImgEndpoints().firstOrNull { it.domain.equals(domain, ignoreCase = true) }
+            ?: return null
+        val acquired = synchronized(imgProbeLastAt) {
+            val previous = imgProbeLastAt[key]
+            if (previous == null || now - previous >= IMG_PROBE_INTERVAL_MS) {
+                imgProbeLastAt[key] = now
+                true
+            } else {
+                false
+            }
+        }
+        return endpoint.takeIf { acquired }
     }
 
     /** Whether one exact domain/IP endpoint is not in cooldown. */
     fun isImgEndpointAvailable(endpoint: DomainIp): Boolean {
         val key = normalizedEndpoint(endpoint)
-        val until = imgEndpointFailUntil[key] ?: return true
-        if (until <= System.currentTimeMillis()) {
-            imgEndpointFailUntil.remove(key, until)
+        val health = imgEndpointHealth[key] ?: return true
+        if (health.until <= System.currentTimeMillis()) {
+            imgEndpointHealth.remove(key, health)
             return true
         }
         return false
@@ -639,8 +699,15 @@ object RouteManager {
         val selectedIp = preferredIp(requestedDomain)
         val preferred = selectedIp?.let { DomainIp(requestedDomain, it) }
             ?: ranked.firstOrNull { it.domain.equals(requestedDomain, ignoreCase = true) }
-        if (preferred == null) return listOf(null) + ranked
-        return ImageEndpointSelectionPolicy.retryOrder(preferred, ranked)
+        val ordered = if (preferred == null) ranked else ImageEndpointSelectionPolicy.retryOrder(preferred, ranked)
+        val available = ordered.filter(::isImgEndpointAvailable)
+        if (available.isNotEmpty()) return available
+        // An explicit manual domain pin may be attempted before it has a successful per-IP measurement.
+        val domainHasMeasuredEndpoints = ranked.any { it.domain.equals(requestedDomain, ignoreCase = true) }
+        if (pinnedImgDomain.equals(requestedDomain, ignoreCase = true) && selectedIp == null && !domainHasMeasuredEndpoints) {
+            return listOf(null)
+        }
+        return emptyList()
     }
 
     /** 临时切换到下一条线路（不持久化）。 */

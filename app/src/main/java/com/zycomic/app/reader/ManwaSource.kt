@@ -4,6 +4,7 @@ import com.zycomic.app.data.dto.Manga as MangaDto
 import com.zycomic.app.data.repository.ReaderRepository
 import com.zycomic.app.net.ManwaInterceptor
 import com.zycomic.app.net.NetworkModule
+import com.zycomic.app.net.PageAttemptScope
 import com.zycomic.app.net.RouteManager
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
@@ -12,6 +13,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.Headers
@@ -66,7 +68,17 @@ object ManwaSource : HttpSource() {
 
     /** 通过共享 client 下载图片（ImageInterceptor 自动处理加密图片流式解密）。 */
     override suspend fun getImage(page: Page): Response {
-        return client.newCall(GET(page.imageUrl!!, headers)).awaitSuccess()
+        val attempt = (page as? ReaderPage)?.activeAttempt?.get()
+        val request = GET(page.imageUrl!!, headers).newBuilder()
+            .tag(PageAttemptScope::class.java, attempt)
+            .build()
+        val call = client.newCall(request)
+        val registration = attempt?.registerCall(call, -1)
+        return try {
+            call.awaitSuccess()
+        } finally {
+            registration?.close()
+        }
     }
 
     // ==================== 漫画详情 + 章节列表 ====================

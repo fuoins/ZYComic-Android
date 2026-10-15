@@ -394,6 +394,8 @@ class ReaderViewModel @JvmOverloads constructor(
                 downloadManager.addDownloadsToStartOfQueue(listOf(it))
             }
         }
+        loader?.recycle()
+        loader = null
     }
 
     /**

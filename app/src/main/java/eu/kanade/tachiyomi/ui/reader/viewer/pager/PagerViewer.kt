@@ -13,6 +13,7 @@ import androidx.core.view.isVisible
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
+import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
@@ -68,6 +69,7 @@ abstract class PagerViewer(
      */
     /* [EXH] private */
     var currentPage: ReaderItem? = null
+    private var readingOrderLoader: PageLoader? = null
 
     /**
      * Viewer chapters to set when the pager enters idle mode. Otherwise, if the view was settling
@@ -198,6 +200,7 @@ abstract class PagerViewer(
     fun onPageChange(position: Int) {
         val pagePair = adapter.joinedItems.getOrNull(position)
         val page = pagePair?.first
+        reportReadingOrder(position, pagePair)
         if (page != null && currentPage != page) {
             val allowPreload = checkAllowPreload(page as? ReaderPage)
             val forward = when {
@@ -220,6 +223,43 @@ abstract class PagerViewer(
                 is ChapterTransition -> onTransitionSelected(page)
             }
         }
+    }
+
+    /** Adapter order already reflects LTR/RTL/vertical, double-page and split-page layout decisions. */
+    private fun reportReadingOrder(position: Int, pagePair: Pair<ReaderItem, ReaderItem?>?) {
+        val active = pagePair
+        if (active == null) {
+            readingOrderLoader?.updateReadingOrder(emptyList(), emptyList())
+            readingOrderLoader = null
+            return
+        }
+        val reference = (active.first as? ReaderPage)?.let { if (it is InsertPage) it.parent else it }
+            ?: (active.second as? ReaderPage)?.let { if (it is InsertPage) it.parent else it }
+        if (reference == null) {
+            readingOrderLoader?.updateReadingOrder(emptyList(), emptyList())
+            readingOrderLoader = null
+            return
+        }
+        fun actualPage(item: ReaderItem?): ReaderPage? = when (item) {
+            is InsertPage -> null
+            is ReaderPage -> item
+            else -> null
+        }
+        val visible = listOfNotNull(actualPage(active.first), actualPage(active.second))
+            .ifEmpty { listOf(reference) }
+            .distinctBy { it.index }
+        val orderedSuccessors = adapter.joinedItems
+            .drop(position + 1)
+            .asSequence()
+            .flatMap { sequenceOf(it.first, it.second) }
+            .mapNotNull(::actualPage)
+            .filter { it.chapter == reference.chapter }
+            .distinctBy { it.index }
+            .toList()
+        val loader = reference.chapter.pageLoader
+        if (readingOrderLoader !== loader) readingOrderLoader?.updateReadingOrder(emptyList(), emptyList())
+        readingOrderLoader = loader
+        loader?.updateReadingOrder(visible, orderedSuccessors)
     }
 
     private fun checkAllowPreload(page: ReaderPage?): Boolean {

@@ -1,10 +1,18 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
+import com.zycomic.app.net.ImageAttemptCoordinator
+import com.zycomic.app.net.ImageCacheManager
+import com.zycomic.app.net.ImageCancelReason
+import com.zycomic.app.net.ImageDecryptFailedException
+import com.zycomic.app.net.ImageAttemptDeferredException
+import com.zycomic.app.net.PageAttemptScope
+import com.zycomic.app.net.RouteManager
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -13,258 +21,389 @@ import exh.util.DataSaver
 import exh.util.DataSaver.Companion.getImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.suspendCancellableCoroutine
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.util.concurrent.PriorityBlockingQueue
-import kotlin.concurrent.atomics.AtomicInt
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
-import kotlin.concurrent.atomics.incrementAndFetch
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
-/**
- * Loader used to load chapters from an online source.
- */
-@OptIn(DelicateCoroutinesApi::class)
+/** Loads HTTP chapters with viewer-owned ordering, bounded attempts and generation-safe cancellation. */
 internal class HttpPageLoader(
     private val chapter: ReaderChapter,
     private val source: HttpSource,
     private val chapterCache: ChapterCache = Injekt.get(),
-    // SY -->
     private val readerPreferences: ReaderPreferences = Injekt.get(),
     private val sourcePreferences: SourcePreferences = Injekt.get(),
-    // SY <--
+    private val coordinator: ImageAttemptCoordinator,
 ) : PageLoader() {
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /**
-     * A queue used to manage requests one by one while allowing priorities.
-     */
-    private val queue = PriorityBlockingQueue<PriorityPage>()
-
-    private val preloadSize = /* SY --> */ readerPreferences.preloadSize().get() // SY <--
-
-    // SY -->
+    private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val queue = java.util.concurrent.PriorityBlockingQueue<PriorityPage>()
+    private val preloadSize = readerPreferences.preloadSize().get().coerceAtLeast(0)
+    private val readerThreads = readerPreferences.readerThreads().get().coerceAtLeast(1)
+    private val nearForegroundSize = min(3, preloadSize)
     private val dataSaver = DataSaver(source, sourcePreferences)
-    // SY <--
+    private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
+    private val pendingDisposition = ConcurrentHashMap<ReaderPage, ImageCancelReason>()
+    private val terminalErrors = ConcurrentHashMap<ReaderPage, Throwable>()
+    private val decodeFailures = ConcurrentHashMap<String, AtomicInteger>()
+
+    @Volatile private var visiblePages: List<ReaderPage> = emptyList()
+    @Volatile private var successors: List<ReaderPage> = emptyList()
+    @Volatile private var currentWindow: Set<ReaderPage> = emptySet()
+    @Volatile private var readingRanks: Map<ReaderPage, Int> = emptyMap()
+    @Volatile private var readingOrderInitialized = false
 
     init {
-        // EXH -->
-        repeat(readerPreferences.readerThreads().get()) {
-            // EXH <--
-            scope.launchIO {
-                flow {
-                    while (true) {
-                        emit(runInterruptible { queue.take() }.page)
+        repeat(readerThreads) {
+            workerScope.launchIO {
+                while (true) {
+                    val entry = runInterruptible { queue.take() }
+                    val page = entry.page
+                    if (entry.generation != page.generation.get() || page.status != Page.State.Queue) continue
+                    synchronized(page) {
+                        if (page.queuedToken.get() == entry.generation) page.queuedToken.set(-1)
                     }
+                    internalLoadPage(page)
                 }
-                    .filter { it.status == Page.State.Queue }
-                    .collect(::internalLoadPage)
             }
-            // EXH -->
         }
-        // EXH <--
     }
 
     override var isLocal: Boolean = false
 
-    /**
-     * Returns the page list for a chapter. It tries to return the page list from the local cache,
-     * otherwise fallbacks to network.
-     */
     override suspend fun getPages(): List<ReaderPage> {
         val pages = try {
-            // 开启"用测速最快图源"时绕过磁盘页面缓存，每次用最新最快域名重新构造
-            if (com.zycomic.app.net.RouteManager.useFastestImgForAll) {
+            if (RouteManager.useFastestImgForAll) {
                 source.getPageList(chapter.chapter)
             } else {
                 chapterCache.getPageListFromCache(chapter.chapter.toDomainChapter()!!)
             }
         } catch (e: Throwable) {
-            if (e is CancellationException) {
-                throw e
-            }
+            if (e is CancellationException) throw e
             source.getPageList(chapter.chapter)
         }
-        // SY -->
-        val rp = pages.mapIndexed { index, page ->
-            // Don't trust sources and use our own indexing
-            ReaderPage(index, page.url, page.imageUrl)
-        }
-        if (readerPreferences.aggressivePageLoading().get()) {
-            rp.forEach {
-                if (it.status == Page.State.Queue) {
-                    queue.offer(PriorityPage(it, 0))
-                }
-            }
-        }
-        return rp
-        // SY <--
+        return pages.mapIndexed { index, page -> ReaderPage(index, page.url, page.imageUrl) }
     }
 
-    /**
-     * Loads a page through the queue. Handles re-enqueueing pages if they were evicted from the cache.
-     */
     override suspend fun loadPage(page: ReaderPage) = withIOContext {
-        val imageUrl = page.imageUrl
-
-        // Check if the image has been deleted
-        if (page.status == Page.State.Ready && imageUrl != null && !chapterCache.isImageInCache(imageUrl)) {
+        if (!readingOrderInitialized) return@withIOContext
+        if (page.status == Page.State.Ready && page.imageUrl != null && !chapterCache.isImageInCache(page.imageUrl!!)) {
             page.status = Page.State.Queue
         }
-
-        // Automatically retry failed pages when subscribed to this page
-        if (page.status is Page.State.Error) {
-            page.status = Page.State.Queue
-        }
-
-        val queuedPages = mutableListOf<PriorityPage>()
-        if (page.status == Page.State.Queue) {
-            queuedPages += PriorityPage(page, 1).also { queue.offer(it) }
-        }
-        queuedPages += preloadNextPages(page, preloadSize)
-
-        suspendCancellableCoroutine<Nothing> { continuation ->
-            continuation.invokeOnCancellation {
-                queuedPages.forEach {
-                    if (it.page.status == Page.State.Queue) {
-                        queue.remove(it)
-                    }
-                }
-            }
+        if (page.status is Page.State.Error) page.status = Page.State.Queue
+        if (page.status == Page.State.Queue && (currentWindow.isEmpty() || page in currentWindow)) {
+            if (page in visiblePages) maybePreemptForVisiblePage()
+            enqueue(page, priorityFor(page))
         }
     }
 
-    /**
-     * Retries a page. This method is only called from user interaction on the viewer.
-     */
-    override fun retryPage(page: ReaderPage) {
-        if (page.status is Page.State.Error) {
-            page.status = Page.State.Queue
-        }
-        // EXH -->
-        // Grab a new image URL on EXH sources
-        if (source.isEhBasedSource()) {
-            page.imageUrl = null
+    /** The viewer is the authority for visible pages and real reading order. */
+    override fun updateReadingOrder(visible: List<ReaderPage>, successors: List<ReaderPage>) {
+        val normalizedVisible = visible.asSequence()
+            .filterNot { it is InsertPage }
+            .distinctBy { it.index }
+            .take(3)
+            .toList()
+        val normalizedSuccessors = successors.asSequence()
+            .filterNot { it is InsertPage }
+            .distinctBy { it.index }
+            .take(preloadSize)
+            .toList()
+        val oldVisible = visiblePages.toSet()
+        val newVisible = normalizedVisible.toSet()
+        (oldVisible - newVisible).forEach { it.readerVisible = false }
+        (newVisible - oldVisible).forEach { it.readerVisible = true }
+        visiblePages = normalizedVisible
+        this.successors = normalizedSuccessors
+        readingOrderInitialized = true
+        activeScopes.values.forEach { it.updateVisibility(it.page in normalizedVisible) }
+        readingRanks = normalizedSuccessors.withIndex().associate { it.value to it.index }
+        currentWindow = (normalizedVisible + normalizedSuccessors).toSet()
+
+        // Upgrade any still-queued successor that just entered the viewport, preserving viewer order.
+        val newlyVisibleQueueEntries = queue.toList().filter { it.page in newVisible }
+        newlyVisibleQueueEntries.forEach { entry ->
+            queue.remove(entry)
+            synchronized(entry.page) {
+                if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
+            }
         }
 
-        if (readerPreferences.readerInstantRetry().get()) { // EXH <--
-            boostPage(page)
-        } else {
-            // EXH <--
-            queue.offer(PriorityPage(page, 2))
+        // Leaving the complete preload window is the only visibility-based abandon.
+        activeScopes.keys.filter { it !in currentWindow }.forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
+        queue.toList().filter { it.page !in currentWindow }.forEach { entry ->
+            queue.remove(entry)
+            synchronized(entry.page) {
+                if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
+            }
+            entry.page.slow = false
         }
+
+        normalizedVisible.forEach { page ->
+            if (page.status == Page.State.Queue) {
+                maybePreemptForVisiblePage()
+                enqueue(page, priorityFor(page))
+            }
+        }
+        normalizedSuccessors.forEach { page ->
+            if (page.status == Page.State.Queue) enqueue(page, priorityFor(page))
+        }
+    }
+
+    private fun priorityFor(page: ReaderPage): Int = if (page in visiblePages) 1 else 0
+
+    private fun enqueue(page: ReaderPage, priority: Int) {
+        if (page.status != Page.State.Queue) return
+        synchronized(page) {
+            val generation = page.generation.get()
+            if (page.queuedToken.get() == generation) return
+            page.queuedToken.set(generation)
+            queue.offer(PriorityPage(page, priority, generation))
+        }
+    }
+
+    /** Cancel exactly one active far-foreground attempt; queued items are not worker capacity. */
+    private fun maybePreemptForVisiblePage() {
+        if (activeScopes.size < readerThreads) return
+        val farPages = successors.drop(nearForegroundSize).toSet()
+        val target = activeScopes.values.asSequence()
+            .map { it.page }
+            .filter { it in farPages && it.activeAttempt.get()?.let { attempt -> attempt.isCurrent && attempt.hasOuterCall } == true }
+            .maxByOrNull { readingRanks[it] ?: Int.MIN_VALUE }
+            ?: return // E4: no far attempt to take; wait for existing workers.
+        cancelPage(target, ImageCancelReason.ABANDON_FAR, requeue = true)
+    }
+
+    private fun cancelPage(page: ReaderPage, reason: ImageCancelReason, requeue: Boolean): Boolean {
+        val attempt = synchronized(page) {
+            val current = page.activeAttempt.get() ?: return false
+            if (page.generation.get() != current.generation) return false
+            page.generation.incrementAndGet() // invalidate stale writes before cancelling Calls
+            page.activeAttempt.set(null)
+            if (requeue) pendingDisposition[page] = reason else pendingDisposition[page] = ImageCancelReason.PAGE_HIDDEN
+            current
+        }
+        attempt.cancel(reason)
+        page.raceActive = false
+        page.progress = 0
+        logcat { "Image attempt cancelled: page=${page.index}, reason=$reason" }
+        return true
+    }
+
+    override fun retryPage(page: ReaderPage) {
+        val sourceKey = RouteManager.imgRewriteTarget ?: RouteManager.imgHost
+        if (page.retryBudgetSource != sourceKey) {
+            page.retryBudgetSource = sourceKey
+            page.manualRetryCount.set(0)
+            page.imageUrl?.let(decodeFailures::remove)
+        }
+        if (page.manualRetryCount.get() >= 3) {
+            page.slow = false
+            page.status = Page.State.Error(IOException("已重试 3 次，请重新测速或切换图源"))
+            return
+        }
+        page.manualRetryCount.incrementAndGet()
+        val wasActive = cancelPage(page, ImageCancelReason.USER_RETRY, requeue = true)
+        val imageUrl = page.imageUrl
+        if (!imageUrl.isNullOrBlank()) {
+            chapterCache.remove(imageUrl)
+            ImageCacheManager.remove(imageUrl)
+        }
+        page.stream = null
+        page.slow = false
+        page.progress = 0
+        if (wasActive) return
+        synchronized(page) { page.generation.incrementAndGet() }
+        if (source.isEhBasedSource()) page.imageUrl = null
+        page.status = Page.State.Queue
+        enqueue(page, priorityFor(page))
+    }
+
+    override fun invalidatePage(page: ReaderPage): Boolean {
+        val imageUrl = page.imageUrl ?: return false
+        if (page.status != Page.State.Ready) {
+            return page.status == Page.State.Queue && decodeFailures[imageUrl]?.get() == 1
+        }
+        val count = decodeFailures.getOrPut(imageUrl) { AtomicInteger() }.incrementAndGet()
+        if (count >= 2) terminalErrors[page] = ImageDecryptFailedException()
+        val wasActive = cancelPage(page, ImageCancelReason.USER_RETRY, requeue = count < 2)
+        if (!wasActive) synchronized(page) { page.generation.incrementAndGet() }
+        chapterCache.remove(imageUrl)
+        ImageCacheManager.remove(imageUrl)
+        page.stream = null
+        if (count >= 2) {
+            if (!wasActive) {
+                page.slow = false
+                page.status = Page.State.Error(terminalErrors.remove(page) ?: ImageDecryptFailedException())
+            }
+            return false
+        }
+        if (!wasActive) {
+            page.status = Page.State.Queue
+            page.slow = false
+            page.progress = 0
+            enqueue(page, priorityFor(page))
+        }
+        return true
+    }
+
+    override fun markImageDecodeSuccess(page: ReaderPage) {
+        page.imageUrl?.let(decodeFailures::remove)
+        page.manualRetryCount.set(0)
+        page.retryBudgetSource = null
     }
 
     override fun recycle() {
         super.recycle()
-        scope.cancel()
+        visiblePages.forEach { it.readerVisible = false }
+        activeScopes.keys.toList().forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
+        workerScope.cancel()
         queue.clear()
-
-        // Cache current page list progress for online chapters to allow a faster reopen
         chapter.pages?.let { pages ->
             launchIO {
                 try {
-                    // Convert to pages without reader information
                     val pagesToSave = pages.map { Page(it.index, it.url, it.imageUrl) }
                     chapterCache.putPageListToCache(chapter.chapter.toDomainChapter()!!, pagesToSave)
                 } catch (e: Throwable) {
-                    if (e is CancellationException) {
-                        throw e
-                    }
+                    if (e is CancellationException) throw e
                 }
             }
         }
     }
 
-    /**
-     * Preloads the given [amount] of pages after the [currentPage] with a lower priority.
-     *
-     * @return a list of [PriorityPage] that were added to the [queue]
-     */
-    private fun preloadNextPages(currentPage: ReaderPage, amount: Int): List<PriorityPage> {
-        val pageIndex = currentPage.index
-        val pages = currentPage.chapter.pages ?: return emptyList()
-        if (pageIndex == pages.lastIndex) return emptyList()
-
-        return pages
-            .subList(pageIndex + 1, min(pageIndex + 1 + amount, pages.size))
-            .mapNotNull {
-                if (it.status == Page.State.Queue) {
-                    PriorityPage(it, 0).apply { queue.offer(this) }
-                } else {
-                    null
-                }
-            }
-    }
-
-    /**
-     * Loads the page, retrieving the image URL and downloading the image if necessary.
-     * Downloaded images are stored in the chapter cache.
-     *
-     * @param page the page whose source image has to be downloaded.
-     */
     private suspend fun internalLoadPage(page: ReaderPage) {
+        if (visiblePages.firstOrNull()?.let { it !== page } == true) {
+            val homePage = visiblePages.first()
+            val homeScope = homePage.activeAttempt.get()
+            val homeStarted = homeScope?.hasOuterCall == true || homePage.status == Page.State.Ready || homePage.status is Page.State.Error
+            if (!homeStarted || coordinator.availableAttemptCount <= 0) {
+                runCatching {
+                    coordinator.watchdog.schedule({
+                        if (!isRecycled && page.status == Page.State.Queue && page in currentWindow) {
+                            enqueue(page, priorityFor(page))
+                        }
+                    }, 100, TimeUnit.MILLISECONDS)
+                }
+                return
+            }
+        }
+        val myGeneration = synchronized(page) { page.generation.incrementAndGet() }
+        var attempt: PageAttemptScope? = null
+        var slowWatch: java.util.concurrent.ScheduledFuture<*>? = null
+        var deferRetry = false
         try {
             if (page.imageUrl.isNullOrEmpty()) {
+                if (!owns(page, myGeneration)) return
                 page.status = Page.State.LoadPage
                 page.imageUrl = source.getImageUrl(page)
             }
-            val imageUrl = page.imageUrl!!
-
+            val imageUrl = page.imageUrl ?: throw IOException("图片 URL 为空")
             if (!chapterCache.isImageInCache(imageUrl)) {
+                if (!owns(page, myGeneration)) return
                 page.status = Page.State.DownloadImage
-                val imageResponse = source.getImage(page, dataSaver)
-                chapterCache.putImageToCache(imageUrl, imageResponse)
-            }
+                page.progress = 0
+                val currentAttempt = PageAttemptScope(
+                    page = page,
+                    generation = myGeneration,
+                    coordinator = coordinator,
+                    canRace = page in visiblePages,
+                    isSecondaryVisible = page in visiblePages && visiblePages.firstOrNull() !== page,
+                )
+                attempt = currentAttempt
+                page.activeAttempt.set(currentAttempt)
+                activeScopes[page] = currentAttempt
+                currentAttempt.updateVisibility(page in visiblePages)
+                slowWatch = coordinator.watchdog.scheduleAtFixedRate({
+                    val isNear = page in visiblePages || successors.take(nearForegroundSize).any { it === page }
+                    val quietFor = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - currentAttempt.lastProgressAtNanos.get())
+                    if (currentAttempt.isCurrent && isNear && quietFor >= 1_500L) page.slow = true
+                }, 250, 250, TimeUnit.MILLISECONDS)
 
+                val response = source.getImage(page, dataSaver)
+                if (!owns(page, myGeneration) || !currentAttempt.isCurrent) {
+                    response.close()
+                    return
+                }
+                chapterCache.putImageToCache(imageUrl, response) {
+                    owns(page, myGeneration) && page.activeAttempt.get() === currentAttempt
+                }
+            }
+            if (!owns(page, myGeneration)) return
             page.stream = { chapterCache.getImageFile(imageUrl).inputStream() }
+            page.slow = false
             page.status = Page.State.Ready
         } catch (e: Throwable) {
-            page.status = Page.State.Error(e)
-            if (e is CancellationException) {
-                throw e
+            if (!owns(page, myGeneration)) return // stale cancellation never publishes Error
+            if (e is CancellationException) throw e
+            var cause: Throwable? = e
+            var deferred = false
+            while (cause != null) {
+                if (cause is ImageAttemptDeferredException) {
+                    deferred = true
+                    break
+                }
+                cause = cause.cause
+            }
+            if (deferred) {
+                page.status = Page.State.Queue
+                deferRetry = true
+            } else {
+                page.slow = false
+                page.status = Page.State.Error(e)
+            }
+        } finally {
+            slowWatch?.cancel(false)
+            attempt?.let { current ->
+                current.endRace()
+                page.activeAttempt.compareAndSet(current, null)
+                activeScopes.remove(page, current)
+                val disposition = pendingDisposition.remove(page)
+                if (disposition != null) {
+                    page.stream = null
+                    val terminalError = terminalErrors.remove(page)
+                    page.status = if (terminalError != null) Page.State.Error(terminalError) else Page.State.Queue
+                    page.slow = false
+                    if (terminalError == null && disposition != ImageCancelReason.PAGE_HIDDEN && page in currentWindow && !isRecycled) {
+                        enqueue(page, priorityFor(page))
+                    }
+                }
+            }
+            if (deferRetry && page in currentWindow && !isRecycled) {
+                runCatching {
+                    coordinator.watchdog.schedule({
+                        if (!isRecycled && page.status == Page.State.Queue && page in currentWindow) {
+                            enqueue(page, priorityFor(page))
+                        }
+                    }, 100, TimeUnit.MILLISECONDS)
+                }
             }
         }
     }
 
-    // EXH -->
-    fun boostPage(page: ReaderPage) {
-        if (page.status == Page.State.Queue) {
-            scope.launchIO {
-                loadPage(page)
-            }
+    private fun owns(page: ReaderPage, generation: Int): Boolean =
+        !isRecycled && page.generation.get() == generation
+
+    private class PriorityPage(
+        val page: ReaderPage,
+        val priority: Int,
+        val generation: Int,
+    ) : Comparable<PriorityPage> {
+        companion object {
+            private val idGenerator = AtomicInteger(0)
         }
-    }
-    // EXH <--
-}
-
-/**
- * Data class used to keep ordering of pages in order to maintain priority.
- */
-@OptIn(ExperimentalAtomicApi::class)
-private class PriorityPage(
-    val page: ReaderPage,
-    val priority: Int,
-) : Comparable<PriorityPage> {
-    companion object {
-        private val idGenerator = AtomicInt(0)
-    }
-
-    private val identifier = idGenerator.incrementAndFetch()
-
-    override fun compareTo(other: PriorityPage): Int {
-        val p = other.priority.compareTo(priority)
-        return if (p != 0) p else identifier.compareTo(other.identifier)
+        private val identifier = idGenerator.incrementAndGet()
+        override fun compareTo(other: PriorityPage): Int {
+            val priorityOrder = other.priority.compareTo(priority)
+            return if (priorityOrder != 0) priorityOrder else identifier.compareTo(other.identifier)
+        }
     }
 }

@@ -1,29 +1,36 @@
 package com.zycomic.app.net
 
+import java.io.Closeable
+import java.io.File
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import okhttp3.Interceptor
-import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Buffer
 import okio.BufferedSource
+import okio.ForwardingSource
+import okio.buffer
+import okio.source
+import javax.crypto.CipherInputStream
 
-/**
- * 图片拦截器：加请求头（含 Referer 防盗链）+ 加密漫画图片解密 + 加密图片磁盘缓存。
- *
- * 失败兜底按测速成功的「域名 + IP」端点顺序尝试：每个请求最多尝试 3 个未冷却端点，
- * 不在同一端点做额外重试。传输层 IOException 会让该端点冷却 30 分钟；HTTP 响应和非图片内容
- * 只在当前图片请求中跳过，不会影响后续页。手动 pin 仍是本次请求首选，不会被回退结果改写。
- */
 class ImageInterceptor : Interceptor {
 
     companion object {
         private const val HEADER_X_REQUESTED_WITH = "X-Requested-With"
         private const val VALUE_X_REQUESTED_WITH = "zycomic.com"
         private const val MAX_ENDPOINT_ATTEMPTS = 3
+        private const val MAX_IMAGE_BYTES = 25L * 1024 * 1024
+        private const val SLOW_AFTER_MS = 1_500L
         private const val INVALID_IMAGE_STATUS = 502
     }
 
@@ -32,159 +39,560 @@ class ImageInterceptor : Interceptor {
         val originalUrl = original.url.toString()
         if (!isImageRequest(originalUrl)) return chain.proceed(original)
 
-        // 手动 pin 优先，否则使用自动测速结果；无测速结论时保留服务端原始域名。
-        val imgTarget = RouteManager.imgRewriteTarget
-        val fetchUrl = if (!imgTarget.isNullOrBlank()) {
-            originalUrl.replace(Regex("https?://[^/]+"), "https://$imgTarget")
-        } else originalUrl
-
-        // 缓存命中后仍需解密并校验魔数；坏缓存删除后继续尝试网络。
+        val scope = original.tag(PageAttemptScope::class.java)
         ImageCacheManager.get(originalUrl)?.let { cached ->
-            val bytes = try { cached.readBytes() } catch (_: Exception) { null }
-            if (bytes != null) {
-                val out = decryptIfNeeded(bytes, originalUrl)
-                if (isImageMagic(out)) return buildResponse(original, out)
+            if (cached.length() > MAX_IMAGE_BYTES) {
+                ImageCacheManager.remove(originalUrl)
+                return@let
             }
-            try { cached.delete() } catch (_: Exception) {}
+            val responseFile = ImageCacheManager.createResponseTemp()
+            val mime = try {
+                decodeToResponseFile(cached, responseFile)
+            } catch (_: Exception) {
+                responseFile.delete()
+                null
+            }
+            if (mime != null) return buildResponse(original, responseFile, mime)
+            ImageCacheManager.remove(originalUrl)
         }
 
+        val imgTarget = RouteManager.imgRewriteTarget
+        val fetchUrl = if (!imgTarget.isNullOrBlank()) {
+            original.url.newBuilder().host(imgTarget).build()
+        } else original.url
         val imgReq = original.newBuilder()
             .url(fetchUrl)
             .header("User-Agent", ManwaInterceptor.UA)
             .header(HEADER_X_REQUESTED_WITH, VALUE_X_REQUESTED_WITH)
-            // 官方客户端对所有图域使用固定 canonical Referer。
             .header("Referer", ManwaInterceptor.REFERER)
             .header("Accept", "*/*")
             .header("Connection", "keep-alive")
             .build()
 
-        // 首选端点之后接测速排名；无测速端点时，先把当前域名解析成一个精确 IP 作为首选。
-        // 冷却过滤发生在 take(3) 前，因此重试会自然接着未冷却的排名继续分批尝试。
+        var endpoints = resolveCandidates(imgReq.url.host)
+        if (endpoints.isEmpty() && scope?.page?.manualRetryCount?.get()?.let { it > 0 } == true) {
+            val recovered = tryRecoveryProbe(imgReq, imgReq.url.host, scope)
+            if (recovered != null) endpoints = resolveCandidates(imgReq.url.host)
+        }
+        if (endpoints.isEmpty()) {
+            throw IOException("图源临时不可用，正在重新测速：$originalUrl")
+        }
+        val outcomes = if (scope != null && endpoints.size > 1) {
+            raceCandidates(imgReq, originalUrl, endpoints, scope)
+        } else {
+            sequentialCandidates(imgReq, originalUrl, endpoints, scope)
+        }
+        val success = outcomes.filterIsInstance<Outcome.Success>().firstOrNull()
+        if (success != null) return buildResponse(original, success.responseFile, success.mimeType)
+
+        val failure = outcomes.lastOrNull()
+        return when (failure) {
+            is Outcome.Fail.Http -> errorResponse(original, failure.code)
+            is Outcome.Fail.Io -> throw failure.error
+            is Outcome.Fail.Decrypt -> throw ImageDecryptFailedException()
+            is Outcome.Fail.Cancelled -> {
+                if (scope != null && scope.isCurrent && scope.isSecondaryVisible) throw ImageAttemptDeferredException()
+                throw IOException("图片加载已取消")
+            }
+            is Outcome.Fail.Oversize -> throw IOException("图片超过 25MB 上限，已放弃该候选")
+            is Outcome.Fail.Invalid, null -> errorResponse(original, INVALID_IMAGE_STATUS)
+            is Outcome.Success -> buildResponse(original, failure.responseFile, failure.mimeType)
+        }
+    }
+
+    private fun resolveCandidates(requestedDomain: String): List<DomainIp> {
         val endpoints = mutableListOf<DomainIp>()
-        for (candidate in RouteManager.imageRetryEndpoints(imgReq.url.host)) {
-            val endpoint = candidate ?: NetworkModule.resolveProbeIps(imgReq.url.host)
-                .firstOrNull()
-                ?.let { DomainIp(imgReq.url.host, it) }
+        for (candidate in RouteManager.imageRetryEndpoints(requestedDomain)) {
+            val endpoint = candidate ?: NetworkModule.resolveProbeIps(requestedDomain)
+                .firstOrNull()?.let { DomainIp(requestedDomain, it) }
             if (endpoint != null && endpoint !in endpoints && RouteManager.isImgEndpointAvailable(endpoint)) {
                 endpoints += endpoint
                 if (endpoints.size == MAX_ENDPOINT_ATTEMPTS) break
             }
         }
-        if (endpoints.isEmpty()) {
-            throw IOException("没有未冷却的测速图源端点：$originalUrl")
-        }
+        return endpoints
+    }
 
-        var lastFailure: Outcome.Fail? = null
-        for (endpoint in endpoints) {
-            val request = replaceHost(imgReq, endpoint.domain)
-            when (val outcome = proceedOnce(request, originalUrl, endpoint)) {
-                is Outcome.Success -> return buildResponse(original, outcome.bytes)
-                is Outcome.Fail -> {
-                    // 仅网络/传输层失败跨页冷却；404、其他 HTTP 响应及非图片仅跳过本次请求。
-                    if (outcome is Outcome.Fail.IO) RouteManager.markImgEndpointFailed(endpoint)
-                    lastFailure = outcome
+    /** One bounded 2KB probe, reserved at most once per domain/minute and only after manual retry. */
+    private fun tryRecoveryProbe(request: Request, domain: String, scope: PageAttemptScope): DomainIp? {
+        if (!scope.coordinator.tryAcquirePrimary()) return null
+        var client: okhttp3.OkHttpClient? = null
+        var registration: Closeable? = null
+        var rawProbe: File? = null
+        var decodedProbe: File? = null
+        return try {
+            val endpoint = RouteManager.reserveImgRecoveryProbe(domain) ?: return null
+            val samplePath = RouteManager.loadProbeImgPath() ?: request.url.encodedPath
+            val path = samplePath.substringBefore('?').takeIf { it.startsWith("/") } ?: request.url.encodedPath
+            val query = samplePath.substringAfter('?', "").takeIf { it.isNotBlank() }
+            val probeUrl = request.url.newBuilder()
+                .host(endpoint.domain)
+                .encodedPath(path)
+                .encodedQuery(query)
+                .build()
+            val probeRequest = request.newBuilder()
+                .url(probeUrl)
+                .header("Range", "bytes=0-2047")
+                .build()
+            val imageClient = NetworkModule.newImageClientForIp(endpoint.domain, endpoint.ip)
+            client = imageClient
+            val call = imageClient.newCall(probeRequest)
+            registration = scope.registerCall(call, -2)
+            call.execute().use { response ->
+                if (!response.isSuccessful) return null
+                val input = response.body?.byteStream() ?: return null
+                val rawFile = ImageCacheManager.createResponseTemp()
+                rawProbe = rawFile
+                val decodedFile = ImageCacheManager.createResponseTemp()
+                decodedProbe = decodedFile
+                input.use { source ->
+                    rawFile.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(512)
+                        var total = 0
+                        while (total < 2 * 1024) {
+                            val read = source.read(buffer, 0, minOf(buffer.size, 2 * 1024 - total))
+                            if (read < 0) break
+                            if (read == 0) continue
+                            output.write(buffer, 0, read)
+                            total += read
+                        }
+                    }
                 }
+                if (decodeToResponseFile(rawFile, decodedFile) == null) return null
+                RouteManager.markImgEndpointHealthy(endpoint)
+                endpoint
             }
-        }
-
-        return when (val failure = lastFailure) {
-            is Outcome.Fail.Http -> errorResponse(original, failure.code)
-            is Outcome.Fail.InvalidImage -> errorResponse(original, INVALID_IMAGE_STATUS)
-            is Outcome.Fail.IO -> throw failure.error
-            null -> throw IOException("图片加载失败：$originalUrl")
+        } catch (_: Exception) {
+            null
+        } finally {
+            rawProbe?.delete()
+            decodedProbe?.delete()
+            registration?.close()
+            scope.coordinator.releaseAttempt()
+            client?.let { runCatching { it.connectionPool.evictAll() } }
         }
     }
 
-    /** 单次精确端点尝试：网络 client 只解析到该 IP，且关闭 OkHttp 同端点自动重试。 */
-    private fun proceedOnce(
+    private fun sequentialCandidates(
+        request: Request,
+        originalUrl: String,
+        endpoints: List<DomainIp>,
+        scope: PageAttemptScope?,
+    ): List<Outcome> {
+        val outcomes = mutableListOf<Outcome>()
+        endpoints.forEachIndexed { index, endpoint ->
+            val acquired = scope?.let { acquirePermit(it) } ?: true
+            if (!acquired) return outcomes + Outcome.Fail.Cancelled
+            val result = try {
+                executeSafely(request, originalUrl, endpoint, scope, index)
+            } finally {
+                if (scope != null) scope.coordinator.releaseAttempt()
+            }
+            outcomes += result
+            if (result is Outcome.Success) return outcomes
+            if (scope?.isCurrent == false) return outcomes
+        }
+        return outcomes
+    }
+
+    /** First endpoint stays on the calling OkHttp worker; at most two extra attempts use the bounded race pool. */
+    private fun raceCandidates(
+        request: Request,
+        originalUrl: String,
+        endpoints: List<DomainIp>,
+        scope: PageAttemptScope,
+    ): List<Outcome> {
+        val outcomes = mutableListOf<Outcome>()
+        val completed = LinkedBlockingQueue<Outcome>()
+        val active = AtomicInteger(1)
+        val nextIndex = AtomicInteger(1)
+        val lastProgressAt = AtomicLong(System.nanoTime())
+        val startedAt = System.nanoTime()
+        val primaryAcquired = acquirePermit(scope)
+        if (!primaryAcquired) return listOf(Outcome.Fail.Cancelled)
+        active.set(1)
+        var primaryPermitHeld = true
+        val raceStateLock = Any()
+        var raceWindowOpen = true
+        val watch = runCatching {
+            scope.coordinator.scheduleWatchdog {
+                var index = -1
+                var permitAcquired = false
+                var activeReserved = false
+                var submitted = false
+                try {
+                    synchronized(raceStateLock) {
+                        if (!raceWindowOpen || !scope.isCurrent || !scope.canRace || nextIndex.get() >= endpoints.size || active.get() >= 3) return@scheduleWatchdog
+                        val noProgressFor = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastProgressAt.get())
+                        val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+                        if (elapsed < SLOW_AFTER_MS || noProgressFor < SLOW_AFTER_MS) return@scheduleWatchdog
+                        val candidateIndex = nextIndex.getAndIncrement()
+                        if (candidateIndex >= endpoints.size) return@scheduleWatchdog
+                        index = candidateIndex
+                        if (!scope.coordinator.tryAcquireRace()) return@scheduleWatchdog
+                        permitAcquired = true
+                        active.incrementAndGet()
+                        activeReserved = true
+                        scope.beginRace()
+                        lastProgressAt.set(System.nanoTime())
+                        submitted = scope.coordinator.submitRace {
+                            var result: Outcome = Outcome.Fail.Invalid
+                            try {
+                                result = executeSafely(request, originalUrl, endpoints[candidateIndex], scope, candidateIndex)
+                            } finally {
+                                try {
+                                    completed.offer(result)
+                                } finally {
+                                    active.decrementAndGet()
+                                    scope.coordinator.releaseAttempt()
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Keep the periodic watcher alive; the primary attempt and remaining serial fallbacks still proceed.
+                } finally {
+                    if (!submitted) {
+                        if (activeReserved) active.decrementAndGet()
+                        if (permitAcquired) scope.coordinator.releaseAttempt()
+                        if (index >= 0) nextIndex.compareAndSet(index + 1, index)
+                    }
+                }
+            }
+        }.getOrNull()
+
+        try {
+            val primary = try {
+                executeSafely(request, originalUrl, endpoints[0], scope, 0) { bytes, length ->
+                    scope.reportProgress(bytes, length)
+                    lastProgressAt.set(System.nanoTime())
+                }
+            } finally {
+                if (primaryPermitHeld) {
+                    primaryPermitHeld = false
+                    scope.coordinator.releaseAttempt()
+                    active.decrementAndGet()
+                }
+            }
+            outcomes += primary
+            if (primary is Outcome.Success) {
+                scope.cancelLosers(0)
+                return outcomes
+            }
+
+            while (scope.isCurrent && (active.get() > 0 || completed.isNotEmpty())) {
+                val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
+                outcomes += result
+                if (result is Outcome.Success) {
+                    scope.cancelLosers(result.attemptId)
+                    return outcomes
+                }
+            }
+
+            // If no stalled attempt launched a race (or all racing candidates failed quickly), continue the remaining endpoints serially.
+            synchronized(raceStateLock) { raceWindowOpen = false }
+            watch?.cancel(false)
+            while (scope.isCurrent && (active.get() > 0 || completed.isNotEmpty())) {
+                val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
+                outcomes += result
+                if (result is Outcome.Success) {
+                    scope.cancelLosers(result.attemptId)
+                    return outcomes
+                }
+            }
+            scope.endRace()
+            var index = nextIndex.get()
+            while (scope.isCurrent && index < endpoints.size) {
+                val acquired = acquirePermit(scope)
+                if (!acquired) break
+                val result = try {
+                    executeSafely(request, originalUrl, endpoints[index], scope, index)
+                } finally {
+                    scope.coordinator.releaseAttempt()
+                }
+                outcomes += result
+                if (result is Outcome.Success) return outcomes
+                index++
+                nextIndex.set(index)
+            }
+            return outcomes
+        } finally {
+            synchronized(raceStateLock) { raceWindowOpen = false }
+            watch?.cancel(false)
+            if (primaryPermitHeld) {
+                scope.coordinator.releaseAttempt()
+                active.decrementAndGet()
+            }
+            scope.cancelLosers(Int.MIN_VALUE)
+            scope.endRace()
+        }
+    }
+
+    private fun acquirePermit(scope: PageAttemptScope): Boolean {
+        if (scope.isSecondaryVisible) return scope.coordinator.tryAcquirePrimary()
+        while (scope.isCurrent) {
+            if (scope.coordinator.tryAcquirePrimary()) return true
+            try {
+                Thread.sleep(50)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return false
+    }
+
+    private fun executeSafely(
         request: Request,
         originalUrl: String,
         endpoint: DomainIp,
+        scope: PageAttemptScope?,
+        attemptId: Int,
+        progress: (Long, Long) -> Unit = { bytes, length -> scope?.reportProgress(bytes, length) },
+    ): Outcome = try {
+        executeOnce(request, originalUrl, endpoint, scope, attemptId, progress)
+    } catch (e: Exception) {
+        if (scope?.isCurrent == false) Outcome.Fail.Cancelled
+        else Outcome.Fail.Io(e as? IOException ?: IOException("图片请求准备失败", e))
+    }
+
+    private fun executeOnce(
+        baseRequest: Request,
+        originalUrl: String,
+        endpoint: DomainIp,
+        scope: PageAttemptScope?,
+        attemptId: Int,
+        progress: (Long, Long) -> Unit = { bytes, length -> scope?.reportProgress(bytes, length) },
     ): Outcome {
-        val client = NetworkModule.newImageClientForIp(endpoint.domain, endpoint.ip)
-        return try {
-            client.newCall(request).execute().use { response ->
+        val rawTemp = ImageCacheManager.beginAttempt(originalUrl, scope?.generation ?: 0, attemptId, endpoint.ip)
+        val responseTemp = try {
+            ImageCacheManager.createResponseTemp()
+        } catch (e: Exception) {
+            ImageCacheManager.abortAttempt(rawTemp)
+            throw e
+        }
+        val client = try {
+            NetworkModule.newImageClientForIp(endpoint.domain, endpoint.ip)
+        } catch (e: Exception) {
+            responseTemp.delete()
+            ImageCacheManager.abortAttempt(rawTemp)
+            throw e
+        }
+        val call = try {
+            client.newCall(replaceHost(baseRequest, endpoint.domain))
+        } catch (e: Exception) {
+            responseTemp.delete()
+            ImageCacheManager.abortAttempt(rawTemp)
+            runCatching { client.connectionPool.evictAll() }
+            throw e
+        }
+        val registration: Closeable? = scope?.registerCall(call, attemptId)
+        var responseTransferred = false
+        try {
+            call.execute().use { response ->
                 if (!response.isSuccessful) return Outcome.Fail.Http(response.code)
+                val body = response.body ?: return Outcome.Fail.Invalid
+                val contentLength = body.contentLength()
+                if (contentLength > MAX_IMAGE_BYTES) return Outcome.Fail.Oversize
+                var bytesRead = 0L
+                rawTemp.outputStream().buffered().use { output ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(32 * 1024)
+                        while (true) {
+                            if (scope?.isCurrent == false) return Outcome.Fail.Cancelled
+                            if (call.isCanceled) {
+                                if (scope?.reasonFor(call) == null) throw SocketTimeoutException("Image call ended without an owner cancellation")
+                                return Outcome.Fail.Cancelled
+                            }
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            bytesRead += read
+                            if (bytesRead > MAX_IMAGE_BYTES) return Outcome.Fail.Oversize
+                            output.write(buffer, 0, read)
+                            progress(bytesRead, contentLength)
+                        }
+                        output.flush()
+                    }
+                }
+                if (bytesRead == 0L) return Outcome.Fail.Invalid
+                val mimeType = try {
+                    decodeToResponseFile(rawTemp, responseTemp)
+                } catch (_: Exception) {
+                    return Outcome.Fail.Decrypt
+                } ?: return Outcome.Fail.Invalid
 
-                val body = response.body ?: return Outcome.Fail.InvalidImage(response.code)
-                val raw = body.source().readByteArray()
-                if (raw.isEmpty()) return Outcome.Fail.InvalidImage(response.code)
-
-                val out = decryptIfNeeded(raw, originalUrl)
-                if (!isImageMagic(out)) return Outcome.Fail.InvalidImage(response.code)
-
-                // 只有校验为有效图片才写加密缓存。
-                try {
-                    ImageCacheManager.putStream(originalUrl).use { it.write(raw) }
-                    ImageCacheManager.commit(originalUrl)
-                } catch (_: Exception) {}
-
-                Outcome.Success(out)
+                if (scope != null && !scope.claimWinner()) {
+                    responseTemp.delete()
+                    return Outcome.Fail.Cancelled
+                }
+                val committed = ImageCacheManager.commitAttempt(
+                    url = originalUrl,
+                    temporary = rawTemp,
+                    stillOwner = { scope?.isCurrent != false },
+                    ownerLock = scope?.page,
+                )
+                if (!committed) {
+                    responseTemp.delete()
+                    scope?.releaseWinnerClaim()
+                    return Outcome.Fail.Cancelled
+                }
+                RouteManager.markImgEndpointHealthy(endpoint)
+                scope?.cancelLosers(attemptId)
+                responseTransferred = true
+                return Outcome.Success(responseTemp, mimeType, endpoint, attemptId)
             }
         } catch (io: IOException) {
-            Outcome.Fail.IO(io)
+            responseTemp.delete()
+            ImageCacheManager.abortAttempt(rawTemp)
+            val cancellation = scope?.reasonFor(call)
+            if (cancellation != null || scope?.isCurrent == false) return Outcome.Fail.Cancelled
+            val kind = when (io) {
+                is SocketTimeoutException -> ImgEndpointFailure.SLOW
+                is ConnectException, is java.net.UnknownHostException -> ImgEndpointFailure.DEAD
+                else -> ImgEndpointFailure.TRANSIENT
+            }
+            RouteManager.markImgEndpointFailed(endpoint, kind)
+            return Outcome.Fail.Io(io)
         } catch (e: Exception) {
-            Outcome.Fail.IO(IOException("图片端点请求失败：${endpoint.domain} (${endpoint.ip})", e))
+            responseTemp.delete()
+            ImageCacheManager.abortAttempt(rawTemp)
+            if (scope?.isCurrent == false) return Outcome.Fail.Cancelled
+            return Outcome.Fail.Invalid
         } finally {
-            // 此客户端为单端点临时客户端，清理其独立连接池，避免下一候选复用其他 IP 的连接。
+            if (!responseTransferred) responseTemp.delete()
+            registration?.close()
             runCatching { client.connectionPool.evictAll() }
+            // A successful raw file was renamed on commit; failures must not leave attempt files behind.
+            if (rawTemp.exists() && rawTemp.name.contains(".tmp-")) ImageCacheManager.abortAttempt(rawTemp)
         }
     }
 
-    private fun replaceHost(request: Request, host: String): Request {
-        val newUrl = request.url.toString().replace(Regex("https?://[^/]+"), "https://$host")
-        return request.newBuilder().url(newUrl).build()
+    private fun replaceHost(request: Request, host: String): Request =
+        request.newBuilder().url(request.url.newBuilder().host(host).build()).build()
+
+    /** Materialize raw or CBC-encrypted bytes, requiring a complete body and a recognized image header. */
+    private fun decodeToResponseFile(raw: File, output: File): MediaType? {
+        val rawHeader = readHeader(raw)
+        val rawMime = imageMime(rawHeader)
+        if (rawMime != null) {
+            raw.inputStream().buffered().use { input ->
+                output.outputStream().buffered().use { target -> input.copyTo(target) }
+            }
+            return rawMime
+        }
+        val header = ByteArray(16)
+        var headerSize = 0
+        try {
+            CipherInputStream(raw.inputStream().buffered(), Crypto.createImageCipher()).use { input ->
+                output.outputStream().buffered().use { target ->
+                    val buffer = ByteArray(32 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        val copy = minOf(read, header.size - headerSize)
+                        if (copy > 0) {
+                            buffer.copyInto(header, headerSize, 0, copy)
+                            headerSize += copy
+                        }
+                        target.write(buffer, 0, read)
+                    }
+                    target.flush()
+                }
+            }
+        } catch (e: Exception) {
+            output.delete()
+            throw ImageDecryptFailedException(e)
+        }
+        val mime = imageMime(header.copyOf(headerSize))
+        if (mime == null || output.length() == 0L) {
+            output.delete()
+            throw ImageDecryptFailedException()
+        }
+        return mime
     }
 
-    private fun buildResponse(request: Request, bytes: ByteArray): Response {
-        val body = object : ResponseBody() {
-            override fun contentType() = "image/webp".toMediaType()
-            override fun contentLength() = bytes.size.toLong()
-            override fun source(): BufferedSource = Buffer().apply { write(bytes) }
+    private fun readHeader(file: File): ByteArray {
+        val header = ByteArray(16)
+        file.inputStream().use { input ->
+            var offset = 0
+            while (offset < header.size) {
+                val read = input.read(header, offset, header.size - offset)
+                if (read < 0) break
+                offset += read
+            }
+            return header.copyOf(offset)
+        }
+    }
+
+    private fun imageMime(bytes: ByteArray): MediaType? {
+        if (bytes.size >= 12 && bytes.copyOfRange(0, 4).contentEquals(byteArrayOf(0x52, 0x49, 0x46, 0x46)) &&
+            bytes.copyOfRange(8, 12).contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50))
+        ) return "image/webp".toMediaTypeOrNull()
+        if (bytes.size >= 8 && bytes.copyOfRange(0, 8).contentEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))) {
+            return "image/png".toMediaTypeOrNull()
+        }
+        if (bytes.size >= 3 && bytes[0] == 0xff.toByte() && bytes[1] == 0xd8.toByte() && bytes[2] == 0xff.toByte()) {
+            return "image/jpeg".toMediaTypeOrNull()
+        }
+        if (bytes.size >= 4 && bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x38.toByte()) {
+            return "image/gif".toMediaTypeOrNull()
+        }
+        return null
+    }
+
+    private fun buildResponse(request: Request, responseFile: File, mimeType: MediaType): Response {
+        val responseBody = object : ResponseBody() {
+            private val buffered = object : ForwardingSource(responseFile.source()) {
+                override fun close() {
+                    try {
+                        super.close()
+                    } finally {
+                        responseFile.delete()
+                    }
+                }
+            }.buffer()
+
+            override fun contentType(): MediaType = mimeType
+            override fun contentLength(): Long = responseFile.length()
+            override fun source(): BufferedSource = buffered
         }
         return Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
-            .code(200).message("OK")
-            .body(body).build()
+            .code(200)
+            .message("OK")
+            .body(responseBody)
+            .build()
     }
 
     private fun errorResponse(request: Request, code: Int): Response =
         Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
-            .code(code).message("img fail")
+            .code(code)
+            .message("img fail")
             .body(ByteArray(0).toResponseBody(null))
             .build()
 
-    /** 已加密则解密；原始即图片则原样返回。调用方负责用 [isImageMagic] 校验结果。 */
-    private fun decryptIfNeeded(raw: ByteArray, url: String): ByteArray {
-        if (isImageMagic(raw)) return raw
-        return try { Crypto.createImageCipher().doFinal(raw) } catch (_: Exception) { raw }
-    }
-
     private fun isImageRequest(url: String): Boolean =
-        url.contains("/static/upload") ||
-            url.contains(".webp") || url.contains(".jpg") ||
-            url.contains(".png") || url.contains(".gif")
+        url.contains("/static/upload") || url.contains(".webp") || url.contains(".jpg") ||
+            url.contains(".jpeg") || url.contains(".png") || url.contains(".gif")
 
-    private fun isImageMagic(bytes: ByteArray): Boolean {
-        if (bytes.size < 4) return false
-        if (bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
-            bytes.size >= 12 && bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() && bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
-        ) return true
-        if (bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()) return true
-        if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
-        if (bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x38.toByte()) return true
-        return false
-    }
-
-    private sealed class Outcome {
-        class Success(val bytes: ByteArray) : Outcome()
-        sealed class Fail : Outcome() {
-            class Http(val code: Int) : Fail()
-            class InvalidImage(val code: Int) : Fail()
-            class IO(val error: IOException) : Fail()
+    private sealed interface Outcome {
+        data class Success(val responseFile: File, val mimeType: MediaType, val endpoint: DomainIp, val attemptId: Int) : Outcome
+        sealed interface Fail : Outcome {
+            data class Http(val code: Int) : Fail
+            data class Io(val error: IOException) : Fail
+            data object Decrypt : Fail
+            data object Invalid : Fail
+            data object Oversize : Fail
+            data object Cancelled : Fail
         }
     }
 }
+
+class ImageDecryptFailedException(cause: Throwable? = null) :
+    IOException("图片解密/签名链路失败，请检查图源线路或重新测速", cause)
+
+class ImageAttemptDeferredException : IOException("双页副页等待主页释放图片加载额度")

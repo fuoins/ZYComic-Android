@@ -29,6 +29,15 @@ abstract class PageLoader {
      */
     open suspend fun loadPage(page: ReaderPage) {}
 
+    /** Viewer-provided current visibility and ordered successors; loaders must not infer Pager order. */
+    open fun updateReadingOrder(visible: List<ReaderPage>, successors: List<ReaderPage>) {}
+
+    /** Called when the decoder rejects a downloaded image. */
+    open fun invalidatePage(page: ReaderPage): Boolean = false
+
+    /** Called after successful decode so URL-scoped decode retry state can be cleared. */
+    open fun markImageDecodeSuccess(page: ReaderPage) {}
+
     /**
      * Retries the given [page] in case it failed to load. This method only makes sense when an
      * online source is used.

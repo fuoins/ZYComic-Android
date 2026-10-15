@@ -35,7 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.zycomic.app.net.ImageEndpointSelectionPolicy
+import com.zycomic.app.data.repository.ReaderRepository
+import com.zycomic.app.net.ImageSourceDisplayPolicy
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
@@ -65,11 +66,11 @@ fun SpeedTestScreen(
     val imgVerdicts by vm.imgVerdicts.collectAsState()
     val currentLineIdx by vm.currentLineIndex.collectAsState()
     val currentLineIp by vm.currentLineIp.collectAsState()
-    val currentImgIdx by vm.currentImgIndex.collectAsState()
-    val currentImgIp by vm.currentImgIp.collectAsState()
-    val pinnedImg by vm.imgPinned.collectAsState()
+    val currentImgIp = RouteManager.selectedImgIp
+    val pinnedImg = RouteManager.pinnedImgDomain
+    val imgPinDisplayRevision = RouteManager.imgPinDisplayRevision
     val autoSel by vm.autoSelectEnabled.collectAsState()
-    val useFastestImg by vm.useFastestImgForAll.collectAsState()
+    val useFastestImg = RouteManager.useFastestImgForAll
     val followVpn by vm.followSystemVpn.collectAsState()
     val remoteChecking by vm.remoteChecking.collectAsState()
     val remoteInfo by vm.remoteInfo.collectAsState()
@@ -123,10 +124,27 @@ fun SpeedTestScreen(
     val successfulImgEndpoints = remember(imgOrder, imgVerdicts) {
         imgOrder.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
     }
-    val currentImgEndpoint = remember(imgOrder, imgVerdicts, currentImgIdx, currentImgIp) {
-        val domain = RouteManager.imgDomains.getOrNull(currentImgIdx)
-        ImageEndpointSelectionPolicy.currentEndpoint(successfulImgEndpoints, domain, currentImgIp)
-            ?: ImageEndpointSelectionPolicy.currentEndpoint(imgOrder.map { it.key }, domain, currentImgIp)
+    val serverRecommendedImgDomain = ReaderRepository.currentRecommendedImgDomain
+    val serverFallbackImgDomain = ReaderRepository.currentImgDomains.firstOrNull()
+    val currentImageSource = remember(
+        successfulImgEndpoints,
+        RouteManager.imgDomains,
+        imgPinDisplayRevision,
+        pinnedImg,
+        currentImgIp,
+        useFastestImg,
+        serverRecommendedImgDomain,
+        serverFallbackImgDomain,
+    ) {
+        ImageSourceDisplayPolicy.currentSource(
+            configuredDomains = RouteManager.imgDomains,
+            successfulEndpoints = successfulImgEndpoints,
+            pinnedDomain = pinnedImg,
+            pinnedIp = currentImgIp,
+            useFastestImgForAll = useFastestImg,
+            serverRecommendedDomain = serverRecommendedImgDomain,
+            serverFallbackDomain = serverFallbackImgDomain,
+        )
     }
 
     Scaffold(
@@ -241,9 +259,9 @@ fun SpeedTestScreen(
                             Text("封面和章节用测速最快图源", style = MaterialTheme.typography.bodyLarge)
                             Text(
                                 if (useFastestImg) {
-                                    "已开启：封面和章节图片都用测速最快图源"
+                                    "已开启：未手动固定时优先用测速最快；无成功项时沿用服务端推荐"
                                 } else {
-                                    "已关闭：封面用当前图源，章节用服务端推荐"
+                                    "已关闭：使用服务端推荐（手动固定仍优先）"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -260,11 +278,7 @@ fun SpeedTestScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("当前图源", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (pinnedImg.isNullOrBlank()) {
-                                    "自动：由测速结果选择最快图源"
-                                } else {
-                                    "已固定：$pinnedImg（不会被测速结果覆盖）"
-                                },
+                                currentImageSource.description(),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -330,9 +344,21 @@ fun SpeedTestScreen(
                         host = "${endpoint.domain} · ${endpoint.ip}",
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
-                        isSelected = endpoint == currentImgEndpoint,
+                        isSelected = currentImageSource.matchesEndpoint(endpoint),
+                        selectionLabel = currentImageSource.kind.label.takeIf { currentImageSource.matchesEndpoint(endpoint) },
                         onClick = { if (index >= 0) vm.selectImgHost(index, endpoint.ip) },
                     )
+                }
+
+                item {
+                    if (currentImageSource.domain != null && imgOrder.none { currentImageSource.matchesEndpoint(it.key) }) {
+                        Text(
+                            currentImageSource.notInSuccessfulListDescription(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
+                    }
                 }
 
                 item {
@@ -394,6 +420,7 @@ private fun SpeedRow(
     delay: Long?,
     isSelected: Boolean,
     verdict: SpeedTester.ImgVerdict? = null,
+    selectionLabel: String? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -422,6 +449,9 @@ private fun SpeedRow(
         )
         if (isSelected) {
             Text(" ✓", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        }
+        if (selectionLabel != null) {
+            Text(selectionLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
         }
     }
 }
