@@ -13,8 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,6 +39,7 @@ import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
 import com.zycomic.app.net.SpeedTester
+import com.zycomic.app.ui.components.NetworkMaintenanceNotice
 import eu.kanade.tachiyomi.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -173,24 +172,7 @@ fun SpeedTestScreen(
                     Text(if (remoteChecking) "检查中…" else "检查更新")
                 }
             }
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text(
-                        "网络维护提醒",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                    Text(
-                        "本软件在每日晚上18:00前网络流畅,18:00后进行网络维护,会出现卡顿情况",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                }
-            }
+            NetworkMaintenanceNotice(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
             if (speedTestActive || (speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.reusedImages > 0)) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     configRetest?.let {

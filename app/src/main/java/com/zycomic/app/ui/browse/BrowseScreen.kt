@@ -143,6 +143,7 @@ fun BrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = selectionMode) { vm.exitSelection() }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
     androidx.activity.compose.BackHandler(enabled = showTagDialog) { showTagDialog = false }

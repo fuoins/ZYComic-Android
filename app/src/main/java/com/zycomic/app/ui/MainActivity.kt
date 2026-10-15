@@ -25,8 +25,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -63,6 +61,7 @@ import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.browse.BrowseViewModel
+import com.zycomic.app.ui.components.NetworkMaintenanceNotice
 import com.zycomic.app.ui.history.HistoryScreen
 import com.zycomic.app.ui.history.HistoryViewModel
 import com.zycomic.app.ui.library.LibraryScreen
@@ -455,24 +454,7 @@ fun AppContent(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(
-                            "网络维护提醒",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Text(
-                            "本软件在每日晚上18:00前网络流畅,18:00后进行网络维护,会出现卡顿情况",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
+                NetworkMaintenanceNotice(modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(20.dp))
                 Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(24.dp))
