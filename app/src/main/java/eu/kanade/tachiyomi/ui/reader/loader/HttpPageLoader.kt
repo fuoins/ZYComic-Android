@@ -571,7 +571,7 @@ internal class HttpPageLoader(
         if (!file.isFile || file.length() <= 0L || ImageUtil.findImageType { file.inputStream() } == null) return false
         return try {
             file.inputStream().use { input ->
-                val decoder = ImageDecoder.newInstance(input, false, null)
+                val decoder = ImageDecoder.newInstance(input, false, null) ?: return false
                 try {
                     val width = decoder.width
                     val height = decoder.height
