@@ -1,6 +1,7 @@
 package com.zycomic.app.net
 
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import okhttp3.Call
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
@@ -14,6 +15,7 @@ import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -25,8 +27,8 @@ enum class ImageCancelReason {
     ABANDON_FAR,
 }
 
-/** Per-reader bounded resources: at most three in-flight image attempts and two racing workers. */
-class ImageAttemptCoordinator : Closeable {
+/** Per-reader bounded resources: primary workers and extra visible-page race attempts are separate. */
+class ImageAttemptCoordinator(primaryCapacity: Int = 4) : Closeable {
     private val threadIds = java.util.concurrent.atomic.AtomicInteger()
     private val factory = ThreadFactory { task ->
         Thread(task, "zy-img-race-${threadIds.incrementAndGet()}").apply { isDaemon = true }
@@ -43,16 +45,19 @@ class ImageAttemptCoordinator : Closeable {
     val watchdog: ScheduledExecutorService = ScheduledThreadPoolExecutor(1) { task ->
         Thread(task, "zy-img-watchdog").apply { isDaemon = true }
     }
-    private val inFlight = Semaphore(3, true)
+    private val primaryInFlight = Semaphore(primaryCapacity.coerceIn(1, 4), true)
+    private val raceInFlight = Semaphore(2, true)
 
-    fun tryAcquirePrimary(): Boolean = inFlight.tryAcquire()
+    fun tryAcquirePrimary(): Boolean = primaryInFlight.tryAcquire()
 
-    val availableAttemptCount: Int
-        get() = inFlight.availablePermits()
+    val availablePrimaryAttemptCount: Int
+        get() = primaryInFlight.availablePermits()
 
-    fun tryAcquireRace(): Boolean = inFlight.tryAcquire()
+    fun tryAcquireRace(): Boolean = raceInFlight.tryAcquire()
 
-    fun releaseAttempt() = inFlight.release()
+    fun releasePrimaryAttempt() = primaryInFlight.release()
+
+    fun releaseRaceAttempt() = raceInFlight.release()
 
     fun submitRace(task: Runnable): Boolean = try {
         raceExecutor.execute(task)
@@ -84,8 +89,10 @@ class PageAttemptScope(
     private val winnerClaimed = AtomicBoolean(false)
     @Volatile var canRace: Boolean = canRace
         private set
-    val lastProgressAtNanos = AtomicLong(System.nanoTime())
+    val lastProgressAtNanos = AtomicLong(0L)
+    val requestStartedAtNanos = AtomicLong(0L)
     val receivedAnyBytes = AtomicBoolean(false)
+    private val activeEndpointRequests = AtomicInteger(0)
     @Volatile
     var raceActive: Boolean = false
         private set
@@ -94,6 +101,30 @@ class PageAttemptScope(
         get() = cancelReason.get() == null && page.generation.get() == generation
     val hasOuterCall: Boolean
         get() = calls.values.any { it == -1 }
+    val hasActiveEndpointRequest: Boolean
+        get() = activeEndpointRequests.get() > 0
+
+    fun waitingForRequestPermit() {
+        if (isCurrent) page.loadStatus = ReaderPageLoadStatus.WaitingForRequest
+    }
+
+    fun endpointRequestStarted(attemptId: Int, totalAttempts: Int) {
+        val now = System.nanoTime()
+        requestStartedAtNanos.set(now)
+        lastProgressAtNanos.set(now)
+        activeEndpointRequests.incrementAndGet()
+        if (isCurrent) {
+            page.loadStatus = if (attemptId == 0) {
+                ReaderPageLoadStatus.Requesting
+            } else {
+                ReaderPageLoadStatus.TryingFallback(attemptId + 1, totalAttempts)
+            }
+        }
+    }
+
+    fun endpointRequestFinished() {
+        activeEndpointRequests.decrementAndGet()
+    }
 
     fun registerCall(call: Call, attemptId: Int): Closeable {
         calls[call] = attemptId
@@ -150,10 +181,13 @@ class PageAttemptScope(
     }
 
     fun reportProgress(bytesRead: Long, contentLength: Long) {
+        if (!isCurrent) return
         if (bytesRead > 0) {
             receivedAnyBytes.set(true)
             lastProgressAtNanos.set(System.nanoTime())
-            page.slow = false
+            page.loadStatus = ReaderPageLoadStatus.Receiving(
+                contentLength.takeIf { it > 0 }?.let { (100L * bytesRead / it).toInt().coerceIn(0, 100) },
+            )
         }
         if (raceActive) {
             page.progress = 0

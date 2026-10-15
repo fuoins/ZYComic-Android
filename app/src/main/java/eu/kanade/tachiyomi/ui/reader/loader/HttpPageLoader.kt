@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import exh.source.isEhBasedSource
 import exh.util.DataSaver
@@ -48,7 +49,7 @@ internal class HttpPageLoader(
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = java.util.concurrent.PriorityBlockingQueue<PriorityPage>()
     private val preloadSize = readerPreferences.preloadSize().get().coerceAtLeast(0)
-    private val readerThreads = readerPreferences.readerThreads().get().coerceAtLeast(1)
+    private val readerThreads = readerPreferences.readerThreads().get().coerceIn(1, 4)
     private val nearForegroundSize = min(3, preloadSize)
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
@@ -111,7 +112,6 @@ internal class HttpPageLoader(
         val normalizedVisible = visible.asSequence()
             .filterNot { it is InsertPage }
             .distinctBy { it.index }
-            .take(3)
             .toList()
         val normalizedSuccessors = successors.asSequence()
             .filterNot { it is InsertPage }
@@ -130,22 +130,24 @@ internal class HttpPageLoader(
         currentWindow = (normalizedVisible + normalizedSuccessors).toSet()
 
         // Upgrade any still-queued successor that just entered the viewport, preserving viewer order.
-        val newlyVisibleQueueEntries = queue.toList().filter { it.page in newVisible }
+        val newlyVisibleQueueEntries = queueSnapshot().filter { it.page in newVisible }
         newlyVisibleQueueEntries.forEach { entry ->
-            queue.remove(entry)
-            synchronized(entry.page) {
-                if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
+            if (queue.remove(entry)) {
+                synchronized(entry.page) {
+                    if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
+                }
             }
         }
 
         // Leaving the complete preload window is the only visibility-based abandon.
         activeScopes.keys.filter { it !in currentWindow }.forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
-        queue.toList().filter { it.page !in currentWindow }.forEach { entry ->
-            queue.remove(entry)
-            synchronized(entry.page) {
-                if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
+        queueSnapshot().filter { it.page !in currentWindow }.forEach { entry ->
+            if (queue.remove(entry)) {
+                synchronized(entry.page) {
+                    if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
+                }
+                entry.page.slow = false
             }
-            entry.page.slow = false
         }
 
         normalizedVisible.forEach { page ->
@@ -160,6 +162,9 @@ internal class HttpPageLoader(
     }
 
     private fun priorityFor(page: ReaderPage): Int = if (page in visiblePages) 1 else 0
+
+    private fun queueSnapshot(): List<PriorityPage> =
+        queue.toArray(emptyArray<PriorityPage>()).asList()
 
     private fun enqueue(page: ReaderPage, priority: Int) {
         if (page.status != Page.State.Queue) return
@@ -215,6 +220,7 @@ internal class HttpPageLoader(
         }
         if (page.manualRetryCount.get() >= 3) {
             page.slow = false
+            page.loadStatus = ReaderPageLoadStatus.Idle
             page.status = Page.State.Error(IOException("已重试 3 次，请重新测速或切换图源"))
             return
         }
@@ -227,6 +233,7 @@ internal class HttpPageLoader(
         }
         page.stream = null
         page.slow = false
+        page.loadStatus = ReaderPageLoadStatus.Queued
         page.progress = 0
         if (wasActive) return
         synchronized(page) { page.generation.incrementAndGet() }
@@ -250,6 +257,7 @@ internal class HttpPageLoader(
         if (count >= 2) {
             if (!wasActive) {
                 page.slow = false
+                page.loadStatus = ReaderPageLoadStatus.Idle
                 page.status = Page.State.Error(terminalErrors.remove(page) ?: ImageDecryptFailedException())
             }
             return false
@@ -257,6 +265,7 @@ internal class HttpPageLoader(
         if (!wasActive) {
             page.status = Page.State.Queue
             page.slow = false
+            page.loadStatus = ReaderPageLoadStatus.Queued
             page.progress = 0
             enqueue(page, priorityFor(page))
         }
@@ -292,7 +301,8 @@ internal class HttpPageLoader(
             val homePage = visiblePages.first()
             val homeScope = homePage.activeAttempt.get()
             val homeStarted = homeScope?.hasOuterCall == true || homePage.status == Page.State.Ready || homePage.status is Page.State.Error
-            if (!homeStarted || coordinator.availableAttemptCount <= 0) {
+            if (!homeStarted || coordinator.availablePrimaryAttemptCount <= 0) {
+                page.loadStatus = ReaderPageLoadStatus.WaitingForRequest
                 runCatching {
                     coordinator.watchdog.schedule({
                         if (!isRecycled && page.status == Page.State.Queue && page in currentWindow) {
@@ -311,12 +321,14 @@ internal class HttpPageLoader(
             if (page.imageUrl.isNullOrEmpty()) {
                 if (!owns(page, myGeneration)) return
                 page.status = Page.State.LoadPage
+                page.loadStatus = ReaderPageLoadStatus.Requesting
                 page.imageUrl = source.getImageUrl(page)
             }
             val imageUrl = page.imageUrl ?: throw IOException("图片 URL 为空")
             if (!chapterCache.isImageInCache(imageUrl)) {
                 if (!owns(page, myGeneration)) return
                 page.status = Page.State.DownloadImage
+                page.loadStatus = ReaderPageLoadStatus.WaitingForRequest
                 page.progress = 0
                 val currentAttempt = PageAttemptScope(
                     page = page,
@@ -331,8 +343,11 @@ internal class HttpPageLoader(
                 currentAttempt.updateVisibility(page in visiblePages)
                 slowWatch = coordinator.watchdog.scheduleAtFixedRate({
                     val isNear = page in visiblePages || successors.take(nearForegroundSize).any { it === page }
+                    val requestStartedAt = currentAttempt.requestStartedAtNanos.get()
                     val quietFor = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - currentAttempt.lastProgressAtNanos.get())
-                    if (currentAttempt.isCurrent && isNear && quietFor >= 1_500L) page.slow = true
+                    if (currentAttempt.isCurrent && currentAttempt.hasActiveEndpointRequest && requestStartedAt > 0L && isNear && quietFor >= 1_500L) {
+                        page.slow = true
+                    }
                 }, 250, 250, TimeUnit.MILLISECONDS)
 
                 val response = source.getImage(page, dataSaver)
@@ -347,6 +362,7 @@ internal class HttpPageLoader(
             if (!owns(page, myGeneration)) return
             page.stream = { chapterCache.getImageFile(imageUrl).inputStream() }
             page.slow = false
+            page.loadStatus = ReaderPageLoadStatus.Idle
             page.status = Page.State.Ready
         } catch (e: Throwable) {
             if (!owns(page, myGeneration)) return // stale cancellation never publishes Error
@@ -362,9 +378,11 @@ internal class HttpPageLoader(
             }
             if (deferred) {
                 page.status = Page.State.Queue
+                page.loadStatus = ReaderPageLoadStatus.Queued
                 deferRetry = true
             } else {
                 page.slow = false
+                page.loadStatus = ReaderPageLoadStatus.Idle
                 page.status = Page.State.Error(e)
             }
         } finally {
@@ -379,6 +397,11 @@ internal class HttpPageLoader(
                     val terminalError = terminalErrors.remove(page)
                     page.status = if (terminalError != null) Page.State.Error(terminalError) else Page.State.Queue
                     page.slow = false
+                    page.loadStatus = if (terminalError == null) {
+                        ReaderPageLoadStatus.Queued
+                    } else {
+                        ReaderPageLoadStatus.Idle
+                    }
                     if (terminalError == null && disposition != ImageCancelReason.PAGE_HIDDEN && page in currentWindow && !isRecycled) {
                         enqueue(page, priorityFor(page))
                     }

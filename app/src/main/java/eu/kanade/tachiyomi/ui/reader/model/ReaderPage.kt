@@ -8,6 +8,25 @@ import java.io.InputStream
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
+sealed interface ReaderPageLoadStatus {
+    data object Queued : ReaderPageLoadStatus
+    data object WaitingForRequest : ReaderPageLoadStatus
+    data object Requesting : ReaderPageLoadStatus
+    data class Receiving(val percentage: Int?) : ReaderPageLoadStatus
+    data class TryingFallback(val attempt: Int, val total: Int) : ReaderPageLoadStatus
+    data object Idle : ReaderPageLoadStatus
+
+    val label: String
+        get() = when (this) {
+            Queued -> "排队中"
+            WaitingForRequest -> "排队等待请求额度"
+            Requesting -> "连接/请求中"
+            is Receiving -> percentage?.let { "正在下载（$it%）" } ?: "正在接收图片数据"
+            is TryingFallback -> "正在尝试备用图源（第 $attempt/$total 个）"
+            Idle -> ""
+        }
+}
+
 open class ReaderPage(
     index: Int,
     url: String = "",
@@ -35,6 +54,13 @@ open class ReaderPage(
     val slowFlow = _slowFlow.asStateFlow()
     private val _readerVisibleFlow = MutableStateFlow(false)
     val readerVisibleFlow = _readerVisibleFlow.asStateFlow()
+    private val _loadStatusFlow = MutableStateFlow<ReaderPageLoadStatus>(ReaderPageLoadStatus.Queued)
+    val loadStatusFlow = _loadStatusFlow.asStateFlow()
+    var loadStatus: ReaderPageLoadStatus
+        get() = _loadStatusFlow.value
+        set(value) {
+            _loadStatusFlow.value = value
+        }
     @Volatile
     var slow: Boolean = false
         set(value) {

@@ -360,7 +360,7 @@ class WebtoonViewer(
                 .distinctBy { it.index }
                 .toList()
             readingOrderLoaders += loader
-            loader.updateReadingOrder(chapterVisible.takeLast(3), orderedSuccessors)
+            loader.updateReadingOrder(chapterVisible, orderedSuccessors)
         }
     }
 

@@ -168,7 +168,7 @@ class ImageInterceptor : Interceptor {
             rawProbe?.delete()
             decodedProbe?.delete()
             registration?.close()
-            scope.coordinator.releaseAttempt()
+            scope.coordinator.releasePrimaryAttempt()
             client?.let { runCatching { it.connectionPool.evictAll() } }
         }
     }
@@ -184,9 +184,9 @@ class ImageInterceptor : Interceptor {
             val acquired = scope?.let { acquirePermit(it) } ?: true
             if (!acquired) return outcomes + Outcome.Fail.Cancelled
             val result = try {
-                executeSafely(request, originalUrl, endpoint, scope, index)
+                executeSafely(request, originalUrl, endpoint, scope, index, endpoints.size)
             } finally {
-                if (scope != null) scope.coordinator.releaseAttempt()
+                if (scope != null) scope.coordinator.releasePrimaryAttempt()
             }
             outcomes += result
             if (result is Outcome.Success) return outcomes
@@ -206,8 +206,8 @@ class ImageInterceptor : Interceptor {
         val completed = LinkedBlockingQueue<Outcome>()
         val active = AtomicInteger(1)
         val nextIndex = AtomicInteger(1)
-        val lastProgressAt = AtomicLong(System.nanoTime())
-        val startedAt = System.nanoTime()
+        val lastProgressAt = AtomicLong(0L)
+        val primaryStartedAt = AtomicLong(0L)
         val primaryAcquired = acquirePermit(scope)
         if (!primaryAcquired) return listOf(Outcome.Fail.Cancelled)
         active.set(1)
@@ -223,8 +223,11 @@ class ImageInterceptor : Interceptor {
                 try {
                     synchronized(raceStateLock) {
                         if (!raceWindowOpen || !scope.isCurrent || !scope.canRace || nextIndex.get() >= endpoints.size || active.get() >= 3) return@scheduleWatchdog
-                        val noProgressFor = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastProgressAt.get())
-                        val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+                        val requestStartedAt = primaryStartedAt.get()
+                        if (requestStartedAt == 0L) return@scheduleWatchdog
+                        val now = System.nanoTime()
+                        val noProgressFor = TimeUnit.NANOSECONDS.toMillis(now - lastProgressAt.get())
+                        val elapsed = TimeUnit.NANOSECONDS.toMillis(now - requestStartedAt)
                         if (elapsed < SLOW_AFTER_MS || noProgressFor < SLOW_AFTER_MS) return@scheduleWatchdog
                         val candidateIndex = nextIndex.getAndIncrement()
                         if (candidateIndex >= endpoints.size) return@scheduleWatchdog
@@ -238,13 +241,13 @@ class ImageInterceptor : Interceptor {
                         submitted = scope.coordinator.submitRace {
                             var result: Outcome = Outcome.Fail.Invalid
                             try {
-                                result = executeSafely(request, originalUrl, endpoints[candidateIndex], scope, candidateIndex)
+                                result = executeSafely(request, originalUrl, endpoints[candidateIndex], scope, candidateIndex, endpoints.size)
                             } finally {
                                 try {
                                     completed.offer(result)
                                 } finally {
                                     active.decrementAndGet()
-                                    scope.coordinator.releaseAttempt()
+                                    scope.coordinator.releaseRaceAttempt()
                                 }
                             }
                         }
@@ -254,7 +257,7 @@ class ImageInterceptor : Interceptor {
                 } finally {
                     if (!submitted) {
                         if (activeReserved) active.decrementAndGet()
-                        if (permitAcquired) scope.coordinator.releaseAttempt()
+                        if (permitAcquired) scope.coordinator.releaseRaceAttempt()
                         if (index >= 0) nextIndex.compareAndSet(index + 1, index)
                     }
                 }
@@ -263,14 +266,27 @@ class ImageInterceptor : Interceptor {
 
         try {
             val primary = try {
-                executeSafely(request, originalUrl, endpoints[0], scope, 0) { bytes, length ->
-                    scope.reportProgress(bytes, length)
-                    lastProgressAt.set(System.nanoTime())
-                }
+                executeSafely(
+                    request,
+                    originalUrl,
+                    endpoints[0],
+                    scope,
+                    0,
+                    endpoints.size,
+                    progress = { bytes, length ->
+                        scope.reportProgress(bytes, length)
+                        lastProgressAt.set(System.nanoTime())
+                    },
+                    onRequestStarted = {
+                        val now = System.nanoTime()
+                        primaryStartedAt.compareAndSet(0L, now)
+                        lastProgressAt.compareAndSet(0L, now)
+                    },
+                )
             } finally {
                 if (primaryPermitHeld) {
                     primaryPermitHeld = false
-                    scope.coordinator.releaseAttempt()
+                    scope.coordinator.releasePrimaryAttempt()
                     active.decrementAndGet()
                 }
             }
@@ -306,9 +322,9 @@ class ImageInterceptor : Interceptor {
                 val acquired = acquirePermit(scope)
                 if (!acquired) break
                 val result = try {
-                    executeSafely(request, originalUrl, endpoints[index], scope, index)
+                    executeSafely(request, originalUrl, endpoints[index], scope, index, endpoints.size)
                 } finally {
-                    scope.coordinator.releaseAttempt()
+                    scope.coordinator.releasePrimaryAttempt()
                 }
                 outcomes += result
                 if (result is Outcome.Success) return outcomes
@@ -320,7 +336,7 @@ class ImageInterceptor : Interceptor {
             synchronized(raceStateLock) { raceWindowOpen = false }
             watch?.cancel(false)
             if (primaryPermitHeld) {
-                scope.coordinator.releaseAttempt()
+                scope.coordinator.releasePrimaryAttempt()
                 active.decrementAndGet()
             }
             scope.cancelLosers(Int.MIN_VALUE)
@@ -329,9 +345,14 @@ class ImageInterceptor : Interceptor {
     }
 
     private fun acquirePermit(scope: PageAttemptScope): Boolean {
-        if (scope.isSecondaryVisible) return scope.coordinator.tryAcquirePrimary()
+        if (scope.isSecondaryVisible) {
+            val acquired = scope.coordinator.tryAcquirePrimary()
+            if (!acquired) scope.waitingForRequestPermit()
+            return acquired
+        }
         while (scope.isCurrent) {
             if (scope.coordinator.tryAcquirePrimary()) return true
+            scope.waitingForRequestPermit()
             try {
                 Thread.sleep(50)
             } catch (_: InterruptedException) {
@@ -348,9 +369,11 @@ class ImageInterceptor : Interceptor {
         endpoint: DomainIp,
         scope: PageAttemptScope?,
         attemptId: Int,
+        totalAttempts: Int,
         progress: (Long, Long) -> Unit = { bytes, length -> scope?.reportProgress(bytes, length) },
+        onRequestStarted: () -> Unit = {},
     ): Outcome = try {
-        executeOnce(request, originalUrl, endpoint, scope, attemptId, progress)
+        executeOnce(request, originalUrl, endpoint, scope, attemptId, totalAttempts, progress, onRequestStarted)
     } catch (e: Exception) {
         if (scope?.isCurrent == false) Outcome.Fail.Cancelled
         else Outcome.Fail.Io(e as? IOException ?: IOException("图片请求准备失败", e))
@@ -362,7 +385,9 @@ class ImageInterceptor : Interceptor {
         endpoint: DomainIp,
         scope: PageAttemptScope?,
         attemptId: Int,
+        totalAttempts: Int,
         progress: (Long, Long) -> Unit = { bytes, length -> scope?.reportProgress(bytes, length) },
+        onRequestStarted: () -> Unit = {},
     ): Outcome {
         val rawTemp = ImageCacheManager.beginAttempt(originalUrl, scope?.generation ?: 0, attemptId, endpoint.ip)
         val responseTemp = try {
@@ -388,7 +413,11 @@ class ImageInterceptor : Interceptor {
         }
         val registration: Closeable? = scope?.registerCall(call, attemptId)
         var responseTransferred = false
+        var endpointRequestStarted = false
         try {
+            scope?.endpointRequestStarted(attemptId, totalAttempts)
+            endpointRequestStarted = scope != null
+            onRequestStarted()
             call.execute().use { response ->
                 if (!response.isSuccessful) return Outcome.Fail.Http(response.code)
                 val body = response.body ?: return Outcome.Fail.Invalid
@@ -459,6 +488,7 @@ class ImageInterceptor : Interceptor {
             if (scope?.isCurrent == false) return Outcome.Fail.Cancelled
             return Outcome.Fail.Invalid
         } finally {
+            if (endpointRequestStarted) scope?.endpointRequestFinished()
             if (!responseTransferred) responseTemp.delete()
             registration?.close()
             runCatching { client.connectionPool.evictAll() }

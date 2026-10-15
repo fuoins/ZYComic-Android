@@ -108,7 +108,7 @@ class PagerPageHolder(
                 // KMK -->
                 seedColor = seedColor,
                 // KMK <--
-            )
+            ).apply { setStatus(page.loadStatus.label) }
             addView(progressIndicator)
         }
     }
@@ -135,6 +135,12 @@ class PagerPageHolder(
             }
             launch {
                 page.readerVisibleFlow.collectLatest { updateSlowOverlay() }
+            }
+            launch {
+                page.loadStatusFlow.collectLatest { status ->
+                    progressIndicator?.setStatus(status.label)
+                    updateSlowOverlay()
+                }
             }
             page.statusFlow.collectLatest { state ->
                 when (state) {
@@ -469,12 +475,11 @@ class PagerPageHolder(
         if (slowOverlayTarget !== target) {
             removeSlowOverlay()
             slowOverlayTarget = target
-            val overlay = SlowPageOverlay(context) {
-                target.chapter.pageLoader?.retryPage(target)
-            }
+            val overlay = SlowPageOverlay(context, target.loadStatus.label)
             slowOverlay = overlay
             addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         }
+        slowOverlay?.setStatus(target.loadStatus.label)
         slowOverlay?.bringToFront()
     }
 

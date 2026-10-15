@@ -36,7 +36,9 @@ class ChapterLoader(
     private val readerPrefs: ReaderPreferences,
     private val mergedReferences: List<MergedMangaReference>,
     private val mergedManga: Map<Long, Manga>?,
-    private val imageAttemptCoordinator: ImageAttemptCoordinator = ImageAttemptCoordinator(),
+    private val imageAttemptCoordinator: ImageAttemptCoordinator = ImageAttemptCoordinator(
+        readerPrefs.readerThreads().get().coerceIn(1, 4),
+    ),
     // SY <--
 ) {
 

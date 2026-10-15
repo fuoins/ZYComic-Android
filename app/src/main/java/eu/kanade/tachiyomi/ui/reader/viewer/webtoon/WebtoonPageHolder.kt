@@ -156,6 +156,12 @@ class WebtoonPageHolder(
             launch {
                 page.readerVisibleFlow.collectLatest { updateSlowOverlay() }
             }
+            launch {
+                page.loadStatusFlow.collectLatest { status ->
+                    progressIndicator.setStatus(status.label)
+                    updateSlowOverlay()
+                }
+            }
             page.statusFlow.collectLatest { state ->
                 when (state) {
                     Page.State.Queue -> setQueued()
@@ -178,6 +184,7 @@ class WebtoonPageHolder(
      */
     private fun setQueued() {
         progressContainer.isVisible = true
+        progressIndicator.setStatus(page?.loadStatus?.label.orEmpty())
         progressIndicator.show()
         removeErrorLayout()
     }
@@ -291,12 +298,11 @@ class WebtoonPageHolder(
             return
         }
         if (slowOverlay == null) {
-            val overlay = SlowPageOverlay(context) {
-                target.chapter.pageLoader?.retryPage(target)
-            }
+            val overlay = SlowPageOverlay(context, target.loadStatus.label)
             slowOverlay = overlay
             frame.addView(overlay, MATCH_PARENT, MATCH_PARENT)
         }
+        slowOverlay?.setStatus(target.loadStatus.label)
         slowOverlay?.bringToFront()
     }
 
