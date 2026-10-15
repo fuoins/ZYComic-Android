@@ -280,11 +280,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     private data class DefaultNetworkState(
         val network: android.net.Network?,
         val isVpn: Boolean?,
-        /** 非 VPN 网络自身，或 Android 12+ 明确报告的 VPN 底层网络；null 表示无法可靠识别。 */
+        /** 非 VPN 网络自身，或唯一可观察到的非 VPN Internet 网络；null 表示无法可靠识别。 */
         val underlyingNetworks: Set<android.net.Network>?,
     )
 
     private val networkRetestLock = Any()
+    private val observedNonVpnNetworks = mutableSetOf<android.net.Network>()
 
     /** 最近一次默认网络状态，用于去重回调并区分可确认的 VPN-only 变化。 */
     @Volatile
@@ -351,6 +352,33 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 ) = scheduleNetworkRetest(network, caps)
             }
             cm.registerDefaultNetworkCallback(callback)
+            val nonVpnRequest = android.net.NetworkRequest.Builder()
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build()
+            cm.registerNetworkCallback(
+                nonVpnRequest,
+                object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        updateObservedNonVpnNetwork(network, available = true)
+                    }
+
+                    override fun onLost(network: android.net.Network) {
+                        updateObservedNonVpnNetwork(network, available = false)
+                    }
+
+                    override fun onCapabilitiesChanged(
+                        network: android.net.Network,
+                        caps: android.net.NetworkCapabilities,
+                    ) {
+                        updateObservedNonVpnNetwork(
+                            network,
+                            available = caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN),
+                        )
+                    }
+                },
+            )
         } catch (e: Exception) {
             android.util.Log.w("App", "registerNetworkCallback failed: ${e.message}")
         }
@@ -365,10 +393,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         val underlyingNetworks = when {
             network == null || isVpn == null -> null
             !isVpn -> setOf(network)
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                caps?.underlyingNetworks?.takeIf { it.isNotEmpty() }?.toSet()
+            else -> synchronized(networkRetestLock) {
+                observedNonVpnNetworks.singleOrNull()?.let { setOf(it) }
             }
-            else -> null
         }
         val current = DefaultNetworkState(network, isVpn, underlyingNetworks)
         val previous = synchronized(networkRetestLock) {
@@ -387,7 +414,24 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         networkHandler.postDelayed(networkRetestRunnable, 2000)
     }
 
-    /** 只有两侧 VPN/非 VPN 网络都报告同一组非空底层网络时，才将变化视为 VPN-only。 */
+    /** 非 VPN Internet 网络列表发生变化时，按真实/无法分类网络变化防抖测速。 */
+    private fun updateObservedNonVpnNetwork(
+        network: android.net.Network,
+        available: Boolean,
+    ) {
+        val changed = synchronized(networkRetestLock) {
+            if (available) observedNonVpnNetworks.add(network) else observedNonVpnNetworks.remove(network)
+        }
+        if (changed) {
+            synchronized(networkRetestLock) {
+                pendingNetworkRetest = true
+            }
+            networkHandler.removeCallbacks(networkRetestRunnable)
+            networkHandler.postDelayed(networkRetestRunnable, 2000)
+        }
+    }
+
+    /** 只有 VPN 开关变化且唯一可观察到的非 VPN 网络未变时，才将变化视为 VPN-only。 */
     private fun isVpnOnlyChange(
         previous: DefaultNetworkState,
         current: DefaultNetworkState,
