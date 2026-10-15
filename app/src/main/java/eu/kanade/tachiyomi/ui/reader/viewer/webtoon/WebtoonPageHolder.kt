@@ -11,6 +11,7 @@ import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updateMargins
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
+import com.zycomic.app.net.RouteManager
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
@@ -18,7 +19,6 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.SlowPageOverlay
-import com.zycomic.app.net.RouteManager
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
 import kotlinx.coroutines.Job
@@ -276,6 +276,7 @@ class WebtoonPageHolder(
      * Called when the page has an error.
      */
     private fun setError(error: Throwable?) {
+        progressIndicator.hide()
         progressContainer.isVisible = false
         removeSlowOverlay()
         initErrorLayout(error)
@@ -285,6 +286,7 @@ class WebtoonPageHolder(
      * Called when the image is decoded and going to be displayed.
      */
     private fun onImageDecoded() {
+        progressIndicator.hide()
         progressContainer.isVisible = false
         removeErrorLayout()
         page?.let { current -> current.chapter.pageLoader?.markImageDecodeSuccess(current) }
@@ -343,8 +345,9 @@ class WebtoonPageHolder(
                 val current = page ?: return@setOnClickListener
                 val exhausted = current.manualRetryCount.get() >= 3 &&
                     current.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
-                if (exhausted) viewer.activity.showMenu()
-                else {
+                if (exhausted) {
+                    viewer.activity.showMenu()
+                } else {
                     errorLayout?.actionRetry?.text = "重试"
                     current.chapter.pageLoader?.retryPage(current)
                 }

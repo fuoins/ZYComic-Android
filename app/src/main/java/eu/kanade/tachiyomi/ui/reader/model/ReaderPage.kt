@@ -12,18 +12,23 @@ import java.util.concurrent.atomic.AtomicReference
 sealed interface ReaderPageLoadStatus {
     data object Queued : ReaderPageLoadStatus
     data object WaitingForRequest : ReaderPageLoadStatus
+    data object ResolvingImageUrl : ReaderPageLoadStatus
     data object Requesting : ReaderPageLoadStatus
     data class Receiving(val percentage: Int?) : ReaderPageLoadStatus
-    data class TryingFallback(val attempt: Int, val total: Int) : ReaderPageLoadStatus
+    data class TryingFallback(val attempt: Int, val total: Int, val automaticRetryRound: Int? = null) : ReaderPageLoadStatus
     data object Idle : ReaderPageLoadStatus
 
     val label: String
         get() = when (this) {
             Queued -> "排队中"
             WaitingForRequest -> "排队等待请求额度"
-            Requesting -> "连接/请求中"
+            ResolvingImageUrl -> "正在获取图片地址"
+            Requesting -> "正在请求图片"
             is Receiving -> percentage?.let { "正在下载（$it%）" } ?: "正在接收图片数据"
-            is TryingFallback -> "正在尝试备用图源（第 $attempt/$total 个）"
+            is TryingFallback -> automaticRetryRound?.let {
+                "自动重试（第 $it/${PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS} 轮）"
+            }
+                ?: "自动重试/尝试备用节点（第 $attempt/$total 个）"
             Idle -> ""
         }
 }
@@ -55,7 +60,9 @@ open class ReaderPage(
     /** Initial request is round one; automatic retries are capped at three total rounds. */
     val automaticRetryRound = AtomicInteger(1)
     val endpointsAttemptedInRound = AtomicInteger(0)
+
     @Volatile var automaticRetryExhausted: Boolean = false
+
     @Volatile var retryBudgetSource: String? = null
     private val _slowFlow = MutableStateFlow(false)
     val slowFlow = _slowFlow.asStateFlow()
@@ -68,18 +75,21 @@ open class ReaderPage(
         set(value) {
             _loadStatusFlow.value = value
         }
+
     @Volatile
     var slow: Boolean = false
         set(value) {
             field = value
             _slowFlow.value = value
         }
+
     @Volatile
     var readerVisible: Boolean = false
         set(value) {
             field = value
             _readerVisibleFlow.value = value
         }
+
     @Volatile var raceActive: Boolean = false
 
     /** Value to check if the page is too wide to be doubled up */

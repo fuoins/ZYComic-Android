@@ -1,13 +1,5 @@
 package com.zycomic.app.net
 
-import java.io.Closeable
-import java.io.File
-import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -20,7 +12,16 @@ import okio.BufferedSource
 import okio.ForwardingSource
 import okio.buffer
 import okio.source
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.decoder.ImageDecoder
+import java.io.Closeable
+import java.io.File
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.CipherInputStream
 
 class ImageInterceptor : Interceptor {
@@ -67,7 +68,9 @@ class ImageInterceptor : Interceptor {
         val imgTarget = RouteManager.imgRewriteTarget
         val fetchUrl = if (!imgTarget.isNullOrBlank()) {
             original.url.newBuilder().host(imgTarget).build()
-        } else original.url
+        } else {
+            original.url
+        }
         val imgReq = original.newBuilder()
             .url(fetchUrl)
             .header("User-Agent", ManwaInterceptor.UA)
@@ -317,8 +320,11 @@ class ImageInterceptor : Interceptor {
     ): Outcome = try {
         executeOnce(request, originalUrl, endpoint, scope, attemptId, totalAttempts, progress, onRequestStarted)
     } catch (e: Exception) {
-        if (scope?.isCurrent == false) Outcome.Fail.Cancelled
-        else Outcome.Fail.Io(e as? IOException ?: IOException("图片请求准备失败", e))
+        if (scope?.isCurrent == false) {
+            Outcome.Fail.Cancelled
+        } else {
+            Outcome.Fail.Io(e as? IOException ?: IOException("图片请求准备失败", e))
+        }
     }
 
     private fun executeOnce(
@@ -357,12 +363,18 @@ class ImageInterceptor : Interceptor {
         var responseTransferred = false
         var endpointRequestStarted = false
         var networkStartedAt = 0L
+        var firstByteAtNanos = 0L
+        var bytesRead = 0L
+        var downloadCompleted = false
+        val pageLabel = scope?.page?.index?.plus(1)?.toString() ?: "unknown"
+        val retryRound = scope?.page?.automaticRetryRound?.get() ?: 1
         try {
             if (scope != null && !scope.recordEndpointAttempt(endpoint)) return Outcome.Fail.Cancelled
             scope?.endpointRequestStarted(attemptId, totalAttempts)
             endpointRequestStarted = scope != null
             onRequestStarted()
             networkStartedAt = System.nanoTime()
+            logcat { "Image request started: page=$pageLabel attempt=${attemptId + 1} round=$retryRound" }
             call.execute().use { response ->
                 if (!response.isSuccessful) {
                     scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
@@ -372,7 +384,6 @@ class ImageInterceptor : Interceptor {
                 val body = response.body ?: return Outcome.Fail.Invalid
                 val contentLength = body.contentLength()
                 if (contentLength > MAX_IMAGE_BYTES) return Outcome.Fail.Oversize
-                var bytesRead = 0L
                 rawTemp.outputStream().buffered().use { output ->
                     body.byteStream().use { input ->
                         val buffer = ByteArray(32 * 1024)
@@ -384,6 +395,13 @@ class ImageInterceptor : Interceptor {
                             }
                             val read = input.read(buffer)
                             if (read < 0) break
+                            if (read > 0 && firstByteAtNanos == 0L) {
+                                firstByteAtNanos = System.nanoTime()
+                                logcat {
+                                    "Image first byte: page=$pageLabel attempt=${attemptId + 1} " +
+                                        "elapsed=${TimeUnit.NANOSECONDS.toMillis(firstByteAtNanos - networkStartedAt)}ms"
+                                }
+                            }
                             bytesRead += read
                             if (bytesRead > MAX_IMAGE_BYTES) return Outcome.Fail.Oversize
                             output.write(buffer, 0, read)
@@ -391,6 +409,11 @@ class ImageInterceptor : Interceptor {
                         }
                         output.flush()
                     }
+                }
+                downloadCompleted = true
+                logcat {
+                    "Image download completed: page=$pageLabel attempt=${attemptId + 1} " +
+                        "elapsed=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - networkStartedAt)}ms bytes=$bytesRead"
                 }
                 scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
                 networkStartedAt = 0L
@@ -458,6 +481,13 @@ class ImageInterceptor : Interceptor {
             if (scope?.isCurrent == false) return Outcome.Fail.Cancelled
             return Outcome.Fail.Invalid
         } finally {
+            val cancellationReason = scope?.reasonFor(call)
+            if (call.isCanceled() || cancellationReason != null) {
+                logcat {
+                    "Image request cancelled: page=$pageLabel attempt=${attemptId + 1} " +
+                        "reason=${cancellationReason ?: "unknown"} bytes=$bytesRead downloadCompleted=$downloadCompleted"
+                }
+            }
             if (networkStartedAt != 0L) scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
             if (endpointRequestStarted) scope?.endpointRequestFinished()
             if (!responseTransferred) responseTemp.delete()
@@ -554,7 +584,9 @@ class ImageInterceptor : Interceptor {
     private fun imageMime(bytes: ByteArray): MediaType? {
         if (bytes.size >= 12 && bytes.copyOfRange(0, 4).contentEquals(byteArrayOf(0x52, 0x49, 0x46, 0x46)) &&
             bytes.copyOfRange(8, 12).contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50))
-        ) return "image/webp".toMediaTypeOrNull()
+        ) {
+            return "image/webp".toMediaTypeOrNull()
+        }
         if (bytes.size >= 8 && bytes.copyOfRange(0, 8).contentEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))) {
             return "image/png".toMediaTypeOrNull()
         }

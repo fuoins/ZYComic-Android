@@ -1,10 +1,10 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import com.zycomic.app.net.ImageAttemptCoordinator
+import com.zycomic.app.net.ImageAttemptDeferredException
 import com.zycomic.app.net.ImageCacheManager
 import com.zycomic.app.net.ImageCancelReason
 import com.zycomic.app.net.ImageDecryptFailedException
-import com.zycomic.app.net.ImageAttemptDeferredException
 import com.zycomic.app.net.PageAttemptScope
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.normalizedForComparison
@@ -29,8 +29,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runInterruptible
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.core.common.util.system.logcat
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.decoder.ImageDecoder
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -72,13 +72,21 @@ internal class HttpPageLoader(
     private val preloadLock = Any()
 
     @Volatile private var visiblePages: List<ReaderPage> = emptyList()
+
     @Volatile private var successors: List<ReaderPage> = emptyList()
+
     @Volatile private var currentWindow: Set<ReaderPage> = emptySet()
+
     @Volatile private var readingRanks: Map<ReaderPage, Int> = emptyMap()
+
     @Volatile private var readingOrderInitialized = false
+
     @Volatile private var chapterPageOrder: List<ReaderPage> = emptyList()
+
     @Volatile private var preloadStartIndex = 0
+
     @Volatile private var preloadCursor = 0
+
     @Volatile private var rollingPages: List<ReaderPage> = emptyList()
 
     init {
@@ -227,9 +235,6 @@ internal class HttpPageLoader(
             .forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
         (oldVisible - newVisible).filter { it in activeRetryLoads }
             .forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
-        newlyVisible.filter { activeScopes.containsKey(it) && it !in activeRetryLoads }
-            .forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
-        activeRetryLoads.filter { it in newVisible }.forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
         (normalizedVisible + nextRollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
         promotedRetries.forEach { page ->
             if (page.status == Page.State.Queue) enqueue(page, priorityFor(page))
@@ -329,10 +334,18 @@ internal class HttpPageLoader(
         val anchorPosition = visiblePages.lastOrNull()
             ?.let(::chapterPagePosition)
             ?.takeIf { it >= 0 }
+        val now = System.nanoTime()
         val target = activeScopes.values.asSequence()
             .map { it.page }
             .filter { it !in visible && (it in activeRetryLoads || (it !in nearForeground && it in currentWindow)) }
-            .filter { it.activeAttempt.get()?.let { attempt -> attempt.isCurrent && attempt.hasOuterCall } == true }
+            .filter { page ->
+                val active = page.activeAttempt.get()
+                val lastProgress = active?.lastProgressAtNanos?.get() ?: 0L
+                active?.let {
+                    it.isCurrent && it.hasOuterCall && it.hasActiveEndpointRequest && lastProgress > 0L &&
+                        now - lastProgress >= TimeUnit.MILLISECONDS.toNanos(1_500L)
+                } == true
+            }
             .mapNotNull { page ->
                 val position = chapterPagePosition(page)
                 val distance = if (position >= 0 && anchorPosition != null) {
@@ -500,12 +513,22 @@ internal class HttpPageLoader(
         var attempt: PageAttemptScope? = null
         var slowWatch: java.util.concurrent.ScheduledFuture<*>? = null
         var deferRetry = false
+        var urlResolutionNanos = 0L
         try {
             if (page.imageUrl.isNullOrEmpty()) {
                 if (!owns(page, myGeneration)) return
                 page.status = Page.State.LoadPage
-                page.loadStatus = ReaderPageLoadStatus.Requesting
-                page.imageUrl = source.getImageUrl(page)
+                page.loadStatus = ReaderPageLoadStatus.ResolvingImageUrl
+                val resolutionStartedAt = System.nanoTime()
+                try {
+                    page.imageUrl = source.getImageUrl(page)
+                } finally {
+                    urlResolutionNanos = System.nanoTime() - resolutionStartedAt
+                    logcat {
+                        "Reader page ${page.index + 1} image URL resolution: " +
+                            "${TimeUnit.NANOSECONDS.toMillis(urlResolutionNanos)}ms"
+                    }
+                }
             }
             val imageUrl = page.imageUrl ?: throw IOException("图片 URL 为空")
             if (!chapterCache.isImageInCache(imageUrl)) {
@@ -524,6 +547,7 @@ internal class HttpPageLoader(
                             canRace = page in visiblePages,
                             isSecondaryVisible = page in visiblePages && visiblePages.firstOrNull() !== page,
                             queueWaitNanos = queueWaitNanos,
+                            urlResolutionTimeNanos = urlResolutionNanos,
                         ).also { scope ->
                             page.activeAttempt.set(scope)
                             activeScopes[page] = scope

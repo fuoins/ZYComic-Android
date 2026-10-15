@@ -83,11 +83,13 @@ class PageAttemptScope(
     canRace: Boolean,
     val isSecondaryVisible: Boolean = false,
     queueWaitNanos: Long = 0L,
+    urlResolutionTimeNanos: Long = 0L,
 ) {
     private val cancelReason = AtomicReference<ImageCancelReason?>(null)
     private val attemptReasons = ConcurrentHashMap<Int, ImageCancelReason>()
     private val calls = ConcurrentHashMap<Call, Int>()
     private val winnerClaimed = AtomicBoolean(false)
+
     @Volatile var canRace: Boolean = canRace
         private set
     val lastProgressAtNanos = AtomicLong(0L)
@@ -95,11 +97,13 @@ class PageAttemptScope(
     val receivedAnyBytes = AtomicBoolean(false)
     private val activeEndpointRequests = AtomicInteger(0)
     private val queueNanos = AtomicLong(queueWaitNanos.coerceAtLeast(0L))
+    private val imageUrlResolutionNanos = AtomicLong(urlResolutionTimeNanos.coerceAtLeast(0L))
     private val networkNanos = AtomicLong(0L)
     private val decryptNanos = AtomicLong(0L)
     private val cacheNanos = AtomicLong(0L)
     private val validationNanos = AtomicLong(0L)
     private val permitWaitStartedAtNanos = AtomicLong(0L)
+
     @Volatile
     var raceActive: Boolean = false
         private set
@@ -124,10 +128,11 @@ class PageAttemptScope(
         lastProgressAtNanos.set(now)
         activeEndpointRequests.incrementAndGet()
         if (isCurrent) {
-            page.loadStatus = if (attemptId == 0) {
-                ReaderPageLoadStatus.Requesting
-            } else {
-                ReaderPageLoadStatus.TryingFallback(attemptId + 1, totalAttempts)
+            val retryRound = page.automaticRetryRound.get()
+            page.loadStatus = when {
+                retryRound > 1 -> ReaderPageLoadStatus.TryingFallback(attemptId + 1, totalAttempts, retryRound)
+                attemptId == 0 -> ReaderPageLoadStatus.Requesting
+                else -> ReaderPageLoadStatus.TryingFallback(attemptId + 1, totalAttempts)
             }
         }
     }
@@ -251,6 +256,7 @@ class PageAttemptScope(
         }
         val queueTime = queueNanos.get() + pendingQueueTime
         return listOf(
+            "resolveUrl=${millis(imageUrlResolutionNanos.get())}ms",
             "queue=${millis(queueTime)}ms",
             "network=${millis(networkNanos.get())}ms",
             "decrypt=${millis(decryptNanos.get())}ms",

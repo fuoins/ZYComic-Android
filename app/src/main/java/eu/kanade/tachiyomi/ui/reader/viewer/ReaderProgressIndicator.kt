@@ -1,6 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -28,12 +30,12 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.view.isVisible
-import com.google.android.material.progressindicator.CircularProgressIndicator as ViewCircularProgressIndicator
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.theme.TachiyomiTheme
 import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import com.google.android.material.progressindicator.CircularProgressIndicator as ViewCircularProgressIndicator
 
 /**
  * A wrapper for [ViewCircularProgressIndicator] that always rotates and reports the current load stage.
@@ -47,9 +49,24 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     // KMK <--
 ) : AbstractComposeView(context, attrs, defStyleAttr) {
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var showRequested = false
+    private var showScheduled = false
+    private var statusScheduled = false
+    private var pendingStatusText = ""
+    private val showIndicatorRunnable = Runnable {
+        showScheduled = false
+        if (showRequested) isVisible = true
+    }
+    private val showStatusRunnable = Runnable {
+        statusScheduled = false
+        if (showRequested) statusText = pendingStatusText
+    }
+
     init {
         layoutParams = FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER)
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
+        isVisible = false
     }
 
     private var progress by mutableFloatStateOf(0f)
@@ -88,11 +105,26 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     }
 
     fun show() {
-        isVisible = true
+        showRequested = true
+        if (!isVisible && !showScheduled) {
+            showScheduled = true
+            mainHandler.postDelayed(showIndicatorRunnable, 300L)
+        }
+        if (pendingStatusText.isNotBlank() && statusText != pendingStatusText && !statusScheduled) {
+            statusScheduled = true
+            mainHandler.postDelayed(showStatusRunnable, 500L)
+        }
     }
 
     fun hide() {
+        showRequested = false
+        mainHandler.removeCallbacks(showIndicatorRunnable)
+        mainHandler.removeCallbacks(showStatusRunnable)
+        showScheduled = false
+        statusScheduled = false
         isVisible = false
+        pendingStatusText = ""
+        statusText = ""
     }
 
     fun setProgress(@IntRange(from = 0, to = 100) progress: Int) {
@@ -100,6 +132,15 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     }
 
     fun setStatus(status: String) {
-        this.statusText = status
+        if (status == pendingStatusText) return
+        pendingStatusText = status
+        mainHandler.removeCallbacks(showStatusRunnable)
+        statusScheduled = false
+        if (status.isBlank()) {
+            statusText = ""
+        } else if (showRequested) {
+            statusScheduled = true
+            mainHandler.postDelayed(showStatusRunnable, 500L)
+        }
     }
 }
