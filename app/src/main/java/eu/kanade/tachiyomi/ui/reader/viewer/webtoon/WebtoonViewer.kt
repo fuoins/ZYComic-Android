@@ -92,6 +92,7 @@ class WebtoonViewer(
     /* [EXH] private */
     var currentPage: Any? = null
     private val readingOrderLoaders = linkedSetOf<PageLoader>()
+    private var readingDirection = 1
 
     private val threshold: Int =
         // KMK -->
@@ -112,7 +113,7 @@ class WebtoonViewer(
         recycler.addOnScrollListener(
             object : RecyclerView.OnScrollListener() {
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                    onScrolled()
+                    onScrolled(scrollDelta = dy)
 
                     if ((dy > threshold || dy < -threshold) && activity.viewModel.state.value.menuVisible) {
                         activity.hideMenu()
@@ -333,7 +334,10 @@ class WebtoonViewer(
         }
     }
 
-    fun onScrolled(pos: Int? = null) {
+    fun onScrolled(pos: Int? = null, scrollDelta: Int? = null) {
+        if (scrollDelta != null && scrollDelta != 0) {
+            readingDirection = if (scrollDelta > 0) 1 else -1
+        }
         val position = pos ?: layoutManager.findLastEndVisibleItemPosition()
         reportReadingOrder(position)
         val item = adapter.items.getOrNull(position)
@@ -363,9 +367,13 @@ class WebtoonViewer(
         readingOrderLoaders.retainAll(currentLoaders)
         groups.forEach { (loader, chapterVisible) ->
             loader ?: return@forEach
-            val reference = chapterVisible.last()
-            val orderedSuccessors = adapter.items
-                .drop(lastVisible + 1)
+            val reference = if (readingDirection > 0) chapterVisible.last() else chapterVisible.first()
+            val orderedItems = if (readingDirection > 0) {
+                adapter.items.drop(lastVisible + 1)
+            } else {
+                adapter.items.take(firstVisible).asReversed()
+            }
+            val orderedSuccessors = orderedItems
                 .asSequence()
                 .filterIsInstance<ReaderPage>()
                 .map { if (it is InsertPage) it.parent else it }

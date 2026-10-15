@@ -70,6 +70,8 @@ abstract class PagerViewer(
     /* [EXH] private */
     var currentPage: ReaderItem? = null
     private var readingOrderLoader: PageLoader? = null
+    private var lastReadingPosition: Int? = null
+    private var readingDirection = 1
 
     /**
      * Viewer chapters to set when the pager enters idle mode. Otherwise, if the view was settling
@@ -200,7 +202,12 @@ abstract class PagerViewer(
     fun onPageChange(position: Int) {
         val pagePair = adapter.joinedItems.getOrNull(position)
         val page = pagePair?.first
-        reportReadingOrder(position, pagePair)
+        val previousPosition = lastReadingPosition
+        if (page != null && currentPage != null && page != currentPage && previousPosition != null && position != previousPosition) {
+            readingDirection = if (position > previousPosition) 1 else -1
+        }
+        lastReadingPosition = position
+        reportReadingOrder(position, pagePair, readingDirection)
         if (page != null && currentPage != page) {
             val allowPreload = checkAllowPreload(page as? ReaderPage)
             val forward = when {
@@ -226,7 +233,7 @@ abstract class PagerViewer(
     }
 
     /** Adapter order already reflects LTR/RTL/vertical, double-page and split-page layout decisions. */
-    private fun reportReadingOrder(position: Int, pagePair: Pair<ReaderItem, ReaderItem?>?) {
+    private fun reportReadingOrder(position: Int, pagePair: Pair<ReaderItem, ReaderItem?>?, direction: Int) {
         val active = pagePair
         if (active == null) {
             readingOrderLoader?.updateReadingOrder(emptyList(), emptyList())
@@ -249,10 +256,16 @@ abstract class PagerViewer(
         val visible = listOfNotNull(actualPage(active.first), actualPage(active.second))
             .ifEmpty { listOf(reference) }
             .distinctBy { it.index }
-        val orderedSuccessors = adapter.joinedItems
-            .drop(position + 1)
+        val orderedPairs = if (direction > 0) {
+            adapter.joinedItems.drop(position + 1)
+        } else {
+            adapter.joinedItems.take(position).asReversed()
+        }
+        val orderedSuccessors = orderedPairs
             .asSequence()
-            .flatMap { sequenceOf(it.first, it.second) }
+            .flatMap { pair ->
+                if (direction > 0) sequenceOf(pair.first, pair.second) else sequenceOf(pair.second, pair.first)
+            }
             .mapNotNull(::readingPage)
             .filter { it.chapter == reference.chapter }
             .distinctBy { it.index }
@@ -350,6 +363,8 @@ abstract class PagerViewer(
         // since we're about to change the size of the items
         // If we don't the size change could put us on a new chapter
         pager.removeOnPageChangeListener(pagerListener)
+        // Adapter positions from the old and new chapter lists are not comparable.
+        lastReadingPosition = null
 
         val forceTransition = config.alwaysShowChapterTransition ||
             adapter.joinedItems.getOrNull(pager.currentItem)?.first is ChapterTransition

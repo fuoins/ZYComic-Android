@@ -157,14 +157,8 @@ class PageAttemptScope(
 
     fun updateVisibility(isVisible: Boolean) {
         canRace = isVisible
-        // Keep progressing hedge calls alive across a visibility change. A stalled page may
-        // still release secondary calls; its primary request retains its normal ownership.
-        if (!isVisible && !hasRecentByteProgress()) {
-            calls.entries.filter { it.value > 0 }.forEach { (call, attemptId) ->
-                attemptReasons.putIfAbsent(attemptId, ImageCancelReason.RACE_LOSER)
-                call.cancel()
-            }
-        }
+        // Visibility controls whether new hedges may start; already-started same-chapter calls
+        // retain ownership so they can finish validation and populate the chapter cache.
     }
 
     /** True when this attempt has received bytes recently enough to count as active progress. */

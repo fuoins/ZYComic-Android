@@ -180,8 +180,13 @@ abstract class PageLoader {
 
     /** Common holder entry point; the barrier is awaited before any loader-specific image work. */
     suspend fun loadPageWhenAllowed(page: ReaderPage) {
-        imageLoadingBarrierJob?.join()
+        awaitImageLoadingBarrier()
         loadPage(page)
+    }
+
+    /** Image workers must await this immediately before starting a network image request. */
+    protected suspend fun awaitImageLoadingBarrier() {
+        imageLoadingBarrierJob?.join()
     }
 
     /**

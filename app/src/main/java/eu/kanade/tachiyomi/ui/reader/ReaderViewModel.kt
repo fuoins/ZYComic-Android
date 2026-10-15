@@ -666,9 +666,12 @@ class ReaderViewModel @JvmOverloads constructor(
         }
 
         val loader = loader ?: return
+        val imageLoadingBarrier = state.value.viewerChapters
+            ?.takeIf { it.nextChapter == chapter }
+            ?.currChapter
         try {
             logcat { "Preloading ${chapter.chapter.url}" }
-            loader.loadChapter(chapter)
+            loader.loadChapter(chapter, imageLoadingBarrier = imageLoadingBarrier)
         } catch (e: Throwable) {
             if (e is CancellationException) {
                 throw e

@@ -71,6 +71,8 @@ internal class HttpPageLoader(
     private val successfullyCachedPages = java.util.Collections.newSetFromMap(ConcurrentHashMap<ReaderPage, Boolean>())
     private val queueLock = Any()
     private val preloadLock = Any()
+    private val queueTokenGenerator = AtomicInteger()
+    private val capacityLimitedPages = ConcurrentHashMap.newKeySet<ReaderPage>()
     private val previouslyVisiblePages = LinkedHashMap<Int, ReaderPage>()
 
     @Volatile private var visiblePages: List<ReaderPage> = emptyList()
@@ -93,13 +95,14 @@ internal class HttpPageLoader(
         repeat(readerThreads) {
             workerScope.launchIO {
                 while (true) {
+                    awaitImageLoadingBarrier()
                     runInterruptible { workerSignals.take() }
+                    awaitImageLoadingBarrier()
                     val entry = queue.poll() ?: continue
                     val page = entry.page
                     val shouldLoad = synchronized(queueLock) {
                         synchronized(page) {
-                            val ownsEntry = page.queuedToken.get() == entry.generation
-                            if (ownsEntry) page.queuedToken.compareAndSet(entry.generation, -1)
+                            val ownsEntry = page.queuedToken.compareAndSet(entry.queueToken, -1)
                             ownsEntry && schedulingEnabled && !activeWorkerJobs.containsKey(page) &&
                                 entry.generation == page.generation.get() &&
                                 page.status == Page.State.Queue && readingOrderInitialized &&
@@ -119,7 +122,9 @@ internal class HttpPageLoader(
                         pageJob.join()
                     } finally {
                         activeWorkerJobs.remove(page, pageJob)
-                        if (schedulingEnabled && !isRecycled && page.status == Page.State.Queue && page in currentWindow) {
+                        if (schedulingEnabled && !isRecycled && page.status == Page.State.Queue &&
+                            page in currentWindow && page !in capacityLimitedPages
+                        ) {
                             enqueue(page, priorityFor(page))
                         }
                     }
@@ -151,7 +156,6 @@ internal class HttpPageLoader(
             page.status = Page.State.Queue
         }
         if (page.status == Page.State.Queue && (currentWindow.isEmpty() || page in currentWindow)) {
-            if (page in visiblePages) maybePreemptForVisiblePage()
             enqueue(page, priorityFor(page))
         }
     }
@@ -207,30 +211,10 @@ internal class HttpPageLoader(
         }
         val newWindow = (normalizedVisible + nextRollingPages).toSet()
 
-        synchronized(queueLock) {
-            currentWindow = newWindow
-            val promoteRegular = queueSnapshot().filter { it.page in newVisible }
-            promoteRegular.forEach { entry ->
-                if (queue.remove(entry)) {
-                    synchronized(entry.page) {
-                        if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
-                    }
-                }
-            }
-            queueSnapshot().filter { it.page !in newWindow }.forEach { entry ->
-                if (queue.remove(entry)) {
-                    synchronized(entry.page) {
-                        if (entry.page.queuedToken.get() == entry.generation) entry.page.queuedToken.set(-1)
-                    }
-                    entry.page.slow = false
-                }
-            }
-        }
+        updateCurrentWindow(newWindow)
 
-        activeScopes.values
-            .filter { it.page !in newWindow }
-            .forEach { cancelPage(it.page, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
         (normalizedVisible + nextRollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
+        wakeCapacityLimitedPages()
     }
 
     override fun activateForReading() {
@@ -251,11 +235,7 @@ internal class HttpPageLoader(
 
         synchronized(queueLock) {
             queueSnapshot().forEach { entry ->
-                synchronized(entry.page) {
-                    if (entry.page.queuedToken.get() == entry.generation) {
-                        entry.page.queuedToken.compareAndSet(entry.generation, -1)
-                    }
-                }
+                entry.page.queuedToken.compareAndSet(entry.queueToken, -1)
             }
             queue.clear()
             workerSignals.clear()
@@ -264,6 +244,7 @@ internal class HttpPageLoader(
         visiblePages = emptyList()
         successors = emptyList()
         readingRanks = emptyMap()
+        capacityLimitedPages.clear()
 
         val scopedPages = activeScopes.keys.toSet()
         scopedPages.forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
@@ -281,21 +262,59 @@ internal class HttpPageLoader(
         }
     }
 
-    private fun priorityFor(page: ReaderPage): Int = if (page in visiblePages) 2 else 1
+    private fun priorityFor(page: ReaderPage): Int {
+        if (page in visiblePages) return Int.MAX_VALUE
+        val rank = readingRanks[page] ?: return 0
+        return if (rank < nearForegroundSize) nearForegroundSize - rank else 0
+    }
 
     private fun queueSnapshot(): List<PriorityPage> = queue.toArray(emptyArray<PriorityPage>()).asList()
 
     private fun enqueue(page: ReaderPage, priority: Int) {
         synchronized(queueLock) {
-            if (!schedulingEnabled || isRecycled || !readingOrderInitialized || page !in currentWindow || page.status != Page.State.Queue) return
+            if (!schedulingEnabled || isRecycled || !readingOrderInitialized || page !in currentWindow ||
+                page.status != Page.State.Queue || page in capacityLimitedPages
+            ) return
             synchronized(page) {
                 val generation = page.generation.get()
-                if (page.queuedToken.get() == generation) return
-                page.queuedToken.set(generation)
-                queue.offer(PriorityPage(page, priority, generation, queuedAtNanos = System.nanoTime()))
+                val oldQueueToken = page.queuedToken.get()
+                if (oldQueueToken != -1) {
+                    val staleEntries = queueSnapshot().filter {
+                        it.page === page && it.queueToken == oldQueueToken && it.generation != generation
+                    }
+                    if (staleEntries.isEmpty()) return
+                    staleEntries.forEach { entry ->
+                        if (queue.remove(entry)) page.queuedToken.compareAndSet(entry.queueToken, -1)
+                    }
+                    if (page.queuedToken.get() != -1) return
+                }
+                val queueToken = queueTokenGenerator.incrementAndGet()
+                page.queuedToken.set(queueToken)
+                queue.offer(PriorityPage(page, priority, generation, queueToken, queuedAtNanos = System.nanoTime()))
                 workerSignals.offer(Unit)
             }
         }
+    }
+
+    private fun updateCurrentWindow(newWindow: Set<ReaderPage>) {
+        val pagesToRequeue = synchronized(queueLock) {
+            currentWindow = newWindow
+            queueSnapshot().mapNotNull { entry ->
+                val page = entry.page
+                val inWindow = page in newWindow
+                if ((!inWindow || entry.priority != priorityFor(page)) && queue.remove(entry)) {
+                    page.queuedToken.compareAndSet(entry.queueToken, -1)
+                    if (!inWindow) {
+                        page.slow = false
+                        capacityLimitedPages.remove(page)
+                    }
+                    page.takeIf { inWindow && page.status == Page.State.Queue }
+                } else {
+                    null
+                }
+            }
+        }
+        pagesToRequeue.distinctBy { it.index }.forEach { enqueue(it, priorityFor(it)) }
     }
 
     private fun chapterPagePosition(page: ReaderPage): Int =
@@ -340,9 +359,10 @@ internal class HttpPageLoader(
         if (!schedulingEnabled || isRecycled) return
         val next = synchronized(preloadLock) { fillRollingWindowLocked() }
         val window = (visiblePages + next).toSet()
-        synchronized(queueLock) { currentWindow = if (schedulingEnabled) window else emptySet() }
+        updateCurrentWindow(if (schedulingEnabled) window else emptySet())
         if (!schedulingEnabled) return
         next.forEach(::enqueueIfLoadable)
+        wakeCapacityLimitedPages()
     }
 
     private fun enqueueIfLoadable(page: ReaderPage) {
@@ -351,8 +371,7 @@ internal class HttpPageLoader(
             successfullyCachedPages.remove(page)
             page.status = Page.State.Queue
         }
-        if (page.status == Page.State.Queue && page in currentWindow) {
-            if (page in visiblePages) maybePreemptForVisiblePage()
+        if (page.status == Page.State.Queue && page in currentWindow && page !in capacityLimitedPages) {
             enqueue(page, priorityFor(page))
         }
     }
@@ -371,42 +390,36 @@ internal class HttpPageLoader(
             }
             refillRollingWindow()
         }
+        wakeCapacityLimitedPages()
     }
 
-    /** Cancel exactly one active far-foreground attempt; queued items are not worker capacity. */
-    private fun maybePreemptForVisiblePage() {
-        if (!schedulingEnabled || activeScopes.size < readerThreads) return
-        val visible = visiblePages.toSet()
-        val nearForeground = successors.take(nearForegroundSize).toSet()
-        val anchorPosition = visiblePages.lastOrNull()
-            ?.let(::chapterPagePosition)
-            ?.takeIf { it >= 0 }
-        val now = System.nanoTime()
-        val target = activeScopes.values.asSequence()
-            .map { it.page }
-            .filter { it !in visible && it !in nearForeground }
-            .filter { page ->
-                val active = page.activeAttempt.get()
-                val lastProgress = active?.lastProgressAtNanos?.get() ?: 0L
-                active?.let {
-                    it.isCurrent && it.hasOuterCall && it.hasActiveEndpointRequest && lastProgress > 0L &&
-                        now - lastProgress >= TimeUnit.MILLISECONDS.toNanos(1_500L)
-                } == true
-            }
-            .mapNotNull { page ->
-                val position = chapterPagePosition(page)
-                val distance = if (position >= 0 && anchorPosition != null) {
-                    kotlin.math.abs(position - anchorPosition)
-                } else {
-                    readingRanks[page]?.plus(1)
+    /** Wake visible work first, then admit background work only while its in-flight budget allows. */
+    private fun wakeCapacityLimitedPages() {
+        if (!schedulingEnabled || isRecycled || capacityLimitedPages.isEmpty()) return
+        val pagesToWake = synchronized(queueLock) {
+            var remainingBackgroundCapacity = (
+                preloadTaskLimit - activeScopes.values.count { it.page !in visiblePages }
+            ).coerceAtLeast(0)
+            capacityLimitedPages.toList().filter { page ->
+                when {
+                    page !in currentWindow || page.status != Page.State.Queue -> {
+                        capacityLimitedPages.remove(page)
+                        false
+                    }
+                    page in visiblePages -> {
+                        capacityLimitedPages.remove(page)
+                        true
+                    }
+                    remainingBackgroundCapacity > 0 -> {
+                        remainingBackgroundCapacity--
+                        capacityLimitedPages.remove(page)
+                        true
+                    }
+                    else -> false
                 }
-                distance?.let { page to it }
             }
-            .maxByOrNull { it.second }
-            ?.first
-            ?: return // No active invisible request can be classified as far; leave all current work untouched.
-        // cancelPage records ABANDON_FAR; completion returns the page to the ordinary queue.
-        cancelPage(target, ImageCancelReason.ABANDON_FAR, requeue = true)
+        }
+        pagesToWake.forEach(::enqueueIfLoadable)
     }
 
     private fun cancelPage(page: ReaderPage, reason: ImageCancelReason, requeue: Boolean): Boolean {
@@ -465,6 +478,7 @@ internal class HttpPageLoader(
         page.slow = false
         page.loadStatus = ReaderPageLoadStatus.Queued
         page.progress = 0
+        capacityLimitedPages.remove(page)
         if (wasActive) return
         synchronized(page) { page.generation.incrementAndGet() }
         if (source.isEhBasedSource()) page.imageUrl = null
@@ -535,6 +549,8 @@ internal class HttpPageLoader(
 
     private suspend fun internalLoadPage(page: ReaderPage, queuedAtNanos: Long) {
         if (!schedulingEnabled || !readingOrderInitialized || page !in currentWindow) return
+        awaitImageLoadingBarrier()
+        if (!schedulingEnabled || !readingOrderInitialized || page !in currentWindow) return
         val queueWaitNanos = (System.nanoTime() - queuedAtNanos).coerceAtLeast(0L)
         if (visiblePages.firstOrNull()?.let { it !== page } == true) {
             val homePage = visiblePages.first()
@@ -580,13 +596,23 @@ internal class HttpPageLoader(
             val imageUrl = page.imageUrl ?: throw IOException("图片 URL 为空")
             if (!chapterCache.isImageInCache(imageUrl)) {
                 if (!owns(page, myGeneration)) return
+                var capacityLimited = false
                 val currentAttempt = synchronized(queueLock) {
                     if (!schedulingEnabled || !readingOrderInitialized || page !in currentWindow || !owns(page, myGeneration)) {
+                        null
+                    } else if (page !in visiblePages &&
+                        activeScopes.values.count { it.page !in visiblePages } >= preloadTaskLimit
+                    ) {
+                        capacityLimited = true
+                        page.status = Page.State.Queue
+                        page.loadStatus = ReaderPageLoadStatus.Queued
+                        capacityLimitedPages.add(page)
                         null
                     } else {
                         page.status = Page.State.DownloadImage
                         page.loadStatus = ReaderPageLoadStatus.WaitingForRequest
                         page.progress = 0
+                        capacityLimitedPages.remove(page)
                         PageAttemptScope(
                             page = page,
                             generation = myGeneration,
@@ -603,7 +629,7 @@ internal class HttpPageLoader(
                     }
                 }
                 if (currentAttempt == null) {
-                    if (owns(page, myGeneration)) {
+                    if (!capacityLimited && owns(page, myGeneration)) {
                         page.status = Page.State.Queue
                         page.loadStatus = ReaderPageLoadStatus.Queued
                     }
@@ -697,7 +723,7 @@ internal class HttpPageLoader(
             attempt?.let { current ->
                 current.endRace()
                 page.activeAttempt.compareAndSet(current, null)
-                activeScopes.remove(page, current)
+                synchronized(queueLock) { activeScopes.remove(page, current) }
                 val disposition = pendingDisposition.remove(page)
                 if (disposition != null) {
                     page.stream = null
@@ -782,15 +808,12 @@ internal class HttpPageLoader(
         val page: ReaderPage,
         val priority: Int,
         val generation: Int,
+        val queueToken: Int,
         val queuedAtNanos: Long,
     ) : Comparable<PriorityPage> {
-        companion object {
-            private val idGenerator = AtomicInteger(0)
-        }
-        private val identifier = idGenerator.incrementAndGet()
         override fun compareTo(other: PriorityPage): Int {
             val priorityOrder = other.priority.compareTo(priority)
-            return if (priorityOrder != 0) priorityOrder else identifier.compareTo(other.identifier)
+            return if (priorityOrder != 0) priorityOrder else queueToken.compareTo(other.queueToken)
         }
     }
 }
