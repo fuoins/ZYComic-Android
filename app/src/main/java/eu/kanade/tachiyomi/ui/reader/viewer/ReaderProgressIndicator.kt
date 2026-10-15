@@ -53,7 +53,7 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     }
 
     private var progress by mutableFloatStateOf(0f)
-    private var status by mutableStateOf("")
+    private var statusText by mutableStateOf("")
 
     @Composable
     override fun Content() {
@@ -72,9 +72,9 @@ class ReaderProgressIndicator @JvmOverloads constructor(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 CombinedCircularProgressIndicator(progress = { progress })
-                if (status.isNotBlank()) {
+                if (statusText.isNotBlank()) {
                     Text(
-                        text = status,
+                        text = statusText,
                         modifier = Modifier
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 5.dp),
@@ -100,6 +100,6 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     }
 
     fun setStatus(status: String) {
-        this.status = status
+        this.statusText = status
     }
 }
