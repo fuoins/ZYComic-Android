@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -33,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
@@ -94,6 +96,8 @@ import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.ErrorView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import com.zycomic.app.ui.settings.AddBlacklistDialog
+import com.zycomic.app.util.LoginGate
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
@@ -116,6 +120,10 @@ fun MangaDetailScreen(
     val chapterAsc by vm.chapterAsc.collectAsState()
     val folders by vm.folders.collectAsState()
     val needLogin by vm.needLogin.collectAsState()
+    val addingBlacklist by vm.addingBlacklist.collectAsState()
+    val detailTags = remember(detail?.tags) {
+        detail?.tags.orEmpty().map { it.name }.filter { it.isNotBlank() }.distinct()
+    }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -135,6 +143,7 @@ fun MangaDetailScreen(
 
     var showFolderDialog by remember { mutableStateOf(false) }
     var showCoverMenu by remember { mutableStateOf(false) }
+    var showAddBlacklistDialog by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽二次确认：服务端接口是 toggle，必须让用户知道重复点击会变成取消屏蔽 */
     var showBlockConfirm by remember { mutableStateOf(false) }
     /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
@@ -155,6 +164,12 @@ fun MangaDetailScreen(
 
     LaunchedEffect(vm) {
         vm.blockMessage.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(vm) {
+        vm.blacklistMessage.collect { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
@@ -418,6 +433,36 @@ fun MangaDetailScreen(
                                     )
                                 }
                             }
+                            val blockChipShape = RoundedCornerShape(8.dp)
+                            Box(
+                                modifier = Modifier
+                                    .clip(blockChipShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                    .border(1.dp, MaterialTheme.colorScheme.primary, blockChipShape)
+                                    .clickable {
+                                        if (LoginGate.ensureLogin(context)) {
+                                            showAddBlacklistDialog = true
+                                        } else {
+                                            onRequireLogin()
+                                        }
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Filled.Add,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(2.dp))
+                                    Text(
+                                        "屏蔽标签+",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -625,6 +670,16 @@ fun MangaDetailScreen(
                         }
                     }
                 }
+            },
+        )
+    }
+    if (showAddBlacklistDialog) {
+        AddBlacklistDialog(
+            tags = detailTags,
+            adding = addingBlacklist,
+            onDismiss = { showAddBlacklistDialog = false },
+            onSubmit = { tags ->
+                vm.submitAddBlacklist(tags) { showAddBlacklistDialog = false }
             },
         )
     }

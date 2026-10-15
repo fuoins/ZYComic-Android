@@ -58,7 +58,7 @@ internal class HttpPageLoader(
     private val retryWorkerActive = AtomicBoolean(false)
     private val preloadSize = readerPreferences.preloadSize().get().coerceAtLeast(0)
     private val readerThreads = readerPreferences.readerThreads().get().coerceIn(1, 4)
-    private val rollingWindowSize = if (preloadSize == 0) 1 else min(3, preloadSize + 1)
+    private val rollingWindowSize = if (preloadSize == 0) 1 else min(4, preloadSize + 1)
     private val nearForegroundSize = min(rollingWindowSize - 1, preloadSize)
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
@@ -231,9 +231,13 @@ internal class HttpPageLoader(
             (promoteRegular + promoteRetries).map { it.page }.distinctBy { it.index }
         }
 
-        activeScopes.keys.filter { it !in newWindow && it !in activeRetryLoads }
-            .forEach { cancelPage(it, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
+        activeScopes.values
+            .filter {
+                it.page !in newWindow && it.page !in activeRetryLoads && !it.hasRecentByteProgress()
+            }
+            .forEach { cancelPage(it.page, ImageCancelReason.PAGE_HIDDEN, requeue = false) }
         (oldVisible - newVisible).filter { it in activeRetryLoads }
+            .filter { activeScopes[it]?.hasRecentByteProgress() != true }
             .forEach { cancelPage(it, ImageCancelReason.ABANDON_FAR, requeue = true) }
         (normalizedVisible + nextRollingPages).distinctBy { it.index }.forEach(::enqueueIfLoadable)
         promotedRetries.forEach { page ->
@@ -337,7 +341,7 @@ internal class HttpPageLoader(
         val now = System.nanoTime()
         val target = activeScopes.values.asSequence()
             .map { it.page }
-            .filter { it !in visible && (it in activeRetryLoads || (it !in nearForeground && it in currentWindow)) }
+            .filter { it !in visible && (it in activeRetryLoads || it !in nearForeground) }
             .filter { page ->
                 val active = page.activeAttempt.get()
                 val lastProgress = active?.lastProgressAtNanos?.get() ?: 0L

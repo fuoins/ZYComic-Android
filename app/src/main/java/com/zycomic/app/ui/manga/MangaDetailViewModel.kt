@@ -8,6 +8,7 @@ import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
+import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,11 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 屏蔽请求进行中，用于禁用按钮避免连点重复 toggle。 */
     val blockBusy = MutableStateFlow(false)
+
+    /** 添加当前漫画标签到账号屏蔽列表的提交状态与结果事件。 */
+    val addingBlacklist = MutableStateFlow(false)
+    private val _blacklistMessage = MutableSharedFlow<String>()
+    val blacklistMessage: SharedFlow<String> = _blacklistMessage.asSharedFlow()
 
     val user = UserRepository.userFlow
 
@@ -176,6 +182,26 @@ class MangaDetailViewModel(private val bookId: String) {
                 _blockMessage.emit(e.message ?: "屏蔽操作失败，请重试")
             } finally {
                 blockBusy.value = false
+            }
+        }
+    }
+
+    /** 将详情页选中的漫画标签加入账号屏蔽列表。 */
+    fun submitAddBlacklist(tags: List<String>, onSuccess: () -> Unit) {
+        if (tags.isEmpty() || addingBlacklist.value) return
+        scope.launch {
+            addingBlacklist.value = true
+            try {
+                TagRepository.addBlackTags(tags)
+                _blacklistMessage.emit("已添加 ${tags.size} 个标签到屏蔽列表")
+                onSuccess()
+            } catch (e: NotLoggedInException) {
+                needLogin.value = true
+            } catch (e: Exception) {
+                android.util.Log.e("MangaDetailViewModel", "submitAddBlacklist failed", e)
+                _blacklistMessage.emit(e.message ?: "添加失败，请重试")
+            } finally {
+                addingBlacklist.value = false
             }
         }
     }

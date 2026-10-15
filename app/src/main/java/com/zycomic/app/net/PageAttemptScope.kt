@@ -154,12 +154,22 @@ class PageAttemptScope(
 
     fun updateVisibility(isVisible: Boolean) {
         canRace = isVisible
-        if (!isVisible) {
+        // Keep progressing hedge calls alive across a visibility change. A stalled page may
+        // still release secondary calls; its primary request retains its normal ownership.
+        if (!isVisible && !hasRecentByteProgress()) {
             calls.entries.filter { it.value > 0 }.forEach { (call, attemptId) ->
                 attemptReasons.putIfAbsent(attemptId, ImageCancelReason.RACE_LOSER)
                 call.cancel()
             }
         }
+    }
+
+    /** True when this attempt has received bytes recently enough to count as active progress. */
+    fun hasRecentByteProgress(withinMillis: Long = 1_500L): Boolean {
+        if (!receivedAnyBytes.get()) return false
+        val lastProgress = lastProgressAtNanos.get()
+        return lastProgress > 0L &&
+            System.nanoTime() - lastProgress < TimeUnit.MILLISECONDS.toNanos(withinMillis)
     }
 
     fun cancel(reason: ImageCancelReason) {

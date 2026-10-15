@@ -68,9 +68,10 @@ fun TagBlockScreen(
 
 @Composable
 fun TagBlockContent(vm: SettingsViewModel, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
     val filterEnabled by vm.filterEnabled.collectAsState()
+    val allTags by vm.allTags.collectAsState()
     val blockedTags by vm.blockedTags.collectAsState()
+    val adding by vm.addingBlacklist.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf(false) }
 
@@ -102,100 +103,15 @@ fun TagBlockContent(vm: SettingsViewModel, modifier: Modifier = Modifier) {
     }
 
     if (showAddDialog) {
-        AddBlacklistDialog(vm = vm, onDismiss = { showAddDialog = false })
+        AddBlacklistDialog(
+            tags = allTags,
+            adding = adding,
+            onDismiss = { showAddDialog = false },
+            onSubmit = { tags -> vm.submitAddBlacklist(tags) { showAddDialog = false } },
+        )
     }
     if (showRemoveDialog) {
         RemoveBlacklistDialog(vm = vm, onDismiss = { showRemoveDialog = false })
-    }
-}
-
-// ==================== 添加屏蔽标签弹窗 ====================
-
-@Composable
-private fun AddBlacklistDialog(
-    vm: SettingsViewModel,
-    onDismiss: () -> Unit,
-) {
-    val context = LocalContext.current
-    val allTags by vm.allTags.collectAsState()
-    val adding by vm.addingBlacklist.collectAsState()
-
-    var keyword by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "添加屏蔽标签（已选 ${selected.size}）",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f).padding(16.dp),
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                }
-            }
-
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                placeholder = { Text("搜索标签") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            )
-
-            val filtered = if (keyword.isBlank()) allTags
-            else allTags.filter { it.contains(keyword, ignoreCase = true) }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                filtered.forEach { tag ->
-                    FilterChip(
-                        text = tag,
-                        selected = selected.contains(tag),
-                        onClick = {
-                            selected = if (selected.contains(tag)) selected - tag else selected + tag
-                        },
-                    )
-                }
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(onClick = {
-                    selected = emptySet()
-                    keyword = ""
-                }) { Text("重置") }
-                Button(
-                    modifier = Modifier.weight(1f),
-                    enabled = !adding,
-                    onClick = {
-                        if (selected.isEmpty()) {
-                            Toast.makeText(context, "请先选择标签", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        vm.submitAddBlacklist(selected.toList()) {
-                            onDismiss()
-                        }
-                    },
-                ) { Text(if (adding) "添加中..." else "确认添加 (${selected.size})") }
-            }
-        }
     }
 }
 
