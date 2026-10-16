@@ -84,6 +84,7 @@ import androidx.compose.ui.window.Dialog
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.Folder
+import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -91,6 +92,7 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.TabbedDialog
+import kotlinx.coroutines.CancellationException
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -123,6 +125,17 @@ fun LibraryScreen(
 
     LaunchedEffect(vm.needLogin) {
         vm.needLogin.collect { if (it) onRequireLogin() }
+    }
+
+    LaunchedEffect(Unit) {
+        if (UserRepository.isLoggedIn) {
+            try {
+                UserRepository.refreshUserInfo()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
     }
 
     // 页面首次可见时：收藏夹为空且已登录则请求一次（缓存）

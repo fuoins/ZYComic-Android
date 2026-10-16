@@ -7,6 +7,7 @@ import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -237,12 +238,25 @@ class HistoryViewModel {
     private val _folders = MutableStateFlow<List<Folder>>(emptyList())
     val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
 
+    private suspend fun refreshFavoriteCount() {
+        try {
+            UserRepository.refreshUserInfo()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // 收藏已成功；用户信息刷新失败不应改变收藏操作结果。
+        }
+    }
+
     /** 收藏单本（bookId 为漫画 ID）。 */
     fun favoriteSingle(bookId: String) {
         scope.launch {
             try {
                 FavoriteRepository.addFavorite(bookId.toInt())
+                refreshFavoriteCount()
                 _toast.value = "已加入收藏"
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
@@ -262,8 +276,12 @@ class HistoryViewModel {
                     .filter { it.bookId in ids }
                     .map { it.bookId }
                     .distinct()
+                if (bookIds.isEmpty()) return@launch
                 bookIds.forEach { FavoriteRepository.addFavorite(it.toInt(), folderId) }
+                refreshFavoriteCount()
                 _toast.value = "已加入收藏"
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {

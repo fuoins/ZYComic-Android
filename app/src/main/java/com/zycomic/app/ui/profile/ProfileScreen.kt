@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,7 @@ import com.zycomic.app.data.dto.SignDay
 import com.zycomic.app.data.repository.UserRepository
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import java.time.LocalDate
@@ -89,6 +91,16 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val user by UserRepository.userFlow.collectAsState()
+    LaunchedEffect(Unit) {
+        if (UserRepository.isLoggedIn) {
+            try {
+                UserRepository.refreshUserInfo()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
     var showPointLogs by remember { mutableStateOf(false) }
     var showChangePwd by remember { mutableStateOf(false) }
     var showRewardDialog by remember { mutableStateOf(false) }
@@ -178,7 +190,13 @@ fun ProfileScreen(
                         icon = Icons.Outlined.Refresh,
                         onPreferenceClick = {
                             scope.launch {
-                                try { UserRepository.getUserInfo(); android.widget.Toast.makeText(ctx, "已刷新", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+                                try {
+                                    UserRepository.refreshUserInfo()
+                                    android.widget.Toast.makeText(ctx, "已刷新", android.widget.Toast.LENGTH_SHORT).show()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (_: Exception) {
+                                }
                             }
                         },
                     )

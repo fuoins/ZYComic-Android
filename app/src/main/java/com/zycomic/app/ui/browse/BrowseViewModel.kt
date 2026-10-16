@@ -7,6 +7,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -212,13 +213,26 @@ class BrowseViewModel {
         }
     }
 
+    private suspend fun refreshFavoriteCount() {
+        try {
+            UserRepository.refreshUserInfo()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // 收藏已成功；用户信息刷新失败不应改变收藏操作结果。
+        }
+    }
+
     fun addToAllFolders(onDone: (Boolean, String) -> Unit) {
         val ids = selectedIds.value.toList()
         if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
         scope.launch {
             try {
                 ids.forEach { id -> FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, 0) }
+                refreshFavoriteCount()
                 onDone(true, "已添加 ${ids.size} 本到全部收藏夹")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 onDone(false, e.message ?: "收藏失败")
             }
@@ -231,7 +245,10 @@ class BrowseViewModel {
         scope.launch {
             try {
                 ids.forEach { id -> FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, folderId.toIntOrNull() ?: 0) }
+                refreshFavoriteCount()
                 onDone(true, "已添加 ${ids.size} 本到收藏夹")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 onDone(false, e.message ?: "收藏失败")
             }
