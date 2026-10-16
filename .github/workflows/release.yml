@@ -116,12 +116,12 @@ jobs:
       - name: Write release notes
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 2.1.0 正式版
+          ZYComic 2.2.0 正式版
 
           ZYComic 是一款安卓漫画阅读器，基于成熟的漫画阅读器内核与 Compose UI 框架，接入线路与图源服务。
 
           本次更新
-          - 修复地区与连载/完结筛选提交值映射；保留标签名称和顺序，并一次性迁移旧自定义分类 Tab，维持原筛选意图。
+          - 修复从阅读器返回漫画详情页后，章节已读状态未同步的问题。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。

@@ -10,6 +10,10 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - `Fixed` - for any bug fixes.
 - `Other` - for technical stuff.
 
+## [v2.2.0] - 2026-10-16
+### Fixed
+- Fix chapter read status not syncing on the manga detail page after returning from the reader.
+
 ## [v2.1.0] - 2026-10-16
 ### Fixed
 - Fix browse area and completion-status filter values; migrate saved filter Tabs once while preserving their names, order, and other conditions.

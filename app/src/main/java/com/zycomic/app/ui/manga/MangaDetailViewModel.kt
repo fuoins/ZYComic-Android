@@ -10,6 +10,8 @@ import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.reader.ManwaSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +22,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import tachiyomi.domain.chapter.repository.ChapterRepository
+import tachiyomi.domain.manga.repository.MangaRepository as LocalMangaRepository
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class MangaDetailViewModel(private val bookId: String) {
 
@@ -82,6 +89,38 @@ class MangaDetailViewModel(private val bookId: String) {
 
     fun selectTab(tab: Int) { activeTab.value = tab }
     fun toggleChapterSort() { chapterAsc.value = !chapterAsc.value }
+
+    /** Merge local reader read status into the existing detail without reloading other fields. */
+    fun syncChapterReadStatus() {
+        if (_detail.value == null) return
+        scope.launch {
+            val readChapterUrls = try {
+                withContext(Dispatchers.IO) {
+                    val localManga = Injekt.get<LocalMangaRepository>()
+                        .getMangaByUrlAndSourceId("/manga/$bookId", ManwaSource.id)
+                        ?: return@withContext emptySet()
+                    Injekt.get<ChapterRepository>()
+                        .getChapterByMangaId(localManga.id)
+                        .asSequence()
+                        .filter { it.read }
+                        .map { it.url }
+                        .toSet()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                return@launch
+            }
+            if (readChapterUrls.isEmpty()) return@launch
+            val currentDetail = _detail.value ?: return@launch
+            val updatedChapters = currentDetail.chapterList.map { chapter ->
+                if ("/chapter/${chapter.id}" in readChapterUrls) chapter.copy(readed = 1) else chapter
+            }
+            if (updatedChapters != currentDetail.chapterList) {
+                _detail.value = currentDetail.copy(chapterList = updatedChapters)
+            }
+        }
+    }
 
     /** 已收藏状态：以 detail.fav 为准。 */
     val isFavorited: Boolean get() = _detail.value?.fav == 1
