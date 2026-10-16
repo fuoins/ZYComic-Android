@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -393,12 +394,12 @@ private fun BrowseTabContent(
 
     // Pager 使用稳定的 Tab ID 作为 key，因此可保存的网格状态会随 Tab 排序保留在原 Tab。
     val gridState = rememberLazyGridState()
-    val mangaKeys = remember(mangas) {
+    val gridItems = remember(mangas) {
         val occurrences = mutableMapOf<String, Int>()
         mangas.map { manga ->
             val occurrence = occurrences.getOrDefault(manga.id, 0)
             occurrences[manga.id] = occurrence + 1
-            "manga-${manga.id}-$occurrence"
+            manga to "manga-${manga.id}-$occurrence"
         }
     }
 
@@ -444,8 +445,7 @@ private fun BrowseTabContent(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(mangas.size, key = { mangaKeys[it] }) { i ->
-                            val m = mangas[i]
+                        items(gridItems, key = { it.second }) { (m, _) ->
                             MangaGridItem(
                                 manga = m,
                                 displayMode = displayMode,
