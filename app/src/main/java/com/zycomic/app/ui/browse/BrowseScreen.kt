@@ -393,6 +393,14 @@ private fun BrowseTabContent(
 
     // Pager 使用稳定的 Tab ID 作为 key，因此可保存的网格状态会随 Tab 排序保留在原 Tab。
     val gridState = rememberLazyGridState()
+    val mangaKeys = remember(mangas) {
+        val occurrences = mutableMapOf<String, Int>()
+        mangas.map { manga ->
+            val occurrence = occurrences.getOrDefault(manga.id, 0)
+            occurrences[manga.id] = occurrence + 1
+            "manga-${manga.id}-$occurrence"
+        }
+    }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -436,7 +444,7 @@ private fun BrowseTabContent(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(mangas.size, key = { "manga-${mangas[it].id}" }) { i ->
+                        items(mangas.size, key = { mangaKeys[it] }) { i ->
                             val m = mangas[i]
                             MangaGridItem(
                                 manga = m,
