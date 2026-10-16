@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -203,6 +204,10 @@ private enum class SettingsDialog {
     About,
 }
 
+private const val MAIN_TAB_CATEGORY_STATE_KEY = "main-tab-category"
+private const val MAIN_TAB_FAVORITES_STATE_KEY = "main-tab-favorites"
+private const val MAIN_TAB_HISTORY_STATE_KEY = "main-tab-history"
+
 @Composable
 fun AppContent(
     isLaunch: Boolean,
@@ -227,6 +232,7 @@ fun AppContent(
         // 0分类 1书架 2历史 3我的 4设置；冷启动若来自桌面快捷方式则直达对应 tab
         mutableIntStateOf(shortcutTab.takeIf { it in 0..3 } ?: 0)
     }
+    val tabStateHolder = rememberSaveableStateHolder()
     // 热启动点击快捷方式：切到目标 tab 后消费，避免重组/旋转误跳
     LaunchedEffect(shortcutTab) {
         if (shortcutTab in 0..3) {
@@ -387,35 +393,41 @@ fun AppContent(
         ) { innerPadding ->
             Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 when (bottomTab) {
-                    0 -> BrowseScreen(
-                        vm = browseVm,
-                        pendingTag = pendingTag,
-                        onPendingTagConsumed = { pendingTag = null },
-                        onOpenManga = openDetail,
-                        onOpenSearch = { kw ->
-                            searchKeyword = kw
-                            showSearch = true
-                        },
-                        onRequireLogin = { loginOpen = true },
-                    )
-                    1 -> LibraryScreen(
-                        vm = libraryVm,
-                        onOpenManga = openDetail,
-                        onRequireLogin = { loginOpen = true },
-                        onOpenSearch = { kw ->
-                            searchKeyword = kw
-                            showSearch = true
-                        },
-                    )
-                    2 -> HistoryScreen(
-                        vm = historyVm,
-                        onOpenManga = openDetail,
-                        onRequireLogin = { loginOpen = true },
-                        onOpenSearch = { kw ->
-                            searchKeyword = kw
-                            showSearch = true
-                        },
-                    )
+                    0 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_CATEGORY_STATE_KEY) {
+                        BrowseScreen(
+                            vm = browseVm,
+                            pendingTag = pendingTag,
+                            onPendingTagConsumed = { pendingTag = null },
+                            onOpenManga = openDetail,
+                            onOpenSearch = { kw ->
+                                searchKeyword = kw
+                                showSearch = true
+                            },
+                            onRequireLogin = { loginOpen = true },
+                        )
+                    }
+                    1 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_FAVORITES_STATE_KEY) {
+                        LibraryScreen(
+                            vm = libraryVm,
+                            onOpenManga = openDetail,
+                            onRequireLogin = { loginOpen = true },
+                            onOpenSearch = { kw ->
+                                searchKeyword = kw
+                                showSearch = true
+                            },
+                        )
+                    }
+                    2 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_HISTORY_STATE_KEY) {
+                        HistoryScreen(
+                            vm = historyVm,
+                            onOpenManga = openDetail,
+                            onRequireLogin = { loginOpen = true },
+                            onOpenSearch = { kw ->
+                                searchKeyword = kw
+                                showSearch = true
+                            },
+                        )
+                    }
                     3 -> ProfileScreen(
                         onRequireLogin = { loginOpen = true },
                         onNavigateToTab = { bottomTab = it },
@@ -508,7 +520,7 @@ fun AppContent(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "建议短期内测速使用此功能，会节省大量时间，间隔时间过长可能出现图片加载不出来，若已选择并卡顿，可在漫画里切换图源点击重新测速",
+                        "建议短期内测速过使用此功能，会节省大量时间，两次测速间隔时间过长不建议使用,可能出现图片加载不出来，若已选择并卡顿，可在漫画里切换图源点击重新测速或重启软件",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,

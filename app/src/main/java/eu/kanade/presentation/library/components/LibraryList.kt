@@ -28,7 +28,7 @@ internal fun LibraryList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = contentPadding + PaddingValues(vertical = 8.dp),
     ) {
-        item {
+        item(key = "library-global-search") {
             if (!searchQuery.isNullOrEmpty()) {
                 GlobalSearchItem(
                     modifier = Modifier.fillMaxWidth(),
@@ -40,6 +40,7 @@ internal fun LibraryList(
 
         items(
             items = items,
+            key = { "library-manga-${it.libraryManga.manga.id}" },
             contentType = { "library_list_item" },
         ) { libraryItem ->
             val manga = libraryItem.libraryManga.manga

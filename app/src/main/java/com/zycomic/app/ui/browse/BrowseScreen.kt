@@ -1,8 +1,5 @@
 package com.zycomic.app.ui.browse
 
-import com.zycomic.app.ui.components.FilterChip
-import com.zycomic.app.ui.components.FilterSection
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,24 +10,23 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -46,15 +42,16 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,18 +63,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.collectAsState
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.ui.components.DisplaySettingsSection
+import com.zycomic.app.ui.components.FilterChip
+import com.zycomic.app.ui.components.FilterSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
@@ -296,6 +294,7 @@ fun BrowseScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.Top,
+                key = { page -> tabs[page].id },
             ) { page ->
                 BrowseTabContent(
                     page = page,
@@ -306,7 +305,12 @@ fun BrowseScreen(
                     selectedIds = selectedIds,
                     onOpenManga = onOpenManga,
                     onToggleSelect = { vm.toggleSelect(it) },
-                    onLongClick = { if (!selectionMode) { vm.enterSelection(); vm.toggleSelect(it) } },
+                    onLongClick = {
+                        if (!selectionMode) {
+                            vm.enterSelection()
+                            vm.toggleSelect(it)
+                        }
+                    },
                     bottomPadding = contentPadding.calculateBottomPadding(),
                     onOpenSearch = onOpenSearch,
                 )
@@ -352,7 +356,10 @@ fun BrowseScreen(
             onDismiss = { showFolderDialog = false },
             onConfirm = { folderId ->
                 vm.addToFolder(folderId.toString()) { ok, msg ->
-                    if (ok) { showFolderDialog = false; vm.exitSelection() }
+                    if (ok) {
+                        showFolderDialog = false
+                        vm.exitSelection()
+                    }
                 }
             },
         )
@@ -384,8 +391,8 @@ private fun BrowseTabContent(
     val hasMore by vm.hasMoreForTab(page).collectAsState()
     val error by vm.errorForTab(page).collectAsState()
 
-    // 每个 tab 页独立的滚动状态（动态 tab 数量，按 page 记忆）
-    val gridState = remember(page) { LazyGridState() }
+    // Pager 使用稳定的 Tab ID 作为 key，因此可保存的网格状态会随 Tab 排序保留在原 Tab。
+    val gridState = rememberLazyGridState()
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -429,31 +436,31 @@ private fun BrowseTabContent(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                    items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
-                        val m = mangas[i]
-                        MangaGridItem(
-                            manga = m,
-                            displayMode = displayMode,
-                            selected = selectionMode && m.id in selectedIds,
-                            selectionMode = selectionMode,
-                            onClick = { if (selectionMode) onToggleSelect(m.id) else onOpenManga(m.id) },
-                            onLongClick = { onLongClick(m.id) },
-                        )
-                    }
-                    if (appending) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(8.dp))
-                                Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                        items(mangas.size, key = { "manga-${mangas[it].id}" }) { i ->
+                            val m = mangas[i]
+                            MangaGridItem(
+                                manga = m,
+                                displayMode = displayMode,
+                                selected = selectionMode && m.id in selectedIds,
+                                selectionMode = selectionMode,
+                                onClick = { if (selectionMode) onToggleSelect(m.id) else onOpenManga(m.id) },
+                                onLongClick = { onLongClick(m.id) },
+                            )
+                        }
+                        if (appending) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        } else if (!hasMore && mangas.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                             }
                         }
-                    } else if (!hasMore && mangas.isNotEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                        }
                     }
-                }
                 }
             }
         }
@@ -546,7 +553,9 @@ private fun BrowseFilterDialog(
     TabbedDialog(
         onDismissRequest = onDismiss,
         tabTitles = titles,
-        tabHeaderAction = if (displayOnly) null else {
+        tabHeaderAction = if (displayOnly) {
+            null
+        } else {
             {
                 IconButton(onClick = { showInfo = true }) {
                     Icon(
@@ -652,7 +661,10 @@ private fun TagSelectDialog(vm: BrowseViewModel, onDismiss: () -> Unit) {
     TagPickerDialog(
         initial = f.tags.toSet(),
         onDismiss = onDismiss,
-        onConfirm = { set -> vm.setSelectedTags(set); onDismiss() },
+        onConfirm = { set ->
+            vm.setSelectedTags(set)
+            onDismiss()
+        },
     )
 }
 

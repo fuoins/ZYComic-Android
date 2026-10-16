@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
+import tachiyomi.core.common.util.system.logcat
 import java.io.IOException
 
 /**
@@ -244,10 +245,33 @@ object UserRepository {
         val total = needed.coerceAtLeast(1)
         if (needed > 0) {
             onProgress(0, total, "获取广告页面...")
-            val raw = api.getWawaWise().string()
-            val html = try { org.json.JSONObject(raw).getString("data") } catch (_: Exception) { raw }
-            val links = com.zycomic.app.net.AdClickHelper(appCtx).getAllAdLinks(html)
-            if (links.isEmpty()) throw AdDebugException("ad_clicks=${welfare?.ad_clicks}, bonus_ready=${welfare?.check_ad_bonus_today}\nhtml前200: " + html.take(200))
+            val helper = com.zycomic.app.net.AdClickHelper(appCtx)
+            val attemptDiagnostics = mutableListOf<String>()
+            var lastHtml = ""
+            var links = emptyList<String>()
+            for (attempt in 1..2) {
+                if (attempt == 2) onProgress(0, total, "广告链接尚未渲染，重新获取页面...")
+                val raw = api.getWawaWise().string()
+                val html = try {
+                    org.json.JSONObject(raw).getString("data")
+                } catch (_: Exception) {
+                    raw
+                }
+                lastHtml = html
+                val extraction = helper.getAllAdLinks(html)
+                attemptDiagnostics += "attempt=$attempt html_length=${html.length} ${extraction.diagnostics}"
+                if (extraction.links.isNotEmpty()) {
+                    links = extraction.links
+                    break
+                }
+            }
+            if (links.isEmpty()) {
+                val debug = "ad_clicks=${welfare?.ad_clicks}, bonus_ready=${welfare?.check_ad_bonus_today}\n" +
+                    attemptDiagnostics.joinToString("\n") +
+                    "\nhtml前200: ${lastHtml.take(200)}"
+                logcat { "每日广告奖励链接提取失败: $debug" }
+                throw AdDebugException(debug)
+            }
             repeat(needed) { i ->
                 onProgress(i + 1, total, "点击广告 ${i + 1}/$total")
                 clickAd(links[i % links.size])

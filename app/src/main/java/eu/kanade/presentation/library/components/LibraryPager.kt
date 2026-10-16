@@ -47,6 +47,7 @@ fun LibraryPager(
         modifier = Modifier.fillMaxSize(),
         state = state,
         verticalAlignment = Alignment.Top,
+        key = { page -> getCategoryForPage(page).id },
     ) { page ->
         if (page !in ((state.currentPage - 1)..(state.currentPage + 1))) {
             // To make sure only one offscreen page is being composed
