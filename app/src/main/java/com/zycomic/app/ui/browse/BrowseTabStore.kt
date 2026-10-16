@@ -9,7 +9,7 @@ object BrowseTabStore {
     private const val PREFS = "zycomic_browse_tabs"
     private const val KEY_TABS = "tabs_json"
     private const val KEY_SEED = "seed_version"
-    private const val SEED_VERSION = 4
+    private const val SEED_VERSION = 5
 
     private lateinit var prefs: android.content.SharedPreferences
 
@@ -85,6 +85,11 @@ object BrowseTabStore {
                     val yzIdx = list.indexOfFirst { it.id == ID_YUZONG }
                     if (yzIdx >= 0) { val yz = list.removeAt(yzIdx); list.add(0, yz) } else list.add(0, specialYuzong())
                 }
+                if (seeded < SEED_VERSION) {
+                    val migrated = migrateLegacyFilterValues(list, seeded)
+                    list.clear()
+                    list.addAll(migrated)
+                }
                 if (list.isNotEmpty()) {
                     save(list)
                     prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
@@ -97,6 +102,36 @@ object BrowseTabStore {
         save(def)
         prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
         return def
+    }
+
+    /** v5 maps persisted legacy area/end IDs once; all other tab data stays unchanged. */
+    internal fun migrateLegacyFilterValues(tabs: List<BrowseTabItem>, seedVersion: Int): List<BrowseTabItem> {
+        if (seedVersion >= SEED_VERSION) return tabs
+
+        fun area(value: Int): Int = when (value) {
+            1 -> 2
+            2 -> 3
+            3 -> 4
+            4 -> 5
+            5 -> 6
+            6 -> 1
+            else -> value
+        }
+
+        fun end(value: Int): Int = when (value) {
+            1 -> 2
+            2 -> 1
+            else -> value
+        }
+
+        return tabs.map { tab ->
+            val filter = tab.filter
+            if (tab.kind != TabKind.FILTER || filter == null) {
+                tab
+            } else {
+                tab.copy(filter = filter.copy(area = area(filter.area), end = end(filter.end)))
+            }
+        }
     }
 
     fun save(tabs: List<BrowseTabItem>) {

@@ -11,14 +11,19 @@ plugins {
     alias(libs.plugins.aboutLibraries)
 }
 
+val supportedAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+val requestedAbi = providers.gradleProperty("abi").orNull ?: "arm64-v8a"
+val selectedAbis = if (requestedAbi == "all") supportedAbis else listOf(requestedAbi)
+check(selectedAbis.all { it in supportedAbis }) { "Unsupported ABI selection: $requestedAbi" }
+
 android {
     namespace = "eu.kanade.tachiyomi"
 
     defaultConfig {
         applicationId = "com.zycomic.app"
 
-        versionCode = 7
-        versionName = "2.0.0"
+        versionCode = 8
+        versionName = "2.1.0"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
@@ -73,7 +78,7 @@ android {
             isEnable = true
             isUniversalApk = false
             reset()
-            include("arm64-v8a")
+            include(*selectedAbis.toTypedArray())
         }
     }
 

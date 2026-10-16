@@ -518,8 +518,8 @@ class BrowseViewModel {
 
     companion object {
         val GENDERS = listOf(-1 to "全部", 2 to "一般向", 1 to "禁漫", 0 to "BL向", 3 to "TL向", 4 to "GL向")
-        val AREAS = listOf(0 to "全部", 1 to "韩国", 2 to "日漫", 3 to "国漫", 4 to "台漫", 5 to "其他", 6 to "未分类")
-        val ENDS = listOf(0 to "全部", 1 to "连载", 2 to "完结")
+        val AREAS = listOf(0 to "全部", 2 to "韩国", 3 to "日漫", 4 to "国漫", 5 to "台漫", 6 to "其他", 1 to "未分类")
+        val ENDS = listOf(0 to "全部", 2 to "连载", 1 to "完结")
         val STS = listOf(2 to "收藏", 0 to "最新", 1 to "最旧", 3 to "新漫")
 
         private lateinit var prefs: android.content.SharedPreferences
