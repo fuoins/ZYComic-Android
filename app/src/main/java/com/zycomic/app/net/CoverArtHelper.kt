@@ -14,14 +14,15 @@ import java.io.IOException
 
 /**
  * 详情页封面长按菜单：下载封面字节并保存/分享。
- * 下载走 [NetworkModule.imageClient]，由 ImageInterceptor 自动补 Referer/UA 并解密。
+ * Manwa 下载走 [NetworkModule.imageClient]；JM 下载使用隔离的 [JmNetworkModule.client]。
  */
 object CoverArtHelper {
 
-    /** 拉取封面字节；非 2xx / 空 / 解密后非图片均抛 IOException。 */
-    suspend fun fetchCover(url: String): ByteArray = withContext(Dispatchers.IO) {
+    /** 拉取封面字节；非 2xx / 空 / 非图片均抛 IOException。 */
+    suspend fun fetchCover(url: String, isJm: Boolean = false): ByteArray = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).build()
-        NetworkModule.imageClient.newCall(request).execute().use { resp ->
+        val imageClient = if (isJm) JmNetworkModule.client else NetworkModule.imageClient
+        imageClient.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IOException("封面请求失败: HTTP ${resp.code}")
             }

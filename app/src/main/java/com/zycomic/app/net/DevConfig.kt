@@ -55,6 +55,7 @@ object DevConfig {
     /** 初始化时只恢复经远程版本、候选列表及规则校验的成功快照；不从包内/旧基线补线路。 */
     fun init(ctx: Context) {
         context = ctx.applicationContext
+        JmRouteManager.loadPreferences()
         val configPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val remotePrefs = ctx.getSharedPreferences(PREFS_REMOTE, Context.MODE_PRIVATE)
         val version = remotePrefs.getInt("remote_version", 0)
@@ -77,6 +78,7 @@ object DevConfig {
                     Log.e(TAG, "Unable to restore validated remote configuration", it)
                     cachedJson = EMPTY_CONFIG_JSON
                     RouteManager.clearConfiguration()
+                    JmRouteManager.applyRemoteConfig(emptyList(), emptyList(), emptyMap(), null)
                     remotePrefs.edit()
                         .remove("remote_etag")
                         .remove("remote_updated_at")
@@ -89,6 +91,7 @@ object DevConfig {
         } else {
             cachedJson = EMPTY_CONFIG_JSON
             RouteManager.clearConfiguration()
+            JmRouteManager.applyRemoteConfig(emptyList(), emptyList(), emptyMap(), null)
             // Discard only the unusable snapshot/ETag. Keep the last applied version marker monotonic,
             // while forcing a full response instead of allowing an old ETag to produce a cacheless 304.
             remotePrefs.edit()
@@ -134,6 +137,12 @@ object DevConfig {
                 for (i in 0 until lines.length()) actual += bareHost(lines.getString(i)).lowercase()
                 val sources = root.getJSONArray("sources")
                 for (i in 0 until sources.length()) actual += sources.getString(i).lowercase()
+                root.optJSONArray("lines2")?.let { jmLines ->
+                    for (i in 0 until jmLines.length()) actual += bareHost(jmLines.getString(i)).lowercase()
+                }
+                root.optJSONArray("sources2")?.let { jmSources ->
+                    for (i in 0 until jmSources.length()) actual += jmSources.getString(i).lowercase()
+                }
                 actual == expectedHosts
             }
         }.getOrDefault(false)
@@ -189,16 +198,41 @@ object DevConfig {
     private fun bareHost(url: String): String =
         url.trim().removePrefix("https://").removePrefix("http://").substringBefore('/').trim('/')
 
+    private fun deduplicateLineArray(input: JSONArray): JSONArray {
+        val seen = LinkedHashSet<String>()
+        return JSONArray().apply {
+            for (index in 0 until input.length()) {
+                val value = input.getString(index)
+                val host = runCatching { java.net.URI(value).host }.getOrNull().orEmpty().lowercase()
+                if (host.isNotBlank() && seen.add(host)) put(value)
+            }
+        }
+    }
+
+    private fun deduplicateHostArray(input: JSONArray): JSONArray {
+        val seen = LinkedHashSet<String>()
+        return JSONArray().apply {
+            for (index in 0 until input.length()) {
+                val value = input.getString(index)
+                if (seen.add(value.lowercase())) put(value)
+            }
+        }
+    }
+
     /** 域名→IP 列表映射。 */
     fun getRule(): Map<String, List<String>> {
         return try {
             val root = Json { ignoreUnknownKeys = true }
                 .parseToJsonElement(getConfigJson()).jsonObject
             val ruleObj = root["rule"]?.jsonObject ?: return emptyMap()
+            val manwaHosts = root["lines"]?.jsonArray.orEmpty().map { bareHost(it.jsonPrimitive.content).lowercase() }.toSet() +
+                root["sources"]?.jsonArray.orEmpty().map { it.jsonPrimitive.content.lowercase() }
             buildMap {
                 ruleObj.forEach { (domain, arr) ->
-                    val ips = arr.jsonArray.map { it.jsonPrimitive.content }
-                    put(domain, ips)
+                    if (domain.lowercase() in manwaHosts) {
+                        val ips = arr.jsonArray.map { it.jsonPrimitive.content }
+                        put(domain, ips)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -207,9 +241,7 @@ object DevConfig {
         }
     }
 
-    /**
-     * SNI bypass hosts are derived only from remote lines, sources, and their validated rules.
-     */
+    /** Manwa TLS host set; JM entries are intentionally isolated in [getJmSniDomains]. */
     fun getSniDomains(): Set<String> {
         return try {
             val root = Json { ignoreUnknownKeys = true }
@@ -218,11 +250,31 @@ object DevConfig {
                 root[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
             val lines = strList("lines")
             val sources = strList("sources")
-            val ruleKeys = root["rule"]?.jsonObject?.keys ?: emptySet()
-            val base = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
+            val base = lines.mapTo(HashSet()) { bareHost(it).lowercase() }
+            base.addAll(sources.map { it.lowercase() })
+            val ruleKeys = root["rule"]?.jsonObject?.keys?.map { it.lowercase() }
+                ?.filter { it in base }.orEmpty()
             (base + ruleKeys).filter { it != "dns.google" }.toSet()
         } catch (e: Exception) {
             Log.e(TAG, "getSniDomains failed", e)
+            emptySet()
+        }
+    }
+
+    /** JM TLS host set, kept separate from the Manwa NetworkModule's SNI policy. */
+    fun getJmSniDomains(): Set<String> {
+        return try {
+            val root = Json { ignoreUnknownKeys = true }
+                .parseToJsonElement(getConfigJson()).jsonObject
+            fun strList(key: String): List<String> =
+                root[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            val base = strList("lines2").mapTo(HashSet()) { bareHost(it).lowercase() }
+            base.addAll(strList("sources2").map { it.lowercase() })
+            val ruleKeys = root["rule"]?.jsonObject?.keys?.map { it.lowercase() }
+                ?.filter { it in base }.orEmpty()
+            (base + ruleKeys).filter { it != "dns.google" }.toSet()
+        } catch (e: Exception) {
+            Log.e(TAG, "getJmSniDomains failed", e)
             emptySet()
         }
     }
@@ -258,12 +310,17 @@ object DevConfig {
         }
         val lines = strList("lines")
         val sources = strList("sources")
+        val lines2 = strList("lines2")
+        val sources2 = strList("sources2")
         require(lines.isNotEmpty() && sources.isNotEmpty()) { "Remote routes and sources must not be empty" }
-        RouteManager.setCustomRule(ruleMap)
+        val manwaHosts = (lines.map(::bareHost) + sources).map { it.lowercase() }.toSet()
+        val manwaRules = ruleMap.filterKeys { it.lowercase() in manwaHosts }
+        RouteManager.setCustomRule(manwaRules)
         val version = root["version"]?.jsonPrimitive?.content?.toIntOrNull()
         RouteManager.applyBaseLists(lines, sources, version)
-        val canonical = lines.mapTo(HashSet()) { bareHost(it) }.apply { addAll(sources) }
-        RouteManager.setSniDomains((canonical + ruleMap.keys) - "dns.google")
+        JmRouteManager.applyRemoteConfig(lines2, sources2, ruleMap, version)
+        val manwaRuleHosts = manwaRules.keys.map { it.lowercase() }.filter { it in manwaHosts }
+        RouteManager.setSniDomains((manwaHosts + manwaRuleHosts) - "dns.google")
     }
 
     // ==================== 远程配置 ====================
@@ -309,10 +366,14 @@ object DevConfig {
 
             val lines = remote.getJSONArray("lines")
             val sources = remote.getJSONArray("sources")
+            val lines2 = remote.optJSONArray("lines2")
+            val sources2 = remote.optJSONArray("sources2")
             val rules = remote.getJSONObject("rule")
             val hosts = LinkedHashSet<String>()
             for (i in 0 until lines.length()) hosts += bareHost(lines.getString(i)).lowercase()
             for (i in 0 until sources.length()) hosts += sources.getString(i).lowercase()
+            lines2?.let { array -> for (i in 0 until array.length()) hosts += bareHost(array.getString(i)).lowercase() }
+            sources2?.let { array -> for (i in 0 until array.length()) hosts += array.getString(i).lowercase() }
 
             val snapshot = JSONObject().apply {
                 put("version", version)
@@ -320,6 +381,8 @@ object DevConfig {
                 put("port", remote.getInt("port"))
                 put("lines", lines)
                 put("sources", sources)
+                lines2?.let { put("lines2", deduplicateLineArray(it)) }
+                sources2?.let { put("sources2", deduplicateHostArray(it)) }
                 put("rule", rules)
             }.toString()
             val previous = getConfigJson()

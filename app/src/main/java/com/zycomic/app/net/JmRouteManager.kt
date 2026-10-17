@@ -1,0 +1,425 @@
+package com.zycomic.app.net
+
+import android.content.Context
+import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URI
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+
+/** JM 的运行时网络状态；与 Manwa 的 RouteManager、Cookie、测速和日志完全分开。 */
+object JmRouteManager {
+
+    data class State(
+        val lines: List<String> = OFFLINE_LINES,
+        val imageDomains: List<String> = DEFAULT_IMAGE_DOMAINS,
+        val lineIndex: Int = 0,
+        val imageDomain: String = DEFAULT_IMAGE_DOMAINS.first(),
+        val autoSelect: Boolean = true,
+        val usingFallbackLines: Boolean = true,
+        val remoteVersion: Int? = null,
+    )
+
+    data class SpeedTestSnapshot(
+        val lineDelaysMs: Map<String, Long> = emptyMap(),
+        val imageDelaysMs: Map<String, Long> = emptyMap(),
+        val startedAtEpochMs: Long? = null,
+        val completedAtEpochMs: Long? = null,
+        val remoteVersion: Int? = null,
+    )
+
+    data class LogEntry(
+        val atEpochMs: Long,
+        val kind: String,
+        val host: String,
+        val message: String,
+    )
+
+    private const val PREFS_NAME = "zycomic_jm_route"
+    private const val KEY_SNAPSHOT = "speed_test_snapshot"
+    private const val KEY_LOGS = "route_logs"
+    private const val MAX_LOGS = 200
+    private const val API_FAILURE_THRESHOLD = 3
+    private const val BASE_COOLDOWN_MS = 30_000L
+    private const val MAX_COOLDOWN_MS = 10 * 60_000L
+
+    /** 官方 App 报告中的离线兜底 4 条；不包含 Venera 社区镜像。 */
+    val OFFLINE_LINES = listOf(
+        "https://www.cdnaspa.vip",
+        "https://www.cdnaspa.club",
+        "https://www.cdnplaystation6.vip",
+        "https://www.cdnplaystation6.cc",
+    )
+
+    /** 仅作为旧配置缺少 sources2 时的已验证官方默认图床候选。 */
+    val DEFAULT_IMAGE_DOMAINS = listOf(
+        "cdn-msp.jmapinodeudzn.net",
+        "cdn-msp2.jmapinodeudzn.net",
+        "cdn-msp3.jmapinodeudzn.net",
+        "cdn-msp4.jmapinodeudzn.net",
+    )
+
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state.asStateFlow()
+    private val _snapshot = MutableStateFlow(SpeedTestSnapshot())
+    val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _snapshot.asStateFlow()
+    private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
+    val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
+
+    @Volatile private var routeRules: Map<String, List<String>> = emptyMap()
+    @Volatile private var jmSniDomains: Set<String> = emptySet()
+    @Volatile private var consecutiveFailures = 0
+    private data class Health(val failures: Int, val untilEpochMs: Long)
+    private val lineHealth = ConcurrentHashMap<String, Health>()
+    private val imageHealth = ConcurrentHashMap<String, Health>()
+
+    val lineHosts: List<String> get() = _state.value.lines
+    val imageDomains: List<String> get() = _state.value.imageDomains
+    val baseUrl: String get() = lineHosts.getOrNull(_state.value.lineIndex) ?: lineHosts.firstOrNull().orEmpty()
+    val lineHost: String get() = hostFromUrl(baseUrl)
+    val activeImageDomain: String get() = _state.value.imageDomain
+    val selectedLineIndex: Int get() = _state.value.lineIndex
+    val isAutoSelectEnabled: Boolean get() = _state.value.autoSelect
+    val isUsingFallbackLines: Boolean get() = _state.value.usingFallbackLines
+    val sniDomains: Set<String> get() = jmSniDomains
+
+    fun setSniDomains(domains: Set<String>) {
+        jmSniDomains = domains.map { it.lowercase(Locale.ROOT) }.toSet()
+    }
+
+    /** 从已验证配置应用 JM 的可选 host 列表；绝不写入 Manwa 的 RouteManager。 */
+    @Synchronized
+    fun applyRemoteConfig(
+        lines: List<String>,
+        sources: List<String>,
+        rules: Map<String, List<String>>,
+        version: Int?,
+    ) {
+        val normalizedLines = normalizeLines(lines)
+        val normalizedSources = normalizeHosts(sources)
+        val useFallback = normalizedLines.isEmpty()
+        val activeLines = if (useFallback) OFFLINE_LINES else normalizedLines
+        val activeSources = normalizedSources.ifEmpty { DEFAULT_IMAGE_DOMAINS }
+        val rulesForJm = (normalizedLines.map(::hostFromUrl) + normalizedSources)
+            .map { it.lowercase(Locale.ROOT) }
+            .toSet()
+        routeRules = rules.entries
+            .filter { (host, _) -> host.lowercase(Locale.ROOT) in rulesForJm }
+            .associate { (host, ips) -> host.lowercase(Locale.ROOT) to ips.toList() }
+        jmSniDomains = (activeLines.map(::hostFromUrl) + activeSources + routeRules.keys)
+            .map { it.lowercase(Locale.ROOT) }
+            .filter { it != "dns.google" }
+            .toSet()
+
+        val old = _state.value
+        val poolsChanged = old.lines.map { hostFromUrl(it).lowercase(Locale.ROOT) } !=
+            activeLines.map { hostFromUrl(it).lowercase(Locale.ROOT) } ||
+            old.imageDomains.map { it.lowercase(Locale.ROOT) } != activeSources.map { it.lowercase(Locale.ROOT) }
+        val prefs = prefs()
+        val auto = prefs?.getBoolean("auto_select", true) ?: old.autoSelect
+        val savedLine = prefs?.getString("selected_line", null)
+        val savedImage = prefs?.getString("selected_image", null)
+        val lineIndex = when {
+            auto -> 0
+            savedLine != null -> activeLines.indexOfFirst { hostFromUrl(it).equals(savedLine, true) }.coerceAtLeast(0)
+            else -> old.lines.getOrNull(old.lineIndex)?.let { prior -> activeLines.indexOfFirst { hostFromUrl(it).equals(hostFromUrl(prior), true) } }
+                ?.takeIf { it >= 0 } ?: 0
+        }
+        val matchedSavedImage = savedImage?.let { saved -> activeSources.firstOrNull { it.equals(saved, true) } }
+        val imageDomain = matchedSavedImage
+            ?: activeSources.firstOrNull { it.equals(old.imageDomain, true) }
+            ?: activeSources.first()
+
+        _state.value = State(
+            lines = activeLines,
+            imageDomains = activeSources,
+            lineIndex = lineIndex,
+            imageDomain = imageDomain,
+            autoSelect = auto,
+            usingFallbackLines = useFallback,
+            remoteVersion = version,
+        )
+        prefs?.edit()
+            ?.putString("configured_lines", JSONArray(activeLines).toString())
+            ?.putString("configured_images", JSONArray(activeSources).toString())
+            ?.putBoolean("using_fallback", useFallback)
+            ?.putInt("remote_version", version ?: -1)
+            ?.apply {
+                if (!auto) putString("selected_line", hostFromUrl(activeLines[lineIndex]))
+                if (savedImage != null && matchedSavedImage == null) remove("selected_image")
+            }
+            ?.apply()
+        lineHealth.clear()
+        imageHealth.clear()
+        consecutiveFailures = 0
+        if (poolsChanged) _snapshot.value = SpeedTestSnapshot(remoteVersion = version)
+        else _snapshot.value = _snapshot.value.copy(remoteVersion = version)
+        persistSnapshot()
+        if (!poolsChanged && auto) applyFastestLine()
+        record("config", hostFromUrl(activeLines.first()), if (useFallback) "使用 JM 官方内置兜底线路" else "应用 JM 远程线路配置 v${version ?: "?"}")
+    }
+
+    /** 恢复单独存储的 JM 线路、图源偏好和最近测速快照。 */
+    @Synchronized
+    fun loadPreferences() {
+        val prefs = prefs() ?: return
+        val current = _state.value
+        val restoredLines = decodeStringList(prefs.getString("configured_lines", null))
+            .let(::normalizeLines).ifEmpty { current.lines }
+        val restoredImages = decodeStringList(prefs.getString("configured_images", null))
+            .let(::normalizeHosts).ifEmpty { current.imageDomains }
+        val auto = prefs.getBoolean("auto_select", true)
+        val savedLine = prefs.getString("selected_line", null)
+        val savedImage = prefs.getString("selected_image", null)
+        val idx = if (auto) 0 else savedLine?.let { target ->
+            restoredLines.indexOfFirst { hostFromUrl(it).equals(target, true) }.takeIf { it >= 0 }
+        } ?: 0
+        val img = savedImage?.let { target -> restoredImages.firstOrNull { it.equals(target, true) } }
+            ?: restoredImages.first()
+        _state.value = current.copy(
+            lines = restoredLines,
+            imageDomains = restoredImages,
+            lineIndex = idx,
+            imageDomain = img,
+            autoSelect = auto,
+            usingFallbackLines = prefs.getBoolean("using_fallback", current.usingFallbackLines),
+            remoteVersion = prefs.getInt("remote_version", -1).takeIf { it >= 0 },
+        )
+        _snapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null), _state.value.remoteVersion)
+        _logs.value = decodeLogs(prefs.getString(KEY_LOGS, null))
+    }
+
+    /** 选择 JM API 线路并切换到持久化手动模式。 */
+    @Synchronized
+    fun selectLine(index: Int) {
+        val current = _state.value
+        if (current.lines.isEmpty()) return
+        val safe = index.coerceIn(0, current.lines.lastIndex)
+        val host = hostFromUrl(current.lines[safe])
+        _state.value = current.copy(lineIndex = safe, autoSelect = false)
+        prefs()?.edit()?.putBoolean("auto_select", false)?.putString("selected_line", host)?.apply()
+        consecutiveFailures = 0
+        record("line", host, "手动选择 JM API 线路")
+    }
+
+    @Synchronized
+    fun setAutoSelectEnabled(enabled: Boolean) {
+        val current = _state.value
+        _state.value = current.copy(autoSelect = enabled)
+        prefs()?.edit()?.putBoolean("auto_select", enabled)?.apply()
+        if (enabled) applyFastestLine()
+        else prefs()?.edit()?.putString("selected_line", hostFromUrl(baseUrl))?.apply()
+        record("line", lineHost, if (enabled) "启用 JM 自动选线" else "切换 JM 手动选线")
+    }
+
+    /** 手动固定 JM 图床；空值清除固定并恢复测速最快/首选图床。 */
+    @Synchronized
+    fun selectImageDomain(domain: String?) {
+        val current = _state.value
+        val selected = domain?.let { value -> current.imageDomains.firstOrNull { it.equals(value, true) } }
+        val resolved = selected ?: fastestImageDomain() ?: current.imageDomains.first()
+        _state.value = current.copy(imageDomain = resolved)
+        val editor = prefs()?.edit()
+        if (selected == null) editor?.remove("selected_image") else editor?.putString("selected_image", selected)
+        editor?.apply()
+        record("image", resolved, if (selected == null) "恢复 JM 图床自动选择" else "手动选择 JM 图床")
+    }
+
+    @Synchronized
+    fun applySnapshot(snapshot: SpeedTestSnapshot) {
+        _snapshot.value = snapshot.copy(remoteVersion = _state.value.remoteVersion)
+        persistSnapshot()
+        if (_state.value.autoSelect) applyFastestLine()
+        if (prefs()?.getString("selected_image", null).isNullOrBlank()) {
+            fastestImageDomain()?.let { domain -> _state.value = _state.value.copy(imageDomain = domain) }
+        }
+    }
+
+    @Synchronized
+    private fun applyFastestLine() {
+        if (!_state.value.autoSelect) return
+        val fastest = _snapshot.value.lineDelaysMs.entries
+            .filter { it.value < Long.MAX_VALUE && isLineAvailable(it.key) }
+            .minByOrNull { it.value }?.key ?: return
+        val index = _state.value.lines.indexOfFirst { hostFromUrl(it).equals(fastest, true) }
+        if (index >= 0) _state.value = _state.value.copy(lineIndex = index)
+    }
+
+    private fun fastestImageDomain(): String? = _snapshot.value.imageDelaysMs.entries
+        .filter { it.value < Long.MAX_VALUE && isImageAvailable(it.key) }
+        .minByOrNull { it.value }
+        ?.key?.let { measured -> imageDomains.firstOrNull { it.equals(measured, true) } }
+
+    fun resolveIp(host: String): List<String> =
+        routeRules.entries.firstOrNull { it.key.equals(host, true) }?.value.orEmpty()
+
+    @Synchronized
+    fun recordApiSuccess(host: String = lineHost) {
+        consecutiveFailures = 0
+        lineHealth.remove(host.lowercase(Locale.ROOT))
+        record("api", host, "JM API 请求成功")
+    }
+
+    @Synchronized
+    fun recordApiFailure(host: String = lineHost, detail: String = "JM API 请求失败") {
+        val key = host.lowercase(Locale.ROOT)
+        val previous = lineHealth[key]?.failures ?: 0
+        val failures = previous + 1
+        val cooldown = (BASE_COOLDOWN_MS * (1L shl (failures - 1).coerceAtMost(5))).coerceAtMost(MAX_COOLDOWN_MS)
+        lineHealth[key] = Health(failures, System.currentTimeMillis() + cooldown)
+        consecutiveFailures++
+        record("api", host, "$detail；冷却 ${cooldown / 1000}s（$failures 次）")
+        if (consecutiveFailures >= API_FAILURE_THRESHOLD && _state.value.autoSelect) {
+            consecutiveFailures = 0
+            selectNextAvailableLine()
+        }
+    }
+
+    @Synchronized
+    private fun selectNextAvailableLine() {
+        val current = _state.value
+        if (current.lines.size < 2) return
+        val next = (1..current.lines.size).asSequence()
+            .map { (current.lineIndex + it) % current.lines.size }
+            .firstOrNull { isLineAvailable(hostFromUrl(current.lines[it])) }
+            ?: return
+        _state.value = current.copy(lineIndex = next)
+        record("failover", hostFromUrl(current.lines[next]), "JM 自动切换至可用线路")
+    }
+
+    fun isLineAvailable(host: String): Boolean = isAvailable(lineHealth, host)
+    fun isImageAvailable(host: String): Boolean = isAvailable(imageHealth, host)
+
+    fun recordImageSuccess(host: String) {
+        imageHealth.remove(host.lowercase(Locale.ROOT))
+        record("image", host, "JM 图像获取成功")
+    }
+
+    fun recordImageFailure(host: String, detail: String) {
+        val key = host.lowercase(Locale.ROOT)
+        val failures = (imageHealth[key]?.failures ?: 0) + 1
+        val cooldown = (BASE_COOLDOWN_MS * (1L shl (failures - 1).coerceAtMost(5))).coerceAtMost(MAX_COOLDOWN_MS)
+        imageHealth[key] = Health(failures, System.currentTimeMillis() + cooldown)
+        record("image", host, "$detail；冷却 ${cooldown / 1000}s")
+    }
+
+    fun imageCandidates(requestedHost: String): List<String> {
+        val configured = imageDomains
+        val ordered = buildList {
+            configured.firstOrNull { it.equals(requestedHost, true) }?.let(::add)
+            configured.firstOrNull { it.equals(activeImageDomain, true) }?.let(::add)
+            addAll(configured)
+        }.distinctBy { it.lowercase(Locale.ROOT) }
+        val available = ordered.filter(::isImageAvailable)
+        return available.ifEmpty { ordered }
+    }
+
+    @Synchronized
+    fun recordSpeedTest(snapshot: SpeedTestSnapshot) {
+        applySnapshot(snapshot)
+        record("speed", "JM", "JM 独立线路/图床测速完成")
+    }
+
+    @Synchronized
+    fun record(kind: String, host: String, message: String) {
+        val next = (_logs.value + LogEntry(System.currentTimeMillis(), kind, host, message)).takeLast(MAX_LOGS)
+        _logs.value = next
+        prefs()?.edit()?.putString(KEY_LOGS, encodeLogs(next))?.apply()
+    }
+
+    private fun persistSnapshot() {
+        prefs()?.edit()?.putString(KEY_SNAPSHOT, encodeSnapshot(_snapshot.value))?.apply()
+    }
+
+    private fun prefs(): SharedPreferences? = runCatching {
+        DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }.getOrNull()
+
+    private fun isAvailable(map: ConcurrentHashMap<String, Health>, host: String): Boolean {
+        val key = host.lowercase(Locale.ROOT)
+        val health = map[key] ?: return true
+        if (health.untilEpochMs <= System.currentTimeMillis()) {
+            map.remove(key, health)
+            return true
+        }
+        return false
+    }
+
+    private fun normalizeLines(values: List<String>): List<String> {
+        val unique = LinkedHashMap<String, String>()
+        values.forEach { value ->
+            val raw = value.trim()
+            if (raw.isNotBlank()) {
+                val url = if (raw.startsWith("http://", true) || raw.startsWith("https://", true)) raw else "https://$raw"
+                val host = hostFromUrl(url).lowercase(Locale.ROOT)
+                if (host.isNotBlank()) unique.putIfAbsent(host, url)
+            }
+        }
+        return unique.values.toList()
+    }
+
+    private fun normalizeHosts(values: List<String>): List<String> {
+        val unique = LinkedHashMap<String, String>()
+        values.forEach { value ->
+            val host = value.trim()
+            if (host.isNotBlank()) unique.putIfAbsent(host.lowercase(Locale.ROOT), host)
+        }
+        return unique.values.toList()
+    }
+
+    private fun decodeStringList(raw: String?): List<String> = runCatching {
+        val array = JSONArray(raw ?: return@runCatching emptyList())
+        (0 until array.length()).map { array.getString(it) }
+    }.getOrDefault(emptyList())
+
+    private fun hostFromUrl(value: String): String =
+        runCatching { URI(value).host.orEmpty() }
+            .getOrDefault(value.removePrefix("https://").removePrefix("http://").substringBefore('/'))
+
+    private fun encodeSnapshot(snapshot: SpeedTestSnapshot): String = JSONObject().apply {
+        put("started", snapshot.startedAtEpochMs ?: JSONObject.NULL)
+        put("completed", snapshot.completedAtEpochMs ?: JSONObject.NULL)
+        put("version", snapshot.remoteVersion ?: JSONObject.NULL)
+        put("lines", JSONObject().apply { snapshot.lineDelaysMs.forEach { (host, delay) -> put(host, delay) } })
+        put("images", JSONObject().apply { snapshot.imageDelaysMs.forEach { (host, delay) -> put(host, delay) } })
+    }.toString()
+
+    private fun decodeSnapshot(raw: String?, version: Int?): SpeedTestSnapshot = runCatching {
+        val root = JSONObject(raw ?: return@runCatching SpeedTestSnapshot(remoteVersion = version))
+        fun delays(key: String): Map<String, Long> {
+            val obj = root.optJSONObject(key) ?: return emptyMap()
+            val result = LinkedHashMap<String, Long>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val host = keys.next()
+                result[host] = obj.optLong(host, Long.MAX_VALUE)
+            }
+            return result
+        }
+        SpeedTestSnapshot(
+            lineDelaysMs = delays("lines"),
+            imageDelaysMs = delays("images"),
+            startedAtEpochMs = root.optLong("started").takeIf { it > 0 },
+            completedAtEpochMs = root.optLong("completed").takeIf { it > 0 },
+            remoteVersion = version,
+        )
+    }.getOrDefault(SpeedTestSnapshot(remoteVersion = version))
+
+    private fun encodeLogs(entries: List<LogEntry>): String = JSONArray().apply {
+        entries.forEach { entry ->
+            put(JSONObject().put("at", entry.atEpochMs).put("kind", entry.kind).put("host", entry.host).put("message", entry.message))
+        }
+    }.toString()
+
+    private fun decodeLogs(raw: String?): List<LogEntry> = runCatching {
+        val array = JSONArray(raw ?: return@runCatching emptyList())
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            LogEntry(item.optLong("at"), item.optString("kind"), item.optString("host"), item.optString("message"))
+        }.takeLast(MAX_LOGS)
+    }.getOrDefault(emptyList())
+}

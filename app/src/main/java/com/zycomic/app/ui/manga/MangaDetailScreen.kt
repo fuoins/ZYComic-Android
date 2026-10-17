@@ -135,12 +135,20 @@ fun MangaDetailScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    LaunchedEffect(vm, detail?.chapterList?.size) {
+        if (detail != null) vm.syncChapterReadStatus()
+    }
     val detailTags = remember(detail?.tags) {
         detail?.tags.orEmpty().map { it.name }.filter { it.isNotBlank() }.distinct()
     }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val jmImageLoader = if (vm.isJm) {
+        com.zycomic.app.ui.components.JmCoverImageLoader.get(context)
+    } else {
+        coil3.compose.LocalImageLoader.current
+    }
 
     /** 通过 komikku 原生阅读器打开指定章节。chapterId 为字符串数字。 */
     fun openReader(chapterId: String) {
@@ -148,18 +156,23 @@ fun MangaDetailScreen(
         if (chapterId.isBlank()) return
         scope.launch {
             try {
-                ReaderLauncher.launch(context, d, chapterId)
+                ReaderLauncher.launch(
+                    context,
+                    d,
+                    chapterId,
+                    sourceId = if (vm.isJm) com.zycomic.app.reader.JmSource.id else com.zycomic.app.reader.ManwaSource.id,
+                )
             } catch (e: Exception) {
                 Toast.makeText(context, "打开阅读器失败: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    var showFolderDialog by remember { mutableStateOf(false) }
-    var showCoverMenu by remember { mutableStateOf(false) }
+    var showFolderDialog by remember(bookId) { mutableStateOf(false) }
+    var showCoverMenu by remember(bookId) { mutableStateOf(false) }
     var showAddBlacklistDialog by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽二次确认：服务端接口是 toggle，必须让用户知道重复点击会变成取消屏蔽 */
-    var showBlockConfirm by remember { mutableStateOf(false) }
+    var showBlockConfirm by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
     val blockBusy by vm.blockBusy.collectAsState()
 
@@ -228,6 +241,7 @@ fun MangaDetailScreen(
                     AsyncImage(
                         model = coverUrl(d),
                         contentDescription = null,
+                        imageLoader = jmImageLoader,
                         modifier = Modifier
                             .matchParentSize()
                             .blur(7.dp)
@@ -263,6 +277,7 @@ fun MangaDetailScreen(
                         SubcomposeAsyncImage(
                             model = coverUrl(d),
                             contentDescription = d.name,
+                            imageLoader = jmImageLoader,
                             modifier = Modifier
                                 .width(100.dp)
                                 .aspectRatio(2f / 3f)
@@ -278,7 +293,7 @@ fun MangaDetailScreen(
                                 style = MaterialTheme.typography.titleLarge,
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable { onSearchKeyword(d.name) },
+                                modifier = if (vm.isJm) Modifier else Modifier.clickable { onSearchKeyword(d.name) },
                             )
                             Spacer(Modifier.height(8.dp))
                             val author = d.author
@@ -299,8 +314,8 @@ fun MangaDetailScreen(
                                 }
                                 Spacer(Modifier.height(6.dp))
                             }
-                            // 状态行：连载/完结 · 类别·地区
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            // JM 报告只确认专辑名与章节，未提供状态、类别或地区字段。
+                            if (!vm.isJm) Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     if (d.state == "完结") Icons.Filled.DoneAll else Icons.Outlined.Schedule,
                                     contentDescription = null,
@@ -332,7 +347,8 @@ fun MangaDetailScreen(
                         }
                     }
 
-                    // 2. 操作按钮行
+                    // JM 账号功能未接入；避免显示或触发漫蛙收藏/屏蔽操作。
+                    if (!vm.isJm) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -409,6 +425,8 @@ fun MangaDetailScreen(
                                 TextButton(onClick = { showBlockConfirm = false }) { Text("取消") }
                             },
                         )
+                    }
+
                     }
 
                     // 3. 可展开简介
@@ -551,7 +569,7 @@ fun MangaDetailScreen(
 
                     // 6. 相关推荐
                     Text(
-                        "相关推荐",
+                        if (vm.isJm) "相关推荐（JM 未提供）" else "相关推荐",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier
                             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
@@ -560,7 +578,14 @@ fun MangaDetailScreen(
                                 if (parent != null) recommendY = parent.localPositionOf(coordinates, Offset.Zero).y.toInt()
                             },
                     )
-                    if (d.loveList.isEmpty()) {
+                    if (vm.isJm) {
+                        Text(
+                            "当前报告未确认 JM 专辑相关推荐字段，因此不显示推测内容。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    } else if (d.loveList.isEmpty()) {
                         Text(
                             "暂无相关推荐",
                             style = MaterialTheme.typography.bodyMedium,
@@ -660,7 +685,7 @@ fun MangaDetailScreen(
                     val coverUrl = coverUrl(d)
                     scope.launch {
                         try {
-                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl)
+                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl, isJm = vm.isJm)
                             com.zycomic.app.net.CoverArtHelper.save(bytes, d.name)
                             Toast.makeText(context, "封面已保存到相册", Toast.LENGTH_SHORT).show()
                         } catch (e: Exception) {
@@ -676,7 +701,7 @@ fun MangaDetailScreen(
                     val coverUrl = coverUrl(d)
                     scope.launch {
                         try {
-                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl)
+                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl, isJm = vm.isJm)
                             val uri = com.zycomic.app.net.CoverArtHelper.shareToCache(bytes, d.name)
                             context.startActivity(uri.toShareIntent(context))
                         } catch (e: Exception) {

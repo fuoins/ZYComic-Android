@@ -7,6 +7,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.reader.JmSource
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
@@ -78,6 +79,38 @@ class BrowseViewModel {
 
     // ---- 当前 FILTER tab 的临时筛选；按平台和 Tab 保存，不改写预设 ----
     val curFilter = MutableStateFlow(FilterSnapshot())
+
+    // JM 的筛选参数名已确认，但分类/周榜枚举未在报告中给出，因此保留原始输入。
+    val jmMode = MutableStateFlow(0) // 0 推荐 / 1 分类 / 2 周榜 / 3 搜索
+    val jmQuery = MutableStateFlow("")
+    val jmOrder = MutableStateFlow("")
+    val jmCategory = MutableStateFlow("")
+    val jmWeekId = MutableStateFlow("")
+    val jmWeekType = MutableStateFlow("")
+
+    fun selectJmMode(mode: Int) {
+        if (mode !in 0..2) return
+        if (jmMode.value == mode && jmQuery.value.isBlank()) return
+        jmMode.value = mode
+        jmQuery.value = ""
+        refresh()
+    }
+
+    fun searchJm(query: String) {
+        val value = query.trim()
+        if (value.isBlank()) return
+        jmQuery.value = value
+        jmMode.value = 3
+        refresh()
+    }
+
+    fun updateJmFilters(order: String, category: String, weekId: String, weekType: String) {
+        jmOrder.value = order.trim()
+        jmCategory.value = category.trim()
+        jmWeekId.value = weekId.trim()
+        jmWeekType.value = weekType.trim()
+        refresh()
+    }
 
     val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
 
@@ -181,7 +214,7 @@ class BrowseViewModel {
         mainTab.value = tab
         BrowseTabStore.saveSelectedTab(tab)
         bindFilterFor(tab)
-        if (currentPlatform.value == ContentPlatform.MANWA && !stateFor(tab).loaded) refresh()
+        if (!stateFor(tab).loaded) refresh()
     }
 
     private fun bindPlatform(platform: ContentPlatform) {
@@ -321,7 +354,7 @@ class BrowseViewModel {
 
     fun addToAllFolders(onDone: (Boolean, String) -> Unit) {
         if (currentPlatform.value != ContentPlatform.MANWA) {
-            onDone(false, "禁漫天堂接口待接入")
+            onDone(false, "JM 批量收藏尚未支持：缺少登录态与收藏写接口样例")
             return
         }
         val ids = selectedIds.value.toList()
@@ -344,7 +377,7 @@ class BrowseViewModel {
 
     fun addToFolder(folderId: String, onDone: (Boolean, String) -> Unit) {
         if (currentPlatform.value != ContentPlatform.MANWA) {
-            onDone(false, "禁漫天堂接口待接入")
+            onDone(false, "JM 批量收藏尚未支持：缺少登录态与收藏夹写接口样例")
             return
         }
         val ids = selectedIds.value.toList()
@@ -379,20 +412,24 @@ class BrowseViewModel {
     }
 
     fun refresh() {
-        if (currentPlatform.value != ContentPlatform.MANWA || tabs.isEmpty()) return
+        if (tabs.isEmpty()) return
         currentJob?.cancel()
         currentJob = scope.launch { doLoad(reset = true) }
     }
 
     fun loadMore(tab: Int) {
-        if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.MANWA) return
+        if (tab !in tabs.indices) return
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         currentJob = scope.launch { doLoad(reset = false, tab = tab) }
     }
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
-        if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.MANWA) return
+        if (tab !in tabs.indices) return
+        if (tabs[tab].platformId == ContentPlatform.JM) {
+            doLoadJm(reset, tab)
+            return
+        }
         val ts = stateFor(tab)
         val item = tabs[tab]
         val reqId = requestSeq.incrementAndGet()
@@ -450,6 +487,48 @@ class BrowseViewModel {
         } catch (e: Exception) {
             if (reqId != requestSeq.get()) return
             if (reset) ts.error.value = e.message ?: "加载失败"
+        } finally {
+            if (reqId == requestSeq.get()) {
+                ts.loading.value = false
+                ts.appending.value = false
+            }
+        }
+    }
+
+    private suspend fun doLoadJm(reset: Boolean, tab: Int) {
+        val ts = stateFor(tab)
+        val reqId = requestSeq.incrementAndGet()
+        if (reset) {
+            ts.currentPage = 1
+            ts.hasMore.value = true
+            ts.loading.value = true
+            ts.error.value = null
+            ts.mangas.value = emptyList()
+        } else {
+            ts.appending.value = true
+        }
+        try {
+            val result = JmSource.browse(
+                mode = jmMode.value,
+                page = ts.currentPage,
+                query = jmQuery.value,
+                order = jmOrder.value,
+                category = jmCategory.value,
+                weekId = jmWeekId.value,
+                weekType = jmWeekType.value,
+            )
+            if (reqId != requestSeq.get()) return
+            ts.currentPage += 1
+            ts.mangas.value = if (reset) result.items else ts.mangas.value + result.items
+            ts.loaded = true
+            ts.hasMore.value = result.hasMore
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (reqId != requestSeq.get()) return
+            if (reset || ts.mangas.value.isEmpty()) ts.error.value = e.message ?: "JM 加载失败"
+            ts.loaded = true
+            ts.hasMore.value = false
         } finally {
             if (reqId == requestSeq.get()) {
                 ts.loading.value = false
@@ -637,7 +716,7 @@ class BrowseViewModel {
         mainTab.value = index
         BrowseTabStore.saveSelectedTab(index)
         bindFilterFor(index)
-        if (currentPlatform.value == ContentPlatform.MANWA && !stateFor(index).loaded) refresh()
+        if (!stateFor(index).loaded) refresh()
     }
 
     private fun buildDateOptions(): List<Pair<String, String>> {

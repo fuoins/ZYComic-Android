@@ -30,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,14 +40,23 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.data.repository.ReaderRepository
 import com.zycomic.app.net.ImageSourceDisplayPolicy
+import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.net.JmSpeedTester
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.ui.components.FilterChip
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen() {
     val vm = remember { SettingsViewModel() }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val jmState by JmRouteManager.state.collectAsState()
+    val jmSnapshot by JmRouteManager.speedTestSnapshot.collectAsState()
+    val jmLogs by JmRouteManager.logs.collectAsState()
+    var jmTesting by remember { mutableStateOf(false) }
+    var jmTestError by remember { mutableStateOf<String?>(null) }
     val filterEnabled by vm.filterEnabled.collectAsState()
     val allTags by vm.allTags.collectAsState()
     val addingBlacklist by vm.addingBlacklist.collectAsState()
@@ -242,6 +252,100 @@ fun SettingsScreen() {
 
             Button(onClick = { vm.runSpeedTest() }, enabled = !testing, modifier = Modifier.padding(top = 8.dp)) {
                 Text(if (testing) "测速中..." else "重新测速")
+            }
+        }
+
+        SectionTitle("禁漫天堂独立线路")
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+            Text(
+                if (jmState.usingFallbackLines) "当前使用 JM 官方内置兜底线路（远程配置未提供 lines2）"
+                else "当前使用远程配置 lines2",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("JM 自动选线", style = MaterialTheme.typography.titleSmall)
+                    Text("关闭后点击线路可固定为手动模式；状态与 Manwa 分开保存。", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = jmState.autoSelect,
+                    onCheckedChange = { JmRouteManager.setAutoSelectEnabled(it) },
+                )
+            }
+            jmState.lines.forEachIndexed { index, url ->
+                val host = runCatching { java.net.URI(url).host }.getOrDefault(url)
+                val delay = jmSnapshot.lineDelaysMs[host]
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { JmRouteManager.selectLine(index) }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${index + 1}. $host${if (index == jmState.lineIndex) " · 当前" else ""}",
+                        modifier = Modifier.weight(1f),
+                        color = if (index == jmState.lineIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = when (delay) {
+                            null -> "未测"
+                            Long.MAX_VALUE -> "不可达"
+                            else -> "${delay}ms"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            Text("JM 图源（点击固定；恢复自动会按 JM 测速结果选择）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            jmState.imageDomains.forEach { host ->
+                val delay = jmSnapshot.imageDelaysMs[host]
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { JmRouteManager.selectImageDomain(host) }.padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${if (host.equals(jmState.imageDomain, true)) "● " else ""}$host",
+                        modifier = Modifier.weight(1f),
+                        color = if (host.equals(jmState.imageDomain, true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = when (delay) {
+                            null -> "未测"
+                            Long.MAX_VALUE -> "不可达"
+                            else -> "${delay}ms"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { JmRouteManager.selectImageDomain(null) },
+                    modifier = Modifier.padding(end = 8.dp),
+                ) { Text("图源自动") }
+                Button(
+                    onClick = {
+                        jmTesting = true
+                        jmTestError = null
+                        scope.launch {
+                            runCatching { JmSpeedTester.run() }
+                                .onFailure { jmTestError = it.message ?: "JM 测速失败" }
+                            jmTesting = false
+                        }
+                    },
+                    enabled = !jmTesting,
+                ) { Text(if (jmTesting) "JM 测速中..." else "JM 重新测速") }
+            }
+            jmSnapshot.completedAtEpochMs?.let { Text("最近测速：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it))}", style = MaterialTheme.typography.bodySmall) }
+            jmTestError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            Text("JM 独立日志（最近 8 条）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            jmLogs.takeLast(8).asReversed().forEach { entry ->
+                Text(
+                    text = "${entry.host} · ${entry.message}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

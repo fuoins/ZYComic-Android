@@ -48,6 +48,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -77,7 +78,6 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.ContentPlatform
-import com.zycomic.app.platform.PlatformNotConnectedContent
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.FilterChip
@@ -94,9 +94,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
-import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
-import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun BrowseScreen(
@@ -150,6 +148,8 @@ fun BrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
+    var showJmSearchDialog by remember { mutableStateOf(false) }
+    var jmSearchText by remember { mutableStateOf("") }
     androidx.activity.compose.BackHandler(enabled = selectionMode) { vm.exitSelection() }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
@@ -193,6 +193,11 @@ fun BrowseScreen(
                                 )
                             } else {
                                 persistentListOf(
+                                    AppBar.Action(title = "JM 搜索", icon = Icons.Default.Search, onClick = {
+                                        jmSearchText = vm.jmQuery.value.takeIf { it.isNotBlank() }.orEmpty()
+                                        showJmSearchDialog = true
+                                    }),
+                                    AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                     AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                 )
                             },
@@ -338,6 +343,28 @@ fun BrowseScreen(
         BrowseGuideDialog(onDismiss = { showGuideDialog = false })
     }
 
+    if (showJmSearchDialog) {
+        AlertDialog(
+            onDismissRequest = { showJmSearchDialog = false },
+            title = { Text("禁漫天堂搜索") },
+            text = {
+                OutlinedTextField(
+                    value = jmSearchText,
+                    onValueChange = { jmSearchText = it },
+                    singleLine = true,
+                    label = { Text("关键词") },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.searchJm(jmSearchText)
+                    showJmSearchDialog = false
+                }) { Text("搜索") }
+            },
+            dismissButton = { TextButton(onClick = { showJmSearchDialog = false }) { Text("取消") } },
+        )
+    }
+
     // Tab 管理面板
     if (showManageSheet) {
         TabManageSheet(vm = vm, onDismiss = { showManageSheet = false })
@@ -415,13 +442,6 @@ private fun BrowseTabContent(
 ) {
     val item = vm.tabs.getOrNull(page)
     val tabPlatform = item?.platformId ?: platform
-    if (tabPlatform == ContentPlatform.JM) {
-        PlatformNotConnectedContent(
-            modifier = Modifier.fillMaxSize(),
-            detail = stringResource(KMR.strings.content_platform_not_connected_detail),
-        )
-        return
-    }
     if (item?.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.YUZONG_RANK) {
         com.zycomic.app.platform.YuzongRankContent(onSearchTitle = onOpenSearch, modifier = Modifier.fillMaxSize(), gridColumns = if (gridColumns > 0) gridColumns else 3, displayMode = displayMode)
         return
@@ -453,7 +473,10 @@ private fun BrowseTabContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        when {
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (tabPlatform == ContentPlatform.JM) JmBrowseControls(vm)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
             loading && mangas.isEmpty() -> MangaGridSkeleton(
                 columns = if (gridColumns > 0) gridColumns else 3,
                 displayMode = displayMode,
@@ -488,10 +511,17 @@ private fun BrowseTabContent(
                         items(gridItems, key = { it.second }) { (m, _) ->
                             MangaGridItem(
                                 manga = m,
+                                isJm = tabPlatform == ContentPlatform.JM,
                                 displayMode = displayMode,
                                 selected = selectionMode && m.id in selectedIds,
                                 selectionMode = selectionMode,
-                                onClick = { if (selectionMode) onToggleSelect(m.id) else onOpenManga(m.id) },
+                                onClick = {
+                                    if (selectionMode && tabPlatform == ContentPlatform.MANWA) {
+                                        onToggleSelect(m.id)
+                                    } else {
+                                        onOpenManga(if (tabPlatform == ContentPlatform.JM) "jm:${m.id}" else m.id)
+                                    }
+                                },
                                 onLongClick = { onLongClick(m.id) },
                             )
                         }
@@ -514,16 +544,67 @@ private fun BrowseTabContent(
         }
     }
 }
+}
+}
+
+@Composable
+private fun JmBrowseControls(vm: BrowseViewModel) {
+    val mode by vm.jmMode.collectAsState()
+    val query by vm.jmQuery.collectAsState()
+    var order by remember { mutableStateOf(vm.jmOrder.value) }
+    var category by remember { mutableStateOf(vm.jmCategory.value) }
+    var weekId by remember { mutableStateOf(vm.jmWeekId.value) }
+    var weekType by remember { mutableStateOf(vm.jmWeekType.value) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf("推荐" to 0, "分类" to 1, "周榜" to 2).forEach { (label, value) ->
+                TextButton(onClick = { vm.selectJmMode(value) }) {
+                    Text(label, color = if (mode == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (mode == 3) Text("搜索：$query", style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        }
+        when (mode) {
+            1 -> {
+                Text("JM 分类枚举未包含在实测报告中；按接口参数原样填写。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = order, onValueChange = { order = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("排序 o") })
+                    OutlinedTextField(value = category, onValueChange = { category = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("分类 c") })
+                }
+                TextButton(onClick = { vm.updateJmFilters(order, category, weekId, weekType) }) { Text("应用分类") }
+            }
+            2 -> {
+                Text("周榜 ID/type 的可选值未在报告中确认；不预设枚举。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = weekId, onValueChange = { weekId = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("周榜 id") })
+                    OutlinedTextField(value = weekType, onValueChange = { weekType = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("周榜 type") })
+                }
+                TextButton(onClick = { vm.updateJmFilters(order, category, weekId, weekType) }) { Text("应用周榜") }
+            }
+            3 -> Text("JM 搜索端点的分页参数未有样本确认，当前只请求首屏。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 @Composable
 private fun MangaGridItem(
     manga: Manga,
+    isJm: Boolean,
     displayMode: Int,
     selected: Boolean,
     selectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val imageLoader = if (isJm) {
+        com.zycomic.app.ui.components.JmCoverImageLoader.get(androidx.compose.ui.platform.LocalContext.current)
+    } else {
+        coil3.compose.LocalImageLoader.current
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -540,6 +621,7 @@ private fun MangaGridItem(
             SubcomposeAsyncImage(
                 model = com.zycomic.app.ui.components.coverUrl(manga.picx ?: manga.pic ?: ""),
                 contentDescription = manga.name,
+                imageLoader = imageLoader,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },

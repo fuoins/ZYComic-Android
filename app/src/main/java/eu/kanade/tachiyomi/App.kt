@@ -161,6 +161,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
                 }
             }
+            if (com.zycomic.app.net.JmRouteManager.isAutoSelectEnabled) {
+                runCatching { com.zycomic.app.net.JmSpeedTester.run() }
+            }
         }
 
         patchInjekt()

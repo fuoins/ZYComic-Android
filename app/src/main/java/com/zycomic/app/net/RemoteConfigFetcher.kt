@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
@@ -145,6 +146,10 @@ object RemoteConfigFetcher {
 
             val linesArr = root.optJSONArray("lines") ?: throw IllegalArgumentException("缺少 lines")
             val sourcesArr = root.optJSONArray("sources") ?: throw IllegalArgumentException("缺少 sources")
+            val lines2Arr = root.optJSONArray("lines2")
+            val sources2Arr = root.optJSONArray("sources2")
+            require(!root.has("lines2") || lines2Arr != null) { "lines2 必须是数组" }
+            require(!root.has("sources2") || sources2Arr != null) { "sources2 必须是数组" }
             val ruleObj = root.optJSONObject("rule") ?: throw IllegalArgumentException("缺少 rule")
             require(linesArr.length() > 0) { "lines 不能为空" }
             require(sourcesArr.length() > 0) { "sources 不能为空" }
@@ -165,11 +170,40 @@ object RemoteConfigFetcher {
             }
             require(lineHosts.none { it in sources }) { "lines 与 sources 存在重叠主机" }
 
-            val classified = lineHosts + sources
+            // JM arrays are optional for old-config compatibility. Duplicate hosts within either
+            // JM pool are accepted here and collapsed by first occurrence when applied.
+            val lineHosts2 = LinkedHashSet<String>()
+            lines2Arr?.let { array ->
+                for (i in 0 until array.length()) {
+                    val value = array.optString(i)
+                    val uri = runCatching { java.net.URI(value) }.getOrNull()
+                    require(uri != null && uri.scheme in setOf("http", "https") && uri.host != null) { "lines2[$i] 非法: $value" }
+                    require(HOST_REGEX.matches(uri.host.lowercase(Locale.ROOT))) { "lines2[$i] 主机非法: ${uri.host}" }
+                    lineHosts2.add(uri.host.lowercase(Locale.ROOT))
+                }
+            }
+            val sources2 = LinkedHashSet<String>()
+            sources2Arr?.let { array ->
+                for (i in 0 until array.length()) {
+                    val host = array.optString(i)
+                    require(HOST_REGEX.matches(host.lowercase(Locale.ROOT))) { "sources2[$i] 主机非法: $host" }
+                    sources2.add(host.lowercase(Locale.ROOT))
+                }
+            }
+            require(lineHosts2.none { it in sources2 }) { "lines2 与 sources2 存在重叠主机" }
+
+            // Cross-platform identity is intentionally retained: a Manwa host and a JM host
+            // may be the same hostname, while each platform keeps its own runtime pool.
+            val classified = (lineHosts + sources + lineHosts2 + sources2)
+                .mapTo(LinkedHashSet()) { it.lowercase(Locale.ROOT) }
             require(classified.size <= MAX_HOSTS) { "主机数超过 $MAX_HOSTS" }
             val ruleKeys = LinkedHashSet<String>()
             val keyIt = ruleObj.keys()
-            while (keyIt.hasNext()) ruleKeys.add(keyIt.next())
+            while (keyIt.hasNext()) {
+                val key = keyIt.next()
+                require(HOST_REGEX.matches(key.lowercase(Locale.ROOT))) { "rule 主机非法: $key" }
+                require(ruleKeys.add(key.lowercase(Locale.ROOT))) { "rule 主机重复（忽略大小写）: $key" }
+            }
             require(ruleKeys == classified) {
                 "rule.key 与 lines∪sources 不一致（差集: ${(ruleKeys + classified).filter { (it in ruleKeys) != (it in classified) }}）"
             }

@@ -35,22 +35,30 @@ object ReaderLauncher {
         mangaDto: MangaDto,
         chapterId: String,
         page: Int = 0,
+        sourceId: Long = ManwaSource.id,
     ) = withContext(Dispatchers.IO) {
         try {
             val mangaRepository = Injekt.get<MangaRepository>()
             val chapterRepository = Injekt.get<ChapterRepository>()
 
             // 1. 构造 komikku Manga 并插入（upsert by url+source），拿到数据库 mangaId
+            val isJm = sourceId == JmSource.id
+            val mangaPath = if (isJm) "/album/${mangaDto.id}" else "/manga/${mangaDto.id}"
             val domainManga = DomainManga.create().copy(
-                source = ManwaSource.id,
-                url = "/manga/${mangaDto.id}",
+                source = sourceId,
+                url = mangaPath,
                 ogTitle = mangaDto.name,
                 ogAuthor = mangaDto.author,
-                ogThumbnailUrl = ManwaSource.coverUrl(mangaDto).ifBlank { null },
-                ogDescription = mangaDto.text.ifBlank { null },
+                ogThumbnailUrl = if (isJm) mangaDto.picx.takeIf { it.isNotBlank() } else ManwaSource.coverUrl(mangaDto).takeIf { it.isNotBlank() },
+                ogDescription = mangaDto.text.takeIf { it.isNotBlank() },
                 ogGenre = mangaDto.tags.map { it.name },
-                ogStatus = if (mangaDto.end.contains("完")) SManga.COMPLETED.toLong() else SManga.ONGOING.toLong(),
-                initialized = true,
+                ogStatus = when {
+                    mangaDto.state.contains("完") || mangaDto.end.contains("完") -> SManga.COMPLETED.toLong()
+                    mangaDto.state.contains("连载") || mangaDto.end.contains("连载") -> SManga.ONGOING.toLong()
+                    else -> SManga.UNKNOWN.toLong()
+                },
+                // JM 详情只确认了 name/series；保持未初始化，避免把缺失字段缓存为完整详情。
+                initialized = !isJm,
                 // 强制 Webtoon 模式
                 viewerFlags = ReadingMode.WEBTOON.flagValue.toLong(),
                 dateAdded = System.currentTimeMillis(),
@@ -70,7 +78,7 @@ object ReaderLauncher {
                     mangaId = insertedManga.id,
                     url = "/chapter/${ch.id}",
                     name = ch.name,
-                    dateUpload = ManwaSource.parseAddtime(ch.addtime),
+                    dateUpload = if (isJm) 0L else ManwaSource.parseAddtime(ch.addtime),
                     sourceOrder = ch.sort.toLong(),
                     chapterNumber = ch.sort.toDouble(),
                     read = ch.readed == 1,

@@ -19,7 +19,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.RouteManager
+import java.net.URI
 
 /**
  * 把漫画封面字段拼成可加载 URL。
@@ -40,6 +42,10 @@ fun coverUrl(raw: String): String {
     // 统一读 imgRewriteTarget：手动 pin 优先，其次才是开关开启时的派生最快域
     val target = RouteManager.imgRewriteTarget
     if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        val rawHost = runCatching { URI(raw).host.orEmpty() }.getOrDefault("")
+        if (rawHost.endsWith(".jmapinodeudzn.net", ignoreCase = true) || JmRouteManager.imageDomains.any { it.equals(rawHost, ignoreCase = true) }) {
+            return raw
+        }
         if (!target.isNullOrBlank()) {
             return raw.replace(Regex("https?://[^/]+"), "https://$target")
         }

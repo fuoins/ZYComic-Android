@@ -10,6 +10,7 @@ import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.reader.JmSource
 import com.zycomic.app.reader.ManwaSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +30,9 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 class MangaDetailViewModel(private val bookId: String) {
+
+    val isJm: Boolean = bookId.startsWith("jm:")
+    private val contentId: String = bookId.removePrefix("jm:")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -78,7 +82,7 @@ class MangaDetailViewModel(private val bookId: String) {
             _loading.value = true
             _error.value = null
             try {
-                _detail.value = MangaRepository.getDetail(bookId)
+                _detail.value = if (isJm) JmSource.getAlbum(contentId) else MangaRepository.getDetail(bookId)
             } catch (e: Exception) {
                 _error.value = e.message ?: "加载失败"
             } finally {
@@ -97,7 +101,10 @@ class MangaDetailViewModel(private val bookId: String) {
             val readChapterUrls = try {
                 withContext(Dispatchers.IO) {
                     val localManga = Injekt.get<LocalMangaRepository>()
-                        .getMangaByUrlAndSourceId("/manga/$bookId", ManwaSource.id)
+                        .getMangaByUrlAndSourceId(
+                            if (isJm) "/album/$contentId" else "/manga/$contentId",
+                            if (isJm) JmSource.id else ManwaSource.id,
+                        )
                         ?: return@withContext emptySet()
                     Injekt.get<ChapterRepository>()
                         .getChapterByMangaId(localManga.id)
@@ -127,6 +134,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 快速收藏/取消收藏。 */
     fun toggleFavorite() {
+        if (isJm) return
         scope.launch {
             favBusy.value = true
             try {
@@ -147,6 +155,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 打开收藏夹选择：拉取分类列表。 */
     fun openFolderPicker() {
+        if (isJm) return
         scope.launch {
             try {
                 folders.value = FavoriteRepository.getFolderList()
@@ -159,6 +168,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 收藏到指定分类。 */
     fun addToFolder(folderId: Int) {
+        if (isJm) return
         scope.launch {
             favBusy.value = true
             try {
@@ -181,6 +191,7 @@ class MangaDetailViewModel(private val bookId: String) {
      * 逻辑同 [addToFolder](0)，但作为独立语义的操作入口。
      */
     fun addToAllFolders() {
+        if (isJm) return
         scope.launch {
             favBusy.value = true
             try {
@@ -206,6 +217,7 @@ class MangaDetailViewModel(private val bookId: String) {
      * 所以这里必须把服务端返回的真实结果用 toast 讲清楚，用户才知道发生了什么。
      */
     fun toggleBlock() {
+        if (isJm) return
         scope.launch {
             blockBusy.value = true
             try {
@@ -227,6 +239,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 将详情页选中的漫画标签加入账号屏蔽列表。 */
     fun submitAddBlacklist(tags: List<String>, onSuccess: () -> Unit) {
+        if (isJm) return
         if (tags.isEmpty() || addingBlacklist.value) return
         scope.launch {
             addingBlacklist.value = true
@@ -247,6 +260,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 删除当前漫画的阅读历史。bookId 为字符串，单本直接传入。 */
     fun deleteHistory() {
+        if (isJm) return
         scope.launch {
             try {
                 HistoryRepository.deleteHistory(bookId)

@@ -48,9 +48,16 @@ object BrowseTabStore {
     private fun specialLatest() = BrowseTabItem(id = ID_LATEST_ADD, name = LATEST_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.LATEST)
     private fun specialRanking() = BrowseTabItem(id = ID_RANKING, name = RANKING_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.RANKING)
     private fun specialYuzong() = BrowseTabItem(id = ID_YUZONG, name = YUZONG_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.YUZONG_RANK)
+    private fun specialJmHome() = BrowseTabItem(
+        id = "jm_recommendations",
+        name = "JM 推荐",
+        kind = TabKind.FILTER,
+        builtin = true,
+        platformId = ContentPlatform.JM,
+    )
 
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
-        if (platform == ContentPlatform.JM) return emptyList()
+        if (platform == ContentPlatform.JM) return listOf(specialJmHome())
         return listOf(
             specialYuzong(),
             BrowseTabItem(
@@ -140,7 +147,12 @@ object BrowseTabStore {
                 List(array.length()) { BrowseTabItem.fromJson(array.getJSONObject(it)) }
                     .filter { it.id.isNotBlank() }
             }.getOrNull()
-            if (mixed != null) return mixed
+            if (mixed != null) {
+                if (mixed.none { it.platformId == ContentPlatform.JM }) {
+                    return (mixed + specialJmHome()).also(::saveAll)
+                }
+                return mixed
+            }
         }
 
         val migrated = load(ContentPlatform.MANWA) + load(ContentPlatform.JM)
