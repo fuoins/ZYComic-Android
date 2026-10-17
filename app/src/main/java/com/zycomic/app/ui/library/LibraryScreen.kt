@@ -93,6 +93,7 @@ import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
+import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
@@ -235,21 +236,22 @@ fun LibraryScreen(
                                 singleLine = true,
                             )
                         } else {
-                            Column {
-                                if (platform == ContentPlatform.MANWA) {
-                                    user?.let {
-                                        val max = when {
-                                            it.level >= 5 -> 3500
-                                            it.level == 4 -> 2500
-                                            it.level == 3 -> 1500
-                                            it.level == 2 -> 800
-                                            it.level == 1 -> 300
-                                            else -> 0
-                                        }
-                                        Text("已收藏 ${it.favoriteCount}/$max", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val subtitle = if (platform == ContentPlatform.MANWA) {
+                                user?.let { currentUser ->
+                                    val max = when {
+                                        currentUser.level >= 5 -> 3500
+                                        currentUser.level == 4 -> 2500
+                                        currentUser.level == 3 -> 1500
+                                        currentUser.level == 2 -> 800
+                                        currentUser.level == 1 -> 300
+                                        else -> 0
                                     }
+                                    "${currentUser.favoriteCount}/$max"
                                 }
+                            } else {
+                                null
                             }
+                            AppBarTitle(title = "收藏", subtitle = subtitle)
                         }
                     },
                     actions = {

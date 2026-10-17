@@ -188,13 +188,13 @@ fun HistoryScreen(
                                         icon = Icons.Outlined.Checklist,
                                         onClick = { vm.enterSelection() },
                                     ),
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
                                         ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
                                     },
                                 )
                             } else {
                                 persistentListOf(
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
                                         ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
                                     },
                                 )

@@ -179,7 +179,15 @@ fun BrowseScreen(
                 )
             } else {
                 SearchToolbar(
-                    titleContent = { AppBarTitle("分类") },
+                    titleContent = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            AppBarTitle("分类")
+                            CategoryPlatformLegend()
+                        }
+                    },
                     searchEnabled = false,
                     searchQuery = null,
                     onChangeSearchQuery = {},
@@ -271,7 +279,7 @@ fun BrowseScreen(
                                     }
                                 }
                                 if (item.pageType == BrowsePageType.YUZONG_RANK) {
-                                    Box(Modifier.clickable(onClick = selectTab).padding(end = 6.dp)) {
+                                    Box(Modifier.clip(CircleShape).clickable(onClick = selectTab).padding(end = 6.dp)) {
                                         BrowseTabCapsule(
                                             name = item.name,
                                             platform = item.platformId,
@@ -280,7 +288,7 @@ fun BrowseScreen(
                                         )
                                     }
                                 } else {
-                                    Box(Modifier.clickable(onClick = selectTab).padding(end = 6.dp)) {
+                                    Box(Modifier.clip(CircleShape).clickable(onClick = selectTab).padding(end = 6.dp)) {
                                         BrowseTabCapsule(
                                             name = item.name,
                                             platform = item.platformId,
@@ -301,7 +309,6 @@ fun BrowseScreen(
                             }
                         }
                     }
-                    CategoryPlatformLegend()
                     TabBarIcon(
                         icon = Icons.Outlined.Tune,
                         contentDescription = "管理",
