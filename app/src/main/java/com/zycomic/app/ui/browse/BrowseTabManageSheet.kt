@@ -63,6 +63,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformSelector
@@ -331,30 +332,32 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
 
-                if (vm.currentPlatform.value == ContentPlatform.MANWA) {
-                    SpecialAddButton(
-                        label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
-                        enabled = vm.canAddLatest(),
-                        onClick = { vm.addLatestTab() },
-                        info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
-                    )
-                    Spacer(Modifier.height(8.dp))
+                SpecialAddButton(
+                    label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
+                    enabled = vm.canAddLatest(),
+                    onClick = { vm.addLatestTab() },
+                    info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
+                    platform = ContentPlatform.MANWA,
+                )
+                Spacer(Modifier.height(8.dp))
 
-                    SpecialAddButton(
-                        label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
-                        enabled = vm.canAddRanking(),
-                        onClick = { vm.addRankingTab() },
-                        info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
-                    )
-                    Spacer(Modifier.height(8.dp))
+                SpecialAddButton(
+                    label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
+                    enabled = vm.canAddRanking(),
+                    onClick = { vm.addRankingTab() },
+                    info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
+                    platform = ContentPlatform.MANWA,
+                )
+                Spacer(Modifier.height(8.dp))
 
-                    SpecialAddButton(
-                        label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
-                        enabled = vm.canAddYuzong(),
-                        onClick = { vm.addYuzongTab() },
-                        info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
-                    )
-                }
+                SpecialAddButton(
+                    label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
+                    enabled = vm.canAddYuzong(),
+                    onClick = { vm.addYuzongTab() },
+                    info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
+                    platform = ContentPlatform.MANWA,
+                    isYuzongRank = true,
+                )
             }
 
             Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
@@ -391,7 +394,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                         )
                     },
             ) {
-                itemsIndexed(vm.tabs, key = { _, it -> it.id }) { index, item ->
+                itemsIndexed(vm.tabs, key = { _, it -> "${it.platformId.id}_${it.id}" }) { index, item ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -405,7 +408,15 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                                 },
                             ),
                     ) {
-                        Text(item.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(start = 10.dp))
+                        BrowseTabCapsule(
+                            name = item.name,
+                            platform = item.platformId,
+                            isYuzongRank = item.pageType == BrowsePageType.YUZONG_RANK,
+                            modifier = Modifier.weight(1f).padding(start = 10.dp),
+                            horizontalPadding = 10.dp,
+                            verticalPadding = 6.dp,
+                            fontSize = 14.sp,
+                        )
                         if (item.kind == TabKind.FILTER) {
                             IconButton(onClick = { renaming = item }) { Icon(Icons.Outlined.Edit, contentDescription = "改名") }
                             IconButton(onClick = { editing = item }) { Icon(Icons.Outlined.FilterList, contentDescription = "编辑默认筛选") }
@@ -521,11 +532,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = { Text("恢复默认预设") },
             text = {
                 Text(
-                    if (vm.currentPlatform.value == ContentPlatform.MANWA) {
-                        "将清空你新增/改名/修改的 tab，恢复为：一般向热门、禁漫向热门、热血热门。确定？"
-                    } else {
-                        stringResource(KMR.strings.content_platform_jm_reset_confirmation)
-                    },
+                    "将清空共享列表中的新增、改名和修改项，恢复漫蛙默认标签；禁漫天堂暂无默认标签。确定？",
                 )
             },
             confirmButton = {
@@ -795,13 +802,27 @@ private fun FilterTabFormDialog(
 }
 
 @androidx.compose.runtime.Composable
-private fun SpecialAddButton(label: String, enabled: Boolean, onClick: () -> Unit, info: String) {
+private fun SpecialAddButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    info: String,
+    platform: ContentPlatform,
+    isYuzongRank: Boolean = false,
+) {
     var showInfo by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.weight(1f)) {
             Icon(Icons.Outlined.Add, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text(label)
+            BrowseTabCapsule(
+                name = label,
+                platform = platform,
+                isYuzongRank = isYuzongRank,
+                horizontalPadding = 8.dp,
+                verticalPadding = 4.dp,
+                fontSize = 12.sp,
+            )
         }
         androidx.compose.material3.IconButton(onClick = { showInfo = true }) {
             Icon(Icons.Outlined.Info, contentDescription = "说明", tint = MaterialTheme.colorScheme.onSurfaceVariant)

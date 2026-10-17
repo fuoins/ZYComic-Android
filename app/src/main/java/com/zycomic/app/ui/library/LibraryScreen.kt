@@ -236,7 +236,6 @@ fun LibraryScreen(
                             )
                         } else {
                             Column {
-                                Text("收藏", style = MaterialTheme.typography.titleLarge)
                                 if (platform == ContentPlatform.MANWA) {
                                     user?.let {
                                         val max = when {
@@ -261,7 +260,7 @@ fun LibraryScreen(
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refreshFavorites() }),
                                     AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
                                     AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
                                         ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
                                     },
                                 )
@@ -269,13 +268,13 @@ fun LibraryScreen(
                                 persistentListOf(
                                     AppBar.Action(title = "清除", icon = Icons.Default.Close, onClick = { vm.updateSearchQuery("") }),
                                     AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
                                         ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
                                     },
                                 )
                             } else {
                                 persistentListOf(
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
                                         ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
                                     },
                                 )

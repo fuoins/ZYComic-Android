@@ -5,10 +5,12 @@ import com.zycomic.app.platform.ContentPlatform
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** 分类页 Tab 配置（SP + JSON），每个平台独立保存；旧版配置迁入漫蛙。 */
+/** 分类页 Tab 配置（SP + JSON）；旧版按平台保存的配置会合并迁入共享列表。 */
 object BrowseTabStore {
 
     private const val PREFS = "zycomic_browse_tabs"
+    private const val MIXED_KEY_TABS = "tabs_json_mixed"
+    private const val MIXED_KEY_SELECTED_TAB = "selected_tab_mixed"
     private const val LEGACY_KEY_TABS = "tabs_json"
     private const val LEGACY_KEY_SEED = "seed_version"
     private const val SEED_VERSION = 5
@@ -129,6 +131,29 @@ object BrowseTabStore {
         return defaults
     }
 
+    /** 加载共享标签列表；首次使用时把旧版漫蛙和禁漫配置合并，保留各 tab 的平台归属。 */
+    fun loadAll(): List<BrowseTabItem> {
+        val raw = prefs.getString(MIXED_KEY_TABS, null)
+        if (!raw.isNullOrBlank()) {
+            val mixed = runCatching {
+                val array = JSONArray(raw)
+                List(array.length()) { BrowseTabItem.fromJson(array.getJSONObject(it)) }
+                    .filter { it.id.isNotBlank() }
+            }.getOrNull()
+            if (mixed != null) return mixed
+        }
+
+        val migrated = load(ContentPlatform.MANWA) + load(ContentPlatform.JM)
+        saveAll(migrated)
+        return migrated
+    }
+
+    fun saveAll(tabs: List<BrowseTabItem>) {
+        val array = JSONArray()
+        tabs.forEach { array.put(it.toJson()) }
+        prefs.edit().putString(MIXED_KEY_TABS, array.toString()).apply()
+    }
+
     /** v5 maps persisted legacy area/end IDs once; all other tab data stays unchanged. */
     internal fun migrateLegacyFilterValues(tabs: List<BrowseTabItem>, seedVersion: Int): List<BrowseTabItem> {
         if (seedVersion >= SEED_VERSION) return tabs
@@ -167,8 +192,14 @@ object BrowseTabStore {
 
     fun loadSelectedTab(platform: ContentPlatform): Int = prefs.getInt(selectedTabKey(platform), 0)
 
+    fun loadSelectedTab(): Int = prefs.getInt(MIXED_KEY_SELECTED_TAB, 0)
+
     fun saveSelectedTab(platform: ContentPlatform, index: Int) {
         prefs.edit().putInt(selectedTabKey(platform), index.coerceAtLeast(0)).apply()
+    }
+
+    fun saveSelectedTab(index: Int) {
+        prefs.edit().putInt(MIXED_KEY_SELECTED_TAB, index.coerceAtLeast(0)).apply()
     }
 
     fun loadFilter(platform: ContentPlatform, tabId: String): FilterSnapshot? =
@@ -186,6 +217,18 @@ object BrowseTabStore {
         val editor = prefs.edit()
         prefs.all.keys.filter { it.startsWith("filter_${platform.id}_") }.forEach { editor.remove(it) }
         editor.putInt(seedKey(platform), SEED_VERSION).putInt(selectedTabKey(platform), 0).apply()
+        return defaults
+    }
+
+    fun resetAll(): List<BrowseTabItem> {
+        val defaults = defaultTabs(ContentPlatform.MANWA) + defaultTabs(ContentPlatform.JM)
+        saveAll(defaults)
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("filter_manwa_") || it.startsWith("filter_jm_") }.forEach { editor.remove(it) }
+        editor.putInt(seedKey(ContentPlatform.MANWA), SEED_VERSION)
+            .putInt(seedKey(ContentPlatform.JM), SEED_VERSION)
+            .putInt(MIXED_KEY_SELECTED_TAB, 0)
+            .apply()
         return defaults
     }
 }

@@ -7,6 +7,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import kotlinx.coroutines.CancellationException
@@ -32,12 +33,21 @@ class BrowseViewModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    // ---- 可持久化的有序 Tab 列表（Compose 可观察） ----
-    val currentPlatform = MutableStateFlow(ContentPlatformPrefs.load("browse"))
-    val tabs = mutableStateListOf<BrowseTabItem>().apply { addAll(BrowseTabStore.load(currentPlatform.value)) }
+    // ---- 可持久化的共享 Tab 列表（Compose 可观察） ----
+    private val initialPlatform = ContentPlatformPrefs.load("browse")
+    val tabs = mutableStateListOf<BrowseTabItem>().apply { addAll(BrowseTabStore.loadAll()) }
+    val currentPlatform = MutableStateFlow(initialPlatform)
 
-    /** 当前选中 tab 的下标。 */
-    val mainTab = MutableStateFlow(BrowseTabStore.loadSelectedTab(currentPlatform.value))
+    /** 当前选中 tab 的下标；旧版按平台保存的下标迁移到共享序列。 */
+    val mainTab = MutableStateFlow(initialTabIndex(initialPlatform))
+
+    private fun initialTabIndex(platform: ContentPlatform): Int {
+        val oldIndex = BrowseTabStore.loadSelectedTab(platform)
+        val platformTabs = tabs.withIndex().filter { it.value.platformId == platform }
+        return platformTabs.getOrNull(oldIndex)?.index
+            ?: tabs.indexOfFirst { it.platformId == platform }.takeIf { it >= 0 }
+            ?: 0
+    }
 
     /** 单个 tab 的列表状态，按 tab id 存放。 */
     private class TabState {
@@ -54,7 +64,7 @@ class BrowseViewModel {
 
     private fun stateFor(page: Int): TabState {
         val item = tabs.getOrNull(page) ?: return TabState()
-        val key = "${currentPlatform.value.id}:${item.id}"
+        val key = "${item.platformId.id}:${item.id}"
         return stateById.getOrPut(key) { TabState() }
     }
 
@@ -142,6 +152,8 @@ class BrowseViewModel {
 
     init {
         if (tabs.isNotEmpty()) mainTab.value = mainTab.value.coerceIn(0, tabs.lastIndex)
+        tabs.getOrNull(mainTab.value)?.let { bindPlatform(it.platformId) }
+        BrowseTabStore.saveSelectedTab(mainTab.value)
         bindFilterFor(mainTab.value)
         refresh()
     }
@@ -150,45 +162,44 @@ class BrowseViewModel {
     private fun bindFilterFor(page: Int) {
         val item = tabs.getOrNull(page) ?: return
         if (item.kind == TabKind.FILTER) {
-            curFilter.value = BrowseTabStore.loadFilter(currentPlatform.value, item.id)
+            curFilter.value = BrowseTabStore.loadFilter(item.platformId, item.id)
                 ?: item.filter?.copy()
                 ?: FilterSnapshot()
         }
     }
 
     fun selectMainTab(tab: Int) {
-        if (tabs.isEmpty() || tab !in tabs.indices || mainTab.value == tab) return
+        if (tabs.isEmpty() || tab !in tabs.indices) return
+        val item = tabs[tab]
+        if (mainTab.value == tab && currentPlatform.value == item.platformId) return
+        val platformChanged = currentPlatform.value != item.platformId
+        bindPlatform(item.platformId)
+        if (platformChanged) {
+            selectionMode.value = false
+            selectedIds.value = emptySet()
+        }
         mainTab.value = tab
-        BrowseTabStore.saveSelectedTab(currentPlatform.value, tab)
+        BrowseTabStore.saveSelectedTab(tab)
         bindFilterFor(tab)
         if (currentPlatform.value == ContentPlatform.MANWA && !stateFor(tab).loaded) refresh()
     }
 
-    fun selectPlatform(platform: ContentPlatform) {
+    private fun bindPlatform(platform: ContentPlatform) {
         if (currentPlatform.value == platform) return
         currentJob?.cancel()
         requestSeq.incrementAndGet()
-        stateById.values.forEach { state ->
-            state.loading.value = false
-            state.appending.value = false
-        }
-        if (tabs.isNotEmpty()) BrowseTabStore.saveSelectedTab(currentPlatform.value, mainTab.value)
+        val previous = currentPlatform.value
         prefs.edit()
-            .putString("browse_newest_date_${currentPlatform.value.id}", newestDate.value)
-            .putInt("browse_rank_type_${currentPlatform.value.id}", rankType.value)
-            .putBoolean("browse_filter_expanded_${currentPlatform.value.id}", filterExpanded.value)
+            .putString("browse_newest_date_${previous.id}", newestDate.value)
+            .putInt("browse_rank_type_${previous.id}", rankType.value)
+            .putBoolean("browse_filter_expanded_${previous.id}", filterExpanded.value)
             .apply()
         currentPlatform.value = platform
-        tabs.clear()
-        tabs.addAll(BrowseTabStore.load(platform))
-        mainTab.value = if (tabs.isEmpty()) 0 else BrowseTabStore.loadSelectedTab(platform).coerceIn(0, tabs.lastIndex)
+        ContentPlatformPrefs.save("browse", platform)
         newestDate.value = prefs.getString("browse_newest_date_${platform.id}", "") ?: ""
         rankType.value = prefs.getInt("browse_rank_type_${platform.id}", 0)
         filterExpanded.value = prefs.getBoolean("browse_filter_expanded_${platform.id}", true)
-        selectionMode.value = false
-        selectedIds.value = emptySet()
-        bindFilterFor(mainTab.value)
-        if (platform == ContentPlatform.MANWA && tabs.isNotEmpty() && !stateFor(mainTab.value).loaded) refresh()
+        rankTypeInitialized = false
     }
 
     fun selectRankType(type: Int) {
@@ -202,7 +213,7 @@ class BrowseViewModel {
     private fun updateCurrentFilter(snapshot: FilterSnapshot) {
         curFilter.value = snapshot
         tabs.getOrNull(mainTab.value)?.let { item ->
-            BrowseTabStore.saveFilter(currentPlatform.value, item.id, snapshot)
+            BrowseTabStore.saveFilter(item.platformId, item.id, snapshot)
         }
     }
 
@@ -356,10 +367,12 @@ class BrowseViewModel {
 
     /** 从详情页标签点击返回：定位到第一个 FILTER tab，并把该标签作为当次临时筛选。 */
     fun applyPendingTag(tag: String) {
-        if (currentPlatform.value != ContentPlatform.MANWA || tabs.isEmpty()) return
-        val idx = tabs.indexOfFirst { it.kind == TabKind.FILTER }.coerceAtLeast(0)
+        if (tabs.isEmpty()) return
+        val idx = tabs.indexOfFirst { it.kind == TabKind.FILTER && it.platformId == ContentPlatform.MANWA }
+        if (idx < 0) return
+        bindPlatform(ContentPlatform.MANWA)
         mainTab.value = idx
-        BrowseTabStore.saveSelectedTab(currentPlatform.value, idx)
+        BrowseTabStore.saveSelectedTab(idx)
         bindFilterFor(idx)
         updateCurrentFilter((tabs[idx].filter ?: FilterSnapshot()).copy(tags = listOf(tag)))
         refresh()
@@ -372,14 +385,14 @@ class BrowseViewModel {
     }
 
     fun loadMore(tab: Int) {
-        if (currentPlatform.value != ContentPlatform.MANWA || tab !in tabs.indices) return
+        if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.MANWA) return
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         currentJob = scope.launch { doLoad(reset = false, tab = tab) }
     }
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
-        if (currentPlatform.value != ContentPlatform.MANWA || tab !in tabs.indices) return
+        if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.MANWA) return
         val ts = stateFor(tab)
         val item = tabs[tab]
         val reqId = requestSeq.incrementAndGet()
@@ -457,15 +470,15 @@ class BrowseViewModel {
     fun moveTab(from: Int, to: Int) {
         if (from == to) return
         if (from !in tabs.indices || to !in tabs.indices) return
-        val selectedId = tabs.getOrNull(mainTab.value)?.id
+        val selected = tabs.getOrNull(mainTab.value)?.let { it.platformId to it.id }
         val moved = tabs.removeAt(from)
         tabs.add(to, moved)
         persist()
-        if (selectedId != null) {
-            val ni = tabs.indexOfFirst { it.id == selectedId }
+        if (selected != null) {
+            val ni = tabs.indexOfFirst { it.platformId == selected.first && it.id == selected.second }
             if (ni >= 0) {
                 mainTab.value = ni
-                BrowseTabStore.saveSelectedTab(currentPlatform.value, ni)
+                BrowseTabStore.saveSelectedTab(ni)
             }
         }
     }
@@ -476,11 +489,11 @@ class BrowseViewModel {
         platform: ContentPlatform = currentPlatform.value,
     ): Boolean {
         val n = name.trim()
-        val items = if (platform == currentPlatform.value) tabs else BrowseTabStore.load(platform)
-        return items.any { it.id != ignoreId && it.name == n }
+        val ignoredPlatform = tabs.firstOrNull { it.id == ignoreId }?.platformId ?: platform
+        return tabs.any { it.name == n && !(it.id == ignoreId && it.platformId == ignoredPlatform) }
     }
 
-    private fun persist() = BrowseTabStore.save(tabs.toList(), currentPlatform.value)
+    private fun persist() = BrowseTabStore.saveAll(tabs.toList())
 
     fun renameTab(id: String, name: String): Boolean {
         val i = tabs.indexOfFirst { it.id == id }
@@ -507,13 +520,14 @@ class BrowseViewModel {
     fun deleteTab(id: String) {
         val i = tabs.indexOfFirst { it.id == id }
         if (i < 0 || isProtected(tabs[i])) return
+        val deletedPlatform = tabs[i].platformId
         tabs.removeAt(i)
-        stateById.remove("${currentPlatform.value.id}:$id")
-        if (tabs.isEmpty() && currentPlatform.value == ContentPlatform.MANWA) tabs.addAll(BrowseTabStore.defaultTabs())
+        stateById.remove("${deletedPlatform.id}:$id")
+        if (tabs.isEmpty()) tabs.addAll(BrowseTabStore.defaultTabs(ContentPlatform.MANWA))
         persist()
         if (tabs.isEmpty()) {
             mainTab.value = 0
-            BrowseTabStore.saveSelectedTab(currentPlatform.value, 0)
+            BrowseTabStore.saveSelectedTab(0)
             return
         }
         val target = when {
@@ -521,8 +535,9 @@ class BrowseViewModel {
             i == mainTab.value -> 0
             else -> mainTab.value
         }.coerceIn(0, tabs.lastIndex)
+        bindPlatform(tabs[target].platformId)
         mainTab.value = target
-        BrowseTabStore.saveSelectedTab(currentPlatform.value, target)
+        BrowseTabStore.saveSelectedTab(target)
         bindFilterFor(target)
         if (!stateFor(target).loaded) refresh()
     }
@@ -535,18 +550,13 @@ class BrowseViewModel {
         val n = name.trim()
         if (n.isEmpty() || isNameTaken(n, platform = platform)) return false
         val item = BrowseTabItem(
-            id = "custom_${System.currentTimeMillis()}",
+            id = "custom_${platform.id}_${System.currentTimeMillis()}",
             name = n,
             kind = TabKind.FILTER,
             builtin = false,
             filter = snapshot,
             platformId = platform,
         )
-        if (platform != currentPlatform.value) {
-            val platformTabs = BrowseTabStore.load(platform).toMutableList().apply { add(item) }
-            BrowseTabStore.save(platformTabs, platform)
-            return true
-        }
         tabs.add(item)
         persist()
         goTo(tabs.lastIndex)
@@ -612,16 +622,20 @@ class BrowseViewModel {
 
     fun resetToDefaults() {
         tabs.clear()
-        stateById.keys.removeAll { it.startsWith("${currentPlatform.value.id}:") }
-        tabs.addAll(BrowseTabStore.reset(currentPlatform.value))
+        stateById.clear()
+        tabs.addAll(BrowseTabStore.resetAll())
+        bindPlatform(ContentPlatform.MANWA)
         mainTab.value = 0
+        BrowseTabStore.saveSelectedTab(0)
         bindFilterFor(0)
         refresh()
     }
 
     private fun goTo(index: Int) {
+        val item = tabs.getOrNull(index) ?: return
+        bindPlatform(item.platformId)
         mainTab.value = index
-        BrowseTabStore.saveSelectedTab(currentPlatform.value, index)
+        BrowseTabStore.saveSelectedTab(index)
         bindFilterFor(index)
         if (currentPlatform.value == ContentPlatform.MANWA && !stateFor(index).loaded) refresh()
     }
@@ -654,6 +668,7 @@ class BrowseViewModel {
         private lateinit var prefs: android.content.SharedPreferences
         fun init(context: android.content.Context) {
             ContentPlatformPrefs.init(context)
+            ContentPlatformAccentPrefs.init(context)
             prefs = context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
             BrowseTabStore.init(context)
         }

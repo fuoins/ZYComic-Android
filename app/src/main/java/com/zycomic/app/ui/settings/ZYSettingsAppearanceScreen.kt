@@ -2,17 +2,41 @@ package com.zycomic.app.ui.settings
 
 import android.app.Activity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.materialkolor.PaletteStyle
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformAccentPrefs
+import com.zycomic.app.platform.rememberContentPlatformAccent
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.domain.ui.model.AppTheme
@@ -70,6 +94,13 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
 
         val amoledPref = uiPreferences.themeDarkAmoled()
         val amoled by amoledPref.collectAsState()
+        val manwaAccent = rememberContentPlatformAccent(ContentPlatform.MANWA)
+        val jmAccent = rememberContentPlatformAccent(ContentPlatform.JM)
+        var editingAccent by remember { mutableStateOf<ContentPlatform?>(null) }
+
+        editingAccent?.let { platform ->
+            PlatformAccentDialog(platform = platform, onDismiss = { editingAccent = null })
+        }
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_theme),
@@ -91,6 +122,18 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             onItemClick = { appThemePref.set(it) },
                         )
                     }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "漫蛙标签颜色") {
+                    PlatformAccentPreferenceRow(
+                        color = manwaAccent,
+                        onClick = { editingAccent = ContentPlatform.MANWA },
+                    )
+                },
+                Preference.PreferenceItem.CustomPreference(title = "禁漫天堂标签颜色") {
+                    PlatformAccentPreferenceRow(
+                        color = jmAccent,
+                        onClick = { editingAccent = ContentPlatform.JM },
+                    )
                 },
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(KMR.strings.pref_custom_color),
@@ -282,6 +325,74 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
             ),
         )
     }
+}
+
+@Composable
+private fun PlatformAccentPreferenceRow(color: Color, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = ContentPlatformAccentPrefs.format(color),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.size(24.dp).background(color, CircleShape))
+    }
+}
+
+@Composable
+private fun PlatformAccentDialog(platform: ContentPlatform, onDismiss: () -> Unit) {
+    val current = rememberContentPlatformAccent(platform)
+    var hex by remember(platform) { mutableStateOf(ContentPlatformAccentPrefs.format(current)) }
+    val parsed = ContentPlatformAccentPrefs.parseColor(hex)
+    val platformName = if (platform == ContentPlatform.MANWA) "漫蛙" else "禁漫天堂"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$platformName 标签颜色") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = hex,
+                    onValueChange = { hex = it },
+                    label = { Text("ARGB 色值") },
+                    placeholder = { Text("#FF248A48") },
+                    supportingText = { Text("支持 #RRGGBB 或 #AARRGGBB") },
+                    singleLine = true,
+                    isError = hex.isNotBlank() && parsed == null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("预览", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.size(28.dp).background(parsed ?: current, CircleShape))
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = parsed != null,
+                onClick = {
+                    parsed?.let { ContentPlatformAccentPrefs.set(platform, it) }
+                    onDismiss()
+                },
+            ) { Text("应用") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = {
+                    ContentPlatformAccentPrefs.reset(platform)
+                    onDismiss()
+                }) { Text("恢复默认") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
 }
 
 private val DateFormats = listOf(

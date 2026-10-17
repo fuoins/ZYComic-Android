@@ -77,9 +77,8 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.ContentPlatform
-import com.zycomic.app.platform.ContentPlatformPrefs
-import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.PlatformNotConnectedContent
+import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
@@ -120,10 +119,6 @@ fun BrowseScreen(
     val mainTab by vm.mainTab.collectAsState()
     val platform by vm.currentPlatform.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val selectPlatform: (ContentPlatform) -> Unit = { selected ->
-        ContentPlatformPrefs.save("browse", selected)
-        vm.selectPlatform(selected)
-    }
     val tabs = vm.tabs
     val pagerState = rememberPagerState(
         initialPage = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
@@ -244,9 +239,9 @@ fun BrowseScreen(
                     end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
                 ),
         ) {
-            // 可横向滑动的自定义紧凑 Tab 行（选中 tab 紧后内嵌「重新筛选」）+ 最右固定「管理」
+            // 共用混合标签栏（选中 tab 后内嵌「重新筛选」）+ 平台颜色图例 + 管理
             val tabRowStateHolder = rememberSaveableStateHolder()
-            tabRowStateHolder.SaveableStateProvider("category_tab_row_${platform.id}") {
+            tabRowStateHolder.SaveableStateProvider("category_tab_row_shared") {
                 val tabRowState = rememberLazyListState()
                 LaunchedEffect(pagerState.currentPage, tabs.size) {
                     // 选中 tab 后插入的筛选图标 lazy 下标 = currentPage+1；滚动使其露出，不与固定管理按钮重叠
@@ -261,7 +256,7 @@ fun BrowseScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         tabs.forEachIndexed { index, item ->
-                            item(key = "tab_${item.id}") {
+                            item(key = "tab_${item.platformId.id}_${item.id}") {
                                 val selected = pagerState.currentPage == index
                                 val selectTab: () -> Unit = {
                                     scope.launch {
@@ -270,39 +265,20 @@ fun BrowseScreen(
                                     }
                                 }
                                 if (item.pageType == BrowsePageType.YUZONG_RANK) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = selectTab).padding(horizontal = 12.dp),
-                                    ) {
-                                        Text(
-                                            text = item.name,
-                                            fontSize = 13.sp,
-                                            maxLines = 1,
-                                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.padding(top = 0.dp, bottom = 0.5.dp),
-                                        )
-                                        Box(
-                                            modifier = Modifier.width(24.dp).height(3.dp).then(
-                                                if (selected) Modifier.background(MaterialTheme.colorScheme.primary) else Modifier,
-                                            ),
+                                    Box(Modifier.clickable(onClick = selectTab).padding(end = 6.dp)) {
+                                        BrowseTabCapsule(
+                                            name = item.name,
+                                            platform = item.platformId,
+                                            isYuzongRank = true,
+                                            selected = selected,
                                         )
                                     }
                                 } else {
-                                    val accent = item.platformId.accent
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(end = 6.dp)
-                                            .clip(CircleShape)
-                                            .background(if (selected) accent else accent.copy(alpha = 0.12f))
-                                            .clickable(onClick = selectTab)
-                                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                                    ) {
-                                        Text(
-                                            text = item.name,
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            color = if (selected) Color.White else accent,
-                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    Box(Modifier.clickable(onClick = selectTab).padding(end = 6.dp)) {
+                                        BrowseTabCapsule(
+                                            name = item.name,
+                                            platform = item.platformId,
+                                            selected = selected,
                                         )
                                     }
                                 }
@@ -319,11 +295,7 @@ fun BrowseScreen(
                             }
                         }
                     }
-                    ContentPlatformSelector(
-                        selected = platform,
-                        onSelect = selectPlatform,
-                        compact = true,
-                    )
+                    CategoryPlatformLegend()
                     TabBarIcon(
                         icon = Icons.Outlined.Tune,
                         contentDescription = "管理",
@@ -332,38 +304,31 @@ fun BrowseScreen(
                 }
             }
 
-            if (platform == ContentPlatform.JM && tabs.isEmpty()) {
-                PlatformNotConnectedContent(
-                    modifier = Modifier.fillMaxSize(),
-                    detail = stringResource(KMR.strings.content_platform_browse_detail),
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.Top,
+                key = { page -> "${tabs.getOrNull(page)?.platformId?.id ?: platform.id}_${tabs.getOrNull(page)?.id ?: "empty"}" },
+            ) { page ->
+                BrowseTabContent(
+                    page = page,
+                    vm = vm,
+                    platform = platform,
+                    displayMode = displayMode,
+                    gridColumns = gridColumns,
+                    selectionMode = selectionMode,
+                    selectedIds = selectedIds,
+                    onOpenManga = onOpenManga,
+                    onToggleSelect = { vm.toggleSelect(it) },
+                    onLongClick = {
+                        if (!selectionMode) {
+                            vm.enterSelection()
+                            vm.toggleSelect(it)
+                        }
+                    },
+                    bottomPadding = contentPadding.calculateBottomPadding(),
+                    onOpenSearch = onOpenSearch,
                 )
-            } else {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.Top,
-                    key = { page -> "${platform.id}_${tabs.getOrNull(page)?.id ?: "empty"}" },
-                ) { page ->
-                    BrowseTabContent(
-                        page = page,
-                        vm = vm,
-                        platform = platform,
-                        displayMode = displayMode,
-                        gridColumns = gridColumns,
-                        selectionMode = selectionMode,
-                        selectedIds = selectedIds,
-                        onOpenManga = onOpenManga,
-                        onToggleSelect = { vm.toggleSelect(it) },
-                        onLongClick = {
-                            if (!selectionMode) {
-                                vm.enterSelection()
-                                vm.toggleSelect(it)
-                            }
-                        },
-                        bottomPadding = contentPadding.calculateBottomPadding(),
-                        onOpenSearch = onOpenSearch,
-                    )
-                }
             }
         }
     }
@@ -417,6 +382,23 @@ fun BrowseScreen(
 }
 
 @Composable
+private fun CategoryPlatformLegend() {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp), modifier = Modifier.padding(horizontal = 3.dp)) {
+        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.MANWA), label = "漫蛙")
+        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.JM), label = "禁漫天堂")
+        PlatformLegendRow(color = MaterialTheme.colorScheme.primary, label = "宇总排行")
+    }
+}
+
+@Composable
+private fun PlatformLegendRow(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Box(Modifier.width(10.dp).height(6.dp).clip(CircleShape).background(color))
+        Text(label, fontSize = 9.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun BrowseTabContent(
     page: Int,
     vm: BrowseViewModel,
@@ -431,14 +413,15 @@ private fun BrowseTabContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenSearch: (String) -> Unit,
 ) {
-    if (platform == ContentPlatform.JM) {
+    val item = vm.tabs.getOrNull(page)
+    val tabPlatform = item?.platformId ?: platform
+    if (tabPlatform == ContentPlatform.JM) {
         PlatformNotConnectedContent(
             modifier = Modifier.fillMaxSize(),
             detail = stringResource(KMR.strings.content_platform_not_connected_detail),
         )
         return
     }
-    val item = vm.tabs.getOrNull(page)
     if (item?.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.YUZONG_RANK) {
         com.zycomic.app.platform.YuzongRankContent(onSearchTitle = onOpenSearch, modifier = Modifier.fillMaxSize(), gridColumns = if (gridColumns > 0) gridColumns else 3, displayMode = displayMode)
         return
