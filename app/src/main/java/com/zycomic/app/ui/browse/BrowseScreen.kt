@@ -263,7 +263,7 @@ fun BrowseScreen(
                         tabs.forEachIndexed { index, item ->
                             item(key = "tab_${item.id}") {
                                 val selected = pagerState.currentPage == index
-                                val selectTab = {
+                                val selectTab: () -> Unit = {
                                     scope.launch {
                                         pagerState.animateScrollToPage(index)
                                         vm.selectMainTab(index)
