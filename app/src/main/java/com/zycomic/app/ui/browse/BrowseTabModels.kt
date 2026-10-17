@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.browse
 
+import com.zycomic.app.platform.ContentPlatform
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -53,12 +54,14 @@ data class BrowseTabItem(
     val builtin: Boolean = false,
     val filter: FilterSnapshot? = null,
     val pageType: BrowsePageType? = null,
+    val platformId: ContentPlatform = ContentPlatform.MANWA,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)
         put("kind", kind.name)
         put("builtin", builtin)
+        put("platformId", platformId.id)
         filter?.let { put("filter", it.toJson()) }
         pageType?.let { put("pageType", it.name) }
     }
@@ -81,6 +84,7 @@ data class BrowseTabItem(
                 builtin = o.optBoolean("builtin", false),
                 filter = filter,
                 pageType = pageType,
+                platformId = ContentPlatform.fromId(o.optString("platformId", ContentPlatform.MANWA.id)),
             )
         }
     }

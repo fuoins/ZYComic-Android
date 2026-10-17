@@ -6,15 +6,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,14 +21,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,20 +41,18 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.SelectAll
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -85,20 +84,26 @@ import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.FavoriteItem
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformPrefs
+import com.zycomic.app.platform.ContentPlatformSelector
+import com.zycomic.app.platform.PlatformNotConnectedContent
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
-import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.TabbedDialog
-import kotlinx.coroutines.CancellationException
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.CancellationException
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
+import androidx.compose.foundation.lazy.grid.items as gridItems
 
 @Composable
 fun LibraryScreen(
@@ -107,6 +112,11 @@ fun LibraryScreen(
     onRequireLogin: () -> Unit,
     onOpenSearch: (String) -> Unit,
 ) {
+    val platform by vm.currentPlatform.collectAsState()
+    val selectPlatform: (ContentPlatform) -> Unit = { selected ->
+        ContentPlatformPrefs.save("library", selected)
+        vm.selectPlatform(selected)
+    }
     val user by vm.user.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()
     val favs by vm.favItems.collectAsState()
@@ -127,8 +137,8 @@ fun LibraryScreen(
         vm.needLogin.collect { if (it) onRequireLogin() }
     }
 
-    LaunchedEffect(Unit) {
-        if (UserRepository.isLoggedIn) {
+    LaunchedEffect(platform) {
+        if (platform == ContentPlatform.MANWA && UserRepository.isLoggedIn) {
             try {
                 UserRepository.refreshUserInfo()
             } catch (e: CancellationException) {
@@ -139,8 +149,8 @@ fun LibraryScreen(
     }
 
     // 页面首次可见时：收藏夹为空且已登录则请求一次（缓存）
-    LaunchedEffect(Unit) {
-        vm.ensureFoldersLoaded()
+    LaunchedEffect(platform) {
+        if (platform == ContentPlatform.MANWA) vm.ensureFoldersLoaded()
     }
 
     // 多选模式下按返回键 = 退出多选
@@ -158,9 +168,9 @@ fun LibraryScreen(
     var isRefreshing by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
-    LaunchedEffect(listState.canScrollForward, filtered.size) {
+    LaunchedEffect(platform, listState.canScrollForward, filtered.size) {
         val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (filtered.isNotEmpty() && last >= filtered.size - 3 && hasMore) vm.loadMoreFavorites()
+        if (platform == ContentPlatform.MANWA && filtered.isNotEmpty() && last >= filtered.size - 3 && hasMore) vm.loadMoreFavorites()
     }
 
     Scaffold(
@@ -184,7 +194,7 @@ fun LibraryScreen(
                             ),
                         )
                     },
-                isActionMode = true,
+                    isActionMode = true,
                     onCancelActionMode = { vm.exitSelection() },
                     scrollBehavior = scrollBehavior,
                 )
@@ -206,7 +216,9 @@ fun LibraryScreen(
                             vm.updateSearchQuery(null)
                             focusManager.clearFocus()
                         }
-                    } else null,
+                    } else {
+                        null
+                    },
                     titleContent = {
                         if (isSearching) {
                             BasicTextField(
@@ -223,39 +235,58 @@ fun LibraryScreen(
                                 singleLine = true,
                             )
                         } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                AppBarTitle("收藏")
-                                val user by com.zycomic.app.data.repository.UserRepository.userFlow.collectAsState()
-                                user?.let {
-                                    val max = when { it.level >= 5 -> 3500; it.level == 4 -> 2500; it.level == 3 -> 1500; it.level == 2 -> 800; it.level == 1 -> 300; else -> 0 }
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("已收藏 ${it.favoriteCount}/$max", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column {
+                                Text("收藏", style = MaterialTheme.typography.titleLarge)
+                                if (platform == ContentPlatform.MANWA) {
+                                    user?.let {
+                                        val max = when {
+                                            it.level >= 5 -> 3500
+                                            it.level == 4 -> 2500
+                                            it.level == 3 -> 1500
+                                            it.level == 2 -> 800
+                                            it.level == 1 -> 300
+                                            else -> 0
+                                        }
+                                        Text("已收藏 ${it.favoriteCount}/$max", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                             }
                         }
                     },
                     actions = {
                         AppBarActions(
-                            if (!isSearching) {
+                            if (platform == ContentPlatform.MANWA && !isSearching) {
                                 persistentListOf(
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { vm.updateSearchQuery("") }),
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refreshFavorites() }),
                                     AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
                                     AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
+                                    },
                                 )
-                            } else {
+                            } else if (platform == ContentPlatform.MANWA) {
                                 persistentListOf(
                                     AppBar.Action(title = "清除", icon = Icons.Default.Close, onClick = { vm.updateSearchQuery("") }),
                                     AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
+                                    },
+                                )
+                            } else {
+                                persistentListOf(
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
+                                    },
                                 )
                             },
                         )
                     },
-                scrollBehavior = scrollBehavior,
-            )
-        }
-    },
-    bottomBar = {
+                    scrollBehavior = scrollBehavior,
+                )
+            }
+        },
+        bottomBar = {
             if (selectionMode) {
                 Row(
                     modifier = Modifier
@@ -285,6 +316,10 @@ fun LibraryScreen(
         },
     ) { contentPadding ->
         when {
+            platform == ContentPlatform.JM -> PlatformNotConnectedContent(
+                modifier = Modifier.fillMaxSize().padding(contentPadding),
+                detail = stringResource(KMR.strings.content_platform_favorites_detail),
+            )
             user == null -> EmptyScreen(
                 message = "请先登录",
                 modifier = Modifier.padding(contentPadding),
@@ -296,108 +331,124 @@ fun LibraryScreen(
             )
             else -> {
                 Box(modifier = Modifier.fillMaxSize()) {
-                if (displayMode <= 2) {
-                // 网格模式：0=紧凑 1=舒适 2=仅封面
-                val columns = if (gridColumns > 0) gridColumns else if (displayMode == 1) 2 else 3
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    contentPadding = contentPadding,
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (!searchQuery.isNullOrBlank()) {
-                        item(key = "global-search", contentType = "global-search", span = { GridItemSpan(columns) }) {
-                            TextButton(
-                                onClick = { onOpenSearch(searchQuery ?: "") },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                            ) {
-                                Text(text = "全局搜索：${searchQuery}", color = MaterialTheme.colorScheme.primary)
+                    if (displayMode <= 2) {
+                        // 网格模式：0=紧凑 1=舒适 2=仅封面
+                        val columns = if (gridColumns > 0) {
+                            gridColumns
+                        } else if (displayMode == 1) {
+                            2
+                        } else {
+                            3
+                        }
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(columns),
+                            contentPadding = contentPadding,
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (!searchQuery.isNullOrBlank()) {
+                                item(key = "global-search", contentType = "global-search", span = { GridItemSpan(columns) }) {
+                                    TextButton(
+                                        onClick = { onOpenSearch(searchQuery ?: "") },
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                    ) {
+                                        Text(text = "全局搜索：$searchQuery", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                            gridItems(filtered, key = { "fav-${it.bookId}" }, contentType = { "grid" }) { item ->
+                                FavGridItem(
+                                    item = item,
+                                    displayMode = displayMode,
+                                    selected = selectedIds.contains(item.bookId),
+                                    selectionMode = selectionMode,
+                                    showUnreadBadge = showUnreadBadge,
+                                    showUpdateBadge = showUpdateBadge,
+                                    onClick = {
+                                        if (selectionMode) {
+                                            vm.toggleSelect(item.bookId)
+                                        } else {
+                                            onOpenManga(item.bookId)
+                                        }
+                                    },
+                                    onLongClick = { if (!selectionMode) vm.enterSelectionAndSelect(item.bookId) },
+                                )
+                            }
+                            if (appending) {
+                                item(key = "loading-footer", contentType = "footer", span = { GridItemSpan(columns) }) { LoadingFooter() }
+                            } else if (!hasMore) {
+                                item(key = "no-more", contentType = "footer", span = { GridItemSpan(columns) }) {
+                                    Text(
+                                        text = "没有更多了",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        FastScrollLazyColumn(
+                            state = listState,
+                            contentPadding = contentPadding,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            // 本地搜索词非空时，提供“全局搜索”入口
+                            if (!searchQuery.isNullOrBlank()) {
+                                item(key = "global-search", contentType = "global-search") {
+                                    TextButton(
+                                        onClick = { onOpenSearch(searchQuery ?: "") },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    ) {
+                                        Text(
+                                            text = "全局搜索：$searchQuery",
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
+                            items(filtered, key = { "fav-${it.bookId}" }, contentType = { "item" }) { item ->
+                                FavItemRow(
+                                    item = item,
+                                    displayMode = displayMode,
+                                    selected = selectedIds.contains(item.bookId),
+                                    selectionMode = selectionMode,
+                                    showUnreadBadge = showUnreadBadge,
+                                    showUpdateBadge = showUpdateBadge,
+                                    onClick = {
+                                        if (selectionMode) {
+                                            vm.toggleSelect(item.bookId)
+                                        } else {
+                                            onOpenManga(item.bookId)
+                                        }
+                                    },
+                                    onLongClick = { if (!selectionMode) vm.enterSelectionAndSelect(item.bookId) },
+                                )
+                            }
+                            if (appending) {
+                                item(key = "loading-footer", contentType = "footer") { LoadingFooter() }
+                            } else if (!hasMore) {
+                                item(key = "no-more", contentType = "footer") {
+                                    Text(
+                                        text = "没有更多了",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                    )
+                                }
                             }
                         }
                     }
-                    gridItems(filtered, key = { "fav-${it.bookId}" }, contentType = { "grid" }) { item ->
-                        FavGridItem(
-                            item = item,
-                            displayMode = displayMode,
-                            selected = selectedIds.contains(item.bookId),
-                            selectionMode = selectionMode,
-                            showUnreadBadge = showUnreadBadge,
-                            showUpdateBadge = showUpdateBadge,
-                            onClick = {
-                                if (selectionMode) vm.toggleSelect(item.bookId)
-                                else onOpenManga(item.bookId)
-                            },
-                            onLongClick = { if (!selectionMode) vm.enterSelectionAndSelect(item.bookId) },
-                        )
-                    }
-                    if (appending) {
-                        item(key = "loading-footer", contentType = "footer", span = { GridItemSpan(columns) }) { LoadingFooter() }
-                    } else if (!hasMore) {
-                        item(key = "no-more", contentType = "footer", span = { GridItemSpan(columns) }) {
-                            Text(text = "没有更多了", style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp))
-                        }
-                    }
-                }
-            } else {
-                FastScrollLazyColumn(
-                state = listState,
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                // 本地搜索词非空时，提供“全局搜索”入口
-                if (!searchQuery.isNullOrBlank()) {
-                    item(key = "global-search", contentType = "global-search") {
-                        TextButton(
-                            onClick = { onOpenSearch(searchQuery ?: "") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                text = "全局搜索：${searchQuery}",
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                }
-                items(filtered, key = { "fav-${it.bookId}" }, contentType = { "item" }) { item ->
-                    FavItemRow(
-                        item = item,
-                        displayMode = displayMode,
-                        selected = selectedIds.contains(item.bookId),
-                        selectionMode = selectionMode,
-                        showUnreadBadge = showUnreadBadge,
-                        showUpdateBadge = showUpdateBadge,
-                        onClick = {
-                            if (selectionMode) vm.toggleSelect(item.bookId)
-                            else onOpenManga(item.bookId)
-                        },
-                        onLongClick = { if (!selectionMode) vm.enterSelectionAndSelect(item.bookId) },
-                    )
-                }
-                if (appending) {
-                    item(key = "loading-footer", contentType = "footer") { LoadingFooter() }
-                } else if (!hasMore) {
-                    item(key = "no-more", contentType = "footer") {
-                        Text(
-                            text = "没有更多了",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                        )
-                    }
-                }
-                }
                 }
             }
         }
-    }
     }
 
     // 筛选 / 排序 / 显示 / 管理收藏夹 对话框

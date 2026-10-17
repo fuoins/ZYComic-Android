@@ -7,6 +7,8 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,10 +33,11 @@ class BrowseViewModel {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // ---- 可持久化的有序 Tab 列表（Compose 可观察） ----
-    val tabs = mutableStateListOf<BrowseTabItem>().apply { addAll(BrowseTabStore.load()) }
+    val currentPlatform = MutableStateFlow(ContentPlatformPrefs.load("browse"))
+    val tabs = mutableStateListOf<BrowseTabItem>().apply { addAll(BrowseTabStore.load(currentPlatform.value)) }
 
     /** 当前选中 tab 的下标。 */
-    val mainTab = MutableStateFlow(0)
+    val mainTab = MutableStateFlow(BrowseTabStore.loadSelectedTab(currentPlatform.value))
 
     /** 单个 tab 的列表状态，按 tab id 存放。 */
     private class TabState {
@@ -50,8 +53,9 @@ class BrowseViewModel {
     private val stateById = HashMap<String, TabState>()
 
     private fun stateFor(page: Int): TabState {
-        val id = tabs[page].id
-        return stateById.getOrPut(id) { TabState() }
+        val item = tabs.getOrNull(page) ?: return TabState()
+        val key = "${currentPlatform.value.id}:${item.id}"
+        return stateById.getOrPut(key) { TabState() }
     }
 
     private val cur: TabState get() = stateFor(mainTab.value)
@@ -62,35 +66,42 @@ class BrowseViewModel {
     fun hasMoreForTab(tab: Int): StateFlow<Boolean> = stateFor(tab).hasMore
     fun errorForTab(tab: Int): StateFlow<String?> = stateFor(tab).error
 
-    // ---- 当前 FILTER tab 的会话临时筛选（进入 tab 时从预设拷贝，切走再回会重置，不持久化） ----
-    val curFilter = MutableStateFlow(
-        tabs.getOrNull(0)?.filter?.copy() ?: FilterSnapshot(),
-    )
+    // ---- 当前 FILTER tab 的临时筛选；按平台和 Tab 保存，不改写预设 ----
+    val curFilter = MutableStateFlow(FilterSnapshot())
 
     val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
 
     // ---- 最近更新（SPECIAL: LATEST） ----
-    val newestDate = MutableStateFlow("")       // ""=7天
+    val newestDate = MutableStateFlow(prefs.getString("browse_newest_date_${currentPlatform.value.id}", "") ?: "") // ""=7天
     val newestNums = MutableStateFlow(0)
 
     // ---- 排行（SPECIAL: RANKING）子类型：0 人气 / 1 新番 / 2 完结 ----
-    val rankType = MutableStateFlow(0)
+    val rankType = MutableStateFlow(prefs.getInt("browse_rank_type_${currentPlatform.value.id}", 0))
     private var rankTypeInitialized = false
     fun initDefaultRankType(default: Int) {
-        if (!rankTypeInitialized) { rankType.value = default; rankTypeInitialized = true }
+        if (!rankTypeInitialized) {
+            rankType.value = prefs.getInt("browse_rank_type_${currentPlatform.value.id}", default)
+            rankTypeInitialized = true
+        }
     }
     fun applyDefaultRankType(t: Int) {
         rankTypeInitialized = true
-        if (rankType.value != t) { rankType.value = t; refresh() }
+        if (rankType.value != t) {
+            rankType.value = t
+            prefs.edit().putInt("browse_rank_type_${currentPlatform.value.id}", t).apply()
+            refresh()
+        }
     }
 
-    val filterExpanded = MutableStateFlow(true)
+    val filterExpanded = MutableStateFlow(prefs.getBoolean("browse_filter_expanded_${currentPlatform.value.id}", true))
 
     // ---- 显示模式：0紧凑 1舒适(默认) 2仅封面 ----（持久化）
     val displayMode = MutableStateFlow(prefs.getInt("browse_display_mode", 1))
     val gridColumns = MutableStateFlow(3)
 
-    init { migrateGridColumnsIfNeeded("browse") }
+    init {
+        migrateGridColumnsIfNeeded("browse")
+    }
 
     fun setDisplayMode(mode: Int) {
         displayMode.value = mode
@@ -130,7 +141,8 @@ class BrowseViewModel {
     val dateOptions: List<Pair<String, String>> = buildDateOptions()
 
     init {
-        bindFilterFor(0)
+        if (tabs.isNotEmpty()) mainTab.value = mainTab.value.coerceIn(0, tabs.lastIndex)
+        bindFilterFor(mainTab.value)
         refresh()
     }
 
@@ -138,69 +150,142 @@ class BrowseViewModel {
     private fun bindFilterFor(page: Int) {
         val item = tabs.getOrNull(page) ?: return
         if (item.kind == TabKind.FILTER) {
-            curFilter.value = item.filter?.copy() ?: FilterSnapshot()
+            curFilter.value = BrowseTabStore.loadFilter(currentPlatform.value, item.id)
+                ?: item.filter?.copy()
+                ?: FilterSnapshot()
         }
     }
 
     fun selectMainTab(tab: Int) {
-        if (mainTab.value == tab) return
+        if (tabs.isEmpty() || tab !in tabs.indices || mainTab.value == tab) return
         mainTab.value = tab
+        BrowseTabStore.saveSelectedTab(currentPlatform.value, tab)
         bindFilterFor(tab)
-        if (!stateFor(tab).loaded) refresh()
+        if (currentPlatform.value == ContentPlatform.MANWA && !stateFor(tab).loaded) refresh()
+    }
+
+    fun selectPlatform(platform: ContentPlatform) {
+        if (currentPlatform.value == platform) return
+        currentJob?.cancel()
+        requestSeq.incrementAndGet()
+        stateById.values.forEach { state ->
+            state.loading.value = false
+            state.appending.value = false
+        }
+        if (tabs.isNotEmpty()) BrowseTabStore.saveSelectedTab(currentPlatform.value, mainTab.value)
+        prefs.edit()
+            .putString("browse_newest_date_${currentPlatform.value.id}", newestDate.value)
+            .putInt("browse_rank_type_${currentPlatform.value.id}", rankType.value)
+            .putBoolean("browse_filter_expanded_${currentPlatform.value.id}", filterExpanded.value)
+            .apply()
+        currentPlatform.value = platform
+        tabs.clear()
+        tabs.addAll(BrowseTabStore.load(platform))
+        mainTab.value = if (tabs.isEmpty()) 0 else BrowseTabStore.loadSelectedTab(platform).coerceIn(0, tabs.lastIndex)
+        newestDate.value = prefs.getString("browse_newest_date_${platform.id}", "") ?: ""
+        rankType.value = prefs.getInt("browse_rank_type_${platform.id}", 0)
+        filterExpanded.value = prefs.getBoolean("browse_filter_expanded_${platform.id}", true)
+        selectionMode.value = false
+        selectedIds.value = emptySet()
+        bindFilterFor(mainTab.value)
+        if (platform == ContentPlatform.MANWA && tabs.isNotEmpty() && !stateFor(mainTab.value).loaded) refresh()
     }
 
     fun selectRankType(type: Int) {
         if (rankType.value == type) return
         rankType.value = type
+        prefs.edit().putInt("browse_rank_type_${currentPlatform.value.id}", type).apply()
         refresh()
     }
 
     // ---- 「重新筛选」：仅改当前 tab 的会话临时筛选，不写回预设 ----
-    fun selectGender(v: Int) { curFilter.value = curFilter.value.copy(gender = v); refresh() }
-    fun selectArea(v: Int) { curFilter.value = curFilter.value.copy(area = v); refresh() }
-    fun selectEnd(v: Int) { curFilter.value = curFilter.value.copy(end = v); refresh() }
-    fun selectSt(v: Int) { curFilter.value = curFilter.value.copy(st = v); refresh() }
-    fun toggleFilterExpanded() { filterExpanded.value = !filterExpanded.value }
+    private fun updateCurrentFilter(snapshot: FilterSnapshot) {
+        curFilter.value = snapshot
+        tabs.getOrNull(mainTab.value)?.let { item ->
+            BrowseTabStore.saveFilter(currentPlatform.value, item.id, snapshot)
+        }
+    }
+
+    fun selectGender(v: Int) {
+        updateCurrentFilter(curFilter.value.copy(gender = v))
+        refresh()
+    }
+    fun selectArea(v: Int) {
+        updateCurrentFilter(curFilter.value.copy(area = v))
+        refresh()
+    }
+    fun selectEnd(v: Int) {
+        updateCurrentFilter(curFilter.value.copy(end = v))
+        refresh()
+    }
+    fun selectSt(v: Int) {
+        updateCurrentFilter(curFilter.value.copy(st = v))
+        refresh()
+    }
+    fun toggleFilterExpanded() {
+        filterExpanded.value = !filterExpanded.value
+        prefs.edit().putBoolean("browse_filter_expanded_${currentPlatform.value.id}", filterExpanded.value).apply()
+    }
 
     fun toggleTag(tag: String) {
         val f = curFilter.value
         val set = f.tags.toMutableSet()
         if (!set.add(tag)) set.remove(tag)
-        curFilter.value = f.copy(tags = set.toList())
+        updateCurrentFilter(f.copy(tags = set.toList()))
         refresh()
     }
 
-    fun clearTags() { curFilter.value = curFilter.value.copy(tags = emptyList()); refresh() }
+    fun clearTags() {
+        updateCurrentFilter(curFilter.value.copy(tags = emptyList()))
+        refresh()
+    }
 
     fun setSelectedTags(tags: Set<String>) {
-        curFilter.value = curFilter.value.copy(tags = tags.toList())
+        updateCurrentFilter(curFilter.value.copy(tags = tags.toList()))
         refresh()
     }
 
     /** 用一份完整快照替换当前 tab 的会话临时筛选并刷新（「重新筛选」面板用）。 */
     fun applyTempFilter(snapshot: FilterSnapshot) {
-        curFilter.value = snapshot
+        updateCurrentFilter(snapshot)
         refresh()
     }
 
-    fun selectDate(date: String) { newestDate.value = date; refresh() }
+    fun selectDate(date: String) {
+        newestDate.value = date
+        prefs.edit().putString("browse_newest_date_${currentPlatform.value.id}", date).apply()
+        refresh()
+    }
 
     // ---- 多选 ----
-    fun enterSelection() { selectionMode.value = true; selectedIds.value = emptySet() }
-    fun exitSelection() { selectionMode.value = false; selectedIds.value = emptySet() }
+    fun enterSelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA || tabs.isEmpty()) return
+        selectionMode.value = true
+        selectedIds.value = emptySet()
+    }
+    fun exitSelection() {
+        selectionMode.value = false
+        selectedIds.value = emptySet()
+    }
     fun toggleSelect(id: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val curIds = selectedIds.value.toMutableSet()
         if (!curIds.add(id)) curIds.remove(id)
         selectedIds.value = curIds
     }
-    fun selectAll() { selectedIds.value = cur.mangas.value.map { it.id }.toSet() }
+    fun selectAll() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
+        selectedIds.value = cur.mangas.value.map { it.id }.toSet()
+    }
     fun invertSelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val all = cur.mangas.value.map { it.id }.toSet()
         selectedIds.value = all - selectedIds.value
     }
 
     // ---- 收藏夹 ----
     fun loadFolders() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (_foldersLoading.value) return
         _foldersLoading.value = true
         scope.launch {
@@ -224,8 +309,15 @@ class BrowseViewModel {
     }
 
     fun addToAllFolders(onDone: (Boolean, String) -> Unit) {
+        if (currentPlatform.value != ContentPlatform.MANWA) {
+            onDone(false, "禁漫天堂接口待接入")
+            return
+        }
         val ids = selectedIds.value.toList()
-        if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
+        if (ids.isEmpty()) {
+            onDone(false, "请先选择漫画")
+            return
+        }
         scope.launch {
             try {
                 ids.forEach { id -> FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, 0) }
@@ -240,8 +332,15 @@ class BrowseViewModel {
     }
 
     fun addToFolder(folderId: String, onDone: (Boolean, String) -> Unit) {
+        if (currentPlatform.value != ContentPlatform.MANWA) {
+            onDone(false, "禁漫天堂接口待接入")
+            return
+        }
         val ids = selectedIds.value.toList()
-        if (ids.isEmpty()) { onDone(false, "请先选择漫画"); return }
+        if (ids.isEmpty()) {
+            onDone(false, "请先选择漫画")
+            return
+        }
         scope.launch {
             try {
                 ids.forEach { id -> FavoriteRepository.addFavorite(id.toIntOrNull() ?: 0, folderId.toIntOrNull() ?: 0) }
@@ -257,25 +356,30 @@ class BrowseViewModel {
 
     /** 从详情页标签点击返回：定位到第一个 FILTER tab，并把该标签作为当次临时筛选。 */
     fun applyPendingTag(tag: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA || tabs.isEmpty()) return
         val idx = tabs.indexOfFirst { it.kind == TabKind.FILTER }.coerceAtLeast(0)
         mainTab.value = idx
+        BrowseTabStore.saveSelectedTab(currentPlatform.value, idx)
         bindFilterFor(idx)
-        curFilter.value = (tabs[idx].filter ?: FilterSnapshot()).copy(tags = listOf(tag))
+        updateCurrentFilter((tabs[idx].filter ?: FilterSnapshot()).copy(tags = listOf(tag)))
         refresh()
     }
 
     fun refresh() {
+        if (currentPlatform.value != ContentPlatform.MANWA || tabs.isEmpty()) return
         currentJob?.cancel()
         currentJob = scope.launch { doLoad(reset = true) }
     }
 
     fun loadMore(tab: Int) {
+        if (currentPlatform.value != ContentPlatform.MANWA || tab !in tabs.indices) return
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         currentJob = scope.launch { doLoad(reset = false, tab = tab) }
     }
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
+        if (currentPlatform.value != ContentPlatform.MANWA || tab !in tabs.indices) return
         val ts = stateFor(tab)
         val item = tabs[tab]
         val reqId = requestSeq.incrementAndGet()
@@ -359,16 +463,24 @@ class BrowseViewModel {
         persist()
         if (selectedId != null) {
             val ni = tabs.indexOfFirst { it.id == selectedId }
-            if (ni >= 0) mainTab.value = ni
+            if (ni >= 0) {
+                mainTab.value = ni
+                BrowseTabStore.saveSelectedTab(currentPlatform.value, ni)
+            }
         }
     }
 
-    fun isNameTaken(name: String, ignoreId: String? = null): Boolean {
+    fun isNameTaken(
+        name: String,
+        ignoreId: String? = null,
+        platform: ContentPlatform = currentPlatform.value,
+    ): Boolean {
         val n = name.trim()
-        return tabs.any { it.id != ignoreId && it.name == n }
+        val items = if (platform == currentPlatform.value) tabs else BrowseTabStore.load(platform)
+        return items.any { it.id != ignoreId && it.name == n }
     }
 
-    private fun persist() = BrowseTabStore.save(tabs.toList())
+    private fun persist() = BrowseTabStore.save(tabs.toList(), currentPlatform.value)
 
     fun renameTab(id: String, name: String): Boolean {
         val i = tabs.indexOfFirst { it.id == id }
@@ -387,7 +499,7 @@ class BrowseViewModel {
         tabs[i] = tabs[i].copy(filter = snapshot)
         persist()
         if (mainTab.value == i) {
-            curFilter.value = snapshot.copy()
+            updateCurrentFilter(snapshot.copy())
             refresh()
         }
     }
@@ -396,29 +508,45 @@ class BrowseViewModel {
         val i = tabs.indexOfFirst { it.id == id }
         if (i < 0 || isProtected(tabs[i])) return
         tabs.removeAt(i)
-        stateById.remove(id)
-        if (tabs.isEmpty()) tabs.addAll(BrowseTabStore.defaultTabs())
+        stateById.remove("${currentPlatform.value.id}:$id")
+        if (tabs.isEmpty() && currentPlatform.value == ContentPlatform.MANWA) tabs.addAll(BrowseTabStore.defaultTabs())
         persist()
+        if (tabs.isEmpty()) {
+            mainTab.value = 0
+            BrowseTabStore.saveSelectedTab(currentPlatform.value, 0)
+            return
+        }
         val target = when {
             i < mainTab.value -> mainTab.value - 1
             i == mainTab.value -> 0
             else -> mainTab.value
         }.coerceIn(0, tabs.lastIndex)
         mainTab.value = target
+        BrowseTabStore.saveSelectedTab(currentPlatform.value, target)
         bindFilterFor(target)
         if (!stateFor(target).loaded) refresh()
     }
 
-    fun addFilterTab(name: String, snapshot: FilterSnapshot): Boolean {
+    fun addFilterTab(
+        name: String,
+        snapshot: FilterSnapshot,
+        platform: ContentPlatform = currentPlatform.value,
+    ): Boolean {
         val n = name.trim()
-        if (n.isEmpty() || isNameTaken(n)) return false
+        if (n.isEmpty() || isNameTaken(n, platform = platform)) return false
         val item = BrowseTabItem(
             id = "custom_${System.currentTimeMillis()}",
             name = n,
             kind = TabKind.FILTER,
             builtin = false,
             filter = snapshot,
+            platformId = platform,
         )
+        if (platform != currentPlatform.value) {
+            val platformTabs = BrowseTabStore.load(platform).toMutableList().apply { add(item) }
+            BrowseTabStore.save(platformTabs, platform)
+            return true
+        }
         tabs.add(item)
         persist()
         goTo(tabs.lastIndex)
@@ -484,8 +612,8 @@ class BrowseViewModel {
 
     fun resetToDefaults() {
         tabs.clear()
-        stateById.clear()
-        tabs.addAll(BrowseTabStore.reset())
+        stateById.keys.removeAll { it.startsWith("${currentPlatform.value.id}:") }
+        tabs.addAll(BrowseTabStore.reset(currentPlatform.value))
         mainTab.value = 0
         bindFilterFor(0)
         refresh()
@@ -493,8 +621,9 @@ class BrowseViewModel {
 
     private fun goTo(index: Int) {
         mainTab.value = index
+        BrowseTabStore.saveSelectedTab(currentPlatform.value, index)
         bindFilterFor(index)
-        if (!stateFor(index).loaded) refresh()
+        if (currentPlatform.value == ContentPlatform.MANWA && !stateFor(index).loaded) refresh()
     }
 
     private fun buildDateOptions(): List<Pair<String, String>> {
@@ -517,13 +646,14 @@ class BrowseViewModel {
     }
 
     companion object {
-        val GENDERS = listOf(-1 to "全部", 2 to "一般向", 1 to "禁漫", 0 to "BL向", 3 to "TL向", 4 to "GL向")
+        val GENDERS = listOf(-1 to "全部", 2 to "一般向", 1 to "禁漫向", 0 to "BL向", 3 to "TL向", 4 to "GL向")
         val AREAS = listOf(0 to "全部", 2 to "韩国", 3 to "日漫", 4 to "国漫", 5 to "台漫", 6 to "其他", 1 to "未分类")
         val ENDS = listOf(0 to "全部", 2 to "连载", 1 to "完结")
         val STS = listOf(2 to "收藏", 0 to "最新", 1 to "最旧", 3 to "新漫")
 
         private lateinit var prefs: android.content.SharedPreferences
         fun init(context: android.content.Context) {
+            ContentPlatformPrefs.init(context)
             prefs = context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
             BrowseTabStore.init(context)
         }

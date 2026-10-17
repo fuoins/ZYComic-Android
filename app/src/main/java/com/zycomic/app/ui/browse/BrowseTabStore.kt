@@ -1,23 +1,29 @@
 package com.zycomic.app.ui.browse
 
 import android.content.Context
+import com.zycomic.app.platform.ContentPlatform
 import org.json.JSONArray
+import org.json.JSONObject
 
-/** 分类页 Tab 列表持久化（SP + JSON），含首次种子化与版本迁移。 */
+/** 分类页 Tab 配置（SP + JSON），每个平台独立保存；旧版配置迁入漫蛙。 */
 object BrowseTabStore {
 
     private const val PREFS = "zycomic_browse_tabs"
-    private const val KEY_TABS = "tabs_json"
-    private const val KEY_SEED = "seed_version"
+    private const val LEGACY_KEY_TABS = "tabs_json"
+    private const val LEGACY_KEY_SEED = "seed_version"
     private const val SEED_VERSION = 5
-
     private lateinit var prefs: android.content.SharedPreferences
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
-    // ---- 内置默认 tab（3 个筛选型热门） ----
+    private fun tabsKey(platform: ContentPlatform) = "tabs_json_${platform.id}"
+    private fun seedKey(platform: ContentPlatform) = "seed_version_${platform.id}"
+    private fun selectedTabKey(platform: ContentPlatform) = "selected_tab_${platform.id}"
+    private fun filterKey(platform: ContentPlatform, tabId: String) = "filter_${platform.id}_$tabId"
+
+    // ---- 默认漫蛙分类 ----
     const val ID_GENERAL = "builtin_general"
     const val ID_JINMAN = "builtin_jinman"
     const val ID_REXUE = "builtin_rexue"
@@ -41,35 +47,43 @@ object BrowseTabStore {
     private fun specialRanking() = BrowseTabItem(id = ID_RANKING, name = RANKING_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.RANKING)
     private fun specialYuzong() = BrowseTabItem(id = ID_YUZONG, name = YUZONG_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.YUZONG_RANK)
 
-    fun defaultTabs(): List<BrowseTabItem> = listOf(
-        specialYuzong(),
-        BrowseTabItem(
-            id = ID_GENERAL,
-            name = "一般向热门",
-            kind = TabKind.FILTER,
-            builtin = true,
-            filter = FilterSnapshot(gender = 2, tags = emptyList(), area = 0, end = 0, st = 2),
-        ),
-        BrowseTabItem(
-            id = ID_JINMAN,
-            name = "禁漫热门",
-            kind = TabKind.FILTER,
-            builtin = true,
-            filter = FilterSnapshot(gender = 1, tags = emptyList(), area = 0, end = 0, st = 2),
-        ),
-        BrowseTabItem(
-            id = ID_REXUE,
-            name = "热血热门",
-            kind = TabKind.FILTER,
-            builtin = true,
-            filter = FilterSnapshot(gender = 2, tags = listOf("热血"), area = 0, end = 0, st = 2),
-        ),
-    )
+    fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
+        if (platform == ContentPlatform.JM) return emptyList()
+        return listOf(
+            specialYuzong(),
+            BrowseTabItem(
+                id = ID_GENERAL,
+                name = "一般向热门",
+                kind = TabKind.FILTER,
+                builtin = true,
+                filter = FilterSnapshot(gender = 2, tags = emptyList(), area = 0, end = 0, st = 2),
+            ),
+            BrowseTabItem(
+                id = ID_JINMAN,
+                name = "禁漫向热门",
+                kind = TabKind.FILTER,
+                builtin = true,
+                filter = FilterSnapshot(gender = 1, tags = emptyList(), area = 0, end = 0, st = 2),
+            ),
+            BrowseTabItem(
+                id = ID_REXUE,
+                name = "热血热门",
+                kind = TabKind.FILTER,
+                builtin = true,
+                filter = FilterSnapshot(gender = 2, tags = listOf("热血"), area = 0, end = 0, st = 2),
+            ),
+        )
+    }
 
-    /** 读取 tab 列表；首次/版本不符时种子化或迁移并持久化。解析失败回退默认。 */
-    fun load(): List<BrowseTabItem> {
-        val seeded = prefs.getInt(KEY_SEED, 0)
-        val raw = prefs.getString(KEY_TABS, null)
+    /** 读取指定平台的 Tab；首次/版本不符时种子化或迁移并持久化。 */
+    fun load(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
+        var seeded = prefs.getInt(seedKey(platform), 0)
+        var raw = prefs.getString(tabsKey(platform), null)
+        // 旧版列表只有一份，且只属于漫蛙；首次升级时迁入新的漫蛙 key。
+        if (platform == ContentPlatform.MANWA && raw == null) {
+            raw = prefs.getString(LEGACY_KEY_TABS, null)
+            if (raw != null) seeded = prefs.getInt(LEGACY_KEY_SEED, 0)
+        }
 
         if (!raw.isNullOrBlank()) {
             runCatching {
@@ -77,31 +91,42 @@ object BrowseTabStore {
                 val list = mutableListOf<BrowseTabItem>().apply {
                     addAll(List(arr.length()) { BrowseTabItem.fromJson(arr.getJSONObject(it)) })
                 }
-                if (seeded == 1) {
-                    list.removeAll { it.id == ID_LATEST_V1 }
-                }
-                if (seeded < 4) {
+                if (seeded == 1) list.removeAll { it.id == ID_LATEST_V1 }
+                if (platform == ContentPlatform.MANWA && seeded < 4) {
                     list.removeAll { it.id == ID_LATEST_ADD || it.id == ID_RANKING }
                     val yzIdx = list.indexOfFirst { it.id == ID_YUZONG }
-                    if (yzIdx >= 0) { val yz = list.removeAt(yzIdx); list.add(0, yz) } else list.add(0, specialYuzong())
+                    if (yzIdx >= 0) {
+                        val yz = list.removeAt(yzIdx)
+                        list.add(0, yz)
+                    } else {
+                        list.add(0, specialYuzong())
+                    }
                 }
-                if (seeded < SEED_VERSION) {
+                if (platform == ContentPlatform.MANWA && seeded < SEED_VERSION) {
                     val migrated = migrateLegacyFilterValues(list, seeded)
                     list.clear()
                     list.addAll(migrated)
                 }
-                if (list.isNotEmpty()) {
-                    save(list)
-                    prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
-                    return list
+                val normalized = list.mapNotNull { item ->
+                    if (item.id.isBlank()) {
+                        null
+                    } else {
+                        item.copy(
+                            name = if (item.id == ID_JINMAN && item.name == "禁漫热门") "禁漫向热门" else item.name,
+                            platformId = platform,
+                        )
+                    }
                 }
+                save(normalized, platform)
+                prefs.edit().putInt(seedKey(platform), SEED_VERSION).apply()
+                return normalized
             }
         }
 
-        val def = defaultTabs()
-        save(def)
-        prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
-        return def
+        val defaults = defaultTabs(platform)
+        save(defaults, platform)
+        prefs.edit().putInt(seedKey(platform), SEED_VERSION).apply()
+        return defaults
     }
 
     /** v5 maps persisted legacy area/end IDs once; all other tab data stays unchanged. */
@@ -134,16 +159,33 @@ object BrowseTabStore {
         }
     }
 
-    fun save(tabs: List<BrowseTabItem>) {
+    fun save(tabs: List<BrowseTabItem>, platform: ContentPlatform = ContentPlatform.MANWA) {
         val arr = JSONArray()
-        tabs.forEach { arr.put(it.toJson()) }
-        prefs.edit().putString(KEY_TABS, arr.toString()).apply()
+        tabs.forEach { arr.put(it.copy(platformId = platform).toJson()) }
+        prefs.edit().putString(tabsKey(platform), arr.toString()).apply()
     }
 
-    fun reset(): List<BrowseTabItem> {
-        val def = defaultTabs()
-        save(def)
-        prefs.edit().putInt(KEY_SEED, SEED_VERSION).apply()
-        return def
+    fun loadSelectedTab(platform: ContentPlatform): Int = prefs.getInt(selectedTabKey(platform), 0)
+
+    fun saveSelectedTab(platform: ContentPlatform, index: Int) {
+        prefs.edit().putInt(selectedTabKey(platform), index.coerceAtLeast(0)).apply()
+    }
+
+    fun loadFilter(platform: ContentPlatform, tabId: String): FilterSnapshot? =
+        prefs.getString(filterKey(platform, tabId), null)?.let { raw ->
+            runCatching { FilterSnapshot.fromJson(JSONObject(raw)) }.getOrNull()
+        }
+
+    fun saveFilter(platform: ContentPlatform, tabId: String, snapshot: FilterSnapshot) {
+        prefs.edit().putString(filterKey(platform, tabId), snapshot.toJson().toString()).apply()
+    }
+
+    fun reset(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
+        val defaults = defaultTabs(platform)
+        save(defaults, platform)
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("filter_${platform.id}_") }.forEach { editor.remove(it) }
+        editor.putInt(seedKey(platform), SEED_VERSION).putInt(selectedTabKey(platform), 0).apply()
+        return defaults
     }
 }

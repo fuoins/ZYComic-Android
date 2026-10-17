@@ -244,4 +244,19 @@
     <string name="speed_test_export_failed">Failed to export speed test log</string>
     <string name="speed_test_export_no_complete_result">No complete diagnostic result is available</string>
     <string name="speed_test_export_in_progress">A speed test is in progress. Try exporting after it finishes.</string>
+    <!-- Content platform switch -->
+    <string name="content_platform_manwa">漫蛙</string>
+    <string name="content_platform_jm">禁漫天堂</string>
+    <string name="content_platform_switch">平台切换</string>
+    <string name="content_platform_section_title">内容平台</string>
+    <string name="content_platform_profile_summary">选择此页面默认平台</string>
+    <string name="content_platform_interface_pending">接口待接入</string>
+    <string name="content_platform_not_connected_detail">禁漫天堂接口待接入；此处不会显示或修改漫蛙数据。</string>
+    <string name="content_platform_browse_detail">禁漫天堂的分类接口尚未接入。可先在“管理”中创建禁漫天堂自定义筛选 Tab。</string>
+    <string name="content_platform_favorites_detail">禁漫天堂收藏接口待接入；漫蛙收藏仍保留并可切回继续管理。</string>
+    <string name="content_platform_history_detail">禁漫天堂历史接口待接入；漫蛙阅读历史仍保留并可切回查看。</string>
+    <string name="content_platform_custom_tab_target">添加到平台</string>
+    <string name="content_platform_custom_tab_notice">禁漫天堂接口待接入；此 Tab 仅保存本地筛选配置。</string>
+    <string name="content_platform_jm_reset_confirmation">将删除当前禁漫天堂平台下的自定义 Tab，恢复为空白分类页。确定？</string>
+    <string name="content_platform_filter_jm">禁漫向</string>
 </resources>

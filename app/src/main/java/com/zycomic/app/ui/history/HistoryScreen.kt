@@ -10,10 +10,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -33,15 +35,13 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.SelectAll
-import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -49,7 +49,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +61,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.HistoryItem
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformPrefs
+import com.zycomic.app.platform.ContentPlatformSelector
+import com.zycomic.app.platform.PlatformNotConnectedContent
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.AppBar
@@ -70,8 +73,11 @@ import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.SearchToolbar
 import eu.kanade.presentation.util.animateItemFastScroll
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
@@ -84,6 +90,11 @@ fun HistoryScreen(
     onOpenSearch: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val platform by vm.currentPlatform.collectAsState()
+    val selectPlatform: (ContentPlatform) -> Unit = { selected ->
+        ContentPlatformPrefs.save("history", selected)
+        vm.selectPlatform(selected)
+    }
 
     val user by vm.user.collectAsState()
     val history by vm.history.collectAsState()
@@ -122,9 +133,9 @@ fun HistoryScreen(
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    LaunchedEffect(listState.canScrollForward, filtered.size) {
+    LaunchedEffect(platform, listState.canScrollForward, filtered.size) {
         val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (filtered.isNotEmpty() && last >= filtered.size - 3 && hasMore) {
+        if (platform == ContentPlatform.MANWA && filtered.isNotEmpty() && last >= filtered.size - 3 && hasMore) {
             vm.loadMoreHistory()
         }
     }
@@ -157,25 +168,37 @@ fun HistoryScreen(
             } else {
                 SearchToolbar(
                     titleContent = { AppBarTitle("历史") },
+                    searchEnabled = platform == ContentPlatform.MANWA,
                     searchQuery = searchQuery,
                     onChangeSearchQuery = { vm.updateSearchQuery(it) },
                     actions = {
                         AppBarActions(
-                            persistentListOf(
-                                AppBar.Action(
-                                    title = "刷新",
-                                    icon = Icons.Default.Refresh,
-                                    onClick = {
-                                        vm.refreshHistory()
-                                        scope.launch { listState.scrollToItem(0) }
+                            if (platform == ContentPlatform.MANWA) {
+                                persistentListOf(
+                                    AppBar.Action(
+                                        title = "刷新",
+                                        icon = Icons.Default.Refresh,
+                                        onClick = {
+                                            vm.refreshHistory()
+                                            scope.launch { listState.scrollToItem(0) }
+                                        },
+                                    ),
+                                    AppBar.Action(
+                                        title = "多选",
+                                        icon = Icons.Outlined.Checklist,
+                                        onClick = { vm.enterSelection() },
+                                    ),
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
                                     },
-                                ),
-                                AppBar.Action(
-                                    title = "多选",
-                                    icon = Icons.Outlined.Checklist,
-                                    onClick = { vm.enterSelection() },
-                                ),
-                            ),
+                                )
+                            } else {
+                                persistentListOf(
+                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 128.dp) {
+                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
+                                    },
+                                )
+                            },
                         )
                     },
                     scrollBehavior = scrollBehavior,
@@ -199,8 +222,11 @@ fun HistoryScreen(
                     ) {
                         Text(
                             "全部收藏夹",
-                            color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (selectedIds.isNotEmpty()) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
                     // 其他收藏夹
@@ -216,8 +242,11 @@ fun HistoryScreen(
                     ) {
                         Text(
                             "其他收藏夹",
-                            color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (selectedIds.isNotEmpty()) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
                     // 删除
@@ -230,8 +259,11 @@ fun HistoryScreen(
                     ) {
                         Text(
                             "删除",
-                            color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (selectedIds.isNotEmpty()) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
                 }
@@ -239,6 +271,10 @@ fun HistoryScreen(
         },
     ) { contentPadding ->
         when {
+            platform == ContentPlatform.JM -> PlatformNotConnectedContent(
+                modifier = Modifier.fillMaxSize().padding(contentPadding),
+                detail = stringResource(KMR.strings.content_platform_history_detail),
+            )
             // 未登录
             user == null -> EmptyScreen(
                 message = "请先登录",
@@ -264,63 +300,69 @@ fun HistoryScreen(
                     if (!loading) isRefreshing = false
                 }
                 FastScrollLazyColumn(
-                state = listState,
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                // 本地搜索词非空时，提供"全局搜索"入口
-                if (!searchQuery.isNullOrBlank()) {
-                    item(key = "global-search", contentType = "global-search") {
-                        androidx.compose.material3.TextButton(
-                            onClick = { onOpenSearch(searchQuery ?: "") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                    state = listState,
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    // 本地搜索词非空时，提供"全局搜索"入口
+                    if (!searchQuery.isNullOrBlank()) {
+                        item(key = "global-search", contentType = "global-search") {
+                            androidx.compose.material3.TextButton(
+                                onClick = { onOpenSearch(searchQuery ?: "") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    text = "全局搜索：$searchQuery",
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    filtered.forEach { item ->
+                        item(
+                            key = "history-${item.id}",
+                            contentType = "item",
                         ) {
-                            Text(
-                                text = "全局搜索：${searchQuery}",
-                                color = MaterialTheme.colorScheme.primary,
+                            HistoryItemRow(
+                                item = item,
+                                selected = item.bookId in selectedIds,
+                                selectionMode = selectionMode,
+                                onClickRow = {
+                                    if (selectionMode) {
+                                        vm.toggleSelect(item.bookId)
+                                    } else {
+                                        onOpenManga(item.bookId)
+                                    }
+                                },
+                                onLongClickRow = {
+                                    if (selectionMode) {
+                                        vm.toggleSelect(item.bookId)
+                                    } else {
+                                        vm.enterSelectionAndSelect(item.bookId)
+                                    }
+                                },
+                                onClickCover = { onOpenManga(item.bookId) },
+                                onClickFavorite = { showFavoriteConfirm = item },
+                                onClickDelete = { singleDeleteTarget = item },
                             )
                         }
                     }
-                }
-                filtered.forEach { item ->
-                    item(
-                        key = "history-${item.id}",
-                        contentType = "item",
-                    ) {
-                        HistoryItemRow(
-                            item = item,
-                            selected = item.bookId in selectedIds,
-                            selectionMode = selectionMode,
-                            onClickRow = {
-                                if (selectionMode) vm.toggleSelect(item.bookId)
-                                else onOpenManga(item.bookId)
-                            },
-                            onLongClickRow = {
-                                if (selectionMode) vm.toggleSelect(item.bookId)
-                                else vm.enterSelectionAndSelect(item.bookId)
-                            },
-                            onClickCover = { onOpenManga(item.bookId) },
-                            onClickFavorite = { showFavoriteConfirm = item },
-                            onClickDelete = { singleDeleteTarget = item },
-                        )
+                    // 底部分页
+                    if (loading) {
+                        item(key = "loading-footer", contentType = "footer") { LoadingFooter() }
+                    } else if (!hasMore) {
+                        item(key = "no-more", contentType = "footer") {
+                            Text(
+                                text = "没有更多了",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            )
+                        }
                     }
-                }
-                // 底部分页
-                if (loading) {
-                    item(key = "loading-footer", contentType = "footer") { LoadingFooter() }
-                } else if (!hasMore) {
-                    item(key = "no-more", contentType = "footer") {
-                        Text(
-                            text = "没有更多了",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        )
-                    }
-                }
                 }
             }
         }
@@ -566,4 +608,3 @@ private fun HistoryItemRow(
         }
     }
 }
-

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,12 +18,13 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,8 +36,8 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FilterList
-import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
@@ -64,9 +64,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.AllTags
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
 import eu.kanade.presentation.components.AdaptiveSheet
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * 通用筛选快照编辑器（性向/标签/地区/状态/排序），纯受控：
@@ -87,7 +91,11 @@ fun FilterSnapshotEditor(
 
     FilterSection("性向") {
         BrowseViewModel.GENDERS.forEach { (v, label) ->
-            FilterChip(text = label, selected = snapshot.gender == v, onClick = { onChange(snapshot.copy(gender = v)) })
+            FilterChip(
+                text = if (v == 1) stringResource(KMR.strings.content_platform_filter_jm) else label,
+                selected = snapshot.gender == v,
+                onClick = { onChange(snapshot.copy(gender = v)) },
+            )
         }
     }
     FilterSection("标签") {
@@ -323,28 +331,30 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
 
-                SpecialAddButton(
-                    label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
-                    enabled = vm.canAddLatest(),
-                    onClick = { vm.addLatestTab() },
-                    info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
-                )
-                Spacer(Modifier.height(8.dp))
+                if (vm.currentPlatform.value == ContentPlatform.MANWA) {
+                    SpecialAddButton(
+                        label = if (vm.canAddLatest()) "增加最新更新" else "已添加最新更新",
+                        enabled = vm.canAddLatest(),
+                        onClick = { vm.addLatestTab() },
+                        info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
+                    )
+                    Spacer(Modifier.height(8.dp))
 
-                SpecialAddButton(
-                    label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
-                    enabled = vm.canAddRanking(),
-                    onClick = { vm.addRankingTab() },
-                    info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
-                )
-                Spacer(Modifier.height(8.dp))
+                    SpecialAddButton(
+                        label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行已添加",
+                        enabled = vm.canAddRanking(),
+                        onClick = { vm.addRankingTab() },
+                        info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
+                    )
+                    Spacer(Modifier.height(8.dp))
 
-                SpecialAddButton(
-                    label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
-                    enabled = vm.canAddYuzong(),
-                    onClick = { vm.addYuzongTab() },
-                    info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
-                )
+                    SpecialAddButton(
+                        label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行已添加",
+                        enabled = vm.canAddYuzong(),
+                        onClick = { vm.addYuzongTab() },
+                        info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
+                    )
+                }
             }
 
             Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
@@ -445,7 +455,10 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             text = {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it; error = null },
+                    onValueChange = {
+                        name = it
+                        error = null
+                    },
                     singleLine = true,
                     isError = error != null,
                     supportingText = { error?.let { Text(it) } },
@@ -468,10 +481,12 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "编辑 tab",
             initialName = item.name,
             initial = item.filter ?: FilterSnapshot(),
+            initialPlatform = item.platformId,
+            allowPlatformSelect = false,
             onDismiss = { editing = null },
-            checkNameTaken = { nm -> vm.isNameTaken(nm, item.id) },
+            checkNameTaken = { nm, platform -> vm.isNameTaken(nm, item.id, platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap ->
+            onSave = { nm, snap, _ ->
                 vm.updateTabDefaultFilter(item.id, snap)
                 if (nm != item.name) vm.renameTab(item.id, nm)
                 editing = null
@@ -485,11 +500,13 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "新增筛选 tab",
             initialName = "",
             initial = FilterSnapshot(),
+            initialPlatform = vm.currentPlatform.value,
+            allowPlatformSelect = true,
             onDismiss = { adding = false },
-            checkNameTaken = { nm -> vm.isNameTaken(nm) },
+            checkNameTaken = { nm, platform -> vm.isNameTaken(nm, platform = platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap ->
-                if (vm.addFilterTab(nm, snap)) {
+            onSave = { nm, snap, platform ->
+                if (vm.addFilterTab(nm, snap, platform)) {
                     adding = false
                     onDismiss()
                 }
@@ -502,9 +519,21 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text("恢复默认预设") },
-            text = { Text("将清空你新增/改名/修改的 tab，恢复为：一般向热门、禁漫热门、热血热门。确定？") },
+            text = {
+                Text(
+                    if (vm.currentPlatform.value == ContentPlatform.MANWA) {
+                        "将清空你新增/改名/修改的 tab，恢复为：一般向热门、禁漫向热门、热血热门。确定？"
+                    } else {
+                        stringResource(KMR.strings.content_platform_jm_reset_confirmation)
+                    },
+                )
+            },
             confirmButton = {
-                TextButton(onClick = { confirmReset = false; vm.resetToDefaults(); onDismiss() }) { Text("恢复") }
+                TextButton(onClick = {
+                    confirmReset = false
+                    vm.resetToDefaults()
+                    onDismiss()
+                }) { Text("恢复") }
             },
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("取消") } },
         )
@@ -515,14 +544,20 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
         TagPickerDialog(
             initial = initSet,
             onDismiss = { tagPicker = null },
-            onConfirm = { set -> cb(set); tagPicker = null },
+            onConfirm = { set ->
+                cb(set)
+                tagPicker = null
+            },
         )
     }
     editingSpecial?.let { sp ->
         if (sp.pageType == BrowsePageType.YUZONG_RANK) {
             com.zycomic.app.platform.YuzongDefaultDialog(
                 initialName = sp.name,
-                onRename = { nm -> vm.renameTab(sp.id, nm); true },
+                onRename = { nm ->
+                    vm.renameTab(sp.id, nm)
+                    true
+                },
                 onDismiss = { editingSpecial = null },
             )
         } else {
@@ -615,8 +650,13 @@ private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDis
 }
 
 /** 生成筛选摘要文案。 */
+@Composable
 private fun FilterSnapshot.summary(): String {
-    val g = BrowseViewModel.GENDERS.firstOrNull { it.first == gender }?.second ?: "全部"
+    val g = if (gender == 1) {
+        stringResource(KMR.strings.content_platform_filter_jm)
+    } else {
+        BrowseViewModel.GENDERS.firstOrNull { it.first == gender }?.second ?: "全部"
+    }
     val a = BrowseViewModel.AREAS.firstOrNull { it.first == area }?.second ?: "全部"
     val e = BrowseViewModel.ENDS.firstOrNull { it.first == end }?.second ?: "全部"
     val s = BrowseViewModel.STS.firstOrNull { it.first == st }?.second ?: "收藏"
@@ -632,18 +672,21 @@ private fun FilterTabFormDialog(
     title: String,
     initialName: String,
     initial: FilterSnapshot,
+    initialPlatform: ContentPlatform,
+    allowPlatformSelect: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, FilterSnapshot) -> Unit,
+    onSave: (String, FilterSnapshot, ContentPlatform) -> Unit,
     onOpenTagDialog: (Set<String>, (Set<String>) -> Unit) -> Unit,
-    checkNameTaken: (String) -> Boolean,
+    checkNameTaken: (String, ContentPlatform) -> Boolean,
 ) {
     var name by remember(title) { mutableStateOf(initialName) }
     var draft by remember(title) { mutableStateOf(initial) }
+    var targetPlatform by remember(title) { mutableStateOf(initialPlatform) }
 
     val trimmed = name.trim()
     val nameError = when {
         trimmed.isEmpty() -> "名称不能为空"
-        checkNameTaken(trimmed) -> "名称已存在"
+        checkNameTaken(trimmed, targetPlatform) -> "名称已存在"
         else -> null
     }
 
@@ -662,72 +705,89 @@ private fun FilterTabFormDialog(
                     modifier = Modifier
                         .fillMaxSize(),
                 ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp),
-            ) {
-                Icon(Icons.Outlined.Label, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
-            }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp),
+                    ) {
+                        Icon(Icons.Outlined.Label, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
+                    }
 
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Outlined.Label, contentDescription = null) },
-                isError = nameError != null,
-                supportingText = { nameError?.let { Text(it) } },
-                label = { Text("tab 名称") },
-                placeholder = { Text("例如：热血收藏") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            )
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Outlined.Label, contentDescription = null) },
+                        isError = nameError != null,
+                        supportingText = { nameError?.let { Text(it) } },
+                        label = { Text("tab 名称") },
+                        placeholder = { Text("例如：热血收藏") },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
 
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            ) {
-                Text(
-                    draft.summary(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(10.dp),
-                )
-            }
+                    if (allowPlatformSelect) {
+                        Text(stringResource(KMR.strings.content_platform_custom_tab_target), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                        ContentPlatformSelector(
+                            selected = targetPlatform,
+                            onSelect = { targetPlatform = it },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        )
+                        if (targetPlatform == ContentPlatform.JM) {
+                            Text(
+                                stringResource(KMR.strings.content_platform_custom_tab_notice),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
 
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            ) {
-                FilterSnapshotEditor(
-                    snapshot = draft,
-                    onChange = { draft = it },
-                    onOpenTagDialog = {
-                        onOpenTagDialog(draft.tags.toSet()) { set -> draft = draft.copy(tags = set.toList()) }
-                    },
-                )
-                Text(
-                    "新 tab 默认按收藏（热门）排序",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-                )
-            }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    ) {
+                        Text(
+                            draft.summary(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(10.dp),
+                        )
+                    }
 
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onDismiss) { Text("取消") }
-                Spacer(Modifier.width(8.dp))
-                Button(enabled = nameError == null, onClick = { onSave(trimmed, draft) }) { Text("保存") }
-            }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                    ) {
+                        FilterSnapshotEditor(
+                            snapshot = draft,
+                            onChange = { draft = it },
+                            onOpenTagDialog = {
+                                onOpenTagDialog(draft.tags.toSet()) { set -> draft = draft.copy(tags = set.toList()) }
+                            },
+                        )
+                        Text(
+                            "新 tab 默认按收藏（热门）排序",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                        )
+                    }
+
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = onDismiss) { Text("取消") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(enabled = nameError == null, onClick = { onSave(trimmed, draft, targetPlatform) }) { Text("保存") }
+                    }
                 }
             }
         }

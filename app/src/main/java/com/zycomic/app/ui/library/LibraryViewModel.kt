@@ -8,6 +8,8 @@ import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,16 +31,17 @@ import kotlinx.coroutines.launch
 class LibraryViewModel(val mode: Int = 2) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val TAG = "LibraryVM"
+    private val tag = "LibraryVM"
 
-    val mainTab = MutableStateFlow(0)   // 0 收藏 / 1 阅读历史
+    val mainTab = MutableStateFlow(0) // 0 收藏 / 1 阅读历史
+    val currentPlatform = MutableStateFlow(ContentPlatformPrefs.load("library"))
 
     // ---- 收藏夹 ----
     val folders = MutableStateFlow<List<Folder>>(emptyList())
-    val selectedFolderId = MutableStateFlow(0)        // 0 = 全部收藏夹
-    val isFullVersion = MutableStateFlow(-1)           // -1 全部 / 1 高清 / 2 清水 / 3 未删减 / 4 完整
-    val order = MutableStateFlow(2)                   // 1 更新日期 / 2 收藏日期（默认收藏日期）
-    val orderType = MutableStateFlow(0)               // 0 降序 / 1 升序
+    val selectedFolderId = MutableStateFlow(0) // 0 = 全部收藏夹
+    val isFullVersion = MutableStateFlow(-1) // -1 全部 / 1 高清 / 2 清水 / 3 未删减 / 4 完整
+    val order = MutableStateFlow(2) // 1 更新日期 / 2 收藏日期（默认收藏日期）
+    val orderType = MutableStateFlow(0) // 0 降序 / 1 升序
 
     // ---- 收藏列表 ----
     private val _favItems = MutableStateFlow<List<FavoriteItem>>(emptyList())
@@ -52,21 +55,23 @@ class LibraryViewModel(val mode: Int = 2) {
 
     // ---- 收藏多选 ----
     val selectionMode = MutableStateFlow(false)
-    val selectedIds = MutableStateFlow<Set<String>>(emptySet())   // bookId 集合
+    val selectedIds = MutableStateFlow<Set<String>>(emptySet()) // bookId 集合
 
     // ---- 本地筛选 / 显示（客户端筛选，不触发 API）----
     private val _searchQuery = MutableStateFlow<String?>(null)
     /** 本地搜索关键词；null 表示未进入搜索框（顶栏显示标题），非空表示搜索中 */
     val searchQuery: StateFlow<String?> = _searchQuery.asStateFlow()
-    val isUnreadFilter = MutableStateFlow(-1)   // -1 全部 / 0 已读完 / 1 未读完
-    val isReadFilter = MutableStateFlow(-1)     // -1 全部 / 0 未阅读过 / 1 阅读过
-    val isEndFilter = MutableStateFlow(-1)      // -1 全部 / 0 连载中 / 1 已完结（客户端筛选）
+    val isUnreadFilter = MutableStateFlow(-1) // -1 全部 / 0 已读完 / 1 未读完
+    val isReadFilter = MutableStateFlow(-1) // -1 全部 / 0 未阅读过 / 1 阅读过
+    val isEndFilter = MutableStateFlow(-1) // -1 全部 / 0 连载中 / 1 已完结（客户端筛选）
     val onlyUpdatedFilter = MutableStateFlow(false) // false=关闭只显示更新 / true=只显示更新（客户端筛选）
     // 显示模式：0=紧凑网格 1=舒适网格 2=仅封面网格 3=列表1(封面+标题) 4=列表2(历史样式) 5=列表3(当前样式,默认)（持久化）
     val displayMode = MutableStateFlow(prefs.getInt("library_display_mode", 5))
     val gridColumns = MutableStateFlow(3)
 
-    init { migrateGridColumnsIfNeeded("library") }
+    init {
+        migrateGridColumnsIfNeeded("library")
+    }
     val showUnreadBadge = MutableStateFlow(true) // 封面左上角未读完标记
     val showUpdateBadge = MutableStateFlow(true) // 封面右下角 NEW 标记
 
@@ -121,7 +126,7 @@ class LibraryViewModel(val mode: Int = 2) {
             // 本地排序：更新日期用 lastTime 本地排序；收藏日期保持API返回的原始顺序（服务端已按收藏时间排好）
             result = when (ord) {
                 1 -> result.sortedByDescendingOrAscending({ it.lastTime }, ordType == 0)
-                else -> result  // order=2 收藏日期：不排序，保持API顺序
+                else -> result // order=2 收藏日期：不排序，保持API顺序
             }
             result
         }.stateIn(
@@ -131,9 +136,8 @@ class LibraryViewModel(val mode: Int = 2) {
         )
 
 /** 按选择器排序，descending=true 降序，false 升序。 */
-private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selector: (T) -> R, descending: Boolean): List<T> =
-    if (descending) this.sortedByDescending(selector) else this.sortedBy(selector)
-
+    private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selector: (T) -> R, descending: Boolean): List<T> =
+        if (descending) this.sortedByDescending(selector) else this.sortedBy(selector)
 
     // ---- 历史 ----
     private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
@@ -143,7 +147,7 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     private val _historyHasMore = MutableStateFlow(true)
     val historyHasMore: StateFlow<Boolean> = _historyHasMore.asStateFlow()
     val historySelectionMode = MutableStateFlow(false)
-    val historySelectedIds = MutableStateFlow<Set<String>>(emptySet())   // bookId（漫画 id）集合
+    val historySelectedIds = MutableStateFlow<Set<String>>(emptySet()) // bookId（漫画 id）集合
 
     val needLogin = MutableStateFlow(false)
     val user = UserRepository.userFlow
@@ -153,13 +157,14 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     /** 当前在途的收藏加载任务（重置或加载更多），刷新时取消旧任务，避免旧分页串入。 */
     private var favJob: Job? = null
+    private var historyJob: Job? = null
 
     init {
-        if (mode == 0 || mode == 2) {
+        if (currentPlatform.value == ContentPlatform.MANWA && (mode == 0 || mode == 2)) {
             loadFolders()
             refreshFavorites()
         }
-        if (mode == 1 || mode == 2) {
+        if (currentPlatform.value == ContentPlatform.MANWA && (mode == 1 || mode == 2)) {
             refreshHistory()
         }
         // 监听登录态变化：登录成功后自动重新加载，登出后清空
@@ -167,11 +172,11 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
             UserRepository.userFlow.collect { user ->
                 if (user != null) {
                     needLogin.value = false
-                    if (mode == 0 || mode == 2) {
+                    if (currentPlatform.value == ContentPlatform.MANWA && (mode == 0 || mode == 2)) {
                         loadFolders()
                         refreshFavorites()
                     }
-                    if (mode == 1 || mode == 2) {
+                    if (currentPlatform.value == ContentPlatform.MANWA && (mode == 1 || mode == 2)) {
                         refreshHistory()
                     }
                 } else {
@@ -183,32 +188,68 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
         }
     }
 
-    fun selectMainTab(t: Int) { mainTab.value = t }
+    fun selectMainTab(t: Int) {
+        mainTab.value = t
+    }
+
+    fun selectPlatform(platform: ContentPlatform) {
+        if (currentPlatform.value == platform) return
+        currentPlatform.value = platform
+        if (platform == ContentPlatform.JM) {
+            favJob?.cancel()
+            historyJob?.cancel()
+            _favLoading.value = false
+            _favAppending.value = false
+            _historyLoading.value = false
+            exitSelection()
+            exitHistorySelection()
+            updateSearchQuery(null)
+        } else {
+            if (mode == 0 || mode == 2) {
+                loadFolders()
+                refreshFavorites()
+            }
+            if (mode == 1 || mode == 2) refreshHistory()
+        }
+    }
 
     // ---------- 收藏夹 ----------
     fun loadFolders() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         scope.launch {
-            try { folders.value = FavoriteRepository.getFolderList() }
-            catch (_: NotLoggedInException) { /* 未登录不提示，UI 层已处理 */ }
-            catch (e: Exception) { Log.e(TAG, "加载收藏夹失败", e) }
+            try {
+                folders.value = FavoriteRepository.getFolderList()
+            } catch (_: NotLoggedInException) { /* 未登录不提示，UI 层已处理 */ } catch (e: Exception) {
+                Log.e(tag, "加载收藏夹失败", e)
+            }
         }
     }
 
     /** 收藏页可见时调用：folders 为空且已登录则请求一次（缓存，不重复请求）。 */
     fun ensureFoldersLoaded() {
-        if (UserRepository.isLoggedIn && folders.value.isEmpty()) {
+        if (currentPlatform.value == ContentPlatform.MANWA && UserRepository.isLoggedIn && folders.value.isEmpty()) {
             loadFolders()
         }
     }
 
-    fun selectFolder(id: Int) { selectedFolderId.value = id; refreshFavorites() }
-    fun selectIsFull(v: Int) { isFullVersion.value = v; refreshFavorites() }
+    fun selectFolder(id: Int) {
+        selectedFolderId.value = id
+        refreshFavorites()
+    }
+    fun selectIsFull(v: Int) {
+        isFullVersion.value = v
+        refreshFavorites()
+    }
 
     /** 完结筛选：-1 全部 / 0 连载中 / 1 已完结（客户端筛选，不请求）。 */
-    fun selectIsEnd(v: Int) { isEndFilter.value = v }
+    fun selectIsEnd(v: Int) {
+        isEndFilter.value = v
+    }
 
     /** 只显示更新：false=关闭 / true=只显示更新（客户端筛选，不请求）。 */
-    fun selectOnlyUpdated(v: Boolean) { onlyUpdatedFilter.value = v }
+    fun selectOnlyUpdated(v: Boolean) {
+        onlyUpdatedFilter.value = v
+    }
 
     /** 排序：order=1 更新日期（本地排序）/ 2 收藏日期（重新请求API，保持服务端顺序）；orderType=0 降序 / 1 升序。 */
     fun selectSort(order: Int, orderType: Int) {
@@ -227,10 +268,14 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     }
 
     /** 未读完筛选：-1 全部 / 0 已读完 / 1 未读完（客户端筛选）。 */
-    fun selectIsUnread(v: Int) { isUnreadFilter.value = v }
+    fun selectIsUnread(v: Int) {
+        isUnreadFilter.value = v
+    }
 
     /** 阅读过筛选：-1 全部 / 0 未阅读过 / 1 阅读过（客户端筛选）。 */
-    fun selectIsRead(v: Int) { isReadFilter.value = v }
+    fun selectIsRead(v: Int) {
+        isReadFilter.value = v
+    }
 
     /** 显示模式：0 默认列表 / 1 列表2。 */
     fun selectDisplayMode(m: Int) {
@@ -256,19 +301,25 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     }
 
     /** 切换封面左上角未读完标记显示。 */
-    fun toggleShowUnreadBadge() { showUnreadBadge.value = !showUnreadBadge.value }
+    fun toggleShowUnreadBadge() {
+        showUnreadBadge.value = !showUnreadBadge.value
+    }
 
     /** 切换封面右下角 NEW 标记显示。 */
-    fun toggleShowUpdateBadge() { showUpdateBadge.value = !showUpdateBadge.value }
+    fun toggleShowUpdateBadge() {
+        showUpdateBadge.value = !showUpdateBadge.value
+    }
 
     // ---------- 收藏列表 ----------
     fun refreshFavorites() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         // 取消上一次在途的收藏加载（含加载更多），避免切收藏夹/筛选/刷新时旧分页追加进新列表
         favJob?.cancel()
         favJob = scope.launch { loadFav(reset = true) }
     }
 
     fun loadMoreFavorites() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (_favLoading.value || _favAppending.value || !_favHasMore.value) return
         if (!UserRepository.isLoggedIn) return
         // 在发起协程前【同步】置位，消除快速 fling 时同一页被并发拉取两次的窗口
@@ -277,12 +328,14 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     }
 
     private suspend fun loadFav(reset: Boolean) {
-        if (!UserRepository.isLoggedIn) return  // 未登录不加载，UI 层用 user==null 显示"请先登录"
+        if (!UserRepository.isLoggedIn) return // 未登录不加载，UI 层用 user==null 显示"请先登录"
         if (reset) {
             favPage = 1
             _favHasMore.value = true
             _favLoading.value = true
-        } else _favAppending.value = true
+        } else {
+            _favAppending.value = true
+        }
         try {
             val list = FavoriteRepository.getFavorites(
                 page = favPage,
@@ -304,7 +357,7 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "加载收藏失败", e)
+            Log.e(tag, "加载收藏失败", e)
         } finally {
             // 只清自己这一模式的标志，避免被取消的追加任务误清重置任务的 loading 标志
             if (reset) _favLoading.value = false else _favAppending.value = false
@@ -312,9 +365,17 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     }
 
     // ---------- 收藏多选 ----------
-    fun enterSelection() { selectionMode.value = true; selectedIds.value = emptySet() }
-    fun exitSelection() { selectionMode.value = false; selectedIds.value = emptySet() }
+    fun enterSelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
+        selectionMode.value = true
+        selectedIds.value = emptySet()
+    }
+    fun exitSelection() {
+        selectionMode.value = false
+        selectedIds.value = emptySet()
+    }
     fun toggleSelect(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val s = selectedIds.value.toMutableSet()
         if (!s.add(bookId)) s.remove(bookId)
         selectedIds.value = s
@@ -322,17 +383,20 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     /** 长按进入多选时，同时选中当前项。 */
     fun enterSelectionAndSelect(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         selectionMode.value = true
         selectedIds.value = setOf(bookId)
     }
 
     /** 全选当前筛选结果中的所有收藏。 */
     fun selectAll() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         selectedIds.value = filteredFavs.value.map { it.bookId }.toSet()
     }
 
     /** 在当前筛选结果范围内反选。 */
     fun invertSelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val current = selectedIds.value.toMutableSet()
         filteredFavs.value.forEach {
             if (!current.add(it.bookId)) current.remove(it.bookId)
@@ -342,11 +406,13 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     /** 全选已加载出的收藏；若已全选则取消全选 */
     fun toggleSelectAllLoadedFavorites() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val all = _favItems.value.map { it.bookId }.toSet()
         selectedIds.value = if (selectedIds.value == all) emptySet() else all
     }
 
     fun batchRemove() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val ids = selectedIds.value.joinToString(",")
         if (ids.isEmpty()) return
         scope.launch {
@@ -355,71 +421,86 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
                 exitSelection()
                 refreshFavorites()
                 UserRepository.refreshUserInfo()
-            } catch (_: NotLoggedInException) { needLogin.value = true }
-            catch (_: Exception) {}
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {}
         }
     }
 
     /** 移动所选收藏到收藏夹；folderId 为 null 表示移出收藏夹（全部收藏）。 */
     fun moveSelectedTo(folderId: Int?) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val ids = selectedIds.value.toList()
         if (ids.isEmpty()) return
         scope.launch {
             try {
-                if (folderId == null) FavoriteRepository.moveOutFolder(ids)
-                else FavoriteRepository.moveToFolder(ids, folderId)
+                if (folderId == null) {
+                    FavoriteRepository.moveOutFolder(ids)
+                } else {
+                    FavoriteRepository.moveToFolder(ids, folderId)
+                }
                 exitSelection()
                 refreshFavorites()
                 loadFolders()
-            } catch (_: NotLoggedInException) { needLogin.value = true }
-            catch (_: Exception) {}
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {}
         }
     }
 
     // ---------- 收藏夹操作 ----------
     fun createFolder(name: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (name.isBlank()) return
         scope.launch {
             try {
                 FavoriteRepository.createFolder(name)
                 loadFolders()
-            } catch (_: NotLoggedInException) { needLogin.value = true }
-            catch (_: Exception) {}
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {}
         }
     }
 
     fun renameFolder(folderId: String, name: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (name.isBlank()) return
         scope.launch {
             try {
                 FavoriteRepository.renameFolder(folderId, name)
                 loadFolders()
-            } catch (_: NotLoggedInException) { needLogin.value = true }
-            catch (_: Exception) {}
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {}
         }
     }
 
     fun deleteFolder(folderId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         scope.launch {
             try {
                 FavoriteRepository.deleteFolder(folderId)
                 if (selectedFolderId.value.toString() == folderId) selectedFolderId.value = 0
                 loadFolders()
                 refreshFavorites()
-            } catch (_: NotLoggedInException) { needLogin.value = true }
-            catch (_: Exception) {}
+            } catch (_: NotLoggedInException) {
+                needLogin.value = true
+            } catch (_: Exception) {}
         }
     }
 
     // ---------- 历史 ----------
     fun refreshHistory() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (!UserRepository.isLoggedIn) return
-        scope.launch { loadHist(reset = true) }
+        historyJob?.cancel()
+        historyJob = scope.launch { loadHist(reset = true) }
     }
 
     fun loadMoreHistory() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (_historyLoading.value || !_historyHasMore.value) return
-        scope.launch { loadHist(reset = false) }
+        historyJob = scope.launch { loadHist(reset = false) }
     }
 
     private suspend fun loadHist(reset: Boolean) {
@@ -433,16 +514,26 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
             historyPage++
             _history.value = if (reset) list else _history.value + list
             _historyHasMore.value = hasMore
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "加载历史失败", e)
+            Log.e(tag, "加载历史失败", e)
         } finally {
             _historyLoading.value = false
         }
     }
 
-    fun enterHistorySelection() { historySelectionMode.value = true; historySelectedIds.value = emptySet() }
-    fun exitHistorySelection() { historySelectionMode.value = false; historySelectedIds.value = emptySet() }
+    fun enterHistorySelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
+        historySelectionMode.value = true
+        historySelectedIds.value = emptySet()
+    }
+    fun exitHistorySelection() {
+        historySelectionMode.value = false
+        historySelectedIds.value = emptySet()
+    }
     fun toggleHistorySelect(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val s = historySelectedIds.value.toMutableSet()
         if (!s.add(bookId)) s.remove(bookId)
         historySelectedIds.value = s
@@ -450,11 +541,13 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
 
     /** 全选已加载出的历史；若已全选则取消全选（按 bookId）。 */
     fun toggleSelectAllLoadedHistory() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val all = _history.value.map { it.bookId }.toSet()
         historySelectedIds.value = if (historySelectedIds.value == all) emptySet() else all
     }
 
     fun deleteSelectedHistory() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val ids = historySelectedIds.value
         if (ids.isEmpty()) return
         scope.launch {
@@ -471,6 +564,7 @@ private fun <T, R : Comparable<R>> List<T>.sortedByDescendingOrAscending(selecto
     companion object {
         private lateinit var prefs: android.content.SharedPreferences
         fun init(context: android.content.Context) {
+            ContentPlatformPrefs.init(context)
             prefs = context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
         }
     }

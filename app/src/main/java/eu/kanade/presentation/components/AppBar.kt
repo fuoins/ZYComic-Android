@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -56,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.collections.immutable.ImmutableList
@@ -256,7 +259,8 @@ fun AppBarActions(
             Box(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
-                    .size(40.dp),
+                    .width(it.width)
+                    .height(40.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 it.content()
@@ -476,6 +480,7 @@ sealed interface AppBar {
     // KMK -->
     data class ActionCompose(
         val title: String,
+        val width: Dp = 40.dp,
         val content: @Composable () -> Unit,
     ) : AppBarAction
     // KMK <--

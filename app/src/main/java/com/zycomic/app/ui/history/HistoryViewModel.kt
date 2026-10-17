@@ -7,9 +7,12 @@ import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.HistoryRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,10 +38,12 @@ import kotlinx.coroutines.launch
 class HistoryViewModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val TAG = "HistoryVM"
+    private val tag = "HistoryVM"
+    val currentPlatform = MutableStateFlow(ContentPlatformPrefs.load("history"))
 
     // ---- 分页 ----
     private var historyPage = 1
+    private var historyJob: Job? = null
     private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
     val history: StateFlow<List<HistoryItem>> = _history.asStateFlow()
     private val _historyLoading = MutableStateFlow(false)
@@ -77,20 +82,22 @@ class HistoryViewModel {
     // ---- 一次性提示（Toast）----
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
-    fun consumeToast() { _toast.value = null }
+    fun consumeToast() {
+        _toast.value = null
+    }
 
     // ---- 登录态 ----
     val user = UserRepository.userFlow
     val needLogin = MutableStateFlow(false)
 
     init {
-        refreshHistory()
+        if (currentPlatform.value == ContentPlatform.MANWA) refreshHistory()
         // 监听登录态变化：登录成功后自动刷新，登出后清空
         scope.launch {
             UserRepository.userFlow.collect { u ->
                 if (u != null) {
                     needLogin.value = false
-                    refreshHistory()
+                    if (currentPlatform.value == ContentPlatform.MANWA) refreshHistory()
                 } else {
                     _history.value = emptyList()
                     _selectedIds.value = emptySet()
@@ -100,15 +107,30 @@ class HistoryViewModel {
         }
     }
 
+    fun selectPlatform(platform: ContentPlatform) {
+        if (currentPlatform.value == platform) return
+        currentPlatform.value = platform
+        if (platform == ContentPlatform.JM) {
+            historyJob?.cancel()
+            _historyLoading.value = false
+            exitSelection()
+            updateSearchQuery(null)
+        } else {
+            refreshHistory()
+        }
+    }
+
     // ---------- 分页加载 ----------
     fun refreshHistory() {
-        if (!UserRepository.isLoggedIn) return  // 未登录不加载
-        scope.launch { loadHist(reset = true) }
+        if (currentPlatform.value != ContentPlatform.MANWA || !UserRepository.isLoggedIn) return // 未登录不加载
+        historyJob?.cancel()
+        historyJob = scope.launch { loadHist(reset = true) }
     }
 
     fun loadMoreHistory() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (_historyLoading.value || !_historyHasMore.value) return
-        scope.launch { loadHist(reset = false) }
+        historyJob = scope.launch { loadHist(reset = false) }
     }
 
     private suspend fun loadHist(reset: Boolean) {
@@ -124,8 +146,10 @@ class HistoryViewModel {
             _historyHasMore.value = hasMore
         } catch (_: NotLoggedInException) {
             needLogin.value = true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "加载历史失败", e)
+            Log.e(tag, "加载历史失败", e)
         } finally {
             _historyLoading.value = false
         }
@@ -139,6 +163,7 @@ class HistoryViewModel {
 
     // ---------- 多选（参数均为 bookId）----------
     fun enterSelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         _selectionMode.value = true
         _selectedIds.value = emptySet()
     }
@@ -149,6 +174,7 @@ class HistoryViewModel {
     }
 
     fun toggleSelect(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val s = _selectedIds.value.toMutableSet()
         if (!s.add(bookId)) s.remove(bookId)
         _selectedIds.value = s
@@ -156,17 +182,20 @@ class HistoryViewModel {
 
     /** 长按进入多选时，同时选中当前项（bookId）。 */
     fun enterSelectionAndSelect(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         _selectionMode.value = true
         _selectedIds.value = setOf(bookId)
     }
 
     /** 全选当前筛选结果中的所有项（按 bookId）。 */
     fun selectAll() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         _selectedIds.value = filteredHistory.value.map { it.bookId }.toSet()
     }
 
     /** 在当前筛选结果范围内反选（按 bookId）。 */
     fun invertSelection() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val current = _selectedIds.value.toMutableSet()
         filteredHistory.value.forEach {
             if (!current.add(it.bookId)) current.remove(it.bookId)
@@ -186,6 +215,7 @@ class HistoryViewModel {
      * 先乐观移除本地行（保留滚动位）；服务端成功即一致，失败则刷新回滚并提示。
      */
     fun deleteSingle(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         if (_deleting.value) return
         scope.launch {
             _deleting.value = true
@@ -197,7 +227,7 @@ class HistoryViewModel {
                 needLogin.value = true
                 refreshHistory()
             } catch (e: Exception) {
-                Log.e(TAG, "删除单条历史失败", e)
+                Log.e(tag, "删除单条历史失败", e)
                 _toast.value = "删除失败，请稍后重试"
                 refreshHistory()
             } finally {
@@ -211,6 +241,7 @@ class HistoryViewModel {
      * 先乐观移除，失败则刷新回滚并提示。
      */
     fun deleteSelected() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val bookIds = _selectedIds.value
         if (bookIds.isEmpty() || _deleting.value) return
         scope.launch {
@@ -225,7 +256,7 @@ class HistoryViewModel {
                 needLogin.value = true
                 refreshHistory()
             } catch (e: Exception) {
-                Log.e(TAG, "批量删除历史失败", e)
+                Log.e(tag, "批量删除历史失败", e)
                 _toast.value = "删除失败，请稍后重试"
                 refreshHistory()
             } finally {
@@ -250,6 +281,7 @@ class HistoryViewModel {
 
     /** 收藏单本（bookId 为漫画 ID）。 */
     fun favoriteSingle(bookId: String) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         scope.launch {
             try {
                 FavoriteRepository.addFavorite(bookId.toInt())
@@ -260,7 +292,7 @@ class HistoryViewModel {
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
-                Log.e(TAG, "收藏失败", e)
+                Log.e(tag, "收藏失败", e)
                 _toast.value = "收藏失败，请稍后重试"
             }
         }
@@ -268,6 +300,7 @@ class HistoryViewModel {
 
     /** 批量收藏选中的历史记录到指定收藏夹（选中集合即 bookId，去重）。 */
     fun favoriteSelected(folderId: Int = 0) {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         val ids = _selectedIds.value
         if (ids.isEmpty()) return
         scope.launch {
@@ -285,7 +318,7 @@ class HistoryViewModel {
             } catch (_: NotLoggedInException) {
                 needLogin.value = true
             } catch (e: Exception) {
-                Log.e(TAG, "批量收藏失败", e)
+                Log.e(tag, "批量收藏失败", e)
                 _toast.value = "收藏失败，请稍后重试"
             }
         }
@@ -293,6 +326,7 @@ class HistoryViewModel {
 
     /** 加载收藏夹列表。 */
     fun loadFolders() {
+        if (currentPlatform.value != ContentPlatform.MANWA) return
         scope.launch {
             try {
                 _folders.value = FavoriteRepository.getFolderList()

@@ -2,6 +2,7 @@ package com.zycomic.app.ui.profile
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,44 +22,40 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.Logout
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Storage
-import android.widget.Toast
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,17 +64,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.dto.SignDay
+import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformPrefs
+import com.zycomic.app.platform.ContentPlatformSelector
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
+import tachiyomi.presentation.core.i18n.stringResource
 import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,6 +95,11 @@ fun ProfileScreen(
     onBlockGayTags: () -> Unit,
 ) {
     val context = LocalContext.current
+    var platform by remember { mutableStateOf(ContentPlatformPrefs.load("profile")) }
+    val selectPlatform: (ContentPlatform) -> Unit = { selected ->
+        platform = selected
+        ContentPlatformPrefs.save("profile", selected)
+    }
     val user by UserRepository.userFlow.collectAsState()
     LaunchedEffect(Unit) {
         if (UserRepository.isLoggedIn) {
@@ -123,6 +133,23 @@ fun ProfileScreen(
     ) { contentPadding ->
         ScrollbarLazyColumn(contentPadding = contentPadding) {
             item { LogoHeader() }
+
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(stringResource(KMR.strings.content_platform_section_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        stringResource(KMR.strings.content_platform_profile_summary),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                    )
+                    ContentPlatformSelector(
+                        selected = platform,
+                        onSelect = selectPlatform,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
 
             // ---- 用户信息 ----
             item {
@@ -268,13 +295,18 @@ fun ProfileScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (pwd1.isEmpty() || pwd1 != pwd2) { pwdErr = "两次密码不一致"; return@TextButton }
+                    if (pwd1.isEmpty() || pwd1 != pwd2) {
+                        pwdErr = "两次密码不一致"
+                        return@TextButton
+                    }
                     scope.launch {
                         try {
                             UserRepository.changePassword(pwd1)
                             showChangePwd = false
                             Toast.makeText(context, "密码修改成功，请重新登录", Toast.LENGTH_SHORT).show()
-                        } catch (e: Exception) { pwdErr = e.message ?: "修改失败" }
+                        } catch (e: Exception) {
+                            pwdErr = e.message ?: "修改失败"
+                        }
                     }
                 }) { Text("确认") }
             },
@@ -305,16 +337,22 @@ fun ProfileScreen(
                             }.onSuccess {
                                 adResultOk = it
                             }.onFailure {
-                                if (it is UserRepository.AdDebugException) showAdDebug = it.debug
-                                else adErr = it.message ?: "领取失败"
+                                if (it is UserRepository.AdDebugException) {
+                                    showAdDebug = it.debug
+                                } else {
+                                    adErr = it.message ?: "领取失败"
+                                }
                             }
                             adDone = true
                             rewarding = false
                         }
                     },
                 ) {
-                    if (rewarding) CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                    else Text("确认")
+                    if (rewarding) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    } else {
+                        Text("确认")
+                    }
                 }
             },
             dismissButton = {
@@ -349,7 +387,9 @@ fun ProfileScreen(
                     onClick = {
                         adResultOk?.let { Toast.makeText(context, "领取成功，+${it}积分", Toast.LENGTH_SHORT).show() }
                         adErr?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-                        adProgress = null; adResultOk = null; adErr = null
+                        adProgress = null
+                        adResultOk = null
+                        adErr = null
                     },
                 ) { Text("完成") }
             },
@@ -441,8 +481,11 @@ private fun PointLogsOverlay(onClose: () -> Unit) {
                             Text(
                                 if (l.point >= 0) "+${l.point}" else "${l.point}",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = if (l.point >= 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error,
+                                color = if (l.point >= 0) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
                             )
                         }
                         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
