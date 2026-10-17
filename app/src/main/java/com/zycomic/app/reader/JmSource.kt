@@ -1,7 +1,5 @@
 package com.zycomic.app.reader
 
-import com.zycomic.app.data.dto.Chapter as ChapterDto
-import com.zycomic.app.data.dto.Manga as MangaDto
 import com.zycomic.app.net.JmApiInterceptor
 import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.net.JmRouteManager
@@ -24,12 +22,41 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.IOException
-import java.net.URLEncoder
+import com.zycomic.app.data.dto.Chapter as ChapterDto
+import com.zycomic.app.data.dto.Manga as MangaDto
 
 /** JM JSON API adapter. It deliberately does not share Manwa's network or repository state. */
 object JmSource : HttpSource() {
 
+    private val weekTypes = setOf("hanman", "another", "manga")
+
     data class BrowseResult(val items: List<MangaDto>, val hasMore: Boolean)
+    data class WeekIssue(val id: String, val title: String)
+
+    /** Display label and the exact API value; an empty category means latest A-comics. */
+    val categoryOptions: List<Pair<String, String>> = listOf(
+        "最新A漫" to "",
+        "同人" to "doujin",
+        "单本" to "single",
+        "短篇" to "short",
+        "其他类" to "another",
+        "韩漫" to "hanman",
+        "美漫" to "meiman",
+        "Cosplay" to "another_cosplay",
+        "3D" to "3D",
+        "禁漫汉化组" to "禁漫漢化組",
+    )
+
+    /** Display label and the exact API value verified by the JM contract report. */
+    val orderOptions: List<Pair<String, String>> = listOf(
+        "最新" to "mr",
+        "总排行" to "mv",
+        "月排行" to "mv_m",
+        "周排行" to "mv_w",
+        "日排行" to "mv_t",
+        "最多图片" to "mp",
+        "最多喜欢" to "tf",
+    )
 
     override val name: String = "禁漫天堂"
     override val lang: String = "zh"
@@ -48,20 +75,24 @@ object JmSource : HttpSource() {
     }
 
     private class OrderCode : Filter.Text("排序代码（o，可留空）")
-    private class CategoryCode : Filter.Text("分类值（c，可留空）")
+    private class CategoryCode : Filter.Text("分类 slug（c，可留空）")
     private class WeekId : Filter.Text("周榜 ID（可留空）")
     private class WeekType : Filter.Text("周榜类型（可留空）")
 
     override fun getFilterList(): FilterList = FilterList(
         BrowseMode(),
-        Filter.Header("JM 接口筛选值按原样发送；本地没有预设未验证的枚举"),
+        Filter.Header("分类必须使用 JM slug；分类和排序选项见 source adapter"),
         OrderCode(),
         CategoryCode(),
         WeekId(),
         WeekType(),
     )
 
-    /** Browse UI adapter. Search has no verified page parameter, so it is one page only. */
+    /**
+     * Browse UI adapter. Page numbers here are one-based except the fixed, non-paged week list.
+     * [previousFirstId] is scoped by the caller to its own tab/query. The actual adjacent page is
+     * also checked for list endpoints, so callers that pass an accumulated-list ID cannot leak state.
+     */
     suspend fun browse(
         mode: Int,
         page: Int,
@@ -70,44 +101,91 @@ object JmSource : HttpSource() {
         category: String = "",
         weekId: String = "",
         weekType: String = "",
+        previousFirstId: String? = null,
     ): BrowseResult {
-        val zeroBasedPage = (page - 1).coerceAtLeast(0).toString()
+        val requestedPage = page.coerceAtLeast(1)
         val path: String
         val params: Map<String, String>
-        val pageable: Boolean
+        var hasMore: Boolean
         if (query.isNotBlank()) {
             path = "/search"
-            params = mapOf("search_query" to query, "o" to order)
-            pageable = false
+            validateOrder(order)
+            params = buildMap {
+                put("search_query", query)
+                put("page", requestedPage.toString())
+                order.takeIf(String::isNotBlank)?.let { put("o", it) }
+            }
+            val payload = getJson(path, params)
+            val (items, total) = parseList(payload, path, "content", requireTotal = true)
+            hasMore = JmPagination.searchHasMore(requestedPage, total)
+            return BrowseResult(items, hasMore)
         } else {
             when (mode) {
                 1 -> {
+                    validateOrder(order)
+                    val normalizedCategory = category.trim()
+                    if (normalizedCategory.isNotEmpty() && categoryOptions.none { it.second == normalizedCategory && it.second.isNotEmpty() }) {
+                        throw IOException("JM 分类必须是已确认的 slug；不接受数字分类 ID 或未知值: $normalizedCategory")
+                    }
                     path = "/categories/filter"
-                    params = mapOf("o" to order, "c" to category, "page" to zeroBasedPage)
-                    pageable = true
+                    params = buildMap {
+                        put("page", requestedPage.toString())
+                        order.takeIf(String::isNotBlank)?.let { put("o", it) }
+                        normalizedCategory.takeIf(String::isNotEmpty)?.let { put("c", it) }
+                    }
                 }
                 2 -> {
                     if (weekId.isBlank() && weekType.isBlank()) {
-                        path = "/week"
-                        params = emptyMap()
-                        pageable = false
+                        return BrowseResult(emptyList(), false)
                     } else {
+                        validateWeekSelection(weekId, weekType)
                         path = "/week/filter"
-                        params = mapOf("id" to weekId, "type" to weekType, "page" to zeroBasedPage)
-                        pageable = true
+                        params = mapOf("id" to weekId, "type" to weekType, "page" to "0")
                     }
                 }
                 else -> {
                     path = "/promote"
-                    params = mapOf("page" to zeroBasedPage)
-                    pageable = true
+                    // Keep the existing promote endpoint's zero-based page convention.
+                    params = mapOf("page" to (requestedPage - 1).toString())
                 }
             }
         }
 
         val payload = getJson(path, params)
-        val items = if (path == "/promote") parsePromote(payload) else parseKnownItems(payload, path)
-        return BrowseResult(items, pageable && items.isNotEmpty())
+        if (path == "/week/filter") {
+            val items = parseList(payload, path, "list").first
+            return BrowseResult(items, false)
+        }
+        if (path == "/promote") {
+            val items = parsePromote(payload)
+            val adjacentFirstId = previousFirstId ?: if (requestedPage > 1) {
+                parsePromote(getJson(path, mapOf("page" to (requestedPage - 2).toString()))).firstOrNull()?.id
+            } else {
+                null
+            }
+            val firstId = items.firstOrNull()?.id
+            val repeated = firstId != null && (firstId == previousFirstId || firstId == adjacentFirstId)
+            if (repeated) return BrowseResult(emptyList(), false)
+            hasMore = JmPagination.cappedListHasMore(requestedPage, items.size, firstId, if (repeated) firstId else null)
+            return BrowseResult(items, hasMore)
+        }
+
+        val (items, total) = parseList(payload, path, "content", requireTotal = true)
+        val adjacentFirstId = previousFirstId ?: if (requestedPage > 1) {
+            parseList(
+                getJson(path, params + ("page" to (requestedPage - 1).toString())),
+                path,
+                "content",
+                requireTotal = true,
+            ).first.firstOrNull()?.id
+        } else {
+            null
+        }
+        val firstId = items.firstOrNull()?.id
+        val repeated = firstId != null && (firstId == previousFirstId || firstId == adjacentFirstId)
+        if (repeated) return BrowseResult(emptyList(), false)
+        hasMore = JmPagination.categoryHasMore(requestedPage, total, firstId, if (repeated) firstId else null)
+        return BrowseResult(items, hasMore)
     }
 
     override suspend fun getPopularManga(page: Int): MangasPage {
@@ -169,22 +247,52 @@ object JmSource : HttpSource() {
 
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val chapterId = chapterId(chapter.url) ?: throw IOException("无法从 JM 章节 URL 解析章节 ID")
-        val payload = getJson("/chapter", mapOf("id" to chapterId)).asObject("/chapter")
-        val imageNames = payload.optJSONArray("images")
-            ?: throw IOException("JM /chapter 响应缺少已确认字段 images[]")
-        if (imageNames.length() == 0) throw IOException("JM /chapter images[] 为空；需要该章节的原始响应样本")
+        val payload = getJson("/comic_read", mapOf("id" to chapterId)).asObject("/comic_read")
+        val images = payload.optJSONArray("images")
+            ?: throw IOException("JM /comic_read 响应缺少已确认字段 images[]")
+        if (images.length() == 0) throw IOException("JM /comic_read images[] 为空")
         val host = JmRouteManager.activeImageDomain
         if (host.isBlank()) throw IOException("JM 图源列表为空")
-        val scrambleId = findScrambleId(payload)
-        return (0 until imageNames.length()).map { index ->
-            val fileName = imageNames.optString(index).trim()
-            if (fileName.isBlank() || fileName.contains('/') || fileName.contains('\\')) {
-                throw IOException("JM /chapter images[$index] 不是已确认的单个文件名")
+        val scrambleThreshold = payload.optString("scramble_id").toIntOrNull()
+            ?: throw IOException("JM /comic_read 响应缺少有效整数字段 scramble_id")
+        return (0 until images.length()).map { index ->
+            val imageObject = images.optJSONObject(index)
+                ?: throw IOException("JM /comic_read images[$index] 不是对象")
+            val imageValue = imageObject.optString("image").trim()
+            if (imageValue.isBlank()) throw IOException("JM /comic_read images[$index] 缺少字段 image")
+            val originalUrl = try {
+                imageValue.toHttpUrl()
+            } catch (error: IllegalArgumentException) {
+                throw IOException("JM /comic_read images[$index].image 不是绝对 HTTP URL", error)
             }
-            val builder = "https://$host/media/photos/$chapterId/${encodePathSegment(fileName)}".toHttpUrl().newBuilder()
-            scrambleId?.let { builder.addQueryParameter("_jm_scramble", it.toString()) }
-            val url = builder.build().toString()
+            if (originalUrl.scheme != "http" && originalUrl.scheme != "https") {
+                throw IOException("JM /comic_read images[$index].image 必须使用 HTTP(S)")
+            }
+            // Keep the API's rotated path and query intact; only swap the static image host.
+            val url = originalUrl.newBuilder()
+                .host(host)
+                .removeAllQueryParameters("_jm_scramble")
+                .addQueryParameter("_jm_scramble", scrambleThreshold.toString())
+                .build()
+                .toString()
             Page(index, url, url)
+        }
+    }
+
+    /** Lists the available weekly issue selectors from /week.categories. */
+    suspend fun getWeekIssues(): List<WeekIssue> {
+        val payload = getJson("/week", emptyMap()).asObject("/week")
+        val categories = payload.optJSONArray("categories")
+            ?: throw IOException("JM /week 响应缺少已确认字段 categories[]")
+        return (0 until categories.length()).map { index ->
+            val item = categories.optJSONObject(index)
+                ?: throw IOException("JM /week categories[$index] 不是对象")
+            val id = item.optString("id").trim()
+            val title = item.optString("title").trim()
+            if (!id.matches(Regex("\\d+")) || title.isBlank()) {
+                throw IOException("JM /week categories[$index] 缺少有效字段 id/title")
+            }
+            WeekIssue(id, title)
         }
     }
 
@@ -208,7 +316,7 @@ object JmSource : HttpSource() {
             try {
                 JSONTokener(body).nextValue()
             } catch (error: Exception) {
-                throw IOException("JM ${path} 返回内容不是 JSON", error)
+                throw IOException("JM $path 返回内容不是 JSON", error)
             }
         }
     }
@@ -216,42 +324,53 @@ object JmSource : HttpSource() {
     private fun parsePromote(payload: Any): List<MangaDto> {
         val root = payload as? JSONArray ?: throw IOException("JM /promote 响应不是报告中的 JSON 数组")
         val result = mutableListOf<MangaDto>()
+        var foundContent = false
         for (blockIndex in 0 until root.length()) {
-            val block = root.optJSONObject(blockIndex) ?: continue
-            val content = block.optJSONArray("content") ?: continue
+            val block = root.optJSONObject(blockIndex)
+                ?: throw IOException("JM /promote[$blockIndex] 不是对象")
+            val content = block.optJSONArray("content")
+                ?: throw IOException("JM /promote[$blockIndex] 缺少字段 content[]")
+            foundContent = true
             for (itemIndex in 0 until content.length()) {
-                content.optJSONObject(itemIndex)?.let { item -> mangaFromKnownListItem(item)?.let(result::add) }
+                val item = content.optJSONObject(itemIndex)
+                    ?: throw IOException("JM /promote[$blockIndex].content[$itemIndex] 不是对象")
+                result += mangaFromKnownListItem(item, "/promote[$blockIndex].content[$itemIndex]")
             }
         }
-        if (result.isEmpty()) throw IOException("JM /promote 未返回已确认的 content[].id/name 项")
+        if (!foundContent) throw IOException("JM /promote 响应缺少已确认字段 content[]")
         return result.distinctBy { it.id }
     }
 
-    /** Search/category/week samples are incomplete; accept only documented numeric id + name pairs. */
-    private fun parseKnownItems(payload: Any, endpoint: String): List<MangaDto> {
-        val result = mutableListOf<MangaDto>()
-        fun visit(value: Any?) {
-            when (value) {
-                is JSONArray -> for (index in 0 until value.length()) visit(value.opt(index))
-                is JSONObject -> {
-                    val manga = mangaFromKnownListItem(value)
-                    if (manga != null) result += manga
-                    else {
-                        val keys = value.keys()
-                        while (keys.hasNext()) visit(value.opt(keys.next()))
-                    }
-                }
-            }
+    /** Parse only the documented endpoint list field; never recurse into unrelated IDs. */
+    private fun parseList(
+        payload: Any,
+        endpoint: String,
+        listField: String,
+        requireTotal: Boolean = false,
+    ): Pair<List<MangaDto>, Int> {
+        val root = payload.asObject(endpoint)
+        val list = root.optJSONArray(listField)
+            ?: throw IOException("JM $endpoint 响应缺少已确认字段 $listField[]")
+        val items = (0 until list.length()).map { index ->
+            val item = list.optJSONObject(index)
+                ?: throw IOException("JM $endpoint $listField[$index] 不是对象")
+            mangaFromKnownListItem(item, "$endpoint.$listField[$index]")
+        }.distinctBy { it.id }
+        val total = if (requireTotal) {
+            root.optString("total").toIntOrNull()?.takeIf { it >= 0 }
+                ?: throw IOException("JM $endpoint 响应缺少有效非负整数字段 total")
+        } else {
+            0
         }
-        visit(payload)
-        if (result.isEmpty()) throw IOException("JM $endpoint 响应未包含可验证的数字 id/name 项；缺少该端点的完整 JSON 样本")
-        return result.distinctBy { it.id }
+        return items to total
     }
 
-    private fun mangaFromKnownListItem(item: JSONObject): MangaDto? {
+    private fun mangaFromKnownListItem(item: JSONObject, location: String): MangaDto {
         val id = item.optString("id").trim()
         val title = item.optString("name").trim()
-        if (!id.matches(Regex("\\d+")) || title.isBlank()) return null
+        if (!id.matches(Regex("\\d+")) || title.isBlank()) {
+            throw IOException("JM $location 缺少有效字段 id/name")
+        }
         return MangaDto(
             id = id,
             name = title,
@@ -318,34 +437,23 @@ object JmSource : HttpSource() {
         initialized = false
     }
 
-    private fun findScrambleId(value: Any?): Int? = when (value) {
-        is JSONObject -> {
-            val keys = value.keys()
-            var found: Int? = null
-            while (keys.hasNext() && found == null) {
-                val key = keys.next()
-                val child = value.opt(key)
-                if (key == "scramble_id") {
-                    found = child.toString().toIntOrNull()
-                        ?: throw IOException("JM /chapter scramble_id 不是已确认的整数；需要一份原始 JSON 样本")
-                } else {
-                    found = findScrambleId(child)
-                }
-            }
-            found
-        }
-        is JSONArray -> (0 until value.length()).firstNotNullOfOrNull { findScrambleId(value.opt(it)) }
-        else -> null
-    }
-
     private fun Any.asObject(endpoint: String): JSONObject = this as? JSONObject
         ?: throw IOException("JM $endpoint 响应不是已确认的 JSON 对象")
 
     private fun coverUrl(albumId: String): String =
         "https://${JmRouteManager.activeImageDomain}/media/albums/${albumId}_3x4.jpg"
 
-    private fun mangaId(url: String): String? = Regex("\\d+").find(url)?.value
-    private fun chapterId(url: String): String? = Regex("\\d+").find(url)?.value
+    private fun mangaId(url: String): String? = Regex("(?:^|/)album/(\\d+)(?:/|$)").find(url)?.groupValues?.get(1)
+    private fun chapterId(url: String): String? = Regex("(?:^|/)chapter/(\\d+)(?:/|$)").find(url)?.groupValues?.get(1)
 
-    private fun encodePathSegment(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    private fun validateOrder(order: String) {
+        if (order.isNotBlank() && orderOptions.none { it.second == order }) {
+            throw IOException("JM 排序代码无效: $order")
+        }
+    }
+
+    private fun validateWeekSelection(id: String, type: String) {
+        if (!id.matches(Regex("\\d+"))) throw IOException("JM 周榜必须提供有效期号 id")
+        if (type !in weekTypes) throw IOException("JM 周榜 type 必须是 hanman、another 或 manga")
+    }
 }

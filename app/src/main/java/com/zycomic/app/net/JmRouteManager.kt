@@ -55,23 +55,20 @@ object JmRouteManager {
         "https://www.cdnplaystation6.cc",
     )
 
-    /** 仅作为旧配置缺少 sources2 时的已验证官方默认图床候选。 */
-    val DEFAULT_IMAGE_DOMAINS = listOf(
-        "cdn-msp.jmapinodeudzn.net",
-        "cdn-msp2.jmapinodeudzn.net",
-        "cdn-msp3.jmapinodeudzn.net",
-        "cdn-msp4.jmapinodeudzn.net",
-    )
+    /** sources2 为空或整池不可用时的官方静态 fallback（无 msp1）。 */
+    val DEFAULT_IMAGE_DOMAINS = JmImagePolicy.DEFAULT_IMAGE_DOMAINS
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
-    private val _snapshot = MutableStateFlow(SpeedTestSnapshot())
-    val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _snapshot.asStateFlow()
+    private val _speedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
+    val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _speedTestSnapshot.asStateFlow()
     private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
     val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
 
     @Volatile private var routeRules: Map<String, List<String>> = emptyMap()
+
     @Volatile private var jmSniDomains: Set<String> = emptySet()
+
     @Volatile private var consecutiveFailures = 0
     private data class Health(val failures: Int, val untilEpochMs: Long)
     private val lineHealth = ConcurrentHashMap<String, Health>()
@@ -156,8 +153,11 @@ object JmRouteManager {
         lineHealth.clear()
         imageHealth.clear()
         consecutiveFailures = 0
-        if (poolsChanged) _snapshot.value = SpeedTestSnapshot(remoteVersion = version)
-        else _snapshot.value = _snapshot.value.copy(remoteVersion = version)
+        if (poolsChanged) {
+            _speedTestSnapshot.value = SpeedTestSnapshot(remoteVersion = version)
+        } else {
+            _speedTestSnapshot.value = _speedTestSnapshot.value.copy(remoteVersion = version)
+        }
         persistSnapshot()
         if (!poolsChanged && auto) applyFastestLine()
         record("config", hostFromUrl(activeLines.first()), if (useFallback) "使用 JM 官方内置兜底线路" else "应用 JM 远程线路配置 v${version ?: "?"}")
@@ -175,9 +175,13 @@ object JmRouteManager {
         val auto = prefs.getBoolean("auto_select", true)
         val savedLine = prefs.getString("selected_line", null)
         val savedImage = prefs.getString("selected_image", null)
-        val idx = if (auto) 0 else savedLine?.let { target ->
-            restoredLines.indexOfFirst { hostFromUrl(it).equals(target, true) }.takeIf { it >= 0 }
-        } ?: 0
+        val idx = if (auto) {
+            0
+        } else {
+            savedLine?.let { target ->
+                restoredLines.indexOfFirst { hostFromUrl(it).equals(target, true) }.takeIf { it >= 0 }
+            } ?: 0
+        }
         val img = savedImage?.let { target -> restoredImages.firstOrNull { it.equals(target, true) } }
             ?: restoredImages.first()
         _state.value = current.copy(
@@ -189,7 +193,7 @@ object JmRouteManager {
             usingFallbackLines = prefs.getBoolean("using_fallback", current.usingFallbackLines),
             remoteVersion = prefs.getInt("remote_version", -1).takeIf { it >= 0 },
         )
-        _snapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null), _state.value.remoteVersion)
+        _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null), _state.value.remoteVersion)
         _logs.value = decodeLogs(prefs.getString(KEY_LOGS, null))
     }
 
@@ -211,8 +215,11 @@ object JmRouteManager {
         val current = _state.value
         _state.value = current.copy(autoSelect = enabled)
         prefs()?.edit()?.putBoolean("auto_select", enabled)?.apply()
-        if (enabled) applyFastestLine()
-        else prefs()?.edit()?.putString("selected_line", hostFromUrl(baseUrl))?.apply()
+        if (enabled) {
+            applyFastestLine()
+        } else {
+            prefs()?.edit()?.putString("selected_line", hostFromUrl(baseUrl))?.apply()
+        }
         record("line", lineHost, if (enabled) "启用 JM 自动选线" else "切换 JM 手动选线")
     }
 
@@ -231,7 +238,7 @@ object JmRouteManager {
 
     @Synchronized
     fun applySnapshot(snapshot: SpeedTestSnapshot) {
-        _snapshot.value = snapshot.copy(remoteVersion = _state.value.remoteVersion)
+        _speedTestSnapshot.value = snapshot.copy(remoteVersion = _state.value.remoteVersion)
         persistSnapshot()
         if (_state.value.autoSelect) applyFastestLine()
         if (prefs()?.getString("selected_image", null).isNullOrBlank()) {
@@ -242,14 +249,14 @@ object JmRouteManager {
     @Synchronized
     private fun applyFastestLine() {
         if (!_state.value.autoSelect) return
-        val fastest = _snapshot.value.lineDelaysMs.entries
+        val fastest = _speedTestSnapshot.value.lineDelaysMs.entries
             .filter { it.value < Long.MAX_VALUE && isLineAvailable(it.key) }
             .minByOrNull { it.value }?.key ?: return
         val index = _state.value.lines.indexOfFirst { hostFromUrl(it).equals(fastest, true) }
         if (index >= 0) _state.value = _state.value.copy(lineIndex = index)
     }
 
-    private fun fastestImageDomain(): String? = _snapshot.value.imageDelaysMs.entries
+    private fun fastestImageDomain(): String? = _speedTestSnapshot.value.imageDelaysMs.entries
         .filter { it.value < Long.MAX_VALUE && isImageAvailable(it.key) }
         .minByOrNull { it.value }
         ?.key?.let { measured -> imageDomains.firstOrNull { it.equals(measured, true) } }
@@ -307,15 +314,15 @@ object JmRouteManager {
         record("image", host, "$detail；冷却 ${cooldown / 1000}s")
     }
 
-    fun imageCandidates(requestedHost: String): List<String> {
+    fun imageCandidates(): List<String> {
         val configured = imageDomains
-        val ordered = buildList {
-            configured.firstOrNull { it.equals(requestedHost, true) }?.let(::add)
-            configured.firstOrNull { it.equals(activeImageDomain, true) }?.let(::add)
-            addAll(configured)
-        }.distinctBy { it.lowercase(Locale.ROOT) }
-        val available = ordered.filter(::isImageAvailable)
-        return available.ifEmpty { ordered }
+        val preferredFirst = configured.firstOrNull { it.equals(activeImageDomain, true) }
+            ?.let { selected -> listOf(selected) + configured.filterNot { it.equals(selected, true) } }
+            ?: configured
+        val allHosts = (configured + DEFAULT_IMAGE_DOMAINS).toSet()
+        val available = allHosts.filter(::isImageAvailable).toSet()
+        // The absolute URL's rotating host is intentionally not inserted into this static source pool.
+        return JmImagePolicy.imageCandidates(preferredFirst, available, DEFAULT_IMAGE_DOMAINS)
     }
 
     @Synchronized
@@ -332,7 +339,7 @@ object JmRouteManager {
     }
 
     private fun persistSnapshot() {
-        prefs()?.edit()?.putString(KEY_SNAPSHOT, encodeSnapshot(_snapshot.value))?.apply()
+        prefs()?.edit()?.putString(KEY_SNAPSHOT, encodeSnapshot(_speedTestSnapshot.value))?.apply()
     }
 
     private fun prefs(): SharedPreferences? = runCatching {
@@ -362,14 +369,7 @@ object JmRouteManager {
         return unique.values.toList()
     }
 
-    private fun normalizeHosts(values: List<String>): List<String> {
-        val unique = LinkedHashMap<String, String>()
-        values.forEach { value ->
-            val host = value.trim()
-            if (host.isNotBlank()) unique.putIfAbsent(host.lowercase(Locale.ROOT), host)
-        }
-        return unique.values.toList()
-    }
+    private fun normalizeHosts(values: List<String>): List<String> = JmImagePolicy.deduplicateImageHosts(values)
 
     private fun decodeStringList(raw: String?): List<String> = runCatching {
         val array = JSONArray(raw ?: return@runCatching emptyList())

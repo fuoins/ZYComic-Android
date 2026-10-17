@@ -7,10 +7,10 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
-import com.zycomic.app.reader.JmSource
-import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatformPrefs
+import com.zycomic.app.reader.JmSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,8 +57,16 @@ class BrowseViewModel {
         val appending = MutableStateFlow(false)
         val error = MutableStateFlow<String?>(null)
         val hasMore = MutableStateFlow(true)
+        val jmFilters: MutableStateFlow<JmBrowsePolicy.Filters>
+        var jmJob: Job? = null
+        var jmRequestId = 0L
+        var previousJmPageFirstId: String? = null
         var currentPage = 1
         var loaded = false
+
+        constructor(initialJmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.Filters()) {
+            jmFilters = MutableStateFlow(initialJmFilters)
+        }
     }
 
     private val stateById = HashMap<String, TabState>()
@@ -66,7 +74,7 @@ class BrowseViewModel {
     private fun stateFor(page: Int): TabState {
         val item = tabs.getOrNull(page) ?: return TabState()
         val key = "${item.platformId.id}:${item.id}"
-        return stateById.getOrPut(key) { TabState() }
+        return stateById.getOrPut(key) { TabState(JmBrowsePolicy.initialFilters(item.id)) }
     }
 
     private val cur: TabState get() = stateFor(mainTab.value)
@@ -80,36 +88,70 @@ class BrowseViewModel {
     // ---- 当前 FILTER tab 的临时筛选；按平台和 Tab 保存，不改写预设 ----
     val curFilter = MutableStateFlow(FilterSnapshot())
 
-    // JM 的筛选参数名已确认，但分类/周榜枚举未在报告中给出，因此保留原始输入。
-    val jmMode = MutableStateFlow(0) // 0 推荐 / 1 分类 / 2 周榜 / 3 搜索
-    val jmQuery = MutableStateFlow("")
-    val jmOrder = MutableStateFlow("")
-    val jmCategory = MutableStateFlow("")
-    val jmWeekId = MutableStateFlow("")
-    val jmWeekType = MutableStateFlow("")
+    data class JmWeekChoice(val id: String, val title: String)
 
-    fun selectJmMode(mode: Int) {
-        if (mode !in 0..2) return
-        if (jmMode.value == mode && jmQuery.value.isBlank()) return
-        jmMode.value = mode
-        jmQuery.value = ""
-        refresh()
+    private val _jmWeekIssues = MutableStateFlow<List<JmWeekChoice>>(emptyList())
+    val jmWeekIssues: StateFlow<List<JmWeekChoice>> = _jmWeekIssues.asStateFlow()
+    private val _jmWeekIssuesLoading = MutableStateFlow(false)
+    val jmWeekIssuesLoading: StateFlow<Boolean> = _jmWeekIssuesLoading.asStateFlow()
+    private val _jmWeekIssuesError = MutableStateFlow<String?>(null)
+    val jmWeekIssuesError: StateFlow<String?> = _jmWeekIssuesError.asStateFlow()
+    private var jmWeekIssuesLoaded = false
+    private var jmWeekIssuesJob: Job? = null
+
+    internal fun jmFiltersForTab(tab: Int): StateFlow<JmBrowsePolicy.Filters> = stateFor(tab).jmFilters.asStateFlow()
+
+    fun selectJmMode(mode: Int, tab: Int = mainTab.value) {
+        if (mode !in JmBrowsePolicy.MODE_RECOMMENDATIONS..JmBrowsePolicy.MODE_WEEK || tab !in tabs.indices) return
+        val state = stateFor(tab)
+        val current = state.jmFilters.value
+        if (current.mode == mode && current.query.isBlank()) return
+        state.jmFilters.value = current.copy(
+            mode = mode,
+            query = "",
+            order = if (mode == JmBrowsePolicy.MODE_CATEGORY && current.order.isBlank()) "mr" else current.order,
+            weekType = if (mode == JmBrowsePolicy.MODE_WEEK && current.weekType.isBlank()) "hanman" else current.weekType,
+        )
+        refresh(tab)
     }
 
-    fun searchJm(query: String) {
+    fun searchJm(query: String, tab: Int = mainTab.value) {
         val value = query.trim()
-        if (value.isBlank()) return
-        jmQuery.value = value
-        jmMode.value = 3
-        refresh()
+        if (value.isBlank() || tab !in tabs.indices) return
+        val current = stateFor(tab).jmFilters.value
+        stateFor(tab).jmFilters.value = current.copy(mode = JmBrowsePolicy.MODE_SEARCH, query = value)
+        refresh(tab)
     }
 
-    fun updateJmFilters(order: String, category: String, weekId: String, weekType: String) {
-        jmOrder.value = order.trim()
-        jmCategory.value = category.trim()
-        jmWeekId.value = weekId.trim()
-        jmWeekType.value = weekType.trim()
-        refresh()
+    fun updateJmFilters(tab: Int, order: String? = null, category: String? = null, weekId: String? = null, weekType: String? = null) {
+        if (tab !in tabs.indices) return
+        val current = stateFor(tab).jmFilters.value
+        stateFor(tab).jmFilters.value = current.copy(
+            order = order?.trim() ?: current.order,
+            category = category?.trim() ?: current.category,
+            weekId = weekId?.trim() ?: current.weekId,
+            weekType = weekType?.trim() ?: current.weekType,
+        )
+        refresh(tab)
+    }
+
+    fun loadJmWeekIssues(retry: Boolean = false) {
+        if (_jmWeekIssuesLoading.value || (jmWeekIssuesLoaded && !retry)) return
+        jmWeekIssuesJob?.cancel()
+        _jmWeekIssuesLoading.value = true
+        _jmWeekIssuesError.value = null
+        jmWeekIssuesJob = scope.launch {
+            try {
+                _jmWeekIssues.value = JmSource.getWeekIssues().map { JmWeekChoice(it.id, it.title) }
+                jmWeekIssuesLoaded = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _jmWeekIssuesError.value = e.message ?: "周榜期数加载失败"
+            } finally {
+                _jmWeekIssuesLoading.value = false
+            }
+        }
     }
 
     val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
@@ -222,6 +264,14 @@ class BrowseViewModel {
         currentJob?.cancel()
         requestSeq.incrementAndGet()
         val previous = currentPlatform.value
+        if (previous == ContentPlatform.MANWA) {
+            tabs.indices.filter { tabs[it].platformId == previous }.forEach { tab ->
+                stateFor(tab).also {
+                    it.loading.value = false
+                    it.appending.value = false
+                }
+            }
+        }
         prefs.edit()
             .putString("browse_newest_date_${previous.id}", newestDate.value)
             .putInt("browse_rank_type_${previous.id}", rankType.value)
@@ -411,17 +461,30 @@ class BrowseViewModel {
         refresh()
     }
 
-    fun refresh() {
-        if (tabs.isEmpty()) return
-        currentJob?.cancel()
-        currentJob = scope.launch { doLoad(reset = true) }
+    fun refresh(tab: Int = mainTab.value) {
+        if (tabs.isEmpty() || tab !in tabs.indices) return
+        if (tabs[tab].platformId == ContentPlatform.JM) {
+            val ts = stateFor(tab)
+            ts.jmJob?.cancel()
+            ts.loading.value = false
+            ts.appending.value = false
+            ts.jmJob = scope.launch { doLoadJm(reset = true, tab = tab) }
+        } else {
+            currentJob?.cancel()
+            currentJob = scope.launch { doLoad(reset = true, tab = tab) }
+        }
     }
 
     fun loadMore(tab: Int) {
         if (tab !in tabs.indices) return
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
-        currentJob = scope.launch { doLoad(reset = false, tab = tab) }
+        if (tabs[tab].platformId == ContentPlatform.JM) {
+            ts.jmJob?.cancel()
+            ts.jmJob = scope.launch { doLoadJm(reset = false, tab = tab) }
+        } else {
+            currentJob = scope.launch { doLoad(reset = false, tab = tab) }
+        }
     }
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
@@ -497,9 +560,10 @@ class BrowseViewModel {
 
     private suspend fun doLoadJm(reset: Boolean, tab: Int) {
         val ts = stateFor(tab)
-        val reqId = requestSeq.incrementAndGet()
+        val reqId = ++ts.jmRequestId
         if (reset) {
             ts.currentPage = 1
+            ts.previousJmPageFirstId = null
             ts.hasMore.value = true
             ts.loading.value = true
             ts.error.value = null
@@ -508,29 +572,46 @@ class BrowseViewModel {
             ts.appending.value = true
         }
         try {
+            val filters = ts.jmFilters.value
+            if (filters.mode == JmBrowsePolicy.MODE_WEEK && (filters.weekId.isBlank() || filters.weekType.isBlank())) {
+                ts.loaded = true
+                ts.hasMore.value = false
+                return
+            }
+            val previousFirstId = ts.previousJmPageFirstId
             val result = JmSource.browse(
-                mode = jmMode.value,
+                mode = filters.mode,
                 page = ts.currentPage,
-                query = jmQuery.value,
-                order = jmOrder.value,
-                category = jmCategory.value,
-                weekId = jmWeekId.value,
-                weekType = jmWeekType.value,
+                query = filters.query,
+                order = filters.order,
+                category = filters.category,
+                weekId = filters.weekId,
+                weekType = filters.weekType,
+                previousFirstId = previousFirstId,
             )
-            if (reqId != requestSeq.get()) return
+            if (reqId != ts.jmRequestId) return
+            if (JmBrowsePolicy.shouldStopPaging(result.items, previousFirstId)) {
+                ts.loaded = true
+                ts.hasMore.value = false
+                return
+            }
             ts.currentPage += 1
-            ts.mangas.value = if (reset) result.items else ts.mangas.value + result.items
+            val merged = JmBrowsePolicy.mergeDistinct(ts.mangas.value, result.items, reset)
+            val addedItems = merged.size > ts.mangas.value.size
+            ts.mangas.value = merged
+            ts.previousJmPageFirstId = result.items.firstOrNull()?.id
             ts.loaded = true
-            ts.hasMore.value = result.hasMore
+            val isWeekRank = filters.mode == JmBrowsePolicy.MODE_WEEK
+            ts.hasMore.value = !isWeekRank && result.hasMore && addedItems
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (reqId != requestSeq.get()) return
+            if (reqId != ts.jmRequestId) return
             if (reset || ts.mangas.value.isEmpty()) ts.error.value = e.message ?: "JM 加载失败"
             ts.loaded = true
             ts.hasMore.value = false
         } finally {
-            if (reqId == requestSeq.get()) {
+            if (reqId == ts.jmRequestId) {
                 ts.loading.value = false
                 ts.appending.value = false
             }
@@ -692,6 +773,24 @@ class BrowseViewModel {
                 kind = TabKind.SPECIAL,
                 builtin = false,
                 pageType = BrowsePageType.YUZONG_RANK,
+            ),
+        )
+        persist()
+        goTo(tabs.lastIndex)
+        return true
+    }
+
+    fun canAddJmAllHot(): Boolean = tabs.none { it.platformId == ContentPlatform.JM && it.id == JmBrowsePolicy.ALL_HOT_TAB_ID }
+
+    fun addJmAllHotTab(): Boolean {
+        if (!canAddJmAllHot()) return false
+        tabs.add(
+            BrowseTabItem(
+                id = JmBrowsePolicy.ALL_HOT_TAB_ID,
+                name = "JM 全部热门",
+                kind = TabKind.FILTER,
+                builtin = true,
+                platformId = ContentPlatform.JM,
             ),
         )
         persist()

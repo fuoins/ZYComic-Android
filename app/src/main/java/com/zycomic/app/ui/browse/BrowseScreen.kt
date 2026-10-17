@@ -45,9 +45,12 @@ import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -75,11 +78,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.imageLoader
 import coil3.compose.SubcomposeAsyncImage
+import coil3.imageLoader
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.reader.JmSource
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
@@ -203,7 +207,7 @@ fun BrowseScreen(
                             } else {
                                 persistentListOf(
                                     AppBar.Action(title = "JM 搜索", icon = Icons.Default.Search, onClick = {
-                                        jmSearchText = vm.jmQuery.value.takeIf { it.isNotBlank() }.orEmpty()
+                                        jmSearchText = vm.jmFiltersForTab(mainTab).value.query
                                         showJmSearchDialog = true
                                     }),
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
@@ -365,7 +369,7 @@ fun BrowseScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.searchJm(jmSearchText)
+                    vm.searchJm(jmSearchText, mainTab)
                     showJmSearchDialog = false
                 }) { Text("搜索") }
             },
@@ -482,68 +486,70 @@ private fun BrowseTabContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (tabPlatform == ContentPlatform.JM) JmBrowseControls(vm)
+            if (tabPlatform == ContentPlatform.JM) JmBrowseControls(vm, page)
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
-            loading && mangas.isEmpty() -> MangaGridSkeleton(
-                columns = if (gridColumns > 0) gridColumns else 3,
-                displayMode = displayMode,
-            )
-            error != null && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = { vm.refresh() }) { Text("重试") }
-                }
-            }
-            mangas.isEmpty() && !loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有漫画") }
-            else -> Column(modifier = Modifier.fillMaxSize()) {
-                PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        vm.refresh()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    LaunchedEffect(loading) {
-                        if (!loading) isRefreshing = false
-                    }
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
-                        state = gridState,
-                        contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(gridItems, key = { it.second }) { (m, _) ->
-                            MangaGridItem(
-                                manga = m,
-                                isJm = tabPlatform == ContentPlatform.JM,
-                                displayMode = displayMode,
-                                selected = selectionMode && m.id in selectedIds,
-                                selectionMode = selectionMode,
-                                onClick = {
-                                    if (selectionMode && tabPlatform == ContentPlatform.MANWA) {
-                                        onToggleSelect(m.id)
-                                    } else {
-                                        onOpenManga(if (tabPlatform == ContentPlatform.JM) "jm:${m.id}" else m.id)
-                                    }
-                                },
-                                onLongClick = { onLongClick(m.id) },
-                            )
+                    loading && mangas.isEmpty() -> MangaGridSkeleton(
+                        columns = if (gridColumns > 0) gridColumns else 3,
+                        displayMode = displayMode,
+                    )
+                    error != null && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = { vm.refresh() }) { Text("重试") }
                         }
-                        if (appending) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("加载中...", style = MaterialTheme.typography.bodySmall)
-                                }
+                    }
+                    mangas.isEmpty() && !loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有漫画") }
+                    else -> Column(modifier = Modifier.fillMaxSize()) {
+                        PullToRefreshBox(
+                            isRefreshing = isRefreshing,
+                            onRefresh = {
+                                isRefreshing = true
+                                vm.refresh()
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            LaunchedEffect(loading) {
+                                if (!loading) isRefreshing = false
                             }
-                        } else if (!hasMore && mangas.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                                state = gridState,
+                                contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                items(gridItems, key = { it.second }) { (m, _) ->
+                                    MangaGridItem(
+                                        manga = m,
+                                        isJm = tabPlatform == ContentPlatform.JM,
+                                        displayMode = displayMode,
+                                        selected = selectionMode && m.id in selectedIds,
+                                        selectionMode = selectionMode,
+                                        onClick = {
+                                            if (selectionMode && tabPlatform == ContentPlatform.MANWA) {
+                                                onToggleSelect(m.id)
+                                            } else {
+                                                onOpenManga(if (tabPlatform == ContentPlatform.JM) "jm:${m.id}" else m.id)
+                                            }
+                                        },
+                                        onLongClick = { onLongClick(m.id) },
+                                    )
+                                }
+                                if (appending) {
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                } else if (!hasMore && mangas.isNotEmpty()) {
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
                             }
                         }
                     }
@@ -552,48 +558,112 @@ private fun BrowseTabContent(
         }
     }
 }
-}
-}
 
 @Composable
-private fun JmBrowseControls(vm: BrowseViewModel) {
-    val mode by vm.jmMode.collectAsState()
-    val query by vm.jmQuery.collectAsState()
-    var order by remember { mutableStateOf(vm.jmOrder.value) }
-    var category by remember { mutableStateOf(vm.jmCategory.value) }
-    var weekId by remember { mutableStateOf(vm.jmWeekId.value) }
-    var weekType by remember { mutableStateOf(vm.jmWeekType.value) }
+private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
+    val filters by vm.jmFiltersForTab(page).collectAsState()
+    val mode = filters.mode
+    val categoryOptions = remember { JmBrowsePolicy.categoryOptions(JmSource.categoryOptions) }
+    val orderOptions = remember { JmBrowsePolicy.orderOptions(JmSource.orderOptions) }
+    val weekIssues by vm.jmWeekIssues.collectAsState()
+    val weekIssuesLoading by vm.jmWeekIssuesLoading.collectAsState()
+    val weekIssuesError by vm.jmWeekIssuesError.collectAsState()
+
+    LaunchedEffect(page, mode) {
+        if (mode == JmBrowsePolicy.MODE_WEEK) vm.loadJmWeekIssues()
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            listOf("推荐" to 0, "分类" to 1, "周榜" to 2).forEach { (label, value) ->
-                TextButton(onClick = { vm.selectJmMode(value) }) {
+            listOf("推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS, "分类" to JmBrowsePolicy.MODE_CATEGORY, "周榜" to JmBrowsePolicy.MODE_WEEK).forEach { (label, value) ->
+                TextButton(onClick = { vm.selectJmMode(value, page) }) {
                     Text(label, color = if (mode == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (mode == 3) Text("搜索：$query", style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            if (mode == JmBrowsePolicy.MODE_SEARCH) Text("搜索：${filters.query}", style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
         when (mode) {
-            1 -> {
-                Text("JM 分类枚举未包含在实测报告中；按接口参数原样填写。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            JmBrowsePolicy.MODE_CATEGORY -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = order, onValueChange = { order = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("排序 o") })
-                    OutlinedTextField(value = category, onValueChange = { category = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("分类 c") })
+                    JmBrowseSelector(
+                        title = "分类",
+                        selected = categoryOptions.firstOrNull { it.second == filters.category }?.first ?: "全部分类",
+                        options = categoryOptions,
+                        onSelected = { vm.updateJmFilters(page, category = it) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    JmBrowseSelector(
+                        title = "排序",
+                        selected = orderOptions.firstOrNull { it.second == filters.order }?.first ?: "请选择",
+                        options = orderOptions,
+                        onSelected = { vm.updateJmFilters(page, order = it) },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                TextButton(onClick = { vm.updateJmFilters(order, category, weekId, weekType) }) { Text("应用分类") }
             }
-            2 -> {
-                Text("周榜 ID/type 的可选值未在报告中确认；不预设枚举。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = weekId, onValueChange = { weekId = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("周榜 id") })
-                    OutlinedTextField(value = weekType, onValueChange = { weekType = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("周榜 type") })
+            JmBrowsePolicy.MODE_WEEK -> {
+                if (weekIssuesError != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(weekIssuesError ?: "周榜期数加载失败", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { vm.loadJmWeekIssues(retry = true) }) { Text("重试") }
+                    }
+                } else if (weekIssuesLoading) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text("加载周榜期数…", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        JmBrowseSelector(
+                            title = "期数",
+                            selected = weekIssues.firstOrNull { it.id == filters.weekId }?.title ?: "选择期数",
+                            options = weekIssues.map { it.title to it.id },
+                            onSelected = { vm.updateJmFilters(page, weekId = it) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        JmBrowseSelector(
+                            title = "类型",
+                            selected = JmWeekTypes.firstOrNull { it.second == filters.weekType }?.first ?: "选择类型",
+                            options = JmWeekTypes,
+                            onSelected = { vm.updateJmFilters(page, weekType = it) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
-                TextButton(onClick = { vm.updateJmFilters(order, category, weekId, weekType) }) { Text("应用周榜") }
             }
-            3 -> Text("JM 搜索端点的分页参数未有样本确认，当前只请求首屏。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            JmBrowsePolicy.MODE_SEARCH -> Text("搜索结果支持继续加载", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private val JmWeekTypes = listOf("韩漫" to "hanman", "其他类" to "another", "漫画" to "manga")
+
+@Composable
+private fun JmBrowseSelector(
+    title: String,
+    selected: String,
+    options: List<Pair<String, String>>,
+    onSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember(title) { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth(), enabled = options.isNotEmpty()) {
+            Text("$title：$selected", maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (label, value) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(value)
+                    },
+                )
+            }
         }
     }
 }

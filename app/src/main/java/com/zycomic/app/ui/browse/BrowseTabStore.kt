@@ -14,6 +14,7 @@ object BrowseTabStore {
     private const val LEGACY_KEY_TABS = "tabs_json"
     private const val LEGACY_KEY_SEED = "seed_version"
     private const val SEED_VERSION = 5
+    private const val JM_ALL_HOT_SEEDED_KEY = "jm_all_hot_seeded_v1"
     private lateinit var prefs: android.content.SharedPreferences
 
     fun init(context: Context) {
@@ -56,8 +57,16 @@ object BrowseTabStore {
         platformId = ContentPlatform.JM,
     )
 
+    private fun specialJmAllHot() = BrowseTabItem(
+        id = JmBrowsePolicy.ALL_HOT_TAB_ID,
+        name = "JM 全部热门",
+        kind = TabKind.FILTER,
+        builtin = true,
+        platformId = ContentPlatform.JM,
+    )
+
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
-        if (platform == ContentPlatform.JM) return listOf(specialJmHome())
+        if (platform == ContentPlatform.JM) return listOf(specialJmHome(), specialJmAllHot())
         return listOf(
             specialYuzong(),
             BrowseTabItem(
@@ -148,8 +157,15 @@ object BrowseTabStore {
                     .filter { it.id.isNotBlank() }
             }.getOrNull()
             if (mixed != null) {
-                if (mixed.none { it.platformId == ContentPlatform.JM }) {
-                    return (mixed + specialJmHome()).also(::saveAll)
+                if (!prefs.getBoolean(JM_ALL_HOT_SEEDED_KEY, false)) {
+                    val migrated = mixed.toMutableList()
+                    if (migrated.none { it.platformId == ContentPlatform.JM }) migrated.add(specialJmHome())
+                    if (migrated.none { it.platformId == ContentPlatform.JM && it.id == JmBrowsePolicy.ALL_HOT_TAB_ID }) {
+                        migrated.add(specialJmAllHot())
+                    }
+                    saveAll(migrated)
+                    prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
+                    return migrated
                 }
                 return mixed
             }
@@ -157,6 +173,7 @@ object BrowseTabStore {
 
         val migrated = load(ContentPlatform.MANWA) + load(ContentPlatform.JM)
         saveAll(migrated)
+        prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
         return migrated
     }
 

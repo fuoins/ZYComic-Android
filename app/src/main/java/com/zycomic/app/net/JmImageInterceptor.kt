@@ -6,13 +6,12 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import okhttp3.Interceptor
-import okhttp3.Response
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 
 /** JM 专属图床 fallback 与已验证的章节图 gunzip / 条带逆序流程。 */
@@ -22,9 +21,20 @@ class JmImageInterceptor : Interceptor {
         val original = chain.request()
         if (!original.url.encodedPath.startsWith("/media/")) return chain.proceed(original)
 
-        val scramble = scrambleCount(original.url.encodedPath, original.url.queryParameter(SCRAMBLE_QUERY))
+        val threshold = original.url.queryParameter(SCRAMBLE_QUERY)
+            ?.toIntOrNull() ?: JmImagePolicy.DEFAULT_SCRAMBLE_THRESHOLD
+        val path = original.url.encodedPath
+        val scramble = JmImagePolicy.scrambleCount(path, threshold)
+        JmImagePolicy.chapterId(path)?.takeIf(JmImagePolicy::isScrambleBoundaryChapter)?.let { chapterId ->
+            JmRouteManager.record(
+                "scramble_boundary",
+                chapterId.toString(),
+                "章节 ID 命中 421925–421927 重排边界区间；" +
+                    "当前按 epId >= 421926 使用 base=8，待实测确认",
+            )
+        }
         val networkUrl = original.url.newBuilder().removeAllQueryParameters(SCRAMBLE_QUERY).build()
-        val candidates = JmRouteManager.imageCandidates(networkUrl.host)
+        val candidates = JmRouteManager.imageCandidates()
         var lastError: IOException? = null
         var lastStatus: Int? = null
         for (host in candidates) {
@@ -62,11 +72,11 @@ class JmImageInterceptor : Interceptor {
     }
 
     private fun restoreScrambledImage(response: Response, count: Int): Response {
-        if (count <= 1 || !response.request.url.encodedPath.contains("/media/photos/")) return response
         val body = response.body ?: throw IOException("JM 正文图响应缺少图片内容")
         val encoded = body.bytes()
+        val hasGzipEncoding = response.header("Content-Encoding").equals("gzip", ignoreCase = true)
         val isGzip = encoded.size >= 2 && encoded[0] == 0x1f.toByte() && encoded[1] == 0x8b.toByte()
-        val raw = if (response.header("Content-Encoding").equals("gzip", ignoreCase = true) && isGzip) {
+        val raw = if (isGzip) {
             try {
                 GZIPInputStream(ByteArrayInputStream(encoded)).use { it.readBytes() }
             } catch (error: Exception) {
@@ -77,9 +87,17 @@ class JmImageInterceptor : Interceptor {
         }
         if (raw.size >= GIF_SIGNATURE.size && raw.copyOfRange(0, GIF_SIGNATURE.size).contentEquals(GIF_SIGNATURE)) {
             return response.newBuilder()
-                .removeHeader("Content-Encoding")
                 .removeHeader("Content-Length")
+                .apply { if (isGzip || hasGzipEncoding) removeHeader("Content-Encoding") }
                 .body(raw.toResponseBody("image/gif".toMediaTypeOrNull()))
+                .build()
+        }
+        val shouldScramble = count > 1 && response.request.url.encodedPath.contains("/media/photos/")
+        if (!shouldScramble) {
+            return response.newBuilder()
+                .removeHeader("Content-Length")
+                .apply { if (isGzip || hasGzipEncoding) removeHeader("Content-Encoding") }
+                .body(raw.toResponseBody(body.contentType()))
                 .build()
         }
 
@@ -123,24 +141,6 @@ class JmImageInterceptor : Interceptor {
             source.recycle()
             output.recycle()
         }
-    }
-
-    /** Prefer documented server scramble_id; otherwise apply the report's local legacy rule. */
-    private fun scrambleCount(path: String, serverValue: String?): Int {
-        serverValue?.toIntOrNull()?.let { return it }
-        val parts = path.split('/').filter { it.isNotBlank() }
-        val chapterId = parts.getOrNull(parts.lastIndex - 1)?.toLongOrNull() ?: return 0
-        if (chapterId < 220_980L) return 0
-        if (chapterId < 268_850L) return 10
-        if (chapterId == 421_926L) {
-            throw IOException("JM 报告对章节 ID=421926 的 scramble 阈值写法冲突；需要该边界的图片样本确认")
-        }
-        val fileName = parts.lastOrNull()?.substringBeforeLast('.', parts.lastOrNull().orEmpty()).orEmpty()
-        val digest = MessageDigest.getInstance("MD5")
-            .digest("$chapterId$fileName".toByteArray(Charsets.UTF_8))
-        val lastHex = "%02x".format(digest.last().toInt() and 0xff).last().digitToInt(16)
-        val base = if (chapterId < 421_926L) 10 else 8
-        return (lastHex % base) * 2 + 2
     }
 
     private companion object {
