@@ -2,6 +2,7 @@ package com.zycomic.app.ui.browse
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -283,7 +285,15 @@ fun BrowseScreen(
                                     }
                                 }
                                 if (item.pageType == BrowsePageType.YUZONG_RANK) {
-                                    Box(Modifier.clip(CircleShape).clickable(onClick = selectTab).padding(end = 6.dp)) {
+                                    Box(
+                                        Modifier.clip(CircleShape)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = selectTab,
+                                            )
+                                            .padding(end = 6.dp),
+                                    ) {
                                         BrowseTabCapsule(
                                             name = item.name,
                                             platform = item.platformId,
@@ -292,7 +302,15 @@ fun BrowseScreen(
                                         )
                                     }
                                 } else {
-                                    Box(Modifier.clip(CircleShape).clickable(onClick = selectTab).padding(end = 6.dp)) {
+                                    Box(
+                                        Modifier.clip(CircleShape)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = selectTab,
+                                            )
+                                            .padding(end = 6.dp),
+                                    ) {
                                         BrowseTabCapsule(
                                             name = item.name,
                                             platform = item.platformId,
@@ -563,7 +581,7 @@ private fun BrowseTabContent(
 private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
     val filters by vm.jmFiltersForTab(page).collectAsState()
     val mode = filters.mode
-    val categoryOptions = remember { JmBrowsePolicy.categoryOptions(JmSource.categoryOptions) }
+    val categoryOptions = remember { JmBrowsePolicy.categorySelections(JmSource.categoryOptions) }
     val orderOptions = remember { JmBrowsePolicy.orderOptions(JmSource.orderOptions) }
     val weekIssues by vm.jmWeekIssues.collectAsState()
     val weekIssuesLoading by vm.jmWeekIssuesLoading.collectAsState()
@@ -587,21 +605,27 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
         }
         when (mode) {
             JmBrowsePolicy.MODE_CATEGORY -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    JmBrowseSelector(
-                        title = "分类",
-                        selected = categoryOptions.firstOrNull { it.second == filters.category }?.first ?: "全部分类",
-                        options = categoryOptions,
-                        onSelected = { vm.updateJmFilters(page, category = it) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    JmBrowseSelector(
-                        title = "排序",
-                        selected = orderOptions.firstOrNull { it.second == filters.order }?.first ?: "请选择",
-                        options = orderOptions,
-                        onSelected = { vm.updateJmFilters(page, order = it) },
-                        modifier = Modifier.weight(1f),
-                    )
+                Text("分类", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    items(categoryOptions, key = { it.second }) { (label, value) ->
+                        FilterChip(
+                            text = label,
+                            selected = filters.category == value,
+                            modifier = Modifier.padding(end = 2.dp),
+                            onClick = { vm.updateJmFilters(page, category = value) },
+                        )
+                    }
+                }
+                Text("排序", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    items(orderOptions, key = { it.second }) { (label, value) ->
+                        FilterChip(
+                            text = label,
+                            selected = filters.order == value,
+                            modifier = Modifier.padding(end = 2.dp),
+                            onClick = { vm.updateJmFilters(page, order = value) },
+                        )
+                    }
                 }
             }
             JmBrowsePolicy.MODE_WEEK -> {

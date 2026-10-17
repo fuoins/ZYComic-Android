@@ -1,10 +1,7 @@
 package com.zycomic.app.ui.search
 
-import coil3.compose.SubcomposeAsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,16 +17,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
@@ -37,7 +36,8 @@ import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCompact
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,14 +59,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.ui.components.DisplaySettingsSection
-import com.zycomic.app.ui.components.coverUrl
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
+import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
@@ -77,6 +80,9 @@ fun SearchScreen(
     onOpenManga: (String) -> Unit,
 ) {
     val vm = remember { SearchViewModel() }
+    DisposableEffect(vm) {
+        onDispose { vm.dispose() }
+    }
     val keyword by vm.keyword.collectAsState()
     val mangas by vm.mangas.collectAsState()
     val error by vm.error.collectAsState()
@@ -84,17 +90,20 @@ fun SearchScreen(
     val appending by vm.appending.collectAsState()
     val hasMore by vm.hasMore.collectAsState()
 
+    val provider by vm.provider.collectAsState()
     val displayMode by vm.displayMode.collectAsState()
+    val jmSortCode by vm.jmSortCode.collectAsState()
     /** 删除模式必须 collect 成状态，直读 .value 不会随点击重组 */
     val historyDeleting by vm.historyDeleting.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
     var showDisplaySheet by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = showDisplaySheet) { showDisplaySheet = false }
     val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
-    LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
+    LaunchedEffect(orientation, provider) { vm.loadGridColumnsForOrientation(orientation) }
     val gridState = rememberLazyGridState()
     /** 列表档（displayMode == 3）用独立滚动状态，触底加载逻辑与网格档一致 */
     val listState = rememberLazyListState()
+    var showJmSortMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (initialKeyword.isNotBlank()) {
@@ -151,8 +160,11 @@ fun SearchScreen(
                     Icon(
                         Icons.Outlined.DeleteSweep,
                         contentDescription = if (historyDeleting) "退出删除搜索记录" else "删除搜索记录",
-                        tint = if (historyDeleting) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (historyDeleting) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
             }
@@ -166,6 +178,46 @@ fun SearchScreen(
                     },
                     contentDescription = "显示模式",
                 )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SearchProvider.entries.forEach { option ->
+                TextButton(onClick = { vm.selectProvider(option) }) {
+                    Text(
+                        text = if (provider == option) "● ${option.displayName}" else option.displayName,
+                        color = if (provider == option) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+            if (provider == SearchProvider.JM) {
+                Spacer(modifier = Modifier.weight(1f))
+                Box {
+                    TextButton(onClick = { showJmSortMenu = true }) {
+                        val sortLabel = JmSearchSortOptions.firstOrNull { it.second == jmSortCode }?.first ?: "最新"
+                        Text("排序：$sortLabel")
+                    }
+                    DropdownMenu(
+                        expanded = showJmSortMenu,
+                        onDismissRequest = { showJmSortMenu = false },
+                    ) {
+                        JmSearchSortOptions.forEach { (label, code) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    showJmSortMenu = false
+                                    vm.setJmSortCode(code)
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
         HorizontalDivider()
@@ -197,16 +249,19 @@ fun SearchScreen(
                     itemsIndexed(mangas, key = { i, m -> m.id + "_$i" }) { _, m ->
                         SearchMangaListRow(
                             manga = m,
-                            onClick = { onOpenManga(m.id) },
+                            onClick = { onOpenManga(searchDetailId(provider, m.id)) },
                         )
                     }
-                    if (appending) item { LoadingFooter() }
-                    else if (!hasMore && mangas.isNotEmpty()) item {
-                        Text(
-                            "没有更多了",
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    if (appending) {
+                        item { LoadingFooter() }
+                    } else if (!hasMore && mangas.isNotEmpty()) {
+                        item {
+                            Text(
+                                "没有更多了",
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
                 else -> LazyVerticalGrid(
@@ -222,16 +277,19 @@ fun SearchScreen(
                         SearchMangaGridItem(
                             manga = m,
                             displayMode = displayMode,
-                            onClick = { onOpenManga(m.id) },
+                            onClick = { onOpenManga(searchDetailId(provider, m.id)) },
                         )
                     }
-                    if (appending) item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
-                    else if (!hasMore && mangas.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            "没有更多了",
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    if (appending) {
+                        item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
+                    } else if (!hasMore && mangas.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text(
+                                "没有更多了",
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

@@ -11,7 +11,7 @@ class JmBrowsePolicyTest {
     @Test
     fun `all hot defaults to all categories and most liked order`() {
         assertEquals(
-            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "tf"),
+            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "tf", category = ""),
             JmBrowsePolicy.initialFilters(JmBrowsePolicy.ALL_HOT_TAB_ID),
         )
         assertEquals(JmBrowsePolicy.MODE_RECOMMENDATIONS, JmBrowsePolicy.initialFilters("jm_recommendations").mode)
@@ -35,12 +35,12 @@ class JmBrowsePolicyTest {
 
         assertEquals(
             listOf(
-                "最新A漫（不传分类）" to "",
+                "最新A漫" to JmBrowsePolicy.LATEST_A_CATEGORY,
                 "同人" to "doujin",
-                "单本" to "single",
+                "單本" to "single",
                 "短篇" to "short",
-                "其他类" to "another",
-                "韩漫" to "hanman",
+                "其他類" to "another",
+                "韓漫" to "hanman",
                 "美漫" to "meiman",
                 "Cosplay" to "another_cosplay",
                 "3D" to "3D",
@@ -48,8 +48,14 @@ class JmBrowsePolicyTest {
             ),
             JmBrowsePolicy.categoryOptions(categories),
         )
+        val selections = JmBrowsePolicy.categorySelections(categories)
+        assertEquals(11, selections.size)
+        assertEquals("全部分类" to "", selections.first())
+        assertEquals(11, selections.map { it.second }.distinct().size)
+        assertEquals("", JmBrowsePolicy.apiCategory(JmBrowsePolicy.LATEST_A_CATEGORY))
+        assertEquals("doujin", JmBrowsePolicy.apiCategory("doujin"))
         assertEquals(
-            listOf("最新" to "mr", "总排行" to "mv", "月排行" to "mv_m", "周排行" to "mv_w", "日排行" to "mv_t", "最多图片" to "mp", "最多喜欢" to "tf"),
+            listOf("最新" to "mr", "总排行" to "mv", "月排行" to "mv_m", "周排行" to "mv_w", "日排行" to "mv_t", "最多圖片" to "mp", "最多喜歡" to "tf"),
             JmBrowsePolicy.orderOptions(orders),
         )
     }

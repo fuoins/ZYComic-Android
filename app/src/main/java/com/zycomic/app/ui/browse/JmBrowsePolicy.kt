@@ -10,6 +10,7 @@ internal object JmBrowsePolicy {
     const val MODE_SEARCH = 3
     const val ALL_HOT_TAB_ID = "jm_all_hot"
     const val ALL_HOT_ORDER = "tf"
+    const val LATEST_A_CATEGORY = "__jm_latest_a__"
 
     data class Filters(
         val mode: Int = MODE_RECOMMENDATIONS,
@@ -31,20 +32,26 @@ internal object JmBrowsePolicy {
         source.map { (label, value) ->
             (
                 when (value) {
-                    "" -> "最新A漫（不传分类）"
+                    "" -> "最新A漫"
                     "doujin" -> "同人"
-                    "single" -> "单本"
+                    "single" -> "單本"
                     "short" -> "短篇"
-                    "another" -> "其他类"
-                    "hanman" -> "韩漫"
+                    "another" -> "其他類"
+                    "hanman" -> "韓漫"
                     "meiman" -> "美漫"
                     "another_cosplay" -> "Cosplay"
                     "3D" -> "3D"
                     "禁漫漢化組" -> "禁漫漢化組"
                     else -> label
                 }
-                ) to value
+                ) to if (value.isEmpty()) LATEST_A_CATEGORY else value
         }
+
+    fun categorySelections(source: List<Pair<String, String>>): List<Pair<String, String>> =
+        listOf("全部分类" to "") + categoryOptions(source)
+
+    /** The latest-A chip shares JM's empty API category with the all-category query. */
+    fun apiCategory(category: String): String = if (category == LATEST_A_CATEGORY) "" else category
 
     fun orderOptions(source: List<Pair<String, String>>): List<Pair<String, String>> =
         source.map { (label, value) ->
@@ -55,8 +62,8 @@ internal object JmBrowsePolicy {
                     "mv_m" -> "月排行"
                     "mv_w" -> "周排行"
                     "mv_t" -> "日排行"
-                    "mp" -> "最多图片"
-                    "tf" -> "最多喜欢"
+                    "mp" -> "最多圖片"
+                    "tf" -> "最多喜歡"
                     else -> label
                 }
                 ) to value

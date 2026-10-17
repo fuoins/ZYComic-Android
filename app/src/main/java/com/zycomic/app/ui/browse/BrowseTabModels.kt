@@ -62,17 +62,18 @@ data class BrowseTabItem(
         put("kind", kind.name)
         put("builtin", builtin)
         put("platformId", platformId.id)
-        filter?.let { put("filter", it.toJson()) }
+        if (platformId == ContentPlatform.MANWA) filter?.let { put("filter", it.toJson()) }
         pageType?.let { put("pageType", it.name) }
     }
 
     companion object {
         fun fromJson(o: JSONObject): BrowseTabItem {
             val kind = runCatching { TabKind.valueOf(o.optString("kind", TabKind.FILTER.name)) }.getOrDefault(TabKind.FILTER)
+            val platformId = ContentPlatform.fromId(o.optString("platformId", ContentPlatform.MANWA.id))
             val pageType = o.optString("pageType", "").takeIf { it.isNotEmpty() }?.let {
                 runCatching { BrowsePageType.valueOf(it) }.getOrNull()
             }
-            val filter = if (kind == TabKind.FILTER) {
+            val filter = if (kind == TabKind.FILTER && platformId == ContentPlatform.MANWA) {
                 o.optJSONObject("filter")?.let { FilterSnapshot.fromJson(it) } ?: FilterSnapshot()
             } else {
                 null
@@ -84,7 +85,7 @@ data class BrowseTabItem(
                 builtin = o.optBoolean("builtin", false),
                 filter = filter,
                 pageType = pageType,
-                platformId = ContentPlatform.fromId(o.optString("platformId", ContentPlatform.MANWA.id)),
+                platformId = platformId,
             )
         }
     }

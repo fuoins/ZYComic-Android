@@ -11,14 +11,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,52 +26,31 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Checklist
-import androidx.compose.material.icons.outlined.FilterList
-import androidx.compose.material.icons.outlined.FlipToBack
-import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -86,14 +62,11 @@ import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
-import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.PlatformNotConnectedContent
 import com.zycomic.app.ui.components.FilterChip
+import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
-import eu.kanade.presentation.components.AppBar
-import eu.kanade.presentation.components.AppBarActions
-import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
@@ -176,116 +149,56 @@ fun LibraryScreen(
 
     Scaffold(
         topBar = { scrollBehavior ->
-            if (selectionMode) {
-                AppBar(
-                    titleContent = { Text("${selectedIds.size}") },
-                    actions = {
-                        AppBarActions(
-                            persistentListOf(
-                                AppBar.Action(
-                                    title = "全选",
-                                    icon = Icons.Outlined.SelectAll,
-                                    onClick = { vm.selectAll() },
-                                ),
-                                AppBar.Action(
-                                    title = "反选",
-                                    icon = Icons.Outlined.FlipToBack,
-                                    onClick = { vm.invertSelection() },
-                                ),
-                            ),
-                        )
-                    },
-                    isActionMode = true,
-                    onCancelActionMode = { vm.exitSelection() },
-                    scrollBehavior = scrollBehavior,
-                )
-            } else {
-                val isSearching = searchQuery != null
-                val focusRequester = remember { FocusRequester() }
-                val keyboardController = LocalSoftwareKeyboardController.current
-                val focusManager = LocalFocusManager.current
-                LaunchedEffect(isSearching) {
-                    if (isSearching) {
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
+            val subtitle = if (platform == ContentPlatform.MANWA) {
+                user?.let { currentUser ->
+                    val max = when {
+                        currentUser.level >= 5 -> 3500
+                        currentUser.level == 4 -> 2500
+                        currentUser.level == 3 -> 1500
+                        currentUser.level == 2 -> 800
+                        currentUser.level == 1 -> 300
+                        else -> 0
                     }
+                    "${currentUser.favoriteCount}/$max"
                 }
-                AppBar(
-                    navigationIcon = if (isSearching) Icons.AutoMirrored.Filled.ArrowBack else null,
-                    navigateUp = if (isSearching) {
-                        {
-                            vm.updateSearchQuery(null)
-                            focusManager.clearFocus()
-                        }
-                    } else {
-                        null
-                    },
-                    titleContent = {
-                        if (isSearching) {
-                            BasicTextField(
-                                value = searchQuery ?: "",
-                                onValueChange = { vm.updateSearchQuery(it) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .focusRequester(focusRequester),
-                                textStyle = MaterialTheme.typography.titleMedium.copy(
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    fontWeight = FontWeight.Normal,
-                                ),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                singleLine = true,
-                            )
-                        } else {
-                            val subtitle = if (platform == ContentPlatform.MANWA) {
-                                user?.let { currentUser ->
-                                    val max = when {
-                                        currentUser.level >= 5 -> 3500
-                                        currentUser.level == 4 -> 2500
-                                        currentUser.level == 3 -> 1500
-                                        currentUser.level == 2 -> 800
-                                        currentUser.level == 1 -> 300
-                                        else -> 0
-                                    }
-                                    "${currentUser.favoriteCount}/$max"
-                                }
-                            } else {
-                                null
-                            }
-                            AppBarTitle(title = "收藏", subtitle = subtitle)
-                        }
-                    },
-                    actions = {
-                        AppBarActions(
-                            if (platform == ContentPlatform.MANWA && !isSearching) {
-                                persistentListOf(
-                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { vm.updateSearchQuery("") }),
-                                    AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refreshFavorites() }),
-                                    AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
-                                    AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
-                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
-                                    },
-                                )
-                            } else if (platform == ContentPlatform.MANWA) {
-                                persistentListOf(
-                                    AppBar.Action(title = "清除", icon = Icons.Default.Close, onClick = { vm.updateSearchQuery("") }),
-                                    AppBar.Action(title = "筛选", icon = Icons.Outlined.FilterList, onClick = { showFilterDialog = true }),
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
-                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
-                                    },
-                                )
-                            } else {
-                                persistentListOf(
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
-                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
-                                    },
-                                )
-                            },
-                        )
-                    },
-                    scrollBehavior = scrollBehavior,
-                )
+            } else {
+                null
             }
+            LibraryHistoryToolbar(
+                platform = platform,
+                onSelectPlatform = selectPlatform,
+                searchQuery = searchQuery,
+                onChangeSearchQuery = vm::updateSearchQuery,
+                titleContent = {
+                    Column {
+                        Text(
+                            text = "收藏",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                        subtitle?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                },
+                searchSupported = platform == ContentPlatform.MANWA,
+                refreshSupported = platform == ContentPlatform.MANWA,
+                filterSupported = platform == ContentPlatform.MANWA,
+                onRefresh = { vm.refreshFavorites() },
+                onFilter = { showFilterDialog = true },
+                onEnterSelection = vm::enterSelection,
+                selectionMode = selectionMode,
+                selectionCount = selectedIds.size,
+                onExitSelection = vm::exitSelection,
+                onSelectAll = vm::selectAll,
+                onInvertSelection = vm::invertSelection,
+                scrollBehavior = scrollBehavior,
+            )
         },
         bottomBar = {
             if (selectionMode) {

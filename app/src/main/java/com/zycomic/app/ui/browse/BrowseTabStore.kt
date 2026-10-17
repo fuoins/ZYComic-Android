@@ -25,6 +25,7 @@ object BrowseTabStore {
     private fun seedKey(platform: ContentPlatform) = "seed_version_${platform.id}"
     private fun selectedTabKey(platform: ContentPlatform) = "selected_tab_${platform.id}"
     private fun filterKey(platform: ContentPlatform, tabId: String) = "filter_${platform.id}_$tabId"
+    private fun jmFilterKey(tabId: String) = "jm_filters_$tabId"
 
     // ---- 默认漫蛙分类 ----
     const val ID_GENERAL = "builtin_general"
@@ -59,11 +60,18 @@ object BrowseTabStore {
 
     private fun specialJmAllHot() = BrowseTabItem(
         id = JmBrowsePolicy.ALL_HOT_TAB_ID,
-        name = "JM 全部热门",
+        name = "JM全部热门",
         kind = TabKind.FILTER,
         builtin = true,
         platformId = ContentPlatform.JM,
     )
+
+    private fun normalizeLegacyAllHotName(item: BrowseTabItem): BrowseTabItem =
+        if (item.id == JmBrowsePolicy.ALL_HOT_TAB_ID && item.builtin && item.name == "JM 全部热门") {
+            item.copy(name = "JM全部热门")
+        } else {
+            item
+        }
 
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
         if (platform == ContentPlatform.JM) return listOf(specialJmHome(), specialJmAllHot())
@@ -129,9 +137,11 @@ object BrowseTabStore {
                     if (item.id.isBlank()) {
                         null
                     } else {
-                        item.copy(
-                            name = if (item.id == ID_JINMAN && item.name == "禁漫热门") "禁漫向热门" else item.name,
-                            platformId = platform,
+                        normalizeLegacyAllHotName(
+                            item.copy(
+                                name = if (item.id == ID_JINMAN && item.name == "禁漫热门") "禁漫向热门" else item.name,
+                                platformId = platform,
+                            ),
                         )
                     }
                 }
@@ -157,8 +167,14 @@ object BrowseTabStore {
                     .filter { it.id.isNotBlank() }
             }.getOrNull()
             if (mixed != null) {
+                val normalized = mixed.map { item ->
+                    normalizeLegacyAllHotName(
+                        if (item.platformId == ContentPlatform.JM && item.filter != null) item.copy(filter = null) else item,
+                    )
+                }
+                saveAll(normalized)
                 if (!prefs.getBoolean(JM_ALL_HOT_SEEDED_KEY, false)) {
-                    val migrated = mixed.toMutableList()
+                    val migrated = normalized.toMutableList()
                     if (migrated.none { it.platformId == ContentPlatform.JM }) migrated.add(specialJmHome())
                     if (migrated.none { it.platformId == ContentPlatform.JM && it.id == JmBrowsePolicy.ALL_HOT_TAB_ID }) {
                         migrated.add(specialJmAllHot())
@@ -167,7 +183,7 @@ object BrowseTabStore {
                     prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
                     return migrated
                 }
-                return mixed
+                return normalized
             }
         }
 
@@ -240,11 +256,43 @@ object BrowseTabStore {
         prefs.edit().putString(filterKey(platform, tabId), snapshot.toJson().toString()).apply()
     }
 
+    /** JM browse filters have a separate schema and keyspace from Manwa FilterSnapshot values. */
+    internal fun loadJmFilters(tabId: String): JmBrowsePolicy.Filters? =
+        prefs.getString(jmFilterKey(tabId), null)?.let { raw ->
+            runCatching {
+                val snapshot = JmFilterSnapshot.fromJson(JSONObject(raw), JmBrowsePolicy.MODE_CATEGORY)
+                JmBrowsePolicy.Filters(
+                    mode = snapshot.mode,
+                    query = snapshot.query,
+                    order = snapshot.order,
+                    category = snapshot.category,
+                    weekId = snapshot.weekId,
+                    weekType = snapshot.weekType,
+                )
+            }.getOrNull()
+        }
+
+    internal fun saveJmFilters(tabId: String, filters: JmBrowsePolicy.Filters) {
+        JmFilterSnapshot(
+            mode = filters.mode,
+            query = filters.query,
+            order = filters.order,
+            category = filters.category,
+            weekId = filters.weekId,
+            weekType = filters.weekType,
+        ).toJson().let { prefs.edit().putString(jmFilterKey(tabId), it.toString()).apply() }
+    }
+
+    fun deleteJmFilters(tabId: String) {
+        prefs.edit().remove(jmFilterKey(tabId)).apply()
+    }
+
     fun reset(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
         val defaults = defaultTabs(platform)
         save(defaults, platform)
         val editor = prefs.edit()
         prefs.all.keys.filter { it.startsWith("filter_${platform.id}_") }.forEach { editor.remove(it) }
+        if (platform == ContentPlatform.JM) prefs.all.keys.filter { it.startsWith("jm_filters_") }.forEach { editor.remove(it) }
         editor.putInt(seedKey(platform), SEED_VERSION).putInt(selectedTabKey(platform), 0).apply()
         return defaults
     }
@@ -254,6 +302,7 @@ object BrowseTabStore {
         saveAll(defaults)
         val editor = prefs.edit()
         prefs.all.keys.filter { it.startsWith("filter_manwa_") || it.startsWith("filter_jm_") }.forEach { editor.remove(it) }
+        prefs.all.keys.filter { it.startsWith("jm_filters_") }.forEach { editor.remove(it) }
         editor.putInt(seedKey(ContentPlatform.MANWA), SEED_VERSION)
             .putInt(seedKey(ContentPlatform.JM), SEED_VERSION)
             .putInt(MIXED_KEY_SELECTED_TAB, 0)

@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import com.github.skydoves.colorpicker.compose.rememberColorPickerController
 import com.materialkolor.PaletteStyle
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
@@ -42,17 +43,21 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.domain.ui.model.AppTheme
 import eu.kanade.domain.ui.model.TabletUiMode
 import eu.kanade.domain.ui.model.ThemeMode
+import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.SearchableSettings
 import eu.kanade.presentation.more.settings.screen.appearance.AppCustomThemeColorPickerScreen
 import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
+import eu.kanade.presentation.more.settings.widget.ThemeColorPickerWidget
+import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableMap
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
@@ -123,16 +128,20 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         )
                     }
                 },
-                Preference.PreferenceItem.CustomPreference(title = "漫蛙标签颜色") {
+                Preference.PreferenceItem.CustomPreference(title = "漫蛙对应颜色") {
                     PlatformAccentPreferenceRow(
+                        title = "漫蛙对应颜色",
                         color = manwaAccent,
-                        onClick = { editingAccent = ContentPlatform.MANWA },
+                        onEditClick = { editingAccent = ContentPlatform.MANWA },
+                        onPaletteClick = { navigator.push(PlatformAccentPaletteScreen(ContentPlatform.MANWA)) },
                     )
                 },
-                Preference.PreferenceItem.CustomPreference(title = "禁漫天堂标签颜色") {
+                Preference.PreferenceItem.CustomPreference(title = "禁漫天堂对应颜色") {
                     PlatformAccentPreferenceRow(
+                        title = "禁漫天堂对应颜色",
                         color = jmAccent,
-                        onClick = { editingAccent = ContentPlatform.JM },
+                        onEditClick = { editingAccent = ContentPlatform.JM },
+                        onPaletteClick = { navigator.push(PlatformAccentPaletteScreen(ContentPlatform.JM)) },
                     )
                 },
                 Preference.PreferenceItem.TextPreference(
@@ -327,19 +336,62 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     }
 }
 
+private class PlatformAccentPaletteScreen(
+    private val platform: ContentPlatform,
+) : Screen() {
+    @Composable
+    override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
+        val currentColor = rememberContentPlatformAccent(platform)
+        val controller = rememberColorPickerController()
+        val title = if (platform == ContentPlatform.MANWA) "漫蛙对应颜色" else "禁漫天堂对应颜色"
+
+        Scaffold(
+            topBar = { scrollBehavior ->
+                AppBar(
+                    title = title,
+                    navigateUp = navigator::pop,
+                    scrollBehavior = scrollBehavior,
+                )
+            },
+        ) { contentPadding ->
+            Column(modifier = Modifier.padding(contentPadding)) {
+                ThemeColorPickerWidget(
+                    controller = controller,
+                    initialColor = currentColor,
+                    onItemClick = { color, _ ->
+                        ContentPlatformAccentPrefs.set(platform, color)
+                        navigator.pop()
+                    },
+                )
+            }
+        }
+    }
+}
+
 @Composable
-private fun PlatformAccentPreferenceRow(color: Color, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = ContentPlatformAccentPrefs.format(color),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.size(24.dp).background(color, CircleShape))
+private fun PlatformAccentPreferenceRow(
+    title: String,
+    color: Color,
+    onEditClick: () -> Unit,
+    onPaletteClick: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(text = title, style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = ContentPlatformAccentPrefs.format(color),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f).clickable(onClick = onEditClick),
+            )
+            Spacer(Modifier.size(24.dp).background(color, CircleShape).clickable(onClick = onEditClick))
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = onPaletteClick) { Text("个性调色板") }
+        }
     }
 }
 

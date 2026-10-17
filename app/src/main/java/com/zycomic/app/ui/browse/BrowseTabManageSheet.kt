@@ -501,13 +501,18 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "编辑 tab",
             initialName = item.name,
             initial = item.filter ?: FilterSnapshot(),
+            initialJmFilters = vm.jmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).value,
             initialPlatform = item.platformId,
             allowPlatformSelect = false,
             onDismiss = { editing = null },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, item.id, platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, _ ->
-                vm.updateTabDefaultFilter(item.id, snap)
+            onSave = { nm, snap, jmFilters, platform ->
+                if (platform == ContentPlatform.JM) {
+                    vm.updateTabDefaultJmFilters(item.id, jmFilters)
+                } else if (snap != null) {
+                    vm.updateTabDefaultFilter(item.id, snap)
+                }
                 if (nm != item.name) vm.renameTab(item.id, nm)
                 editing = null
             },
@@ -520,13 +525,14 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "新增筛选 tab",
             initialName = "",
             initial = FilterSnapshot(),
+            initialJmFilters = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "mr"),
             initialPlatform = vm.currentPlatform.value,
             allowPlatformSelect = true,
             onDismiss = { adding = false },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, platform = platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, platform ->
-                if (vm.addFilterTab(nm, snap, platform)) {
+            onSave = { nm, snap, jmFilters, platform ->
+                if (vm.addFilterTab(nm, snap, platform, jmFilters)) {
                     adding = false
                     onDismiss()
                 }
@@ -541,7 +547,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = { Text("恢复默认预设") },
             text = {
                 Text(
-                    "将清空共享列表中的新增、改名和修改项，恢复漫蛙默认标签；禁漫天堂暂无默认标签。确定？",
+                    "将清空共享列表中的新增、改名和修改项，恢复漫蛙默认标签及禁漫天堂的 JM 推荐、JM 全部热门标签。确定？",
                 )
             },
             confirmButton = {
@@ -680,6 +686,41 @@ private fun FilterSnapshot.summary(): String {
     return "$g · 标签：$t · $a · $e · ${s}排序"
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun JmTabFilterEditor(
+    filters: JmBrowsePolicy.Filters,
+    onChange: (JmBrowsePolicy.Filters) -> Unit,
+) {
+    val categories = remember { JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions) }
+    val orders = remember { JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions) }
+
+    FilterSection("JM 分类") {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            categories.forEach { (label, value) ->
+                FilterChip(text = label, selected = filters.category == value) {
+                    onChange(filters.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "", category = value))
+                }
+            }
+        }
+    }
+    FilterSection("JM 排序") {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            orders.forEach { (label, value) ->
+                FilterChip(text = label, selected = filters.order == value) {
+                    onChange(filters.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "", order = value))
+                }
+            }
+        }
+    }
+    Text(
+        "分类与排序只用于此 JM tab，不会读取或写入漫蛙筛选。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+    )
+}
+
 /**
  * 新增/编辑共用的筛选 tab 表单：名称（即时校验）+ 实时摘要 + 筛选配置（标签"更多"进标签选择器）+ 取消/保存。
  */
@@ -688,15 +729,17 @@ private fun FilterTabFormDialog(
     title: String,
     initialName: String,
     initial: FilterSnapshot,
+    initialJmFilters: JmBrowsePolicy.Filters,
     initialPlatform: ContentPlatform,
     allowPlatformSelect: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, FilterSnapshot, ContentPlatform) -> Unit,
+    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform) -> Unit,
     onOpenTagDialog: (Set<String>, (Set<String>) -> Unit) -> Unit,
     checkNameTaken: (String, ContentPlatform) -> Boolean,
 ) {
     var name by remember(title) { mutableStateOf(initialName) }
     var draft by remember(title) { mutableStateOf(initial) }
+    var jmDraft by remember(title) { mutableStateOf(initialJmFilters) }
     var targetPlatform by remember(title) { mutableStateOf(initialPlatform) }
 
     val trimmed = name.trim()
@@ -766,7 +809,15 @@ private fun FilterTabFormDialog(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
                         Text(
-                            draft.summary(),
+                            if (targetPlatform == ContentPlatform.JM) {
+                                val category = JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions)
+                                    .firstOrNull { it.second == jmDraft.category }?.first ?: "全部分类"
+                                val order = JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions)
+                                    .firstOrNull { it.second == jmDraft.order }?.first ?: "最新"
+                                "$category · $order"
+                            } else {
+                                draft.summary()
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(10.dp),
@@ -779,19 +830,23 @@ private fun FilterTabFormDialog(
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                     ) {
-                        FilterSnapshotEditor(
-                            snapshot = draft,
-                            onChange = { draft = it },
-                            onOpenTagDialog = {
-                                onOpenTagDialog(draft.tags.toSet()) { set -> draft = draft.copy(tags = set.toList()) }
-                            },
-                        )
-                        Text(
-                            "新 tab 默认按收藏（热门）排序",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-                        )
+                        if (targetPlatform == ContentPlatform.JM) {
+                            JmTabFilterEditor(filters = jmDraft, onChange = { jmDraft = it })
+                        } else {
+                            FilterSnapshotEditor(
+                                snapshot = draft,
+                                onChange = { draft = it },
+                                onOpenTagDialog = {
+                                    onOpenTagDialog(draft.tags.toSet()) { set -> draft = draft.copy(tags = set.toList()) }
+                                },
+                            )
+                            Text(
+                                "新 tab 默认按收藏（热门）排序",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                            )
+                        }
                     }
 
                     HorizontalDivider()
@@ -802,7 +857,21 @@ private fun FilterTabFormDialog(
                     ) {
                         TextButton(onClick = onDismiss) { Text("取消") }
                         Spacer(Modifier.width(8.dp))
-                        Button(enabled = nameError == null, onClick = { onSave(trimmed, draft, targetPlatform) }) { Text("保存") }
+                        Button(
+                            enabled = nameError == null,
+                            onClick = {
+                                onSave(
+                                    trimmed,
+                                    draft.takeIf { targetPlatform == ContentPlatform.MANWA },
+                                    jmDraft.copy(
+                                        mode = JmBrowsePolicy.MODE_CATEGORY,
+                                        query = "",
+                                        order = jmDraft.order.ifBlank { "mr" },
+                                    ),
+                                    targetPlatform,
+                                )
+                            },
+                        ) { Text("保存") }
                     }
                 }
             }

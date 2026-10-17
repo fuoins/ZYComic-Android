@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,15 +25,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.BookmarkAdd
-import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -63,16 +56,10 @@ import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
-import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.PlatformNotConnectedContent
+import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
-import eu.kanade.presentation.components.AppBar
-import eu.kanade.presentation.components.AppBarActions
-import eu.kanade.presentation.components.AppBarTitle
-import eu.kanade.presentation.components.SearchToolbar
-import eu.kanade.presentation.util.animateItemFastScroll
-import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
@@ -142,68 +129,28 @@ fun HistoryScreen(
 
     Scaffold(
         topBar = { scrollBehavior ->
-            if (selectionMode) {
-                AppBar(
-                    titleContent = { Text("${selectedIds.size}") },
-                    actions = {
-                        AppBarActions(
-                            persistentListOf(
-                                AppBar.Action(
-                                    title = "全选",
-                                    icon = Icons.Outlined.SelectAll,
-                                    onClick = { vm.selectAll() },
-                                ),
-                                AppBar.Action(
-                                    title = "反选",
-                                    icon = Icons.Outlined.FlipToBack,
-                                    onClick = { vm.invertSelection() },
-                                ),
-                            ),
-                        )
-                    },
-                    isActionMode = true,
-                    onCancelActionMode = { vm.exitSelection() },
-                    scrollBehavior = scrollBehavior,
-                )
-            } else {
-                SearchToolbar(
-                    titleContent = { AppBarTitle("历史") },
-                    searchEnabled = platform == ContentPlatform.MANWA,
-                    searchQuery = searchQuery,
-                    onChangeSearchQuery = { vm.updateSearchQuery(it) },
-                    actions = {
-                        AppBarActions(
-                            if (platform == ContentPlatform.MANWA) {
-                                persistentListOf(
-                                    AppBar.Action(
-                                        title = "刷新",
-                                        icon = Icons.Default.Refresh,
-                                        onClick = {
-                                            vm.refreshHistory()
-                                            scope.launch { listState.scrollToItem(0) }
-                                        },
-                                    ),
-                                    AppBar.Action(
-                                        title = "多选",
-                                        icon = Icons.Outlined.Checklist,
-                                        onClick = { vm.enterSelection() },
-                                    ),
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
-                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
-                                    },
-                                )
-                            } else {
-                                persistentListOf(
-                                    AppBar.ActionCompose(title = stringResource(KMR.strings.content_platform_switch), width = 112.dp) {
-                                        ContentPlatformSelector(selected = platform, onSelect = selectPlatform, compact = true)
-                                    },
-                                )
-                            },
-                        )
-                    },
-                    scrollBehavior = scrollBehavior,
-                )
-            }
+            LibraryHistoryToolbar(
+                platform = platform,
+                onSelectPlatform = selectPlatform,
+                searchQuery = searchQuery,
+                onChangeSearchQuery = vm::updateSearchQuery,
+                titleContent = { Text("历史") },
+                searchSupported = platform == ContentPlatform.MANWA,
+                refreshSupported = platform == ContentPlatform.MANWA,
+                filterSupported = false,
+                onRefresh = {
+                    vm.refreshHistory()
+                    scope.launch { listState.scrollToItem(0) }
+                },
+                onFilter = {},
+                onEnterSelection = vm::enterSelection,
+                selectionMode = selectionMode,
+                selectionCount = selectedIds.size,
+                onExitSelection = vm::exitSelection,
+                onSelectAll = vm::selectAll,
+                onInvertSelection = vm::invertSelection,
+                scrollBehavior = scrollBehavior,
+            )
         },
         bottomBar = {
             if (selectionMode) {

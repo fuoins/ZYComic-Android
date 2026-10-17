@@ -74,7 +74,20 @@ class BrowseViewModel {
     private fun stateFor(page: Int): TabState {
         val item = tabs.getOrNull(page) ?: return TabState()
         val key = "${item.platformId.id}:${item.id}"
-        return stateById.getOrPut(key) { TabState(JmBrowsePolicy.initialFilters(item.id)) }
+        return stateById.getOrPut(key) {
+            val initial = if (item.platformId == ContentPlatform.JM) {
+                BrowseTabStore.loadJmFilters(item.id) ?: JmBrowsePolicy.initialFilters(item.id)
+            } else {
+                JmBrowsePolicy.Filters()
+            }
+            TabState(initial)
+        }
+    }
+
+    private fun saveJmFilters(tab: Int, filters: JmBrowsePolicy.Filters) {
+        tabs.getOrNull(tab)
+            ?.takeIf { it.platformId == ContentPlatform.JM }
+            ?.let { BrowseTabStore.saveJmFilters(it.id, filters) }
     }
 
     private val cur: TabState get() = stateFor(mainTab.value)
@@ -102,7 +115,7 @@ class BrowseViewModel {
     internal fun jmFiltersForTab(tab: Int): StateFlow<JmBrowsePolicy.Filters> = stateFor(tab).jmFilters.asStateFlow()
 
     fun selectJmMode(mode: Int, tab: Int = mainTab.value) {
-        if (mode !in JmBrowsePolicy.MODE_RECOMMENDATIONS..JmBrowsePolicy.MODE_WEEK || tab !in tabs.indices) return
+        if (mode !in JmBrowsePolicy.MODE_RECOMMENDATIONS..JmBrowsePolicy.MODE_WEEK || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
         val state = stateFor(tab)
         val current = state.jmFilters.value
         if (current.mode == mode && current.query.isBlank()) return
@@ -112,19 +125,21 @@ class BrowseViewModel {
             order = if (mode == JmBrowsePolicy.MODE_CATEGORY && current.order.isBlank()) "mr" else current.order,
             weekType = if (mode == JmBrowsePolicy.MODE_WEEK && current.weekType.isBlank()) "hanman" else current.weekType,
         )
+        saveJmFilters(tab, state.jmFilters.value)
         refresh(tab)
     }
 
     fun searchJm(query: String, tab: Int = mainTab.value) {
         val value = query.trim()
-        if (value.isBlank() || tab !in tabs.indices) return
+        if (value.isBlank() || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(mode = JmBrowsePolicy.MODE_SEARCH, query = value)
+        saveJmFilters(tab, stateFor(tab).jmFilters.value)
         refresh(tab)
     }
 
     fun updateJmFilters(tab: Int, order: String? = null, category: String? = null, weekId: String? = null, weekType: String? = null) {
-        if (tab !in tabs.indices) return
+        if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(
             order = order?.trim() ?: current.order,
@@ -132,6 +147,7 @@ class BrowseViewModel {
             weekId = weekId?.trim() ?: current.weekId,
             weekType = weekType?.trim() ?: current.weekType,
         )
+        saveJmFilters(tab, stateFor(tab).jmFilters.value)
         refresh(tab)
     }
 
@@ -584,7 +600,7 @@ class BrowseViewModel {
                 page = ts.currentPage,
                 query = filters.query,
                 order = filters.order,
-                category = filters.category,
+                category = JmBrowsePolicy.apiCategory(filters.category),
                 weekId = filters.weekId,
                 weekType = filters.weekType,
                 previousFirstId = previousFirstId,
@@ -667,7 +683,7 @@ class BrowseViewModel {
 
     /** 修改某个 FILTER tab 的默认筛选（仅管理面板调用），并即时刷新当前页。 */
     fun updateTabDefaultFilter(id: String, snapshot: FilterSnapshot) {
-        val i = tabs.indexOfFirst { it.id == id }
+        val i = tabs.indexOfFirst { it.id == id && it.platformId == ContentPlatform.MANWA }
         if (i < 0 || tabs[i].kind != TabKind.FILTER) return
         tabs[i] = tabs[i].copy(filter = snapshot)
         persist()
@@ -677,12 +693,22 @@ class BrowseViewModel {
         }
     }
 
+    /** Save a JM tab's own category/order state, never converting it to a Manwa FilterSnapshot. */
+    internal fun updateTabDefaultJmFilters(id: String, filters: JmBrowsePolicy.Filters) {
+        val i = tabs.indexOfFirst { it.id == id && it.platformId == ContentPlatform.JM }
+        if (i < 0 || tabs[i].kind != TabKind.FILTER) return
+        stateFor(i).jmFilters.value = filters
+        saveJmFilters(i, filters)
+        if (mainTab.value == i) refresh(i)
+    }
+
     fun deleteTab(id: String) {
         val i = tabs.indexOfFirst { it.id == id }
         if (i < 0 || isProtected(tabs[i])) return
         val deletedPlatform = tabs[i].platformId
         tabs.removeAt(i)
         stateById.remove("${deletedPlatform.id}:$id")
+        if (deletedPlatform == ContentPlatform.JM) BrowseTabStore.deleteJmFilters(id)
         if (tabs.isEmpty()) tabs.addAll(BrowseTabStore.defaultTabs(ContentPlatform.MANWA))
         persist()
         if (tabs.isEmpty()) {
@@ -702,10 +728,11 @@ class BrowseViewModel {
         if (!stateFor(target).loaded) refresh()
     }
 
-    fun addFilterTab(
+    internal fun addFilterTab(
         name: String,
-        snapshot: FilterSnapshot,
+        snapshot: FilterSnapshot?,
         platform: ContentPlatform = currentPlatform.value,
+        jmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "mr"),
     ): Boolean {
         val n = name.trim()
         if (n.isEmpty() || isNameTaken(n, platform = platform)) return false
@@ -714,10 +741,11 @@ class BrowseViewModel {
             name = n,
             kind = TabKind.FILTER,
             builtin = false,
-            filter = snapshot,
+            filter = snapshot.takeIf { platform == ContentPlatform.MANWA },
             platformId = platform,
         )
         tabs.add(item)
+        if (platform == ContentPlatform.JM) BrowseTabStore.saveJmFilters(item.id, jmFilters)
         persist()
         goTo(tabs.lastIndex)
         return true
