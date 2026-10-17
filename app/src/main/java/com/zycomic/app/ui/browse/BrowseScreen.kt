@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.imageLoader
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.ContentPlatform
@@ -603,7 +604,7 @@ private fun MangaGridItem(
     val imageLoader = if (isJm) {
         com.zycomic.app.ui.components.JmCoverImageLoader.get(androidx.compose.ui.platform.LocalContext.current)
     } else {
-        coil3.compose.LocalImageLoader.current
+        androidx.compose.ui.platform.LocalContext.current.imageLoader
     }
     Column(
         modifier = Modifier

@@ -13,7 +13,7 @@ object JmCoverImageLoader {
 
     fun get(context: Context): ImageLoader = instance ?: synchronized(this) {
         instance ?: ImageLoader.Builder(context.applicationContext)
-            .components { add(OkHttpNetworkFetcherFactory { JmNetworkModule.client }) }
+            .components { add(OkHttpNetworkFetcherFactory(JmNetworkModule.client)) }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("jm_cover_cache"))

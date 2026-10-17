@@ -93,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
+import coil3.imageLoader
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.reader.ReaderLauncher
@@ -147,7 +148,7 @@ fun MangaDetailScreen(
     val jmImageLoader = if (vm.isJm) {
         com.zycomic.app.ui.components.JmCoverImageLoader.get(context)
     } else {
-        coil3.compose.LocalImageLoader.current
+        context.imageLoader
     }
 
     /** 通过 komikku 原生阅读器打开指定章节。chapterId 为字符串数字。 */

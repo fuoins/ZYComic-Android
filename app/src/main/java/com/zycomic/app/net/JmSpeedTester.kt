@@ -66,7 +66,7 @@ object JmSpeedTester {
         val started = System.nanoTime()
         return try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.bytes().orEmpty()
+                val body = response.body?.bytes() ?: ByteArray(0)
                 val valid = response.isSuccessful && if (image) {
                     response.header("Content-Type")?.startsWith("image/", ignoreCase = true) == true && body.isNotEmpty()
                 } else {

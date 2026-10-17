@@ -290,7 +290,7 @@ object JmSource : HttpSource() {
             }
             SChapter.create().apply {
                 url = "/chapter/$id"
-                name = name
+                this.name = name
                 chapter_number = sortValue.toFloat()
                 scanlator = null
                 date_upload = 0L
