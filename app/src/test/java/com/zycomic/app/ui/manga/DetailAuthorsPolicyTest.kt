@@ -12,6 +12,7 @@ class DetailAuthorsPolicyTest {
     fun `collapsed detail shows only the first author and expansion retains every author`() {
         assertEquals(listOf("作者甲"), detailAuthorsForDisplay(authors, expanded = false))
         assertEquals(authors, detailAuthorsForDisplay(authors, expanded = true))
+        assertEquals(emptyList<String>(), detailAuthorsForDisplay(emptyList(), expanded = false))
     }
 
     @Test

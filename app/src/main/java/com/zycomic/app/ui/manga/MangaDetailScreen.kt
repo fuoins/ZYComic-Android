@@ -350,18 +350,18 @@ fun MangaDetailScreen(
                                                 .clip(CircleShape)
                                                 .background(MaterialTheme.colorScheme.secondaryContainer)
                                                 .clickable { onSearchKeyword(author) }
-                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                .padding(horizontal = 6.dp, vertical = 2.dp),
                                         ) {
                                             Icon(
                                                 Icons.Outlined.PersonOutline,
                                                 contentDescription = null,
-                                                modifier = Modifier.size(14.dp),
+                                                modifier = Modifier.size(12.dp),
                                                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                             )
-                                            Spacer(Modifier.width(3.dp))
+                                            Spacer(Modifier.width(2.dp))
                                             Text(
                                                 author,
-                                                style = MaterialTheme.typography.bodySmall,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                                             )
                                         }
@@ -687,45 +687,42 @@ fun MangaDetailScreen(
                     }
 
                     // 6. 相关推荐
-                    Text(
-                        if (vm.isJm) "相关推荐（JM 未提供）" else "相关推荐",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier
-                            .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                            .onGloballyPositioned { coordinates ->
-                                val parent = coordinates.parentLayoutCoordinates
-                                if (parent != null) recommendY = parent.localPositionOf(coordinates, Offset.Zero).y.toInt()
-                            },
-                    )
-                    if (vm.isJm) {
+                    if (!vm.isJm || d.loveList.isNotEmpty()) {
                         Text(
-                            "当前报告未确认 JM 专辑相关推荐字段，因此不显示推测内容。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    } else if (d.loveList.isEmpty()) {
-                        Text(
-                            "暂无相关推荐",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    } else {
-                        val lazyRowState = rememberLazyListState()
-                        LazyRow(
-                            state = lazyRowState,
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                horizontal = 16.dp,
-                                vertical = 8.dp,
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            "相关推荐",
+                            style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .drawHorizontalScrollbar(lazyRowState),
-                        ) {
-                            items(d.loveList) { m ->
-                                RelatedItem(manga = m, onClick = { onOpenManga(m.id) })
+                                .padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                                .onGloballyPositioned { coordinates ->
+                                    val parent = coordinates.parentLayoutCoordinates
+                                    if (parent != null) recommendY = parent.localPositionOf(coordinates, Offset.Zero).y.toInt()
+                                },
+                        )
+                        if (d.loveList.isEmpty()) {
+                            Text(
+                                "暂无相关推荐",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        } else {
+                            val lazyRowState = rememberLazyListState()
+                            LazyRow(
+                                state = lazyRowState,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                    horizontal = 16.dp,
+                                    vertical = 8.dp,
+                                ),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .drawHorizontalScrollbar(lazyRowState),
+                            ) {
+                                items(d.loveList) { m ->
+                                    RelatedItem(manga = m, imageLoader = jmImageLoader, onClick = {
+                                        onOpenManga(relatedMangaRoute(m.id, vm.isJm))
+                                    })
+                                }
                             }
                         }
                     }
@@ -750,14 +747,16 @@ fun MangaDetailScreen(
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = {
-                        scope.launch { scrollState.animateScrollTo(recommendY) }
-                    }) {
-                        Text(
-                            "相关推荐",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                    if (!vm.isJm || detail?.loveList?.isNotEmpty() == true) {
+                        TextButton(onClick = {
+                            scope.launch { scrollState.animateScrollTo(recommendY) }
+                        }) {
+                            Text(
+                                "相关推荐",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     }
                 }
             }
@@ -886,7 +885,7 @@ private fun ExpandableSummary(text: String) {
 
 /** 相关推荐单项：封面 96dp + 标题最多 2 行。 */
 @Composable
-private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
+private fun RelatedItem(manga: Manga, imageLoader: coil3.ImageLoader, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .width(96.dp)
@@ -896,6 +895,7 @@ private fun RelatedItem(manga: Manga, onClick: () -> Unit) {
         SubcomposeAsyncImage(
             model = coverUrl(manga),
             contentDescription = manga.name,
+            imageLoader = imageLoader,
             modifier = Modifier
                 .width(96.dp)
                 .height(144.dp)

@@ -202,6 +202,20 @@ class JmResponseParserTest {
     }
 
     @Test
+    fun `related album ids normalize to strings titles decode entities and blank images are ignored`() {
+        val related = JmResponseParser.albumDetails(
+            JSONObject(
+                """{"related_list":[{"id":17,"name":"A&nbsp;&amp; B &#39;title&#39;","author":"作者甲","image":""},{"id":"18","name":"数字标题","author":123,"image":""},{"id":"19","name":123,"author":"无效标题"}]}""",
+            ),
+        ).related
+
+        assertEquals(listOf("17", "18"), related.map { it.id })
+        assertEquals("A\u00a0& B 'title'", related.first().name)
+        assertEquals("作者甲", related.first().author)
+        assertEquals("", related.last().author)
+    }
+
+    @Test
     fun `missing optional album details remain empty defaults`() {
         val details = JmResponseParser.albumDetails(JSONObject("{}"))
 

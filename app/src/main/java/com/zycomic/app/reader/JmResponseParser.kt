@@ -3,6 +3,7 @@ package com.zycomic.app.reader
 import com.zycomic.app.data.dto.TagItem
 import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.parser.Parser
 import java.io.IOException
 
 /** Parses confirmed JM fields; album IDs are used as episode IDs only for an explicit empty series. */
@@ -42,13 +43,13 @@ internal object JmResponseParser {
             (0 until list.length()).mapNotNull { index ->
                 val item = list.optJSONObject(index) ?: return@mapNotNull null
                 val id = item.text("id")
-                val name = item.text("name")
+                val name = (item.opt("name") as? String)?.let { Parser.unescapeEntities(it, false) }.orEmpty().trim()
                 if (!validId(id) || name.isBlank()) return@mapNotNull null
                 RelatedManga(
                     id = id,
                     name = name,
-                    author = item.text("author"),
-                    description = item.text("description"),
+                    author = (item.opt("author") as? String).orEmpty().trim(),
+                    description = (item.opt("description") as? String).orEmpty().trim(),
                 )
             }
         }.orEmpty()

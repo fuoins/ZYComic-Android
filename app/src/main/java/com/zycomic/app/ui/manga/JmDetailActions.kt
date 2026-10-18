@@ -73,7 +73,12 @@ internal fun JmDetailActions(vm: MangaDetailViewModel, manga: Manga, onSaveCover
             TextButton(onClick = vm::toggleJmLike, enabled = !busy, modifier = Modifier.weight(1f)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(if (manga.jmLiked == true) Icons.Default.ThumbUp else Icons.Outlined.ThumbUp, null)
-                    Text(stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_count else KMR.strings.jm_like_count, manga.jmLikes?.toString() ?: "—"), textAlign = TextAlign.Center)
+                    Text(
+                        stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_count else KMR.strings.jm_like_count, jmCountForDisplay(manga.jmLikes)),
+                        textAlign = TextAlign.Center,
+                        softWrap = true,
+                        maxLines = Int.MAX_VALUE,
+                    )
                 }
             }
             TextButton(onClick = {
@@ -82,7 +87,12 @@ internal fun JmDetailActions(vm: MangaDetailViewModel, manga: Manga, onSaveCover
             }, modifier = Modifier.weight(1f)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Default.ChatBubbleOutline, null)
-                    Text(stringResource(KMR.strings.jm_comment_count, commentCount?.toString() ?: "—"), textAlign = TextAlign.Center)
+                    Text(
+                        stringResource(KMR.strings.jm_comment_count, jmCountForDisplay(commentCount)),
+                        textAlign = TextAlign.Center,
+                        softWrap = true,
+                        maxLines = Int.MAX_VALUE,
+                    )
                 }
             }
             JmDetailOverflow(manga.name, manga.id, onSaveCover, onShareCover, Modifier.weight(1f))

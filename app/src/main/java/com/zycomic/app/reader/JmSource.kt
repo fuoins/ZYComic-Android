@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
@@ -31,6 +32,7 @@ import com.zycomic.app.data.dto.Manga as MangaDto
 /** JM JSON API adapter. It deliberately does not share Manwa's network or repository state. */
 object JmSource : HttpSource() {
 
+    private val relatedImageHostCache = JmRelatedMangaPolicy.ImageHostCache()
     private val weekTypes = setOf("hanman", "another", "manga")
     private val serializationTypes = setOf("all", "manga", "hanman")
 
@@ -254,6 +256,7 @@ object JmSource : HttpSource() {
         if (title.isBlank()) throw IOException("JM /album 缺少已确认字段 name；未将不完整详情标记为可用")
         val series = JmResponseParser.chapters(album, singleChapterAlbumId = albumId)
         val details = JmResponseParser.albumDetails(album)
+        val relatedImgHost = if (details.related.isNotEmpty()) getRelatedImageHost() else null
         AlbumResult(
             manga = MangaDto(
                 id = albumId,
@@ -273,13 +276,16 @@ object JmSource : HttpSource() {
                 jmViews = details.views,
                 jmUpdateTime = details.updateTime,
                 chapterList = series.items.map { ChapterDto(id = it.id, name = it.name, sort = it.sort) },
-                loveList = details.related.map { item ->
+                loveList = details.related.mapNotNull { item ->
+                    val imageUrl = relatedImgHost?.let { host ->
+                        JmRelatedMangaPolicy.coverUrl(host, item.id, details.addtime)
+                    } ?: return@mapNotNull null
                     MangaDto(
                         id = item.id,
                         name = item.name,
                         author = item.author,
                         text = item.description,
-                        picx = coverUrl(item.id),
+                        picx = imageUrl,
                     )
                 },
             ),
@@ -403,6 +409,47 @@ object JmSource : HttpSource() {
                 throw IOException("JM $path 返回内容不是 JSON", error)
             }
         }
+    }
+
+    private suspend fun getRelatedImageHost(): String? {
+        val key = relatedSettingsCacheKey()
+        relatedImageHostCache.get(key)?.let { return it }
+        return try {
+            val payload = getJson(
+                "/setting",
+                mapOf("app_img_shunt" to "1", "express" to "", "lang" to "TW"),
+            )
+            val host = JmRelatedMangaPolicy.settingImageHost(payload)
+            if (host == null) {
+                JmRouteManager.record("related_setting", JmRouteManager.lineHost, "JM /setting 未返回有效 HTTPS img_host；已隐藏详情相关推荐")
+                return null
+            }
+            if (relatedSettingsCacheKey() != key) {
+                JmRouteManager.record("related_setting", JmRouteManager.lineHost, "JM 线路或配置在 /setting 请求期间切换；本次隐藏详情相关推荐")
+                return null
+            }
+            relatedImageHostCache.put(key, host)
+            host
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            JmRouteManager.record(
+                "related_setting",
+                JmRouteManager.lineHost,
+                "JM /setting 请求失败；已隐藏详情相关推荐: ${error.message ?: error.javaClass.simpleName}",
+            )
+            null
+        }
+    }
+
+    private fun relatedSettingsCacheKey(): JmRelatedMangaPolicy.SettingsCacheKey {
+        val state = JmRouteManager.state.value
+        val routeConfiguration = buildString {
+            append(state.remoteVersion ?: "unknown").append('|')
+            append(state.lineIndex).append('|').append(state.imageDomain.lowercase(java.util.Locale.ROOT)).append('|')
+            append(state.lines.joinToString(",") { it.lowercase(java.util.Locale.ROOT) }).append('|')
+            append(state.imageDomains.joinToString(",") { it.lowercase(java.util.Locale.ROOT) })
+        }
+        return JmRelatedMangaPolicy.cacheKey(JmRouteManager.baseUrl, routeConfiguration)
     }
 
     private suspend fun postJson(path: String, params: Map<String, String>): JSONObject = withContext(Dispatchers.IO) {

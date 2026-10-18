@@ -18,7 +18,7 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private va
         val path = original.url.encodedPath
         val host = original.url.host
         val isImage = JmAuthPolicy.isImage(path)
-        val isUnsigned = path == "/confirm" || path == "/setting"
+        val isUnsigned = path == "/confirm"
         val builder = original.newBuilder()
             .removeHeader("Authorization")
             .apply { if (isImage) removeHeader("Cookie") }

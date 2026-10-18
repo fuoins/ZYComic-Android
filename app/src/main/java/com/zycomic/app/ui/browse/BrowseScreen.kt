@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Tune
@@ -168,7 +169,6 @@ fun BrowseScreen(
     var showFilterDialog by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
-    var showGuideDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
     var showJmAlbumJumpDialog by remember { mutableStateOf(false) }
     var jmAlbumIdInput by remember { mutableStateOf("") }
@@ -214,7 +214,7 @@ fun BrowseScreen(
                     searchQuery = null,
                     onChangeSearchQuery = {},
                     actions = {
-                        // Keep the direct-ID entry beside search, not in a separate content row.
+                        // Keep the compact direct-ID entry immediately beside search.
                         FilledTonalButton(
                             onClick = {
                                 if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
@@ -224,27 +224,25 @@ fun BrowseScreen(
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                         ) {
-                            Icon(Icons.Outlined.Tag, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                            Icon(Icons.Outlined.Tag, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(2.dp))
+                            Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                         }
                         AppBarActions(
                             if (platform == ContentPlatform.MANWA) {
                                 persistentListOf(
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", null) }),
-                                    AppBar.OverflowAction(title = "刷新", onClick = { vm.refresh() }),
-                                    AppBar.OverflowAction(title = "使用说明", onClick = { showGuideDialog = true }),
-                                    AppBar.OverflowAction(title = "多选", onClick = { vm.enterSelection() }),
+                                    AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
+                                    AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = { vm.enterSelection() }),
                                 )
                             } else {
                                 persistentListOf(
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = {
                                         onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, null)
                                     }),
-                                    AppBar.OverflowAction(title = "刷新", onClick = { vm.refresh() }),
-                                    AppBar.OverflowAction(title = "使用说明", onClick = { showGuideDialog = true }),
+                                    AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
                                 )
                             },
                         )
@@ -401,11 +399,6 @@ fun BrowseScreen(
                 )
             }
         }
-    }
-
-    // 使用说明对话框
-    if (showGuideDialog) {
-        BrowseGuideDialog(onDismiss = { showGuideDialog = false })
     }
 
     if (showJmAlbumJumpDialog) {

@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import com.zycomic.app.reader.JmRelatedMangaPolicy
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Response
@@ -34,7 +35,12 @@ class JmImageInterceptor : Interceptor {
             )
         }
         val networkUrl = original.url.newBuilder().removeAllQueryParameters(SCRAMBLE_QUERY).build()
-        val candidates = JmRouteManager.imageCandidates()
+        val configuredCandidates = JmRouteManager.imageCandidates()
+        val candidates = if (path.startsWith("/media/albums/")) {
+            JmRelatedMangaPolicy.imageHostsForAlbum(original.url.host, configuredCandidates)
+        } else {
+            configuredCandidates
+        }
         var lastError: IOException? = null
         var lastStatus: Int? = null
         for (host in candidates) {
