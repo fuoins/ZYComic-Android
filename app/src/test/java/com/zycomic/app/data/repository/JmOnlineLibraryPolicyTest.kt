@@ -30,6 +30,25 @@ class JmOnlineLibraryPolicyTest {
     }
 
     @Test
+    fun `list response failures are non-empty including code 200 API error messages`() {
+        val apiError = JmOnlineLibraryPolicy.listResponseError(
+            isSuccessful = true,
+            httpCode = 200,
+            apiErrorMessage = "账号需要重新登录",
+        )
+        assertEquals("JM 列表请求失败：账号需要重新登录", apiError)
+        assertTrue(apiError!!.isNotBlank())
+
+        val httpError = JmOnlineLibraryPolicy.listResponseError(
+            isSuccessful = false,
+            httpCode = 503,
+            apiErrorMessage = null,
+        )
+        assertEquals("JM 列表请求失败（HTTP 503）", httpError)
+        assertTrue(httpError!!.isNotBlank())
+    }
+
+    @Test
     fun `request pages are one-based`() {
         assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoritesRequest(0, "mr") }
         assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.historyRequest(0) }
@@ -56,4 +75,35 @@ class JmOnlineLibraryPolicyTest {
         assertFalse(JmOnlineLibraryPolicy.hasMore(total = 40, existingItemIds = existingIds, nextPageIds = nextPageIds))
         assertFalse(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = existingIds, nextPageIds = emptyList()))
     }
+
+    @Test
+    fun `history merges local and remote by album id preserving local metadata and remote-only items`() {
+        val local = listOf(item("10", "local title"), item("20", "local only"))
+        val remote = listOf(item("10", "remote title"), item("30", "server only"))
+
+        assertEquals(
+            listOf(item("10", "local title"), item("20", "local only"), item("30", "server only")),
+            JmOnlineLibraryPolicy.mergeHistory(local, remote),
+        )
+    }
+
+    @Test
+    fun `history request error is not represented as an empty list`() {
+        assertEquals(
+            JmOnlineLibraryContentState.ERROR,
+            JmOnlineLibraryPolicy.contentState(hasItems = false, loading = false, error = "JM API error"),
+        )
+        assertEquals(
+            JmOnlineLibraryContentState.EMPTY,
+            JmOnlineLibraryPolicy.contentState(hasItems = false, loading = false, error = null),
+        )
+    }
+
+    private fun item(id: String, name: String) = JmOnlineLibraryItem(
+        id = id,
+        name = name,
+        author = "",
+        description = "",
+        image = "",
+    )
 }

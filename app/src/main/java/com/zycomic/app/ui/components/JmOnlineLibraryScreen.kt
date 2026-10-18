@@ -79,39 +79,66 @@ private fun JmOnlineLibraryContent(
     modifier: Modifier,
 ) {
     var order by remember { mutableStateOf("mr") }
-    var items by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
+    var remoteItems by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
+    var localItems by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
     var total by remember { mutableStateOf<Int?>(null) }
     var page by remember { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
+    var remoteLoading by remember { mutableStateOf(false) }
+    var localLoading by remember { mutableStateOf(history) }
     var hasMore by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var localError by remember { mutableStateOf<String?>(null) }
     var refreshRequest by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
+    val items = remember(history, localItems, remoteItems) {
+        if (history) JmOnlineLibraryPolicy.mergeHistory(localItems, remoteItems) else remoteItems
+    }
+    val loading = remoteLoading || localLoading
+    val visibleError = listOfNotNull(error, localError).joinToString("\n").ifBlank { null }
 
     suspend fun loadPage() {
-        if (loading || !hasMore || !loggedIn) return
-        loading = true
+        if (remoteLoading || !hasMore || !loggedIn) return
+        remoteLoading = true
         error = null
         try {
             val requestedPage = page + 1
             val result = if (history) JmOnlineLibraryRepository.history(requestedPage) else JmOnlineLibraryRepository.favorites(requestedPage, order)
-            val known = items.mapTo(mutableSetOf()) { it.id }
+            val known = remoteItems.mapTo(mutableSetOf()) { it.id }
             hasMore = JmOnlineLibraryPolicy.hasMore(result.total, known, result.items.map { it.id })
             val novel = result.items.filter { known.add(it.id) }
-            items = items + novel
+            remoteItems = remoteItems + novel
             total = result.total
             page = requestedPage
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             error = if (!JmAuthStore.isLoggedIn) "请重新登录 JM 账号" else failure.message ?: "JM 列表加载失败"
         } finally {
-            loading = false
+            remoteLoading = false
+        }
+    }
+
+    LaunchedEffect(history, refreshRequest) {
+        if (!history) {
+            localItems = emptyList()
+            localLoading = false
+            localError = null
+            return@LaunchedEffect
+        }
+        localLoading = true
+        localError = null
+        try {
+            localItems = JmOnlineLibraryRepository.localHistory()
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            localError = failure.message ?: "本地 JM 阅读历史加载失败"
+        } finally {
+            localLoading = false
         }
     }
 
     // A single coroutine serializes initial load and paging. Loading changes must not cancel their own request.
     LaunchedEffect(loggedIn, order, refreshRequest) {
-        items = emptyList()
+        remoteItems = emptyList()
         total = null
         page = 0
         hasMore = true
@@ -122,7 +149,8 @@ private fun JmOnlineLibraryContent(
         loadPage()
         snapshotFlow {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            Triple(last, items.size, error == null)
+            val loadedCount = if (history) JmOnlineLibraryPolicy.mergeHistory(localItems, remoteItems).size else remoteItems.size
+            Triple(last, loadedCount, error == null)
         }.collect { (last, size, healthy) ->
             if (healthy && size > 0 && last >= (size - 3).coerceAtLeast(0) && hasMore) loadPage()
         }
@@ -133,16 +161,18 @@ private fun JmOnlineLibraryContent(
     }
 
     if (!loggedIn) {
-        Column(
-            modifier = modifier.fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("登录 JM 账号后查看${if (history) "阅读历史" else "收藏"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onRequireLogin) { Text("JM 登录") }
+        if (!history) {
+            Column(
+                modifier = modifier.fillMaxSize().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text("登录 JM 账号后查看收藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onRequireLogin) { Text("JM 登录") }
+            }
+            return
         }
-        return
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -162,19 +192,38 @@ private fun JmOnlineLibraryContent(
                 Icon(Icons.Outlined.Refresh, contentDescription = "刷新 JM${if (history) "历史" else "收藏"}")
             }
         }
-        when {
-            loading && items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        if (history && !loggedIn) {
+            TextButton(onClick = onRequireLogin, modifier = Modifier.align(Alignment.End)) {
+                Text("登录 JM 同步账号观看记录")
             }
-            error != null && items.isEmpty() -> Column(
+        }
+        val contentState = JmOnlineLibraryPolicy.contentState(
+            hasItems = items.isNotEmpty(),
+            loading = loading,
+            error = visibleError,
+        )
+        when {
+            history && !loggedIn && items.isEmpty() && !localLoading -> Column(
                 modifier = Modifier.fillMaxSize().padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                Text(localError ?: "登录 JM 账号后可同步账号观看历史", color = if (localError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onRequireLogin) { Text("JM 登录") }
+            }
+            contentState == com.zycomic.app.data.repository.JmOnlineLibraryContentState.LOADING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            contentState == com.zycomic.app.data.repository.JmOnlineLibraryContentState.ERROR -> Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(visibleError.orEmpty(), color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = { refreshRequest++ }) { Text("重试") }
             }
-            items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            contentState == com.zycomic.app.data.repository.JmOnlineLibraryContentState.EMPTY -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(if (history) "暂无 JM 阅读历史" else "暂无 JM 收藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
@@ -186,10 +235,10 @@ private fun JmOnlineLibraryContent(
                         loading -> Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(Modifier.size(22.dp))
                         }
-                        error != null -> TextButton(onClick = { refreshRequest++ }) {
-                            Text("加载失败，点击重试", color = MaterialTheme.colorScheme.error)
+                        visibleError != null -> TextButton(onClick = { refreshRequest++ }) {
+                            Text(visibleError.orEmpty(), color = MaterialTheme.colorScheme.error)
                         }
-                        !hasMore -> Text("已加载 ${items.size}${total?.let { "/$it" }.orEmpty()} 条", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        !hasMore -> Text("已加载 ${items.size}${if (history) "" else total?.let { "/$it" }.orEmpty()} 条", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

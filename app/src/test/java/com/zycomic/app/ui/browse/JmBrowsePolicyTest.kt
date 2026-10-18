@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.browse
 
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.reader.JmSource
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -25,6 +26,23 @@ class JmBrowsePolicyTest {
         assertFalse(JmBrowsePolicy.isVisibleHomeSection("26", "promote"))
         assertFalse(JmBrowsePolicy.isVisibleHomeSection("1001", "library"))
         assertFalse(JmBrowsePolicy.isVisibleHomeSection("1002", "novels"))
+    }
+
+    @Test
+    fun `verified comic sections are immediately available and live directory metadata wins`() {
+        val immediate = JmBrowsePolicy.homeSectionOptions(emptyList())
+        assertEquals(listOf("29", "30", "998", "999", "1000"), immediate.map { it.id })
+
+        val live = JmSource.PromoteSection("29", "Updated C108 title", "promote", "", "29", emptyList())
+        val dynamic = JmSource.PromoteSection("1200", "New comic block", "promote", "", "1200", emptyList())
+        val library = JmSource.PromoteSection("1001", "书库", "library", "creator", "", emptyList())
+        val novels = JmSource.PromoteSection("1002", "小说", "novels", "novels", "", emptyList())
+        val merged = JmBrowsePolicy.homeSectionOptions(listOf(live, dynamic, library, novels))
+
+        assertEquals(listOf("29", "30", "998", "999", "1000", "1200"), merged.map { it.id })
+        assertEquals("Updated C108 title", merged.first().title)
+        assertEquals("New comic block", merged.last().title)
+        assertTrue(merged.all { it.type != "library" && it.type != "novels" })
     }
 
     @Test

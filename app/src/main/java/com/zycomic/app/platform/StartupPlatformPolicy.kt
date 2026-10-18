@@ -76,12 +76,13 @@ object StartupPlatformPolicy {
     /** Returns false and displays the required guidance when an interactive selection is disabled. */
     fun checkSelection(context: Context, platform: ContentPlatform): Boolean {
         if (isEnabled(platform)) return true
-        val message = when (platform) {
-            ContentPlatform.MANWA -> "请在开屏页开启漫蛙"
-            ContentPlatform.JM -> "请在开屏页开启禁漫天堂"
-        }
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, disabledSelectionMessage(platform), Toast.LENGTH_SHORT).show()
         return false
+    }
+
+    internal fun disabledSelectionMessage(platform: ContentPlatform): String = when (platform) {
+        ContentPlatform.MANWA -> "请在开屏页开启漫蛙，或在设置页开启后重启软件"
+        ContentPlatform.JM -> "请在开屏页开启禁漫天堂，或在设置页开启后重启软件"
     }
 
     @Synchronized

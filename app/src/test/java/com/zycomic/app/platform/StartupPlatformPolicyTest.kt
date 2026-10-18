@@ -8,6 +8,18 @@ import org.junit.jupiter.api.Test
 
 class StartupPlatformPolicyTest {
     @Test
+    fun `disabled platform guidance offers startup or settings then restart`() {
+        assertEquals(
+            "请在开屏页开启漫蛙，或在设置页开启后重启软件",
+            StartupPlatformPolicy.disabledSelectionMessage(ContentPlatform.MANWA),
+        )
+        assertEquals(
+            "请在开屏页开启禁漫天堂，或在设置页开启后重启软件",
+            StartupPlatformPolicy.disabledSelectionMessage(ContentPlatform.JM),
+        )
+    }
+
+    @Test
     fun `defaults disable Manwa and reuse the last speed test`() {
         val state = State()
 

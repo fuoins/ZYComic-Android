@@ -266,7 +266,7 @@
     <string name="startup_use_last_speed_test">默认使用上次图源测速结果</string>
     <string name="startup_platform_settings_title">平台可用性</string>
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
-    <string name="startup_platform_restart_toast">下次重启生效</string>
+    <string name="startup_platform_restart_toast">重启软件生效</string>
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
 
     <string name="manwa_detail_login_title">漫蛙账号登录</string>
@@ -346,4 +346,9 @@
     <string name="detail_authors_expand">展开作者</string>
     <string name="detail_authors_collapse">收起作者</string>
     <string name="jm_author_note">禁漫天堂标签真逆天了，是用户们上传的标签不审核吗，全放进来了...</string>
+    <string name="jm_manual_check_in">手动签到</string>
+    <string name="jm_auto_check_in">自动签到</string>
+    <string name="jm_auto_check_in_summary">已登录时进入禁漫我的页，每天自动尝试一次</string>
+    <string name="jm_check_in_working">签到中…</string>
+    <string name="jm_check_in_failed">签到失败，请稍后手动重试</string>
 </resources>

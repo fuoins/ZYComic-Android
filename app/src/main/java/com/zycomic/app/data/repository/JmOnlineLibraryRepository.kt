@@ -3,13 +3,19 @@ package com.zycomic.app.data.repository
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.reader.JmSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import tachiyomi.domain.history.interactor.GetHistory
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.io.IOException
+import tachiyomi.domain.manga.repository.MangaRepository as LocalMangaRepository
 
 data class JmOnlineLibraryItem(
     val id: String,
@@ -34,6 +40,29 @@ object JmOnlineLibraryRepository {
 
     suspend fun history(page: Int): JmOnlineLibraryPage = getPage(JmOnlineLibraryPolicy.historyRequest(page))
 
+    /** Read existing JM reader progress from the local SQLDelight history; it carries no synthetic remote timestamp. */
+    suspend fun localHistory(): List<JmOnlineLibraryItem> = withContext(Dispatchers.IO) {
+        val localMangas = Injekt.get<LocalMangaRepository>().getMangaBySourceId(JmSource.id).associateBy { it.id }
+        val history = Injekt.get<GetHistory>().subscribe(
+            query = "",
+            unfinishedManga = null,
+            unfinishedChapter = null,
+            nonLibraryEntries = null,
+        ).first()
+
+        history.mapNotNull { entry ->
+            val manga = localMangas[entry.mangaId] ?: return@mapNotNull null
+            val albumId = JM_ALBUM_URL.matchEntire(manga.url)?.groupValues?.get(1) ?: return@mapNotNull null
+            JmOnlineLibraryItem(
+                id = albumId,
+                name = entry.title.ifBlank { manga.title },
+                author = manga.author.orEmpty(),
+                description = manga.description.orEmpty(),
+                image = manga.thumbnailUrl.orEmpty(),
+            )
+        }.distinctBy { it.id }
+    }
+
     private suspend fun getPage(requestSpec: JmOnlineLibraryRequest): JmOnlineLibraryPage = withContext(Dispatchers.IO) {
         if (!JmAuthStore.isLoggedIn) throw NotLoggedInException("请先登录 JM 账号")
         val baseUrl = JmRouteManager.baseUrl
@@ -49,7 +78,11 @@ object JmOnlineLibraryRepository {
             .build()
         JmNetworkModule.client.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw IOException("JM 列表请求失败（HTTP ${response.code}）")
+            JmOnlineLibraryPolicy.listResponseError(
+                isSuccessful = response.isSuccessful,
+                httpCode = response.code,
+                apiErrorMessage = response.header(JM_ERROR_MESSAGE_HEADER),
+            )?.let { throw IOException(it) }
             val root = runCatching { JSONObject(body) }.getOrElse { throw IOException("JM 列表响应不是有效 JSON", it) }
             val data = root.optJSONObject("data") ?: root
             val rows = data.optJSONArray("list") ?: throw IOException("JM 列表响应缺少 list")
@@ -71,6 +104,9 @@ object JmOnlineLibraryRepository {
             JmOnlineLibraryPage(items, total)
         }
     }
+
+    private val JM_ALBUM_URL = Regex("/album/([0-9]+)")
+    private const val JM_ERROR_MESSAGE_HEADER = "X-JM-Error-Msg"
 }
 
 private fun JSONObject.readDisplayString(key: String): String = when (val value = opt(key)) {

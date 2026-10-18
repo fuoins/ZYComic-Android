@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.browse
 
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.reader.JmSource
 
 /** JM-only browse defaults and pagination rules; kept independent from Manwa state. */
 internal object JmBrowsePolicy {
@@ -30,6 +31,24 @@ internal object JmBrowsePolicy {
 
     fun isVisibleHomeSection(id: String, type: String, includeSerialization: Boolean = false): Boolean =
         (includeSerialization || id != "26") && type !in setOf("library", "novels") && id !in setOf("1001", "1002")
+
+    /**
+     * Known comic sections are available before /promote finishes loading; the live catalogue
+     * remains authoritative for metadata and may add further verified sections.
+     */
+    fun homeSectionOptions(source: List<JmSource.PromoteSection>): List<JmSource.PromoteSection> {
+        val known = listOf(
+            JmSource.PromoteSection("29", "C108&推薦本本", "promote", "", "29", emptyList()),
+            JmSource.PromoteSection("30", "禁漫去碼&全彩化", "promote", "", "30", emptyList()),
+            JmSource.PromoteSection("998", "禁漫漢化組", "not_in_category_id", "禁漫漢化組", "", emptyList()),
+            JmSource.PromoteSection("999", "韓漫更新", "category_id", "hanman", "5", emptyList()),
+            JmSource.PromoteSection("1000", "其他更新", "category_id", "another", "4", emptyList()),
+        )
+        val merged = linkedMapOf<String, JmSource.PromoteSection>()
+        known.forEach { merged[it.id] = it }
+        source.forEach { merged[it.id] = it }
+        return merged.values.filter { isVisibleHomeSection(it.id, it.type) }
+    }
 
     fun isSelectedHomeSection(mode: Int, selectedId: String, sectionId: String): Boolean =
         mode in setOf(MODE_CATEGORY, MODE_PROMOTE_LIST, MODE_UNAVAILABLE_SECTION) && selectedId == sectionId

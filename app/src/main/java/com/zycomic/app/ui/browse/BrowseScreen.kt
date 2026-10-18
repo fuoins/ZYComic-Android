@@ -685,7 +685,7 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                 JmBrowsePolicy.jmHomeModes().forEach { (label, value) ->
                     add(JmHomeChoice(label, mode == value) { vm.selectJmMode(value, page) })
                 }
-                sections.filter { JmBrowsePolicy.isVisibleHomeSection(it.id, it.type) }.forEach { section ->
+                JmBrowsePolicy.homeSectionOptions(sections).forEach { section ->
                     add(
                         JmHomeChoice(
                             label = section.title,

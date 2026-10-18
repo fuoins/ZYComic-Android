@@ -76,6 +76,13 @@ object JmAuthStore {
     @Synchronized
     fun uid(): String? = accountUid
 
+    /** Keep the authenticated identity stable for one synchronous request. */
+    @Synchronized
+    fun <T> withAccount(uid: String, action: () -> T): T? {
+        if (accountUid != uid || token() == null) return null
+        return action()
+    }
+
     @Synchronized
     fun clear() {
         preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.remove(ACCOUNT_UID)?.apply()

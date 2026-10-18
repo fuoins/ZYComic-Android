@@ -72,6 +72,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.SignDay
 import com.zycomic.app.data.dto.WelfareData
+import com.zycomic.app.data.repository.JmCheckInRepository
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmNetworkModule
@@ -81,6 +82,7 @@ import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.login.JmPasswordChangeDialog
 import eu.kanade.presentation.more.LogoHeader
+import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -136,6 +138,32 @@ fun ProfileScreen(
     var adErr by remember { mutableStateOf<String?>(null) }
     var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // KMK --> JM check-in runs only while this profile is entered, never as a background worker.
+    var jmAutoCheckIn by remember(context) { mutableStateOf(JmCheckInRepository.isAutoEnabled(context)) }
+    var jmCheckingIn by remember { mutableStateOf(false) }
+    var jmCheckInMessage by remember(platform, jmLoggedIn, jmAccount) { mutableStateOf<String?>(null) }
+    val jmCheckInFailure = stringResource(KMR.strings.jm_check_in_failed)
+    suspend fun checkInJm(automatic: Boolean) {
+        if (jmCheckingIn) return
+        jmCheckingIn = true
+        jmCheckInMessage = null
+        try {
+            jmCheckInMessage = JmCheckInRepository.checkIn(context, automatic)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            jmCheckInMessage = error.message ?: jmCheckInFailure
+        } finally {
+            jmCheckingIn = false
+        }
+    }
+    LaunchedEffect(platform, jmLoggedIn, jmAccount, jmAutoCheckIn) {
+        if (platform == ContentPlatform.JM && StartupPlatformPolicy.isEnabled(platform) && jmLoggedIn && jmAutoCheckIn) {
+            checkInJm(automatic = true)
+        }
+    }
+    // KMK <--
 
     tachiyomi.presentation.core.components.material.Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -209,6 +237,36 @@ fun ProfileScreen(
                     }
                 }
             }
+
+            // KMK --> JM preferences remain visible while signed out; network calls require login.
+            if (platform == ContentPlatform.JM) {
+                item {
+                    SwitchPreferenceWidget(
+                        title = stringResource(KMR.strings.jm_auto_check_in),
+                        subtitle = stringResource(KMR.strings.jm_auto_check_in_summary),
+                        checked = jmAutoCheckIn,
+                        onCheckedChanged = { enabled ->
+                            JmCheckInRepository.setAutoEnabled(context, enabled)
+                            jmAutoCheckIn = enabled
+                        },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(if (jmCheckingIn) KMR.strings.jm_check_in_working else KMR.strings.jm_manual_check_in),
+                        subtitle = jmCheckInMessage,
+                        icon = Icons.Outlined.Refresh,
+                        onPreferenceClick = {
+                            if (!jmLoggedIn) {
+                                onRequireLogin()
+                            } else if (!jmCheckingIn) {
+                                scope.launch { checkInJm(automatic = false) }
+                            }
+                        },
+                    )
+                }
+            }
+            // KMK <--
 
             if (platform == ContentPlatform.JM && jmLoggedIn) {
                 item {

@@ -11,7 +11,17 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
 /** JM API 专用协议；不调用 ManwaInterceptor / Crypto。 */
-class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private val allowAuthentication: Boolean = true) : Interceptor {
+class JmApiInterceptor internal constructor(
+    private val recordRouteHealth: Boolean,
+    private val allowAuthentication: Boolean,
+    private val base64Decoder: (String) -> ByteArray,
+) : Interceptor {
+
+    constructor(recordRouteHealth: Boolean = true, allowAuthentication: Boolean = true) : this(
+        recordRouteHealth,
+        allowAuthentication,
+        { Base64.decode(it, Base64.DEFAULT) },
+    )
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
@@ -27,8 +37,13 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private va
             .header("Referer", REFERER)
             .header("X-Requested-With", PACKAGE_NAME)
             .header("Sec-Fetch-Storage-Access", "active")
-        val trustedHosts = JmRouteManager.lineHosts.mapNotNull { runCatching { java.net.URI(it).host }.getOrNull() }
-        if (allowAuthentication && recordRouteHealth && JmAuthPolicy.mayAttachJwt(path, original.method, host, trustedHosts)) {
+        if (allowAuthentication && recordRouteHealth && JmAuthPolicy.mayAttachJwt(
+                path,
+                original.method,
+                host,
+                JmRouteManager.lineHosts.mapNotNull { runCatching { java.net.URI(it).host }.getOrNull() },
+            )
+        ) {
             JmAuthStore.token()?.let { builder.header("Authorization", "Bearer $it") }
         }
         val timestamp = (System.currentTimeMillis() / 1000L).toString()
@@ -61,11 +76,14 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private va
             throw IOException("JM API envelope is not JSON", error)
         }
         val apiCode = envelope.optInt("code", -1)
+        val apiMessage = (if (envelope.isNull("errorMsg")) "" else envelope.optString("errorMsg"))
+            .filter { it >= ' ' && it != '\u007f' }
+            .take(256)
+            .takeIf { it.isNotBlank() }
         if (apiCode != 200) {
             if (apiCode == 401) JmAuthStore.clear()
-            val message = envelope.optString("errorMsg").takeIf { it.isNotBlank() }
             if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
-            throw IOException("JM API rejected request (code=$apiCode)${message?.let { ": $it" }.orEmpty()}")
+            throw IOException("JM API rejected request (code=$apiCode)${apiMessage?.let { ": $it" }.orEmpty()}")
         }
 
         return try {
@@ -78,11 +96,12 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private va
             }
             if (recordRouteHealth) JmRouteManager.recordApiSuccess(host)
             response.newBuilder()
-                .apply {
-                    if (envelope.optString("errorMsg") == "Profile was successfully updated!") {
-                        header("X-JM-Error-Msg", "Profile was successfully updated!")
-                    }
-                }
+                .headers(
+                    response.headers.newBuilder().removeAll("X-JM-Error-Msg").apply {
+                        // JM messages can contain Chinese; keep control characters stripped above.
+                        apiMessage?.let { addUnsafeNonAscii("X-JM-Error-Msg", it) }
+                    }.build(),
+                )
                 .body(plaintext.toResponseBody(response.body?.contentType()))
                 .build()
         } catch (error: Exception) {
@@ -96,7 +115,7 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private va
         val key = md5Hex(timestamp + RESPONSE_SALT).toByteArray(Charsets.UTF_8)
         val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"))
-        val decrypted = String(cipher.doFinal(Base64.decode(base64.trim(), Base64.DEFAULT)), Charsets.UTF_8)
+        val decrypted = String(cipher.doFinal(base64Decoder(base64.trim())), Charsets.UTF_8)
         val startObject = decrypted.indexOf('{').takeIf { it >= 0 } ?: Int.MAX_VALUE
         val startArray = decrypted.indexOf('[').takeIf { it >= 0 } ?: Int.MAX_VALUE
         val start = minOf(startObject, startArray)

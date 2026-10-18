@@ -27,6 +27,14 @@ class JmAuthPolicyTest {
         assertFalse(JmAuthPolicy.mayAttachJwt("/confirm", "POST", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/useredit/not-a-uid", "POST", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/favorite", "POST", "redirect.test", listOf("api.test")))
+        assertTrue(JmAuthPolicy.mayAttachJwt("/daily", "GET", "api.test", listOf("api.test")))
+        assertTrue(JmAuthPolicy.mayAttachJwt("/daily_chk", "POST", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/daily", "POST", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/daily_chk", "GET", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/daily/", "GET", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/daily_chk/extra", "POST", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/daily", "GET", "redirect.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/daily_chk", "POST", "redirect.test", listOf("api.test")))
     }
 
     @Test
