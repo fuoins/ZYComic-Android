@@ -174,6 +174,7 @@ class SettingsViewModel {
                         RemoteConfigFetcher.beginConfigRetest(r.version, duringStartup = false)
                         try {
                             PlatformSpeedTestCoordinator.run(
+                                remoteConfigUpdated = r.configurationUpdated,
                                 onProgress = { lines, images, verdicts ->
                                     lineDelays.value = lines
                                     imgDelays.value = images

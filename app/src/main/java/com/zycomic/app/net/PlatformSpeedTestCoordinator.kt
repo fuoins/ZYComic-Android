@@ -50,6 +50,7 @@ object PlatformSpeedTestCoordinator {
 
     suspend fun run(
         forceFresh: Boolean = false,
+        remoteConfigUpdated: Boolean = false,
         onlyPlatform: ContentPlatform? = null,
         notifyCompletion: Boolean = true,
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
@@ -58,7 +59,16 @@ object PlatformSpeedTestCoordinator {
         DevConfig.awaitUsableRouteConfig()
         lock.withLock {
             val initialKey = currentKey()
-            if (SpeedTestRunPolicy.canSkip(completedKey, initialKey, forceFresh, onlyPlatform != null)) return@withLock _reports.value
+            if (SpeedTestRunPolicy.canSkip(
+                    completedKey,
+                    initialKey,
+                    forceFresh,
+                    onlyPlatform != null,
+                    remoteConfigUpdated,
+                )
+            ) {
+                return@withLock _reports.value
+            }
             _running.value = true
             _progressText.value = null
             _jmProgress.value = null
@@ -69,7 +79,14 @@ object PlatformSpeedTestCoordinator {
                     _jmProgress.value = null
                     val policy = StartupPlatformPolicy.state.value
                     val key = currentKey()
-                    val reuseImages = SpeedTestRunPolicy.canReuseImages(policy.useLastResult, forceFresh, initialKey, key, completedKey)
+                    val reuseImages = SpeedTestRunPolicy.canReuseImages(
+                        policy.useLastResult,
+                        forceFresh,
+                        initialKey,
+                        key,
+                        completedKey,
+                        remoteConfigUpdated,
+                    )
                     val result = mutableListOf<PlatformSpeedTestReport>()
                     for (platform in listOf(ContentPlatform.MANWA, ContentPlatform.JM)) {
                         if (key != currentKey()) break
@@ -86,12 +103,16 @@ object PlatformSpeedTestCoordinator {
                                 reason = if (reuseImages) "线路本次新测；仅复用匹配的图源结果" else "线路与图源本次重新测速"
                                 if (platform == ContentPlatform.MANWA) {
                                     if (reuseImages) SpeedTester.requestPreviousImageResults()
-                                    SpeedTester.runAndApply(onProgress) { progress ->
-                                        if (key == currentKey()) {
-                                            _progressText.value = manwaProgressMessage(progress)
-                                            onStageProgress?.invoke(progress)
-                                        }
-                                    }
+                                    SpeedTester.runAndApply(
+                                        onProgress = onProgress,
+                                        allowImageReuse = !remoteConfigUpdated,
+                                        onStageProgress = { progress ->
+                                            if (key == currentKey()) {
+                                                _progressText.value = manwaProgressMessage(progress)
+                                                onStageProgress?.invoke(progress)
+                                            }
+                                        },
+                                    )
                                     status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
                                     if (status == "tested") {
                                         _progressText.value = manwaProgressMessage(SpeedTester.progress.value)

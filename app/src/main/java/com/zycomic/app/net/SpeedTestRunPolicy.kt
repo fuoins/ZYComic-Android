@@ -9,8 +9,13 @@ internal data class SpeedTestRunKey(
 )
 
 internal object SpeedTestRunPolicy {
-    fun canSkip(completed: SpeedTestRunKey?, current: SpeedTestRunKey, forceFresh: Boolean, platformOnly: Boolean): Boolean =
-        !forceFresh && !platformOnly && completed == current
+    fun canSkip(
+        completed: SpeedTestRunKey?,
+        current: SpeedTestRunKey,
+        forceFresh: Boolean,
+        platformOnly: Boolean,
+        remoteConfigUpdated: Boolean = false,
+    ): Boolean = !forceFresh && !remoteConfigUpdated && !platformOnly && completed == current
 
     fun canReuseImages(
         requested: Boolean,
@@ -18,6 +23,7 @@ internal object SpeedTestRunPolicy {
         initial: SpeedTestRunKey,
         current: SpeedTestRunKey,
         completed: SpeedTestRunKey?,
-    ): Boolean = requested && !forceFresh && initial.networkIdentity == current.networkIdentity &&
+        remoteConfigUpdated: Boolean = false,
+    ): Boolean = requested && !forceFresh && !remoteConfigUpdated && initial.networkIdentity == current.networkIdentity &&
         (completed == null || completed.networkIdentity == current.networkIdentity)
 }

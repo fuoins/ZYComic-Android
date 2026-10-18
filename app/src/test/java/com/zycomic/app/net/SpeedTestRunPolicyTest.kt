@@ -40,4 +40,34 @@ class SpeedTestRunPolicyTest {
         assertFalse(SpeedTestRunPolicy.canReuseImages(true, true, key, key, key))
         assertFalse(SpeedTestRunPolicy.canReuseImages(false, false, key, key, key))
     }
+
+    @Test
+    fun `applied remote config forces complete retest despite unchanged image pool and reuse preference`() {
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = true))
+        assertFalse(
+            SpeedTestRunPolicy.canReuseImages(
+                requested = true,
+                forceFresh = false,
+                initial = key,
+                current = key,
+                completed = key,
+                remoteConfigUpdated = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `unchanged remote config preserves completed-run and image reuse behavior`() {
+        assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = false))
+        assertTrue(
+            SpeedTestRunPolicy.canReuseImages(
+                requested = true,
+                forceFresh = false,
+                initial = key,
+                current = key,
+                completed = key,
+                remoteConfigUpdated = false,
+            ),
+        )
+    }
 }

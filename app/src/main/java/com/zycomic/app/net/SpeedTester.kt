@@ -764,6 +764,7 @@ object SpeedTester {
     suspend fun runAndApply(
         onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((Progress) -> Unit)? = null,
+        allowImageReuse: Boolean = true,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             val configRevisionAtStart = RouteManager.configRevision
@@ -900,7 +901,8 @@ object SpeedTester {
                     RouteManager.invalidateReusableImageSpeedTestSnapshot()
                 }
                 val reusableImageSnapshot = requestedImageSnapshot.get()?.takeIf {
-                    runIsCurrent() &&
+                    allowImageReuse &&
+                        runIsCurrent() &&
                         RouteManager.isReusableImageSpeedTestSnapshotValid(it) &&
                         cachedEndpointPoolMatches &&
                         ReusableImageSpeedTestPolicy.matchesResolvedEndpoints(it.imgDelays.keys, currentImageEndpoints)

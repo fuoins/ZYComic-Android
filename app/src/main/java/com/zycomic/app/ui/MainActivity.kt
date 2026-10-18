@@ -144,7 +144,15 @@ class MainActivity : BaseActivity() {
                     } else {
                         RemoteConfigGate(routeConfigState) {
                             bootstrapScope.launch {
-                                com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = true)
+                                val result = com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = true)
+                                if (result.configurationUpdated) {
+                                    com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
+                                    try {
+                                        com.zycomic.app.net.PlatformSpeedTestCoordinator.run(remoteConfigUpdated = result.configurationUpdated)
+                                    } finally {
+                                        com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
+                                    }
+                                }
                             }
                         }
                     }

@@ -36,7 +36,10 @@ object RemoteConfigFetcher {
 
     enum class Outcome { APPLIED, NOT_CHANGED, FAILED }
 
-    data class Result(val outcome: Outcome, val message: String, val version: Int)
+    data class Result(val outcome: Outcome, val message: String, val version: Int) {
+        /** True only when DevConfig successfully replaced the active remote snapshot. */
+        val configurationUpdated: Boolean get() = outcome == Outcome.APPLIED
+    }
 
     data class ConfigRetest(val version: Int, val duringStartup: Boolean)
 

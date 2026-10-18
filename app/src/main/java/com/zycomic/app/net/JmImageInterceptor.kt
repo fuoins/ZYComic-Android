@@ -9,7 +9,11 @@ import com.zycomic.app.reader.JmRelatedMangaPolicy
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
+import okio.ForwardingSource
+import okio.buffer
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -76,7 +80,7 @@ class JmImageInterceptor internal constructor(
                 if (response.isSuccessful && isImage) {
                     return try {
                         recordImageSuccess(host)
-                        restoreScrambledImage(response, scramble)
+                        restoreScrambledImage(response, scramble, scope)
                     } catch (error: IOException) {
                         response.close()
                         throw error
@@ -97,9 +101,9 @@ class JmImageInterceptor internal constructor(
         throw lastError ?: IOException("JM image request failed${lastStatus?.let { " (HTTP $it)" } ?: ""}")
     }
 
-    private fun restoreScrambledImage(response: Response, count: Int): Response {
+    private fun restoreScrambledImage(response: Response, count: Int, scope: PageAttemptScope?): Response {
         val body = response.body ?: throw IOException("JM 正文图响应缺少图片内容")
-        val encoded = body.bytes()
+        val encoded = readEncodedBody(body, scope)
         val hasGzipEncoding = response.header("Content-Encoding").equals("gzip", ignoreCase = true)
         val isGzip = encoded.size >= 2 && encoded[0] == 0x1f.toByte() && encoded[1] == 0x8b.toByte()
         val raw = if (isGzip) {
@@ -167,6 +171,31 @@ class JmImageInterceptor internal constructor(
             source.recycle()
             output.recycle()
         }
+    }
+
+    /** Report transport bytes before gunzip/strip restoration, using the reader's shared state. */
+    private fun readEncodedBody(body: ResponseBody, scope: PageAttemptScope?): ByteArray {
+        if (scope == null) return body.bytes()
+        val source = object : ForwardingSource(body.source()) {
+            private var received = 0L
+
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                if (!scope.isCurrent) throw IOException("图片加载已取消")
+                val read = super.read(sink, byteCount)
+                if (!scope.isCurrent) throw IOException("图片加载已取消")
+                if (read > 0) {
+                    received += read
+                    scope.reportProgress(received, body.contentLength())
+                }
+                return read
+            }
+        }.buffer()
+        // Keep ResponseBody.bytes() length validation and source-closing semantics intact.
+        return object : ResponseBody() {
+            override fun contentType() = body.contentType()
+            override fun contentLength() = body.contentLength()
+            override fun source() = source
+        }.bytes()
     }
 
     private companion object {
