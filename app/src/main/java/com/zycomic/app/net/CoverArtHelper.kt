@@ -14,14 +14,14 @@ import java.io.IOException
 
 /**
  * 详情页封面长按菜单：下载封面字节并保存/分享。
- * Manwa 下载走 [NetworkModule.imageClient]；JM 下载使用隔离的 [JmNetworkModule.client]。
+ * Manwa 下载走 [NetworkModule.imageClient]；JM 下载使用无账号认证的 [JmNetworkModule.imageClient]。
  */
 object CoverArtHelper {
 
     /** 拉取封面字节；非 2xx / 空 / 非图片均抛 IOException。 */
     suspend fun fetchCover(url: String, isJm: Boolean = false): ByteArray = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).build()
-        val imageClient = if (isJm) JmNetworkModule.client else NetworkModule.imageClient
+        val imageClient = if (isJm) JmNetworkModule.imageClient else NetworkModule.imageClient
         imageClient.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IOException("封面请求失败: HTTP ${resp.code}")
@@ -63,7 +63,9 @@ object CoverArtHelper {
         if (bytes.size < 4) return false
         if (bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
             bytes.size >= 12 && bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() && bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
-        ) return true
+        ) {
+            return true
+        }
         if (bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()) return true
         if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
         if (bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x38.toByte()) return true

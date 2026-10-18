@@ -36,7 +36,7 @@ object PlatformSpeedTestCoordinator {
         currentNetworkIdentity(),
     )
 
-    private fun currentNetworkIdentity(): String {
+    internal fun currentNetworkIdentity(): String {
         val manager = DevConfig.appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
         val active = manager?.activeNetwork
         val underlying = manager?.allNetworks.orEmpty().filter { network ->
@@ -143,11 +143,26 @@ object PlatformSpeedTestCoordinator {
 
     internal fun manwaProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {
         SpeedTester.Phase.PREPARING_LINES -> "漫蛙 · 正在解析线路域名和 IP…"
-        SpeedTester.Phase.TESTING_LINES -> "漫蛙 · 测试线路 IP ${progress.completed}/${progress.total}（可用 ${progress.successful}，失败 ${progress.failed}）"
+        SpeedTester.Phase.TESTING_LINES -> SpeedTestUiTextPolicy.platformEndpointProgress(
+            platform = "漫蛙",
+            endpointKind = "线路",
+            completed = progress.completed,
+            total = progress.total,
+            successful = progress.successful,
+            failed = progress.failed,
+        )
         SpeedTester.Phase.APPLYING_LINE -> "漫蛙 · 线路检测完成（可用 ${progress.successful}，失败 ${progress.failed}），正在更新测速排名"
         SpeedTester.Phase.FETCHING_SAMPLE -> "漫蛙 · 正在获取图源验证样本…"
         SpeedTester.Phase.PREPARING_IMAGES -> "漫蛙 · 正在解析图源域名和 IP…"
-        SpeedTester.Phase.TESTING_IMAGES -> "漫蛙 · 测试图源 IP ${progress.completed}/${progress.total}（可用 ${progress.successful}，连不上 ${progress.failed}，无图 ${progress.noImage}）"
+        SpeedTester.Phase.TESTING_IMAGES -> SpeedTestUiTextPolicy.platformEndpointProgress(
+            platform = "漫蛙",
+            endpointKind = "图源",
+            completed = progress.completed,
+            total = progress.total,
+            successful = progress.successful,
+            failed = progress.failed,
+            noImage = progress.noImage,
+        )
         SpeedTester.Phase.APPLYING_RESULTS -> "漫蛙 · 端点检测完成，正在更新排名并应用结果…"
         SpeedTester.Phase.COMPLETE -> "漫蛙测速完成：图源 ${progress.completed}/${progress.total}，可用 ${progress.successful}、失败 ${progress.failed}、无图 ${progress.noImage}；本次新测 ${progress.freshImages}、复用 ${progress.reusedImages}"
         SpeedTester.Phase.FAILED -> "漫蛙测速中断，继续使用当前线路和图源"

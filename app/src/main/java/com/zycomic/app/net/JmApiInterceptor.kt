@@ -11,21 +11,26 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
 /** JM API 专用协议；不调用 ManwaInterceptor / Crypto。 */
-class JmApiInterceptor(private val recordRouteHealth: Boolean = true) : Interceptor {
+class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private val allowAuthentication: Boolean = true) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val path = original.url.encodedPath
         val host = original.url.host
-        val isImage = path.startsWith("/media/")
+        val isImage = JmAuthPolicy.isImage(path)
         val isUnsigned = path == "/confirm" || path == "/setting"
         val builder = original.newBuilder()
+            .removeHeader("Authorization")
+            .apply { if (isImage) removeHeader("Cookie") }
             .header("User-Agent", USER_AGENT)
             .header("Origin", ORIGIN)
             .header("Referer", REFERER)
             .header("X-Requested-With", PACKAGE_NAME)
-            .header("Authorization", "Bearer")
             .header("Sec-Fetch-Storage-Access", "active")
+        val trustedHosts = JmRouteManager.lineHosts.mapNotNull { runCatching { java.net.URI(it).host }.getOrNull() }
+        if (allowAuthentication && recordRouteHealth && JmAuthPolicy.mayAttachJwt(path, original.method, host, trustedHosts)) {
+            JmAuthStore.token()?.let { builder.header("Authorization", "Bearer $it") }
+        }
         val timestamp = (System.currentTimeMillis() / 1000L).toString()
         if (!isImage && !isUnsigned) {
             builder.header("token", md5Hex(timestamp + REQUEST_SALT))
@@ -44,6 +49,7 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true) : Intercep
 
         val raw = response.body!!.string()
         if (!response.isSuccessful) {
+            if (response.code == 401) JmAuthStore.clear()
             if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
@@ -56,6 +62,7 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true) : Intercep
         }
         val apiCode = envelope.optInt("code", -1)
         if (apiCode != 200) {
+            if (apiCode == 401) JmAuthStore.clear()
             val message = envelope.optString("errorMsg").takeIf { it.isNotBlank() }
             if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
             throw IOException("JM API rejected request (code=$apiCode)${message?.let { ": $it" }.orEmpty()}")

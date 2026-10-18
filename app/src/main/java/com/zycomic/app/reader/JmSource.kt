@@ -1,6 +1,8 @@
 package com.zycomic.app.reader
 
+import com.zycomic.app.data.dto.JmComment
 import com.zycomic.app.net.JmApiInterceptor
+import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.net.JmRouteManager
 import eu.kanade.tachiyomi.network.awaitSuccess
@@ -239,6 +241,13 @@ object JmSource : HttpSource() {
                 addtime = details.addtime,
                 hits = details.hits,
                 fav = details.favorite,
+                jmAuthors = details.authors,
+                jmActors = details.actors,
+                jmWorks = details.works,
+                jmLikes = details.likes,
+                jmLiked = details.liked,
+                jmViews = details.views,
+                jmUpdateTime = details.updateTime,
                 chapterList = series.items.map { ChapterDto(id = it.id, name = it.name, sort = it.sort) },
                 loveList = details.related.map { item ->
                     MangaDto(
@@ -252,6 +261,51 @@ object JmSource : HttpSource() {
             ),
             chapterWarning = series.warning,
         )
+    }
+
+    data class JmCommentPage(val total: Int?, val comments: List<JmComment>, val hasMore: Boolean)
+
+    suspend fun login(username: String, password: String): String = withContext(Dispatchers.IO) {
+        val response = postJson("/login", mapOf("username" to username, "password" to password))
+        val token = response.optString("jwttoken").takeIf(String::isNotBlank)
+            ?: throw IOException(response.optString("errorMsg").ifBlank { response.optString("msg") }.ifBlank { "JM 登录失败：响应缺少 JWT" })
+        JmAuthStore.save(token, username)
+        username
+    }
+
+    fun logout() {
+        JmAuthStore.clear()
+        JmNetworkModule.clearCookies()
+    }
+
+    suspend fun toggleFavorite(albumId: String): Boolean {
+        val response = postJson("/favorite", mapOf("aid" to albumId))
+        if (response.optString("status") != "ok") throw IOException(response.optString("msg").ifBlank { "JM 收藏操作失败" })
+        return response.optString("type") == "add"
+    }
+
+    suspend fun toggleLike(albumId: String) {
+        val response = postJson("/like", mapOf("id" to albumId))
+        if (response.optString("status") != "success" && response.optString("status") != "ok") {
+            throw IOException(response.optString("msg").ifBlank { "JM 点赞操作失败" })
+        }
+    }
+
+    suspend fun getComments(albumId: String, page: Int): JmCommentPage {
+        if (!albumId.matches(Regex("\\d+"))) throw IOException("JM 专辑 ID 无效")
+        val payload = getJson("/forum", mapOf("mode" to "manhua", "aid" to albumId, "page" to page.coerceAtLeast(1).toString())).asObject("/forum")
+        val result = JmResponseParser.forumPage(payload)
+        val count = result.total
+        val pageCount = count?.let { (it + JM_COMMENT_PAGE_SIZE - 1) / JM_COMMENT_PAGE_SIZE }
+        val comments = result.comments.distinctBy { it.id }.map { comment ->
+            comment.copy(avatarUrl = "https://${JmRouteManager.activeImageDomain}/media/users/${comment.avatarUrl.trimStart('/')}")
+        }
+        return JmCommentPage(count, comments, pageCount == null || page < pageCount)
+    }
+
+    suspend fun postComment(albumId: String, content: String) {
+        val response = postJson("/comment", mapOf("aid" to albumId, "comment" to content, "status" to "undefined"))
+        if (response.optString("status") == "fail") throw IOException(response.optString("msg").ifBlank { "JM 评论发送失败" })
     }
 
     override suspend fun getMangaUpdate(
@@ -306,7 +360,7 @@ object JmSource : HttpSource() {
 
     override suspend fun getImage(page: Page): Response {
         val imageUrl = page.imageUrl ?: throw IOException("JM 阅读页缺少图片 URL")
-        return client.newCall(Request.Builder().url(imageUrl).headers(headers).build()).awaitSuccess()
+        return JmNetworkModule.imageClient.newCall(Request.Builder().url(imageUrl).headers(headers).build()).awaitSuccess()
     }
 
     private suspend fun getJson(path: String, params: Map<String, String>): Any = withContext(Dispatchers.IO) {
@@ -320,6 +374,22 @@ object JmSource : HttpSource() {
             val body = response.body?.string().orEmpty()
             try {
                 JSONTokener(body).nextValue()
+            } catch (error: Exception) {
+                throw IOException("JM $path 返回内容不是 JSON", error)
+            }
+        }
+    }
+
+    private suspend fun postJson(path: String, params: Map<String, String>): JSONObject = withContext(Dispatchers.IO) {
+        val currentBase = JmRouteManager.baseUrl
+        if (currentBase.isBlank()) throw IOException("JM 没有可用线路")
+        JmNetworkModule.ensureAgeCookie()
+        val body = okhttp3.FormBody.Builder().apply { params.forEach { (key, value) -> add(key, value) } }.build()
+        val url = currentBase.toHttpUrl().newBuilder().addPathSegments(path.trimStart('/')).build()
+        val request = Request.Builder().url(url).post(body).headers(headers).build()
+        client.newCall(request).awaitSuccess().use { response ->
+            try {
+                JSONObject(response.body?.string().orEmpty())
             } catch (error: Exception) {
                 throw IOException("JM $path 返回内容不是 JSON", error)
             }
@@ -445,6 +515,8 @@ object JmSource : HttpSource() {
         if (type !in serializationTypes) throw IOException("JM serialization type 必须是 all、manga 或 hanman")
         if (date !in 0..7) throw IOException("JM serialization date 必须是 0 到 7")
     }
+
+    private const val JM_COMMENT_PAGE_SIZE = 6
 
     private fun todayIsoWeekday(): Int {
         val day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)

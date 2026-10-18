@@ -268,4 +268,41 @@
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">下次重启生效</string>
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
+
+    <!-- JM details and isolated account -->
+    <string name="jm_detail_more">更多操作</string>
+    <string name="jm_copy_title">复制标题</string>
+    <string name="jm_copy_id">复制禁漫号</string>
+    <string name="jm_save_cover">保存封面</string>
+    <string name="jm_share_cover">分享封面</string>
+    <string name="jm_close">关闭</string>
+    <string name="jm_album_id">禁漫号: %1$s</string>
+    <string name="jm_authors">作者</string>
+    <string name="jm_actors">登场人物</string>
+    <string name="jm_works">作品</string>
+    <string name="jm_tags">标签</string>
+    <string name="jm_views">浏览量: %1$s</string>
+    <string name="jm_updated">更新时间: %1$s</string>
+    <string name="jm_favorite">收藏</string>
+    <string name="jm_favorited">已收藏</string>
+    <string name="jm_like_count">点赞 %1$s</string>
+    <string name="jm_liked_count">已点赞 %1$s</string>
+    <string name="jm_comment_count">评论 %1$s</string>
+    <string name="jm_account">禁漫账号</string>
+    <string name="jm_login">登录禁漫</string>
+    <string name="jm_logout">退出禁漫账号</string>
+    <string name="jm_username">账号</string>
+    <string name="jm_password">密码</string>
+    <string name="jm_cancel">取消</string>
+    <string name="jm_login_hint">禁漫账号与漫蛙账号独立。登录后可收藏、点赞及发表评论。</string>
+    <string name="jm_comments">评论</string>
+    <string name="jm_comment_placeholder">写下你的评论</string>
+    <string name="jm_comment_send">发表</string>
+    <string name="jm_load_more">加载更多</string>
+    <string name="jm_retry">重试</string>
+    <string name="jm_no_comments">暂无评论</string>
+    <string name="jm_loading">加载中…</string>
+    <string name="jm_account_manage">账号管理</string>
+    <string name="jm_login_first">请先登录禁漫账号</string>
+    <string name="jm_saved_cover">封面已保存到相册</string>
 </resources>

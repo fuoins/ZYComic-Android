@@ -20,12 +20,14 @@ class PlatformSpeedTestReportTest {
     )
 
     @Test
-    fun `manual selection summary names actual choices without claiming fastest selected`() {
+    fun `manual selection summary hides endpoint identities without claiming fastest selected`() {
         val summary = report().summary()
-        assertTrue(summary.contains("https://chosen.example（手动）"))
-        assertTrue(summary.contains("chosen-image.example（手动）"))
+        assertTrue(summary.contains("线路（手动）"))
+        assertTrue(summary.contains("图源（手动）"))
+        assertFalse(summary.contains("chosen.example"))
+        assertFalse(summary.contains("chosen-image.example"))
         assertFalse(summary.contains("最快"))
-        assertFalse(summary.contains("faster"))
+        assertFalse(summary.contains("faster.example"))
     }
 
     @Test

@@ -26,7 +26,15 @@ internal object JmResponseParser {
         val hits: Int,
         val favorite: Int,
         val related: List<RelatedManga>,
+        val authors: List<String>,
+        val actors: List<String>,
+        val works: List<String>,
+        val likes: Int?,
+        val liked: Boolean?,
+        val views: Int?,
+        val updateTime: String,
     )
+    data class ForumPage(val total: Int?, val comments: List<com.zycomic.app.data.dto.JmComment>)
 
     /** Extract album fields whose equivalents are present in the existing Manga DTO. */
     fun albumDetails(album: JSONObject): AlbumDetails {
@@ -52,7 +60,38 @@ internal object JmResponseParser {
             hits = album.text("total_views").toIntOrNull() ?: 0,
             favorite = album.opt("is_favorite").asFlag(),
             related = related,
+            authors = album.stringValues("author"),
+            actors = album.stringValues("actors"),
+            works = album.stringValues("works"),
+            likes = album.opt("likes").asIntOrNull(),
+            liked = album.opt("liked").asBoolOrNull(),
+            views = album.opt("total_views").asIntOrNull(),
+            updateTime = album.text("addtime").toLongOrNull()?.let { seconds ->
+                java.text.SimpleDateFormat("yyyy-M-d", java.util.Locale.ROOT).format(java.util.Date(seconds * 1000L))
+            }.orEmpty(),
         )
+    }
+
+    fun forumPage(payload: JSONObject): ForumPage {
+        val list = payload.optJSONArray("list") ?: throw IOException("JM /forum 响应缺少 list[]")
+        val comments = (0 until list.length()).mapNotNull { index ->
+            val item = list.optJSONObject(index) ?: return@mapNotNull null
+            val id = item.text("CID")
+            if (id.isBlank()) return@mapNotNull null
+            val raw = item.text("content")
+            val start = raw.indexOf('>')
+            val end = raw.lastIndexOf('<')
+            val content = if (start >= 0 && end > start) raw.substring(start + 1, end) else raw
+            com.zycomic.app.data.dto.JmComment(
+                id = id,
+                parentId = item.text("parent_CID"),
+                username = item.text("username"),
+                avatarUrl = item.text("photo"),
+                time = item.text("addtime"),
+                content = content,
+            )
+        }
+        return ForumPage(payload.opt("total").asIntOrNull(), comments.distinctBy { it.id })
     }
 
     fun weekIssues(payload: JSONObject): List<WeekIssue> {
@@ -137,6 +176,29 @@ internal object JmResponseParser {
     }
 
     private fun validId(id: String): Boolean = id.matches(Regex("[0-9]+")) && id.any { it != '0' }
+
+    private fun JSONObject.stringValues(key: String): List<String> = when (val value = opt(key)) {
+        is JSONArray -> (0 until value.length()).mapNotNull { value.opt(it).asText().takeIf(String::isNotBlank) }
+        is String -> value.split('|', ',').map(String::trim).filter(String::isNotBlank)
+        else -> emptyList()
+    }
+
+    private fun Any?.asIntOrNull(): Int? = when (this) {
+        is Number -> toInt()
+        is String -> trim().toIntOrNull()
+        else -> null
+    }
+
+    private fun Any?.asBoolOrNull(): Boolean? = when (this) {
+        is Boolean -> this
+        is Number -> toInt() != 0
+        is String -> when (trim().lowercase()) {
+            "1", "true", "yes" -> true
+            "0", "false", "no" -> false
+            else -> null
+        }
+        else -> null
+    }
 
     private fun JSONObject.firstText(key: String): String = when (val value = opt(key)) {
         is JSONArray -> value.opt(0).asText()

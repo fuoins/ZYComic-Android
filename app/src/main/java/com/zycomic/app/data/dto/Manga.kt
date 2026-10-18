@@ -29,7 +29,7 @@ data class Manga(
     @Serializable(with = StringOrListSerializer::class)
     val author: String = "",
     @JsonNames("serialize", "status")
-    val state: String = "",          // "连载" / "完结"
+    val state: String = "", // "连载" / "完结"
     @Serializable(with = IntOrStringSerializer::class)
     val score: Int = 0,
     @Serializable(with = IntOrStringSerializer::class)
@@ -43,9 +43,9 @@ data class Manga(
     val addtime: String = "",
     @Serializable(with = StringOrIntSerializer::class)
     val end: String = "",
-    val fav: Int = 0,                // 0 未收藏 / 1 已收藏
+    val fav: Int = 0, // 0 未收藏 / 1 已收藏
     @Serializable(with = StringOrIntSerializer::class)
-    val start: String = "",          // 上次阅读章节 ID；"0" / 空 = 从第一章开始
+    val start: String = "", // 上次阅读章节 ID；"0" / 空 = 从第一章开始
     @SerialName("book_area") val bookArea: String = "",
     @SerialName("category_name") val categoryName: String = "",
     @Serializable(with = TagsSerializer::class)
@@ -58,6 +58,23 @@ data class Manga(
     @SerialName("comment_nums")
     @Serializable(with = IntOrStringSerializer::class)
     val commentNums: Int = 0,
+    val jmAuthors: List<String> = emptyList(),
+    val jmActors: List<String> = emptyList(),
+    val jmWorks: List<String> = emptyList(),
+    val jmLikes: Int? = null,
+    val jmLiked: Boolean? = null,
+    val jmViews: Int? = null,
+    val jmUpdateTime: String = "",
+)
+
+@Serializable
+data class JmComment(
+    val id: String = "",
+    val parentId: String = "",
+    val username: String = "",
+    val avatarUrl: String = "",
+    val time: String = "",
+    val content: String = "",
 )
 
 /** 章节信息。id 为字符串数字（"123"），兼容数字形态。 */

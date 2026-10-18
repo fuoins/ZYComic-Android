@@ -229,7 +229,7 @@ fun SpeedTestScreen(
                         Text("双平台测速与实际选择", style = MaterialTheme.typography.titleMedium)
                         platformReports.forEach { report ->
                             Text(report.summary(), modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                            Text("线路候选：${report.lineCandidates.joinToString()}\n图源候选：${report.imageCandidates.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                            Text("线路候选 ${report.lineCandidates.size} 项 · 图源候选 ${report.imageCandidates.size} 项", style = MaterialTheme.typography.bodySmall)
                         }
                         Button(
                             enabled = platformReports.isNotEmpty() && !speedTestActive,
@@ -297,7 +297,10 @@ fun SpeedTestScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("当前图源", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                currentImageSource.description(),
+                                SpeedTestUiTextPolicy.imageSourceDescription(
+                                    currentImageSource.kind,
+                                    inSuccessfulList = currentImageSource.hasSuccessfulEndpoint,
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -364,7 +367,7 @@ fun SpeedTestScreen(
                     }
                     SpeedRow(
                         index = position,
-                        host = "${endpoint.domain} · ${endpoint.ip}",
+                        host = SpeedTestUiTextPolicy.lineEndpointLabel(position),
                         delay = entry.value,
                         isSelected = index == currentLineIdx && endpoint.ip == currentLineIp,
                         onClick = { if (index >= 0) vm.selectLine(index, endpoint.ip) },
@@ -379,7 +382,7 @@ fun SpeedTestScreen(
                     val index = RouteManager.imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
                     SpeedRow(
                         index = position,
-                        host = "${endpoint.domain} · ${endpoint.ip}",
+                        host = SpeedTestUiTextPolicy.imageEndpointLabel(position),
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
                         isSelected = currentImageSource.matchesEndpoint(endpoint),
@@ -391,7 +394,7 @@ fun SpeedTestScreen(
                 item {
                     if (currentImageSource.domain != null && imgOrder.none { currentImageSource.matchesEndpoint(it.key) }) {
                         Text(
-                            currentImageSource.notInSuccessfulListDescription(),
+                            SpeedTestUiTextPolicy.imageSourceDescription(currentImageSource.kind, inSuccessfulList = false),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),

@@ -220,5 +220,24 @@ class JmResponseParserTest {
         assertTrue(result.warning!!.contains("已跳过 3 项"))
     }
 
+    @Test
+    fun `album parser maps jm detail attributes and forum page`() {
+        val details = JmResponseParser.albumDetails(JSONObject("""{"author":["作者"],"actors":["演员"],"works":["作品"],"likes":"12","liked":true,"total_views":"321","addtime":"1712345678"}"""))
+        assertEquals(listOf("作者"), details.authors)
+        assertEquals(listOf("演员"), details.actors)
+        assertEquals(listOf("作品"), details.works)
+        assertEquals(12, details.likes)
+        assertEquals(true, details.liked)
+        assertEquals(321, details.views)
+        val localDate = java.time.Instant.ofEpochSecond(1712345678L).atZone(java.time.ZoneId.systemDefault())
+        assertEquals("${localDate.year}-${localDate.monthValue}-${localDate.dayOfMonth}", details.updateTime)
+
+        val forum = JmResponseParser.forumPage(JSONObject("""{"total":"7","list":[{"CID":"11","parent_CID":"0","username":"用户","photo":"a.jpg","addtime":"今天","content":"<p>正文</p>"},{"CID":"11","content":"重复"},{"CID":"","content":"无ID"}]}"""))
+        assertEquals(7, forum.total)
+        assertEquals("11", forum.comments.single().id)
+        assertEquals("0", forum.comments.single().parentId)
+        assertEquals("正文", forum.comments.single().content)
+    }
+
     private fun chapters(series: String) = JmResponseParser.chapters(JSONObject("""{"id":"999","series":$series}"""))
 }

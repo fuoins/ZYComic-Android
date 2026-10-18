@@ -526,7 +526,7 @@ class SettingsViewModel {
     suspend fun autoSelectFastest() {
         autoSelecting.value = true
         try {
-            PlatformSpeedTestCoordinator.run(
+            val reports = PlatformSpeedTestCoordinator.run(
                 onProgress = { l, i, v ->
                     lineDelays.value = l
                     imgDelays.value = i
@@ -534,6 +534,11 @@ class SettingsViewModel {
                 },
                 onStageProgress = { speedTestProgress.value = it },
             )
+            if (reports.any { it.platform == "漫蛙" && it.status == "tested" }) {
+                SpeedTestUiTextPolicy.startupNoAddressToast(
+                    hasLineAddress = RouteManager.lastLineIpDelays.isNotEmpty(),
+                )?.let { toast.value = it }
+            }
             syncSelectedRoutes()
         } finally {
             autoSelecting.value = false

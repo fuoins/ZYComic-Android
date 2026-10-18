@@ -67,6 +67,8 @@ object RouteManager {
         val imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
         val remoteVersion: Int?,
         val configFingerprint: String,
+        val completedAtEpochMs: Long,
+        val networkIdentity: String,
     )
 
     private val _speedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
@@ -249,6 +251,7 @@ object RouteManager {
         completeSnapshot: Boolean = false,
         invalidateCompletedSnapshot: Boolean = false,
         expectedPlatformRevision: Long? = null,
+        imageCacheNetworkIdentity: String? = null,
     ): Boolean {
         if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return false
         if (expectedConfigRevision == null && expectedPlatformRevision == null && img.isNotEmpty() &&
@@ -309,7 +312,7 @@ object RouteManager {
         _speedTestSnapshot.value = snapshot
         if (completeSnapshot) {
             _completedSpeedTestSnapshot.value = snapshot
-            persistReusableImageSpeedTestSnapshot(snapshot)
+            persistReusableImageSpeedTestSnapshot(snapshot, imageCacheNetworkIdentity)
             persistCompletedSpeedTestSnapshot(snapshot)
         } else if (invalidateCompletedSnapshot) {
             _completedSpeedTestSnapshot.value = SpeedTestSnapshot()
@@ -348,8 +351,14 @@ object RouteManager {
     }
 
     fun isReusableImageSpeedTestSnapshotValid(snapshot: ReusableImageSpeedTestSnapshot): Boolean =
-        snapshot.remoteVersion == activeRemoteConfigVersion &&
-            snapshot.configFingerprint == currentSpeedTestConfigFingerprint() &&
+        ReusableImageSpeedTestPolicy.canReuse(
+            snapshotFingerprint = snapshot.configFingerprint,
+            currentFingerprint = currentImageSpeedTestFingerprint(),
+            snapshotNetworkIdentity = snapshot.networkIdentity,
+            currentNetworkIdentity = PlatformSpeedTestCoordinator.currentNetworkIdentity(),
+            completedAtEpochMs = snapshot.completedAtEpochMs,
+            nowEpochMs = System.currentTimeMillis(),
+        ) &&
             imgDomains.isNotEmpty() &&
             snapshot.imgDelays.isNotEmpty() &&
             snapshot.imgDelays.keys == snapshot.imgVerdicts.keys &&
@@ -365,6 +374,9 @@ object RouteManager {
                         null -> false
                     }
             }
+
+    private fun currentImageSpeedTestFingerprint(): String =
+        ReusableImageSpeedTestPolicy.fingerprint(imgDomains, customRule)
 
     private fun currentSpeedTestConfigFingerprint(): String {
         val configText = buildString {
@@ -385,19 +397,23 @@ object RouteManager {
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
-    private fun persistReusableImageSpeedTestSnapshot(snapshot: SpeedTestSnapshot) {
+    private fun persistReusableImageSpeedTestSnapshot(snapshot: SpeedTestSnapshot, imageCacheNetworkIdentity: String?) {
         if (!snapshot.canExport || snapshot.remoteVersion != activeRemoteConfigVersion || snapshot.imgDelays.isEmpty()) return
         val reusable = ReusableImageSpeedTestSnapshot(
             imgDelays = snapshot.imgDelays.toMap(),
             imgVerdicts = snapshot.imgVerdicts.toMap(),
             remoteVersion = snapshot.remoteVersion,
-            configFingerprint = currentSpeedTestConfigFingerprint(),
+            configFingerprint = currentImageSpeedTestFingerprint(),
+            completedAtEpochMs = snapshot.completedAtEpochMs ?: return,
+            networkIdentity = imageCacheNetworkIdentity ?: PlatformSpeedTestCoordinator.currentNetworkIdentity(),
         )
         if (!isReusableImageSpeedTestSnapshotValid(reusable)) return
         val json = org.json.JSONObject().apply {
-            put("formatVersion", 1)
+            put("formatVersion", 3)
             put("remoteVersion", reusable.remoteVersion ?: org.json.JSONObject.NULL)
             put("configFingerprint", reusable.configFingerprint)
+            put("completedAtEpochMs", reusable.completedAtEpochMs)
+            put("networkIdentity", reusable.networkIdentity)
             put(
                 "endpoints",
                 org.json.JSONArray().apply {
@@ -427,7 +443,7 @@ object RouteManager {
 
     private fun decodeReusableImageSpeedTestSnapshot(raw: String): ReusableImageSpeedTestSnapshot {
         val json = org.json.JSONObject(raw)
-        require(json.optInt("formatVersion", -1) == 1)
+        require(json.optInt("formatVersion", -1) == 3)
         val delays = LinkedHashMap<DomainIp, Long>()
         val verdicts = LinkedHashMap<DomainIp, SpeedTester.ImgVerdict>()
         val endpoints = json.getJSONArray("endpoints")
@@ -448,6 +464,8 @@ object RouteManager {
             imgVerdicts = verdicts,
             remoteVersion = version,
             configFingerprint = json.getString("configFingerprint"),
+            completedAtEpochMs = json.getLong("completedAtEpochMs"),
+            networkIdentity = json.getString("networkIdentity"),
         )
     }
 
@@ -1254,9 +1272,8 @@ object RouteManager {
         customRule = normalized
         configRevision++
         clearSpeedTestResults()
-        invalidateReusableImageSpeedTestSnapshot()
-        // Keep the persisted summary until exact-match validation at reuse time. Startup
-        // applies rules and pools separately; clearing here would discard a valid prior run.
+        // Keep the reusable image cache until applyBaseLists has installed the complete
+        // configuration; its image-only fingerprint ignores line and unrelated rule changes.
     }
 
     /**
@@ -1330,7 +1347,7 @@ object RouteManager {
         // Persisted results are inert until reuse validates the final version, pools and rules.
     }
 
-    private fun invalidateReusableImageSpeedTestSnapshot() {
+    internal fun invalidateReusableImageSpeedTestSnapshot() {
         runCatching {
             DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
                 ?.edit()?.remove(REUSABLE_IMAGE_SNAPSHOT_KEY)?.apply()

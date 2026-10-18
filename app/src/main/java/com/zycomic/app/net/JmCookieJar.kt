@@ -12,7 +12,8 @@ class JmCookieJar : CookieJar {
     override fun saveFromResponse(url: HttpUrl, newCookies: List<Cookie>) {
         val now = System.currentTimeMillis()
         cookies.removeAll { it.expiresAt <= now }
-        newCookies.forEach { cookie ->
+        if (!isApiHost(url.host)) return
+        newCookies.filter { it.name == "AVS" }.forEach { cookie ->
             cookies.removeAll { existing ->
                 existing.name == cookie.name && existing.domain == cookie.domain && existing.path == cookie.path
             }
@@ -24,7 +25,12 @@ class JmCookieJar : CookieJar {
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val now = System.currentTimeMillis()
         cookies.removeAll { it.expiresAt <= now }
-        return cookies.filter { it.matches(url) }
+        if (!isApiHost(url.host) || url.encodedPath.startsWith("/media/")) return emptyList()
+        return cookies.filter { it.matches(url) && it.name == "AVS" }
+    }
+
+    private fun isApiHost(host: String): Boolean = JmRouteManager.lineHosts.any { line ->
+        runCatching { java.net.URI(line).host.equals(host, ignoreCase = true) }.getOrDefault(false)
     }
 
     @Synchronized

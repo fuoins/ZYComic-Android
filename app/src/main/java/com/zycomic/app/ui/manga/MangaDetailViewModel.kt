@@ -2,6 +2,7 @@ package com.zycomic.app.ui.manga
 
 import com.zycomic.app.data.dto.Chapter
 import com.zycomic.app.data.dto.Folder
+import com.zycomic.app.data.dto.JmComment
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.BookBlockRepository
 import com.zycomic.app.data.repository.FavoriteRepository
@@ -10,6 +11,7 @@ import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.reader.JmSource
 import com.zycomic.app.reader.ManwaSource
 import kotlinx.coroutines.CancellationException
@@ -52,6 +54,18 @@ class MangaDetailViewModel(private val bookId: String) {
     val chapterAsc = MutableStateFlow(false) // 默认降序
     val folders = MutableStateFlow<List<Folder>>(emptyList())
     val favBusy = MutableStateFlow(false)
+    val jmNeedLogin = MutableStateFlow(false)
+    val jmActionBusy = MutableStateFlow(false)
+    val jmCommentCount = MutableStateFlow<Int?>(null)
+    val jmComments = MutableStateFlow<List<JmComment>>(emptyList())
+    val jmCommentsLoading = MutableStateFlow(false)
+    val jmCommentsError = MutableStateFlow<String?>(null)
+    val jmCommentsHasMore = MutableStateFlow(true)
+    private var jmCommentPage = 0
+    private var jmStateRefreshRequired = false
+    val jmAccountName = MutableStateFlow(JmAuthStore.accountName ?: if (JmAuthStore.token() != null) "已登录" else null)
+    val jmLoginBusy = MutableStateFlow(false)
+    val jmLoginError = MutableStateFlow<String?>(null)
 
     /** 未登录事件：UI 层收到后跳转登录页。 */
     val needLogin = MutableStateFlow(false)
@@ -92,6 +106,7 @@ class MangaDetailViewModel(private val bookId: String) {
                     val result = JmSource.getAlbum(contentId)
                     _detail.value = result.manga
                     _chapterWarning.value = result.chapterWarning
+                    loadJmComments()
                 } else {
                     _detail.value = MangaRepository.getDetail(bookId)
                 }
@@ -100,6 +115,10 @@ class MangaDetailViewModel(private val bookId: String) {
             } catch (e: Exception) {
                 _detail.value = null
                 _error.value = e.message ?: "加载失败"
+                if (isJm && JmAuthStore.token() == null && jmAccountName.value != null) {
+                    jmAccountName.value = null
+                    jmNeedLogin.value = true
+                }
             } finally {
                 _loading.value = false
             }
@@ -153,7 +172,10 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 快速收藏/取消收藏。 */
     fun toggleFavorite() {
-        if (isJm) return
+        if (isJm) {
+            toggleJmFavorite()
+            return
+        }
         scope.launch {
             favBusy.value = true
             try {
@@ -172,6 +194,204 @@ class MangaDetailViewModel(private val bookId: String) {
             } finally {
                 favBusy.value = false
             }
+        }
+    }
+
+    private fun toggleJmFavorite() {
+        if (!isJm) return
+        if (!JmToggleActionPolicy.canStart(jmActionBusy.value, JmAuthStore.token() != null)) {
+            if (JmAuthStore.token() == null) jmNeedLogin.value = true
+            return
+        }
+        scope.launch {
+            jmActionBusy.value = true
+            try {
+                if (jmStateRefreshRequired) {
+                    if (refreshJmState()) {
+                        jmStateRefreshRequired = false
+                    } else {
+                        _favSuccess.emit("收藏状态暂无法确认，请刷新后重试")
+                    }
+                    return@launch
+                }
+                val before = _detail.value?.fav == 1
+                try {
+                    JmSource.toggleFavorite(contentId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    jmStateRefreshRequired = true
+                    val refreshed = refreshJmState()
+                    if (refreshed) jmStateRefreshRequired = false
+                    if (JmAuthStore.token() == null) jmNeedLogin.value = true
+                    _favSuccess.emit(if (refreshed) "收藏请求未确认，已刷新当前状态" else "收藏请求结果不确定，刷新状态失败；请勿重复操作")
+                    return@launch
+                }
+                jmStateRefreshRequired = true
+                val refreshed = refreshJmState()
+                jmStateRefreshRequired = !refreshed
+                val after = _detail.value?.fav == 1
+                _favSuccess.emit(
+                    if (refreshed && after != before) {
+                        if (after) "已收藏" else "已取消收藏"
+                    } else {
+                        "收藏状态未能确认，请刷新"
+                    },
+                )
+            } finally {
+                jmActionBusy.value = false
+            }
+        }
+    }
+
+    fun loadJmComments(nextPage: Boolean = false) {
+        if (!isJm || jmCommentsLoading.value || (nextPage && !jmCommentsHasMore.value)) return
+        val requested = if (nextPage) jmCommentPage + 1 else 1
+        scope.launch {
+            jmCommentsLoading.value = true
+            jmCommentsError.value = null
+            try {
+                val result = JmSource.getComments(contentId, requested)
+                jmCommentCount.value = result.total
+                jmComments.value = (if (nextPage) jmComments.value + result.comments else result.comments).distinctBy { it.id }
+                jmCommentPage = requested
+                jmCommentsHasMore.value = result.hasMore
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                jmCommentsError.value = e.message ?: "评论加载失败"
+            } finally {
+                jmCommentsLoading.value = false
+            }
+        }
+    }
+
+    fun postJmComment(content: String, onSuccess: () -> Unit = {}) {
+        if (!isJm || jmActionBusy.value || content.isBlank()) return
+        if (JmAuthStore.token() == null) {
+            jmNeedLogin.value = true
+            return
+        }
+        scope.launch {
+            jmActionBusy.value = true
+            var posted = false
+            try {
+                JmSource.postComment(contentId, content.trim())
+                posted = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                jmCommentsError.value = e.message ?: "评论结果不确定，请刷新评论确认后再决定是否重试"
+                if (JmAuthStore.token() == null) {
+                    jmNeedLogin.value = true
+                    jmAccountName.value = null
+                }
+                _favSuccess.emit(jmCommentsError.value ?: "评论发送失败")
+            } finally {
+                jmCommentPage = 0
+                loadJmComments()
+                jmActionBusy.value = false
+                if (posted) {
+                    _favSuccess.emit("评论已发送")
+                    runCatching(onSuccess)
+                }
+            }
+        }
+    }
+
+    fun toggleJmLike() {
+        if (!isJm) return
+        if (!JmToggleActionPolicy.canStart(jmActionBusy.value, JmAuthStore.token() != null)) {
+            if (JmAuthStore.token() == null) jmNeedLogin.value = true
+            return
+        }
+        scope.launch {
+            jmActionBusy.value = true
+            try {
+                if (jmStateRefreshRequired) {
+                    if (refreshJmState()) {
+                        jmStateRefreshRequired = false
+                    } else {
+                        _favSuccess.emit("点赞状态暂无法确认，请刷新后重试")
+                    }
+                    return@launch
+                }
+                val before = _detail.value?.jmLiked
+                try {
+                    JmSource.toggleLike(contentId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    jmStateRefreshRequired = true
+                    val refreshed = refreshJmState()
+                    if (refreshed) jmStateRefreshRequired = false
+                    if (JmAuthStore.token() == null) jmNeedLogin.value = true
+                    _favSuccess.emit(if (refreshed) "点赞请求未确认，已刷新当前状态" else "点赞请求结果不确定，刷新状态失败；请勿重复操作")
+                    return@launch
+                }
+                jmStateRefreshRequired = true
+                val refreshed = refreshJmState()
+                jmStateRefreshRequired = !refreshed
+                val after = _detail.value?.jmLiked
+                _favSuccess.emit(
+                    if (refreshed && before != null && after != null && after != before) {
+                        if (after) "已点赞" else "已取消点赞"
+                    } else {
+                        "点赞状态未能确认，请刷新"
+                    },
+                )
+            } finally {
+                jmActionBusy.value = false
+            }
+        }
+    }
+
+    fun loginJm(username: String, password: String) {
+        if (!isJm || jmLoginBusy.value) return
+        scope.launch {
+            jmLoginBusy.value = true
+            jmLoginError.value = null
+            try {
+                jmAccountName.value = JmSource.login(username.trim(), password)
+                jmNeedLogin.value = false
+                refreshJmState()
+                jmCommentPage = 0
+                loadJmComments()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                jmLoginError.value = e.message ?: "JM 登录失败"
+            } finally {
+                jmLoginBusy.value = false
+            }
+        }
+    }
+
+    fun logoutJm() {
+        if (!isJm) return
+        JmSource.logout()
+        jmAccountName.value = null
+        jmNeedLogin.value = false
+        scope.launch { refreshJmState() }
+    }
+
+    private suspend fun refreshJmState(): Boolean {
+        return try {
+            val fresh = JmSource.getAlbum(contentId).manga
+            _detail.value = fresh.copy(chapterList = _detail.value?.chapterList ?: fresh.chapterList)
+            if (JmAuthStore.token() == null && jmAccountName.value != null) {
+                jmAccountName.value = null
+                jmNeedLogin.value = true
+            }
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (JmAuthStore.token() == null && jmAccountName.value != null) {
+                jmAccountName.value = null
+                jmNeedLogin.value = true
+            }
+            false
         }
     }
 

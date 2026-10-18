@@ -103,6 +103,8 @@ import com.zycomic.app.ui.settings.AddBlacklistDialog
 import com.zycomic.app.util.LoginGate
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.drawHorizontalScrollbar
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
@@ -175,11 +177,34 @@ fun MangaDetailScreen(
 
     var showFolderDialog by remember(bookId) { mutableStateOf(false) }
     var showCoverMenu by remember(bookId) { mutableStateOf(false) }
+    var showCoverPreview by remember(bookId) { mutableStateOf(false) }
     var showAddBlacklistDialog by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽二次确认：服务端接口是 toggle，必须让用户知道重复点击会变成取消屏蔽 */
     var showBlockConfirm by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
     val blockBusy by vm.blockBusy.collectAsState()
+
+    // Cover actions use the same platform-aware byte loader as the thumbnail.
+    fun coverAction(share: Boolean) {
+        val d = detail ?: return
+        showCoverMenu = false
+        scope.launch {
+            try {
+                val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl(d), isJm = vm.isJm)
+                if (share) {
+                    val uri = com.zycomic.app.net.CoverArtHelper.shareToCache(bytes, d.name)
+                    context.startActivity(uri.toShareIntent(context))
+                } else {
+                    com.zycomic.app.net.CoverArtHelper.save(bytes, d.name)
+                    Toast.makeText(context, "封面已保存到相册", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     LaunchedEffect(vm, needLogin) {
         if (needLogin) {
@@ -288,7 +313,7 @@ fun MangaDetailScreen(
                                 .aspectRatio(2f / 3f)
                                 .clip(MaterialTheme.shapes.extraSmall)
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .combinedClickable(onClick = {}, onLongClick = { showCoverMenu = true }),
+                                .combinedClickable(onClick = { showCoverPreview = true }, onLongClick = { showCoverMenu = true }),
                             contentScale = ContentScale.Crop,
                             error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
                         )
@@ -319,7 +344,20 @@ fun MangaDetailScreen(
                                 }
                                 Spacer(Modifier.height(6.dp))
                             }
-                            // JM 报告只确认专辑名与章节，未提供状态、类别或地区字段。
+                            if (vm.isJm) {
+                                Text(
+                                    stringResource(KMR.strings.jm_album_id, d.id),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                if (d.jmViews != null) {
+                                    Text(stringResource(KMR.strings.jm_views, d.jmViews.toString()), style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (d.jmUpdateTime.isNotBlank()) {
+                                    Text(stringResource(KMR.strings.jm_updated, d.jmUpdateTime), style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            // Manwa-only status and region fields stay isolated.
                             if (!vm.isJm) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
@@ -354,7 +392,15 @@ fun MangaDetailScreen(
                         }
                     }
 
-                    // JM 账号功能未接入；避免显示或触发漫蛙收藏/屏蔽操作。
+                    if (vm.isJm) {
+                        JmDetailActions(
+                            vm = vm,
+                            manga = d,
+                            onSaveCover = { coverAction(false) },
+                            onShareCover = { coverAction(true) },
+                        )
+                    }
+                    // Manwa account actions must never be used for JM.
                     if (!vm.isJm) {
                         Row(
                             modifier = Modifier
@@ -445,8 +491,15 @@ fun MangaDetailScreen(
                         ExpandableSummary(text = d.text)
                     }
 
-                    // 4. 标签行
-                    if (d.tags.isNotEmpty()) {
+                    // JM groups retain their authoritative namespace and each starts a new row.
+                    if (vm.isJm) {
+                        JmTagGroup(stringResource(KMR.strings.jm_authors), d.jmAuthors, onSearchKeyword)
+                        JmTagGroup(stringResource(KMR.strings.jm_actors), d.jmActors, onSearchKeyword)
+                        JmTagGroup(stringResource(KMR.strings.jm_works), d.jmWorks, onSearchKeyword)
+                        JmTagGroup(stringResource(KMR.strings.jm_tags), d.tags.map { it.name }, onSearchKeyword)
+                    }
+                    // Manwa tags keep their existing behavior.
+                    if (!vm.isJm && d.tags.isNotEmpty()) {
                         FlowRow(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -697,42 +750,21 @@ fun MangaDetailScreen(
         )
     }
 
-    // 8. 封面点击选项
     if (showCoverMenu) {
         CoverActionDialog(
             onDismiss = { showCoverMenu = false },
-            onSave = {
-                showCoverMenu = false
-                val d = detail
-                if (d != null) {
-                    val coverUrl = coverUrl(d)
-                    scope.launch {
-                        try {
-                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl, isJm = vm.isJm)
-                            com.zycomic.app.net.CoverArtHelper.save(bytes, d.name)
-                            Toast.makeText(context, "封面已保存到相册", Toast.LENGTH_SHORT).show()
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            },
-            onShare = {
-                showCoverMenu = false
-                val d = detail
-                if (d != null) {
-                    val coverUrl = coverUrl(d)
-                    scope.launch {
-                        try {
-                            val bytes = com.zycomic.app.net.CoverArtHelper.fetchCover(coverUrl, isJm = vm.isJm)
-                            val uri = com.zycomic.app.net.CoverArtHelper.shareToCache(bytes, d.name)
-                            context.startActivity(uri.toShareIntent(context))
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "分享失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            },
+            onSave = { coverAction(false) },
+            onShare = { coverAction(true) },
+        )
+    }
+    if (showCoverPreview && detail != null) {
+        DetailCoverPreview(
+            title = detail!!.name,
+            url = coverUrl(detail!!),
+            imageLoader = jmImageLoader,
+            onDismiss = { showCoverPreview = false },
+            onSave = { coverAction(false) },
+            onShare = { coverAction(true) },
         )
     }
     if (!vm.isJm && showAddBlacklistDialog) {

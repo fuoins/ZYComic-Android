@@ -795,6 +795,7 @@ object SpeedTester {
             lastImgVerdicts = emptyMap()
             lastImgIpVerdicts = emptyMap()
             val startedAt = System.currentTimeMillis()
+            val imageCacheNetworkIdentityAtStart = PlatformSpeedTestCoordinator.currentNetworkIdentity()
             val followSystemVpnEnabled = DevConfig.isFollowSystemVpnEnabled()
             val systemVpnActive = NetworkModule.isSystemVpnActive()
             val networkPath = SpeedTestNetworkPath(
@@ -889,16 +890,29 @@ object SpeedTester {
                 val reusedImageCount = AtomicInteger(0)
                 reportStage(Progress(Phase.PREPARING_IMAGES))
                 val resolvedImages = imgTargets()
+                val currentImageEndpoints = resolvedImages.toSet()
+                val cachedImageSnapshot = RouteManager.reusableImageSpeedTestSnapshotOrNull()
+                val cachedEndpointPoolMatches = cachedImageSnapshot?.let {
+                    ReusableImageSpeedTestPolicy.matchesResolvedEndpoints(it.imgDelays.keys, currentImageEndpoints)
+                } == true
+                if (cachedImageSnapshot != null && !cachedEndpointPoolMatches) {
+                    RouteManager.invalidateReusableImageSpeedTestSnapshot()
+                }
+                val reusableImageSnapshot = requestedImageSnapshot.get()?.takeIf {
+                    runIsCurrent() &&
+                        RouteManager.isReusableImageSpeedTestSnapshotValid(it) &&
+                        cachedEndpointPoolMatches &&
+                        ReusableImageSpeedTestPolicy.matchesResolvedEndpoints(it.imgDelays.keys, currentImageEndpoints)
+                }
+                if (requestedImageSnapshot.get() != null && reusableImageSnapshot == null) {
+                    RouteManager.invalidateReusableImageSpeedTestSnapshot()
+                }
                 reportStage(Progress(Phase.TESTING_IMAGES, total = resolvedImages.size))
                 val imgJobs = resolvedImages.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
-                            val reusable = requestedImageSnapshot.get()?.takeIf {
-                                runIsCurrent() &&
-                                    RouteManager.isReusableImageSpeedTestSnapshotValid(it)
-                            }
-                            val previousDelay = reusable?.imgDelays?.get(endpoint)
-                            val previousVerdict = reusable?.imgVerdicts?.get(endpoint)
+                            val previousDelay = reusableImageSnapshot?.imgDelays?.get(endpoint)
+                            val previousVerdict = reusableImageSnapshot?.imgVerdicts?.get(endpoint)
                             val delay: Long
                             val verdict: ImgVerdict
                             if (previousDelay != null && previousVerdict != null) {
@@ -1002,6 +1016,7 @@ object SpeedTester {
                             networkPath = networkPath,
                             completeSnapshot = true,
                             expectedPlatformRevision = platformRevisionAtStart,
+                            imageCacheNetworkIdentity = imageCacheNetworkIdentityAtStart,
                         )
                     ) {
                         return@coroutineScope (-1 to -1)

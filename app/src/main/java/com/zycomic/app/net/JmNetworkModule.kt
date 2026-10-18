@@ -69,7 +69,22 @@ object JmNetworkModule {
     private val baseClient: OkHttpClient by lazy(::createBaseClient)
     val client: OkHttpClient by lazy {
         baseClient.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
             .addInterceptor(JmApiInterceptor())
+            .addInterceptor(JmImageInterceptor())
+            .build()
+    }
+
+    /** Image-only transport: no cookies, no redirects, no retries, and the API interceptor strips JWT. */
+    val imageClient: OkHttpClient by lazy {
+        baseClient.newBuilder()
+            .cookieJar(okhttp3.CookieJar.NO_COOKIES)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .addInterceptor(JmApiInterceptor(allowAuthentication = false))
             .addInterceptor(JmImageInterceptor())
             .build()
     }
@@ -82,6 +97,7 @@ object JmNetworkModule {
         .writeTimeout(3, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS)
         .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+        .cookieJar(okhttp3.CookieJar.NO_COOKIES)
         .dispatcher(
             okhttp3.Dispatcher().apply {
                 maxRequests = 24
