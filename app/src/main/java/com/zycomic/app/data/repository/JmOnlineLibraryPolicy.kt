@@ -16,7 +16,8 @@ internal object JmOnlineLibraryPolicy {
         return JmOnlineLibraryRequest(
             method = "GET",
             path = "/favorite",
-            queryParameters = mapOf("folder_id" to "0", "page" to page.toString(), "o" to order),
+            // The API uses an empty folder ID for all favorites, including ungrouped albums.
+            queryParameters = mapOf("folder_id" to "", "page" to page.toString(), "o" to order),
         )
     }
 

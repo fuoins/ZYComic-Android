@@ -170,7 +170,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     endpoint = endpoint,
                     delay = delay,
                     verdict = null,
-                    marker = if (endpoint.domain.equals(selectedLine, true)) "当前线路域名" else null,
+                    marker = null,
                 )
             }
             item { Text("图源端点（域名 · IP）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
@@ -265,7 +265,6 @@ private fun encodeJmSpeedTestLog(
                     endpoint = endpoint,
                     delay = snapshot.lineIpDelaysMs.getValue(endpoint),
                     verdict = null,
-                    selectedRoute = endpoint.domain.equals(selectedLine, true),
                 )
             },
         ),
@@ -310,7 +309,6 @@ private fun endpointJson(
     endpoint: DomainIp,
     delay: Long,
     verdict: JmSpeedTester.ImgVerdict?,
-    selectedRoute: Boolean? = null,
     selected: Boolean? = null,
     successful: Boolean = delay >= 0L && delay < Long.MAX_VALUE,
 ): JsonObject = buildJsonObject {
@@ -319,6 +317,5 @@ private fun endpointJson(
     put("latencyMs", if (delay < 0L || delay == Long.MAX_VALUE) JsonNull else JsonPrimitive(delay))
     put("success", JsonPrimitive(successful))
     put("imageVerdict", verdict?.let { JsonPrimitive(it.name.lowercase(java.util.Locale.ROOT)) } ?: JsonNull)
-    selectedRoute?.let { put("selectedRoute", JsonPrimitive(it)) }
     selected?.let { put("selected", JsonPrimitive(it)) }
 }

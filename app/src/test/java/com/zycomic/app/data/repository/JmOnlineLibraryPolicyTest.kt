@@ -8,15 +8,15 @@ import org.junit.jupiter.api.Test
 
 class JmOnlineLibraryPolicyTest {
     @Test
-    fun `favorites are read-only GET requests with default folder and supported order`() {
+    fun `all favorites are read-only GET requests with empty folder including ungrouped albums`() {
         val byFavorites = JmOnlineLibraryPolicy.favoritesRequest(page = 1, order = "mr")
         assertEquals("GET", byFavorites.method)
         assertEquals("/favorite", byFavorites.path)
-        assertEquals(mapOf("folder_id" to "0", "page" to "1", "o" to "mr"), byFavorites.queryParameters)
+        assertEquals(mapOf("folder_id" to "", "page" to "1", "o" to "mr"), byFavorites.queryParameters)
 
         val byImages = JmOnlineLibraryPolicy.favoritesRequest(page = 3, order = "mp")
         assertEquals("GET", byImages.method)
-        assertEquals(mapOf("folder_id" to "0", "page" to "3", "o" to "mp"), byImages.queryParameters)
+        assertEquals(mapOf("folder_id" to "", "page" to "3", "o" to "mp"), byImages.queryParameters)
         assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoritesRequest(1, "unknown") }
     }
 
@@ -40,6 +40,12 @@ class JmOnlineLibraryPolicyTest {
         val existingIds = (1..45).map(Int::toString)
         assertFalse(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = existingIds, nextPageIds = listOf("41", "42", "43", "44", "45")))
         assertFalse(JmOnlineLibraryPolicy.hasMore(total = 50, existingItemIds = existingIds, nextPageIds = listOf("41", "42", "43", "44", "45")))
+    }
+
+    @Test
+    fun `history pagination stops when out of range repeats the first page`() {
+        val firstPageIds = (1..20).map(Int::toString)
+        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 40, existingItemIds = firstPageIds, nextPageIds = firstPageIds))
     }
 
     @Test
