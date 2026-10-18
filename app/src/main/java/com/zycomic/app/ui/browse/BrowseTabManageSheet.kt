@@ -824,11 +824,11 @@ private fun FilterTabFormDialog(
                                 onSave(
                                     trimmed,
                                     draft.takeIf { targetPlatform == ContentPlatform.MANWA },
-                                    jmDraft.copy(
-                                        mode = if (fixedJmCategoryMode) JmBrowsePolicy.MODE_CATEGORY else jmDraft.mode,
-                                        query = if (fixedJmCategoryMode) "" else jmDraft.query,
-                                        order = if (jmDraft.mode == JmBrowsePolicy.MODE_CATEGORY) jmDraft.order.ifBlank { "mr" } else jmDraft.order,
-                                    ),
+                                    when {
+                                        jmHome -> JmBrowsePolicy.initialFilters(BrowseTabStore.ID_JM_HOME)
+                                        jmCategoryOnly -> JmBrowsePolicy.customCategoryFilters(jmDraft)
+                                        else -> JmBrowsePolicy.effectiveFilters(JmBrowsePolicy.ALL_HOT_TAB_ID, jmDraft)
+                                    },
                                     targetPlatform,
                                 )
                             },
