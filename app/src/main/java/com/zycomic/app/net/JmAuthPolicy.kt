@@ -7,7 +7,7 @@ object JmAuthPolicy {
         if (trustedApiHosts.none { it.equals(host, ignoreCase = true) }) return false
         return when {
             method.equals("POST", true) -> isUserEdit(path) || path in setOf("/favorite", "/like", "/comment")
-            method.equals("GET", true) -> path == "/album" || path == "/chapter" || isUserEdit(path)
+            method.equals("GET", true) -> path == "/album" || path == "/chapter" || path in USER_LIST_GET_PATHS || isUserEdit(path)
             else -> false
         }
     }
@@ -18,4 +18,5 @@ object JmAuthPolicy {
     private fun isUserEdit(path: String): Boolean = USER_EDIT_PATH.matches(path)
 
     private val USER_EDIT_PATH = Regex("/useredit/[0-9]+")
+    private val USER_LIST_GET_PATHS = setOf("/favorite", "/watch_list")
 }

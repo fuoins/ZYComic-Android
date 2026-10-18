@@ -28,12 +28,6 @@ internal object JmBrowsePolicy {
         val promoteTitle: String = "",
     )
 
-    fun isVisibleHomeSection(id: String, type: String, includeSerialization: Boolean = false): Boolean =
-        (includeSerialization || id != "26") && type !in setOf("library", "novels") && id !in setOf("1001", "1002")
-
-    fun isSelectedHomeSection(mode: Int, selectedId: String, sectionId: String): Boolean =
-        mode in setOf(MODE_CATEGORY, MODE_PROMOTE_LIST, MODE_UNAVAILABLE_SECTION) && selectedId == sectionId
-
     fun today(): Int = ((java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7) + 1
 
     fun isCustomCategoryTab(tabId: String): Boolean = tabId.startsWith("custom_jm_")
@@ -50,11 +44,6 @@ internal object JmBrowsePolicy {
         mode = MODE_CATEGORY,
         category = filters.category,
         order = ALL_HOT_ORDER,
-    )
-
-    fun jmHomeModes(): List<Pair<String, Int>> = listOf(
-        "每周必看" to MODE_WEEK,
-        "每周连载更新" to MODE_SERIALIZATION,
     )
 
     fun effectiveFilters(tabId: String, filters: Filters): Filters =
@@ -86,6 +75,8 @@ internal object JmBrowsePolicy {
     fun initialFilters(tabId: String): Filters =
         if (tabId == ALL_HOT_TAB_ID || isCustomCategoryTab(tabId)) {
             Filters(mode = MODE_CATEGORY, order = ALL_HOT_ORDER)
+        } else if (tabId == "jm_recommendations") {
+            Filters(mode = MODE_WEEK)
         } else {
             Filters()
         }

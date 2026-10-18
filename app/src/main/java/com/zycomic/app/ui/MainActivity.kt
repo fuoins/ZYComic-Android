@@ -280,6 +280,12 @@ fun AppContent(
     var searchProvider by remember { mutableStateOf<SearchProvider?>(null) }
     var pendingTag by remember { mutableStateOf<String?>(null) }
 
+    var loginPlatform by remember { mutableStateOf<ContentPlatform?>(null) }
+    val openLogin: (ContentPlatform?) -> Unit = { requestedPlatform ->
+        loginPlatform = requestedPlatform
+        loginOpen = true
+    }
+
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
     val speedTestProgress by settingsVm.speedTestProgress.collectAsState()
@@ -335,7 +341,7 @@ fun AppContent(
     val openReader = { settingsDialog = SettingsDialog.Reader }
     // 标签屏蔽 / 一键屏蔽为账号级功能：未登录统一 Toast 并打开登录页
     val requireLogin: (() -> Unit) -> Unit = { action ->
-        if (!com.zycomic.app.util.LoginGate.ensureLogin(context)) loginOpen = true else action()
+        if (!com.zycomic.app.util.LoginGate.ensureLogin(context)) openLogin(null) else action()
     }
     val openTagBlock = { requireLogin { settingsDialog = SettingsDialog.TagBlock } }
     // 漫画屏蔽同为账号级功能：服务端接口挂在登录会话上，未登录点了只会失败
@@ -362,7 +368,10 @@ fun AppContent(
                 showSearch -> {
                     showSearch = false
                 }
-                loginOpen -> loginOpen = false
+                loginOpen -> {
+                    loginOpen = false
+                    loginPlatform = null
+                }
             }
         }
         Scaffold(
@@ -416,14 +425,14 @@ fun AppContent(
                                 searchProvider = provider
                                 showSearch = true
                             },
-                            onRequireLogin = { loginOpen = true },
+                            onRequireLogin = { openLogin(null) },
                         )
                     }
                     1 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_FAVORITES_STATE_KEY) {
                         LibraryScreen(
                             vm = libraryVm,
                             onOpenManga = openDetail,
-                            onRequireLogin = { loginOpen = true },
+                            onRequireLogin = { openLogin(libraryVm.currentPlatform.value) },
                             onOpenSearch = { kw ->
                                 searchKeyword = kw
                                 searchProvider = null
@@ -435,7 +444,7 @@ fun AppContent(
                         HistoryScreen(
                             vm = historyVm,
                             onOpenManga = openDetail,
-                            onRequireLogin = { loginOpen = true },
+                            onRequireLogin = { openLogin(historyVm.currentPlatform.value) },
                             onOpenSearch = { kw ->
                                 searchKeyword = kw
                                 searchProvider = null
@@ -444,7 +453,7 @@ fun AppContent(
                         )
                     }
                     3 -> ProfileScreen(
-                        onRequireLogin = { loginOpen = true },
+                        onRequireLogin = { openLogin(null) },
                         onNavigateToTab = { bottomTab = it },
                         onOpenTagBlock = openTagBlock,
                         onOpenBookBlock = openBookBlock,
@@ -564,7 +573,11 @@ fun AppContent(
     // ---- 登录覆盖层 ----
     if (loginOpen) {
         LoginOverlay(
-            onClose = { loginOpen = false },
+            onClose = {
+                loginOpen = false
+                loginPlatform = null
+            },
+            fixedPlatform = loginPlatform,
         )
     }
 

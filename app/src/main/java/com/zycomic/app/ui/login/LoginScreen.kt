@@ -57,7 +57,7 @@ import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
-fun LoginOverlay(onClose: () -> Unit) {
+fun LoginOverlay(onClose: () -> Unit, fixedPlatform: ContentPlatform? = null) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -66,7 +66,7 @@ fun LoginOverlay(onClose: () -> Unit) {
             .navigationBarsPadding()
             .padding(24.dp),
     ) {
-        LoginScreen(onClose = onClose)
+        LoginScreen(onClose = onClose, fixedPlatform = fixedPlatform)
     }
 }
 

@@ -62,19 +62,17 @@ import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
-import com.zycomic.app.platform.PlatformNotConnectedContent
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.FilterChip
+import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
-import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
-import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
@@ -89,8 +87,11 @@ fun LibraryScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val platform by vm.currentPlatform.collectAsState()
+    var jmTotal by remember { mutableStateOf<Int?>(null) }
+    var jmLoaded by remember { mutableStateOf(0) }
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
         if (StartupPlatformPolicy.checkSelection(context, selected)) {
+            if (selected == ContentPlatform.JM) vm.exitSelection()
             ContentPlatformPrefs.save("library", selected)
             vm.selectPlatform(selected)
         }
@@ -111,8 +112,8 @@ fun LibraryScreen(
     val showUnreadBadge by vm.showUnreadBadge.collectAsState()
     val showUpdateBadge by vm.showUpdateBadge.collectAsState()
 
-    LaunchedEffect(vm.needLogin) {
-        vm.needLogin.collect { if (it) onRequireLogin() }
+    LaunchedEffect(vm.needLogin, platform) {
+        vm.needLogin.collect { if (it && platform == ContentPlatform.MANWA) onRequireLogin() }
     }
 
     LaunchedEffect(platform) {
@@ -138,10 +139,10 @@ fun LibraryScreen(
     var showMoveDialog by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
-    androidx.activity.compose.BackHandler(enabled = showMoveDialog) { showMoveDialog = false }
-    androidx.activity.compose.BackHandler(enabled = showRemoveConfirm) { showRemoveConfirm = false }
-    androidx.activity.compose.BackHandler(enabled = showNewFolderDialog) { showNewFolderDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showFilterDialog && platform == ContentPlatform.MANWA) { showFilterDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showMoveDialog && platform == ContentPlatform.MANWA) { showMoveDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showRemoveConfirm && platform == ContentPlatform.MANWA) { showRemoveConfirm = false }
+    androidx.activity.compose.BackHandler(enabled = showNewFolderDialog && platform == ContentPlatform.MANWA) { showNewFolderDialog = false }
     var renameTarget by remember { mutableStateOf<Folder?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -166,7 +167,7 @@ fun LibraryScreen(
                     "${currentUser.favoriteCount}/$max"
                 }
             } else {
-                null
+                jmTotal?.let { "$jmLoaded/$it" }
             }
             LibraryHistoryToolbar(
                 platform = platform,
@@ -198,7 +199,7 @@ fun LibraryScreen(
                 onRefresh = { vm.refreshFavorites() },
                 onFilter = { showFilterDialog = true },
                 onEnterSelection = vm::enterSelection,
-                selectionMode = selectionMode,
+                selectionMode = selectionMode && platform == ContentPlatform.MANWA,
                 selectionCount = selectedIds.size,
                 onExitSelection = vm::exitSelection,
                 onSelectAll = vm::selectAll,
@@ -207,7 +208,7 @@ fun LibraryScreen(
             )
         },
         bottomBar = {
-            if (selectionMode) {
+            if (selectionMode && platform == ContentPlatform.MANWA) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -236,9 +237,13 @@ fun LibraryScreen(
         },
     ) { contentPadding ->
         when {
-            platform == ContentPlatform.JM -> PlatformNotConnectedContent(
+            platform == ContentPlatform.JM -> JmOnlineLibraryScreen(
+                history = false,
+                onRequireLogin = onRequireLogin,
+                onOpenManga = onOpenManga,
+                onTotalChanged = { jmTotal = it },
+                onLoadedCountChanged = { jmLoaded = it },
                 modifier = Modifier.fillMaxSize().padding(contentPadding),
-                detail = stringResource(KMR.strings.content_platform_favorites_detail),
             )
             user == null -> EmptyScreen(
                 message = "请先登录",
@@ -372,7 +377,7 @@ fun LibraryScreen(
     }
 
     // 筛选 / 排序 / 显示 / 管理收藏夹 对话框
-    if (showFilterDialog) {
+    if (showFilterDialog && platform == ContentPlatform.MANWA) {
         FilterDialog(
             vm = vm,
             onDismiss = { showFilterDialog = false },
@@ -382,7 +387,7 @@ fun LibraryScreen(
     }
 
     // 移动收藏夹弹窗
-    if (showMoveDialog) {
+    if (showMoveDialog && platform == ContentPlatform.MANWA) {
         val folders by vm.folders.collectAsState()
         Dialog(onDismissRequest = { showMoveDialog = false }) {
             Column(
@@ -423,7 +428,7 @@ fun LibraryScreen(
     }
 
     // 新建收藏夹弹窗
-    if (showNewFolderDialog) {
+    if (showNewFolderDialog && platform == ContentPlatform.MANWA) {
         FolderNameDialog(
             title = "新建收藏夹",
             initial = "",
@@ -436,7 +441,7 @@ fun LibraryScreen(
     }
 
     // 重命名弹窗
-    renameTarget?.let { f ->
+    renameTarget?.takeIf { platform == ContentPlatform.MANWA }?.let { f ->
         FolderNameDialog(
             title = "重命名收藏夹",
             initial = f.name,
@@ -449,7 +454,7 @@ fun LibraryScreen(
     }
 
     // 取消收藏确认对话框
-    if (showRemoveConfirm) {
+    if (showRemoveConfirm && platform == ContentPlatform.MANWA) {
         AlertDialog(
             onDismissRequest = { showRemoveConfirm = false },
             title = { Text("取消收藏确认") },

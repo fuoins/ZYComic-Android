@@ -56,16 +56,14 @@ import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
-import com.zycomic.app.platform.PlatformNotConnectedContent
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import kotlinx.coroutines.launch
-import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
-import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
@@ -97,8 +95,8 @@ fun HistoryScreen(
     val deleting by vm.deleting.collectAsState()
     val toast by vm.toast.collectAsState()
 
-    LaunchedEffect(vm.needLogin) {
-        vm.needLogin.collect { if (it) onRequireLogin() }
+    LaunchedEffect(vm.needLogin, platform) {
+        vm.needLogin.collect { if (it && platform == ContentPlatform.MANWA) onRequireLogin() }
     }
 
     // 一次性 Toast 提示（删除/收藏成败）
@@ -110,14 +108,15 @@ fun HistoryScreen(
     }
 
     // 多选模式下按返回键 = 退出多选
-    BackHandler(enabled = selectionMode) { vm.exitSelection() }
+    val manwaSelectionMode = selectionMode && platform == ContentPlatform.MANWA
+    BackHandler(enabled = manwaSelectionMode) { vm.exitSelection() }
 
     var showBatchDelete by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showFavoriteConfirm by remember { mutableStateOf<HistoryItem?>(null) }
-    androidx.activity.compose.BackHandler(enabled = showBatchDelete) { showBatchDelete = false }
-    androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
-    androidx.activity.compose.BackHandler(enabled = showFavoriteConfirm != null) { showFavoriteConfirm = null }
+    androidx.activity.compose.BackHandler(enabled = showBatchDelete && platform == ContentPlatform.MANWA) { showBatchDelete = false }
+    androidx.activity.compose.BackHandler(enabled = showFolderDialog && platform == ContentPlatform.MANWA) { showFolderDialog = false }
+    androidx.activity.compose.BackHandler(enabled = showFavoriteConfirm != null && platform == ContentPlatform.MANWA) { showFavoriteConfirm = null }
     var singleDeleteTarget by remember { mutableStateOf<HistoryItem?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -153,7 +152,7 @@ fun HistoryScreen(
                 },
                 onFilter = {},
                 onEnterSelection = vm::enterSelection,
-                selectionMode = selectionMode,
+                selectionMode = manwaSelectionMode,
                 selectionCount = selectedIds.size,
                 onExitSelection = vm::exitSelection,
                 onSelectAll = vm::selectAll,
@@ -163,7 +162,7 @@ fun HistoryScreen(
             )
         },
         bottomBar = {
-            if (selectionMode) {
+            if (manwaSelectionMode) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -228,9 +227,11 @@ fun HistoryScreen(
         },
     ) { contentPadding ->
         when {
-            platform == ContentPlatform.JM -> PlatformNotConnectedContent(
+            platform == ContentPlatform.JM -> JmOnlineLibraryScreen(
+                history = true,
+                onRequireLogin = onRequireLogin,
+                onOpenManga = onOpenManga,
                 modifier = Modifier.fillMaxSize().padding(contentPadding),
-                detail = stringResource(KMR.strings.content_platform_history_detail),
             )
             // 未登录
             user == null -> EmptyScreen(
@@ -326,7 +327,7 @@ fun HistoryScreen(
     }
 
     // 单条删除确认
-    singleDeleteTarget?.let { target ->
+    singleDeleteTarget?.takeIf { platform == ContentPlatform.MANWA }?.let { target ->
         AlertDialog(
             onDismissRequest = { singleDeleteTarget = null },
             title = { Text("删除确认") },
@@ -351,7 +352,7 @@ fun HistoryScreen(
     }
 
     // 收藏确认
-    showFavoriteConfirm?.let { target ->
+    showFavoriteConfirm?.takeIf { platform == ContentPlatform.MANWA }?.let { target ->
         AlertDialog(
             onDismissRequest = { showFavoriteConfirm = null },
             title = { Text("收藏确认") },
@@ -375,7 +376,7 @@ fun HistoryScreen(
     }
 
     // 批量删除确认
-    if (showBatchDelete) {
+    if (showBatchDelete && platform == ContentPlatform.MANWA) {
         AlertDialog(
             onDismissRequest = { showBatchDelete = false },
             title = { Text("删除确认") },
@@ -400,7 +401,7 @@ fun HistoryScreen(
     }
 
     // 收藏夹选择对话框
-    if (showFolderDialog) {
+    if (showFolderDialog && platform == ContentPlatform.MANWA) {
         val folders by vm.folders.collectAsState()
         androidx.compose.ui.window.Dialog(
             onDismissRequest = { showFolderDialog = false },
