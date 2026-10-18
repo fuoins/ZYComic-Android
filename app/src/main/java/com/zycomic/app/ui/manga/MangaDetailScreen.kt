@@ -100,8 +100,8 @@ import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.ErrorView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import com.zycomic.app.ui.login.ManwaDetailLoginDialog
 import com.zycomic.app.ui.settings.AddBlacklistDialog
-import com.zycomic.app.util.LoginGate
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -116,7 +116,6 @@ fun MangaDetailScreen(
     onOpenManga: (String) -> Unit,
     onSearchKeyword: (String) -> Unit,
     onTagClick: (String) -> Unit,
-    onRequireLogin: () -> Unit,
 ) {
     // 必须带 bookId 作为 key：相关推荐/搜索结果的漫画点击后只会换 bookId，
     // 不带 key 时 remember 会复用上一本的 ViewModel（页面停留在旧漫画，表现为"点了不跳转"），
@@ -176,6 +175,7 @@ fun MangaDetailScreen(
         }
     }
 
+    var showManwaLogin by remember(bookId) { mutableStateOf(false) }
     var showFolderDialog by remember(bookId) { mutableStateOf(false) }
     var showCoverMenu by remember(bookId) { mutableStateOf(false) }
     var showCoverPreview by remember(bookId) { mutableStateOf(false) }
@@ -209,7 +209,10 @@ fun MangaDetailScreen(
 
     LaunchedEffect(vm, needLogin) {
         if (needLogin) {
-            onRequireLogin()
+            showFolderDialog = false
+            showBlockConfirm = false
+            showAddBlacklistDialog = false
+            showManwaLogin = true
             vm.needLogin.value = false
         }
     }
@@ -448,10 +451,12 @@ fun MangaDetailScreen(
                                 label = "全部收藏夹",
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 onClick = {
-                                    if (isFav) {
-                                        Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        vm.addToAllFolders()
+                                    if (vm.ensureAccountLogin()) {
+                                        if (isFav) {
+                                            Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            vm.addToAllFolders()
+                                        }
                                     }
                                 },
                             )
@@ -462,11 +467,13 @@ fun MangaDetailScreen(
                                 label = "其他收藏夹",
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 onClick = {
-                                    if (isFav) {
-                                        Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        vm.openFolderPicker()
-                                        showFolderDialog = true
+                                    if (vm.ensureAccountLogin()) {
+                                        if (isFav) {
+                                            Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            vm.openFolderPicker()
+                                            showFolderDialog = true
+                                        }
                                     }
                                 },
                             )
@@ -477,7 +484,7 @@ fun MangaDetailScreen(
                                 icon = Icons.Outlined.Block,
                                 label = "屏蔽",
                                 tint = MaterialTheme.colorScheme.onSurface,
-                                onClick = { if (!blockBusy) showBlockConfirm = true },
+                                onClick = { if (!blockBusy && vm.ensureAccountLogin()) showBlockConfirm = true },
                             )
                         }
 
@@ -556,10 +563,8 @@ fun MangaDetailScreen(
                                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
                                         .border(1.dp, MaterialTheme.colorScheme.primary, blockChipShape)
                                         .clickable {
-                                            if (LoginGate.ensureLogin(context)) {
+                                            if (vm.ensureAccountLogin()) {
                                                 showAddBlacklistDialog = true
-                                            } else {
-                                                onRequireLogin()
                                             }
                                         }
                                         .padding(horizontal = 10.dp, vertical = 4.dp),
@@ -756,6 +761,10 @@ fun MangaDetailScreen(
                 )
             }
         }
+    }
+
+    if (showManwaLogin) {
+        ManwaDetailLoginDialog(onDismiss = { showManwaLogin = false })
     }
 
     if (showFolderDialog) {
@@ -1036,7 +1045,6 @@ fun MangaDetailOverlay(
     onOpenManga: (String) -> Unit,
     onSearchKeyword: (String) -> Unit,
     onTagClick: (String) -> Unit,
-    onRequireLogin: () -> Unit,
 ) {
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onClose,
@@ -1051,7 +1059,6 @@ fun MangaDetailOverlay(
             onOpenManga = onOpenManga,
             onSearchKeyword = onSearchKeyword,
             onTagClick = onTagClick,
-            onRequireLogin = onRequireLogin,
         )
     }
 }

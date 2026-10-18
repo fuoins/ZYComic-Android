@@ -36,6 +36,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -77,6 +78,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -103,7 +105,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun BrowseScreen(
@@ -166,6 +170,9 @@ fun BrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
+    var showJmAlbumJumpDialog by remember { mutableStateOf(false) }
+    var jmAlbumIdInput by remember { mutableStateOf("") }
+    var jmAlbumIdError by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = selectionMode) { vm.exitSelection() }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
@@ -267,6 +274,23 @@ fun BrowseScreen(
                     end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
                 ),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    onClick = {
+                        if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
+                            jmAlbumIdInput = ""
+                            jmAlbumIdError = false
+                            showJmAlbumJumpDialog = true
+                        }
+                    },
+                ) {
+                    Text(stringResource(KMR.strings.jm_album_jump_button))
+                }
+            }
+
             // 共用混合标签栏（选中 tab 后内嵌「重新筛选」）+ 平台颜色图例 + 管理
             val tabRowStateHolder = rememberSaveableStateHolder()
             tabRowStateHolder.SaveableStateProvider("category_tab_row_shared") {
@@ -383,6 +407,51 @@ fun BrowseScreen(
     // 使用说明对话框
     if (showGuideDialog) {
         BrowseGuideDialog(onDismiss = { showGuideDialog = false })
+    }
+
+    if (showJmAlbumJumpDialog) {
+        AlertDialog(
+            onDismissRequest = { showJmAlbumJumpDialog = false },
+            title = { Text(stringResource(KMR.strings.jm_album_jump_title)) },
+            text = {
+                OutlinedTextField(
+                    value = jmAlbumIdInput,
+                    onValueChange = {
+                        jmAlbumIdInput = it
+                        jmAlbumIdError = false
+                    },
+                    label = { Text(stringResource(KMR.strings.jm_album_jump_id_label)) },
+                    singleLine = true,
+                    isError = jmAlbumIdError,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = if (jmAlbumIdError) {
+                        { Text(stringResource(KMR.strings.jm_album_jump_invalid_id)) }
+                    } else {
+                        null
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val route = JmAlbumJumpPolicy.route(jmAlbumIdInput)
+                        if (route == null) {
+                            jmAlbumIdError = true
+                        } else if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
+                            showJmAlbumJumpDialog = false
+                            onOpenManga(route)
+                        }
+                    },
+                ) {
+                    Text(stringResource(KMR.strings.jm_album_jump_submit))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showJmAlbumJumpDialog = false }) {
+                    Text(stringResource(KMR.strings.jm_album_jump_cancel))
+                }
+            },
+        )
     }
 
     // Tab 管理面板

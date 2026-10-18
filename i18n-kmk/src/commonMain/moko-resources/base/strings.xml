@@ -269,6 +269,14 @@
     <string name="startup_platform_restart_toast">下次重启生效</string>
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
 
+    <string name="manwa_detail_login_title">漫蛙账号登录</string>
+    <string name="jm_album_jump_button">禁漫号跳转</string>
+    <string name="jm_album_jump_title">跳转到禁漫号</string>
+    <string name="jm_album_jump_id_label">禁漫号（album ID）</string>
+    <string name="jm_album_jump_invalid_id">请输入大于 0 的纯数字禁漫号</string>
+    <string name="jm_album_jump_submit">跳转</string>
+    <string name="jm_album_jump_cancel">取消</string>
+
     <!-- JM details and isolated account -->
     <string name="jm_detail_more">更多操作</string>
     <string name="jm_copy_title">复制标题</string>

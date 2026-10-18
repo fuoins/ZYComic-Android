@@ -67,8 +67,21 @@ class MangaDetailViewModel(private val bookId: String) {
     val jmLoginBusy = MutableStateFlow(false)
     val jmLoginError = MutableStateFlow<String?>(null)
 
-    /** 未登录事件：UI 层收到后跳转登录页。 */
+    /** 漫蛙未登录事件：由详情页打开漫蛙登录弹窗。 */
     val needLogin = MutableStateFlow(false)
+
+    /** Check before opening account-only UI as well as before sending requests. */
+    fun ensureAccountLogin(): Boolean {
+        val authenticated = DetailLoginPolicy.isAuthenticated(
+            isJm = isJm,
+            jmAuthenticated = JmAuthStore.token() != null,
+            manwaAuthenticated = UserRepository.isLoggedIn,
+        )
+        if (!authenticated) {
+            if (isJm) jmNeedLogin.value = true else needLogin.value = true
+        }
+        return authenticated
+    }
 
     /** 收藏成功事件：UI 层收到后显示 toast。 */
     private val _favSuccess = MutableSharedFlow<String>()
@@ -176,6 +189,7 @@ class MangaDetailViewModel(private val bookId: String) {
             toggleJmFavorite()
             return
         }
+        if (!ensureAccountLogin()) return
         scope.launch {
             favBusy.value = true
             try {
@@ -397,7 +411,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 打开收藏夹选择：拉取分类列表。 */
     fun openFolderPicker() {
-        if (isJm) return
+        if (isJm || !ensureAccountLogin()) return
         scope.launch {
             try {
                 folders.value = FavoriteRepository.getFolderList()
@@ -411,6 +425,7 @@ class MangaDetailViewModel(private val bookId: String) {
     /** 收藏到指定分类。 */
     fun addToFolder(folderId: Int) {
         if (isJm) return
+        if (!ensureAccountLogin()) return
         scope.launch {
             favBusy.value = true
             try {
@@ -434,6 +449,7 @@ class MangaDetailViewModel(private val bookId: String) {
      */
     fun addToAllFolders() {
         if (isJm) return
+        if (!ensureAccountLogin()) return
         scope.launch {
             favBusy.value = true
             try {
@@ -459,7 +475,7 @@ class MangaDetailViewModel(private val bookId: String) {
      * 所以这里必须把服务端返回的真实结果用 toast 讲清楚，用户才知道发生了什么。
      */
     fun toggleBlock() {
-        if (isJm) return
+        if (isJm || !ensureAccountLogin()) return
         scope.launch {
             blockBusy.value = true
             try {
@@ -482,7 +498,7 @@ class MangaDetailViewModel(private val bookId: String) {
     /** 将详情页选中的漫画标签加入账号屏蔽列表。 */
     fun submitAddBlacklist(tags: List<String>, onSuccess: () -> Unit) {
         if (isJm) return
-        if (tags.isEmpty() || addingBlacklist.value) return
+        if (tags.isEmpty() || addingBlacklist.value || !ensureAccountLogin()) return
         scope.launch {
             addingBlacklist.value = true
             try {
@@ -502,7 +518,7 @@ class MangaDetailViewModel(private val bookId: String) {
 
     /** 删除当前漫画的阅读历史。bookId 为字符串，单本直接传入。 */
     fun deleteHistory() {
-        if (isJm) return
+        if (isJm || !ensureAccountLogin()) return
         scope.launch {
             try {
                 HistoryRepository.deleteHistory(bookId)

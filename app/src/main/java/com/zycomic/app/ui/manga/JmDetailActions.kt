@@ -40,6 +40,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.zycomic.app.data.dto.Manga
@@ -54,42 +56,36 @@ internal fun JmDetailActions(vm: MangaDetailViewModel, manga: Manga, onSaveCover
     val account by vm.jmAccountName.collectAsState()
     var showAccount by remember(vm) { mutableStateOf(false) }
     var showComments by remember(vm) { mutableStateOf(false) }
-    LaunchedEffect(needsLogin) {
+    LaunchedEffect(vm, needsLogin) {
         if (needsLogin) {
             showAccount = true
             vm.jmNeedLogin.value = false
         }
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = vm::toggleFavorite, enabled = !busy, modifier = Modifier.weight(1f)) {
-                Column {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(if (manga.fav == 1) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder, null)
-                    Text(stringResource(if (manga.fav == 1) KMR.strings.jm_favorited else KMR.strings.jm_favorite))
+                    Text(stringResource(if (manga.fav == 1) KMR.strings.jm_favorited else KMR.strings.jm_favorite), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             TextButton(onClick = vm::toggleJmLike, enabled = !busy, modifier = Modifier.weight(1f)) {
-                Column {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(if (manga.jmLiked == true) Icons.Default.ThumbUp else Icons.Outlined.ThumbUp, null)
-                    Text(stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_count else KMR.strings.jm_like_count, manga.jmLikes?.toString() ?: "—"))
+                    Text(stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_count else KMR.strings.jm_like_count, manga.jmLikes?.toString() ?: "—"), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             TextButton(onClick = {
                 showComments = true
                 vm.loadJmComments()
             }, modifier = Modifier.weight(1f)) {
-                Column {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Default.ChatBubbleOutline, null)
-                    Text(stringResource(KMR.strings.jm_comment_count, commentCount?.toString() ?: "—"))
+                    Text(stringResource(KMR.strings.jm_comment_count, commentCount?.toString() ?: "—"), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            JmDetailOverflow(manga.name, manga.id, onSaveCover, onShareCover)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            if (busy) CircularProgressIndicator(Modifier.size(18.dp))
-            TextButton(onClick = { showAccount = true }, enabled = !busy) {
-                Text(account ?: stringResource(KMR.strings.jm_login), style = MaterialTheme.typography.labelMedium)
-            }
+            JmDetailOverflow(manga.name, manga.id, onSaveCover, onShareCover, Modifier.weight(1f))
         }
     }
     if (showComments) JmCommentsDialog(vm, onDismiss = { showComments = false })

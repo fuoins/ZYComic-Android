@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -24,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +37,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -72,12 +76,15 @@ internal fun JmTagGroup(title: String, entries: List<String>, onSearch: (String)
 }
 
 @Composable
-internal fun JmDetailOverflow(title: String, albumId: String, onSave: () -> Unit, onShare: () -> Unit) {
+internal fun JmDetailOverflow(title: String, albumId: String, onSave: () -> Unit, onShare: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Default.MoreVert, stringResource(KMR.strings.jm_detail_more))
+    Box(modifier, contentAlignment = Alignment.Center) {
+        TextButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
+                Text(stringResource(KMR.strings.jm_detail_more), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text(stringResource(KMR.strings.jm_copy_title)) }, onClick = {

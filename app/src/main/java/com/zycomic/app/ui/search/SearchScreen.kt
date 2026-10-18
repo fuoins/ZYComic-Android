@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -516,9 +519,9 @@ private fun SearchMangaListRow(
 
 /**
  * 搜索历史：关键词为空时整页显示历史列表（最新在前）。
- * 点一条 = 直接用该词搜索；垃圾桶进入删除模式后每条右侧出现 ❌ 可单条删，
- * 长按垃圾桶清空全部。
+ * 历史词以可换行胶囊显示；正常模式点击胶囊搜索，删除模式通过尾部独立按钮单条删除。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchHistorySection(vm: SearchViewModel) {
     val history by vm.searchHistory.collectAsState()
@@ -545,29 +548,39 @@ private fun SearchHistorySection(vm: SearchViewModel) {
                 }
             }
         }
-        items(history, key = { it }) { k ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { if (!deleting) vm.searchHistoryItem(k) }
-                    .padding(vertical = 10.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        item {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             ) {
-                Text(
-                    text = k,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (deleting) {
-                    IconButton(onClick = { vm.removeHistoryItem(k) }, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            Icons.Outlined.Close,
-                            contentDescription = "删除记录 $k",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(18.dp),
+                history.forEach { k ->
+                    Row(
+                        modifier = Modifier
+                            .widthIn(max = 320.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable(enabled = !deleting) { vm.searchHistoryItem(k) }
+                            .padding(start = 12.dp, end = if (deleting) 2.dp else 12.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = k,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
+                        if (deleting) {
+                            IconButton(onClick = { vm.removeHistoryItem(k) }, modifier = Modifier.size(32.dp)) {
+                                Icon(
+                                    Icons.Outlined.Close,
+                                    contentDescription = "删除记录 $k",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

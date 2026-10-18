@@ -285,26 +285,28 @@ fun ProfileScreen(
             item { HorizontalDivider() }
 
             // ---- 设置入口 ----
-            item {
-                TextPreferenceWidget(
-                    title = "标签屏蔽",
-                    icon = Icons.AutoMirrored.Outlined.Label,
-                    onPreferenceClick = onOpenTagBlock,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "漫画屏蔽",
-                    icon = Icons.Outlined.VisibilityOff,
-                    onPreferenceClick = onOpenBookBlock,
-                )
-            }
-            item {
-                TextPreferenceWidget(
-                    title = "gay标签一键屏蔽",
-                    icon = Icons.Outlined.Block,
-                    onPreferenceClick = onBlockGayTags,
-                )
+            if (platform == ContentPlatform.MANWA) {
+                item {
+                    TextPreferenceWidget(
+                        title = "标签屏蔽",
+                        icon = Icons.AutoMirrored.Outlined.Label,
+                        onPreferenceClick = onOpenTagBlock,
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = "漫画屏蔽",
+                        icon = Icons.Outlined.VisibilityOff,
+                        onPreferenceClick = onOpenBookBlock,
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = "gay标签一键屏蔽",
+                        icon = Icons.Outlined.Block,
+                        onPreferenceClick = onBlockGayTags,
+                    )
+                }
             }
 
             item { HorizontalDivider() }

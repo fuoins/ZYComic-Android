@@ -544,7 +544,6 @@ fun AppContent(
                 bottomTab = 0
                 pendingTag = tag
             },
-            onRequireLogin = { loginOpen = true },
         )
     }
 

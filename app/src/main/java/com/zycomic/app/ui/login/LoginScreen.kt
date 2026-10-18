@@ -71,9 +71,9 @@ fun LoginOverlay(onClose: () -> Unit) {
 }
 
 @Composable
-fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () -> Unit = {}) {
+fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () -> Unit = {}, fixedPlatform: ContentPlatform? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var platform by remember { mutableStateOf(ContentPlatformPrefs.load("profile")) }
+    var platform by remember { mutableStateOf(fixedPlatform ?: ContentPlatformPrefs.load("profile")) }
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
     var jmBusy by remember { mutableStateOf(false) }
@@ -99,11 +99,13 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            IconButton(onClick = onClose, enabled = !jmBusy) { Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface) }
+            IconButton(onClick = onClose, enabled = !jmBusy && !loading) { Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface) }
             Spacer(Modifier.width(8.dp))
             Text(
                 if (platform == ContentPlatform.JM) {
                     stringResource(KMR.strings.jm_account_login_title)
+                } else if (fixedPlatform == ContentPlatform.MANWA && mode == 0) {
+                    stringResource(KMR.strings.manwa_detail_login_title)
                 } else {
                     when (mode) {
                         0 -> "账号登录"
@@ -116,17 +118,19 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
-            ContentPlatformSelector(
-                selected = platform,
-                compact = true,
-                onSelect = { selected ->
-                    if (!loading && !jmBusy && selected != platform && StartupPlatformPolicy.checkSelection(context, selected)) {
-                        vm.resetForPlatform()
-                        platform = selected
-                        ContentPlatformPrefs.save("login", selected)
-                    }
-                },
-            )
+            if (fixedPlatform == null) {
+                ContentPlatformSelector(
+                    selected = platform,
+                    compact = true,
+                    onSelect = { selected ->
+                        if (!loading && !jmBusy && selected != platform && StartupPlatformPolicy.checkSelection(context, selected)) {
+                            vm.resetForPlatform()
+                            platform = selected
+                            ContentPlatformPrefs.save("login", selected)
+                        }
+                    },
+                )
+            }
         }
         Spacer(Modifier.height(16.dp))
         if (platform == ContentPlatform.JM) {
