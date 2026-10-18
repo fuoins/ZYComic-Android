@@ -10,6 +10,7 @@ import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
+import com.zycomic.app.net.SpeedTestUiTextPolicy
 import com.zycomic.app.net.SpeedTester
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -39,6 +39,7 @@ import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
+import com.zycomic.app.net.SpeedTestUiTextPolicy
 import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.ui.components.NetworkMaintenanceNotice
 import eu.kanade.tachiyomi.BuildConfig
