@@ -39,18 +39,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -214,21 +214,37 @@ fun BrowseScreen(
                     searchQuery = null,
                     onChangeSearchQuery = {},
                     actions = {
+                        // Keep the direct-ID entry beside search, not in a separate content row.
+                        FilledTonalButton(
+                            onClick = {
+                                if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
+                                    jmAlbumIdInput = ""
+                                    jmAlbumIdError = false
+                                    showJmAlbumJumpDialog = true
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        ) {
+                            Icon(Icons.Outlined.Tag, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        }
                         AppBarActions(
                             if (platform == ContentPlatform.MANWA) {
                                 persistentListOf(
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", null) }),
-                                    AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
-                                    AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
-                                    AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
+                                    AppBar.OverflowAction(title = "刷新", onClick = { vm.refresh() }),
+                                    AppBar.OverflowAction(title = "使用说明", onClick = { showGuideDialog = true }),
+                                    AppBar.OverflowAction(title = "多选", onClick = { vm.enterSelection() }),
                                 )
                             } else {
                                 persistentListOf(
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = {
                                         onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, null)
                                     }),
-                                    AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
-                                    AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
+                                    AppBar.OverflowAction(title = "刷新", onClick = { vm.refresh() }),
+                                    AppBar.OverflowAction(title = "使用说明", onClick = { showGuideDialog = true }),
                                 )
                             },
                         )
@@ -274,23 +290,6 @@ fun BrowseScreen(
                     end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
                 ),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(
-                    onClick = {
-                        if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
-                            jmAlbumIdInput = ""
-                            jmAlbumIdError = false
-                            showJmAlbumJumpDialog = true
-                        }
-                    },
-                ) {
-                    Text(stringResource(KMR.strings.jm_album_jump_button))
-                }
-            }
-
             // 共用混合标签栏（选中 tab 后内嵌「重新筛选」）+ 平台颜色图例 + 管理
             val tabRowStateHolder = rememberSaveableStateHolder()
             tabRowStateHolder.SaveableStateProvider("category_tab_row_shared") {

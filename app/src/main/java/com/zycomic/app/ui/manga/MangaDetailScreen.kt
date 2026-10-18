@@ -180,6 +180,7 @@ fun MangaDetailScreen(
     var showCoverMenu by remember(bookId) { mutableStateOf(false) }
     var showCoverPreview by remember(bookId) { mutableStateOf(false) }
     var showAddBlacklistDialog by remember(bookId) { mutableStateOf(false) }
+    var authorsExpanded by rememberSaveable(bookId) { mutableStateOf(false) }
     /** 屏蔽二次确认：服务端接口是 toggle，必须让用户知道重复点击会变成取消屏蔽 */
     var showBlockConfirm by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
@@ -336,34 +337,52 @@ fun MangaDetailScreen(
                                 .filter(String::isNotBlank)
                                 .distinct()
                             if (authors.isNotEmpty()) {
+                                val visibleAuthors = detailAuthorsForDisplay(authors, authorsExpanded)
                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
-                                    authors.forEach { author ->
+                                    visibleAuthors.forEach { author ->
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier
                                                 .clip(CircleShape)
                                                 .background(MaterialTheme.colorScheme.secondaryContainer)
                                                 .clickable { onSearchKeyword(author) }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
                                         ) {
                                             Icon(
                                                 Icons.Outlined.PersonOutline,
                                                 contentDescription = null,
-                                                modifier = Modifier.size(16.dp),
+                                                modifier = Modifier.size(14.dp),
                                                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                             )
-                                            Spacer(Modifier.width(4.dp))
+                                            Spacer(Modifier.width(3.dp))
                                             Text(
                                                 author,
-                                                style = MaterialTheme.typography.titleSmall,
+                                                style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                                             )
                                         }
                                     }
+                                }
+                                if (authors.size > 1) {
+                                    Text(
+                                        stringResource(if (authorsExpanded) KMR.strings.detail_authors_collapse else KMR.strings.detail_authors_expand),
+                                        modifier = Modifier
+                                            .clickable { authorsExpanded = !authorsExpanded }
+                                            .padding(top = 4.dp, bottom = 2.dp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                if (shouldShowJmAuthorNote(vm.isJm, authorsExpanded)) {
+                                    Text(
+                                        stringResource(KMR.strings.jm_author_note),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                                 Spacer(Modifier.height(6.dp))
                             }

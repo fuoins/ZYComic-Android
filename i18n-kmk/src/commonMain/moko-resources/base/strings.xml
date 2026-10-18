@@ -343,4 +343,7 @@
     <string name="jm_account_cancel">取消</string>
     <string name="jm_password_profile_notice">修改前会先读取完整资料，仅替换密码后提交，以保留姓名、生日等原有资料。</string>
     <string name="jm_home_online_defaults">采用在线获取，不支持更改默认</string>
+    <string name="detail_authors_expand">展开作者</string>
+    <string name="detail_authors_collapse">收起作者</string>
+    <string name="jm_author_note">禁漫天堂标签真逆天了，是用户们上传的标签不审核吗，全放进来了...</string>
 </resources>
