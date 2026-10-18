@@ -249,6 +249,7 @@ object JmRouteManager {
     fun selectImageDomain(domain: String?) {
         val current = _state.value
         val selected = domain?.let { value -> current.imageDomains.firstOrNull { it.equals(value, true) } }
+        if (selected == null) JmNetworkModule.clearSelectedImageEndpoint()
         val resolved = selected ?: fastestImageDomain() ?: current.imageDomains.first()
         _state.value = current.copy(imageDomain = resolved)
         val editor = prefs()?.edit()

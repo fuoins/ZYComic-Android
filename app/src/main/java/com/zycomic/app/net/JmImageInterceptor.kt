@@ -48,6 +48,7 @@ class JmImageInterceptor : Interceptor {
                 .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
                 .build()
             try {
+                JmNetworkModule.prepareImageRoute(host)
                 val response = chain.proceed(request)
                 val isImage = response.header("Content-Type")?.substringBefore(';')
                     ?.startsWith("image/", ignoreCase = true) == true

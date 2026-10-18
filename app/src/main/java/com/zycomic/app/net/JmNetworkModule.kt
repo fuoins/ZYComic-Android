@@ -21,18 +21,22 @@ object JmNetworkModule {
     @Volatile private var selectedImageEndpoint: DomainIp? = null
 
     val selectedImageIp: String?
-        get() = selectedImageEndpoint?.takeIf { endpoint ->
-            endpoint.domain.equals(JmRouteManager.activeImageDomain, true) &&
-                endpoint in JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs
-        }?.ip
+        get() = currentImageEndpoint()?.ip
+
+    fun currentImageEndpoint(domain: String = JmRouteManager.activeImageDomain): DomainIp? {
+        val snapshot = JmRouteManager.speedTestSnapshot.value
+        return JmImageEndpointSelectionPolicy.currentEndpoint(
+            domain = domain,
+            configuredDomains = JmRouteManager.imageDomains,
+            delays = snapshot.imageIpDelaysMs,
+            verdicts = snapshot.imageIpVerdicts,
+            manualEndpoint = selectedImageEndpoint,
+        )
+    }
 
     private val jmDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            selectedImageEndpoint?.takeIf { endpoint ->
-                endpoint.domain.equals(hostname, ignoreCase = true) &&
-                    JmRouteManager.imageDomains.any { it.equals(endpoint.domain, true) } &&
-                    endpoint in JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs
-            }?.let { endpoint ->
+            currentImageEndpoint(hostname)?.let { endpoint ->
                 return listOf(InetAddress.getByName(endpoint.ip))
             }
             val configured = JmRouteManager.resolveIp(hostname)
@@ -93,17 +97,14 @@ object JmNetworkModule {
     fun selectImageEndpoint(domain: String, ip: String): Boolean {
         if (JmRouteManager.imageDomains.none { it.equals(domain, ignoreCase = true) }) return false
         if (ip.isBlank()) return false
-        if (JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.keys.none {
-                it.domain.equals(domain, true) && it.ip.equals(ip.trim(), true)
-            }
-        ) {
-            return false
-        }
-        selectedImageEndpoint = DomainIp(domain, ip.trim())
+        val endpoint = JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.keys.firstOrNull {
+            it.domain.equals(domain, true) && it.ip.equals(ip.trim(), true)
+        } ?: return false
+        selectedImageEndpoint = endpoint
         return true
     }
 
-    /** Forget the manual per-IP override and resume the configured JM DNS result. */
+    /** Forget the manual override and resume the active domain's fastest valid measured IP. */
     fun clearSelectedImageEndpoint() {
         selectedImageEndpoint = null
     }
@@ -111,6 +112,20 @@ object JmNetworkModule {
     /** The JM client has a dedicated pool; evict old sockets after changing a hostname's pinned IP. */
     fun rebindImageEndpoint() {
         runCatching { baseClient.connectionPool.evictAll() }
+    }
+
+    private val boundImageRoutes = mutableMapOf<String, List<String>>()
+
+    /** Called only by the image interceptor on its request thread, never by main-thread state updates. */
+    @Synchronized
+    internal fun prepareImageRoute(host: String) {
+        if (JmRouteManager.imageDomains.none { it.equals(host, ignoreCase = true) }) return
+        val key = host.lowercase(java.util.Locale.ROOT)
+        val addresses = currentImageEndpoint(host)?.let { listOf(it.ip) } ?: JmRouteManager.resolveIp(host)
+        if (boundImageRoutes[key] != addresses) {
+            rebindImageEndpoint()
+            boundImageRoutes[key] = addresses
+        }
     }
 
     /** /confirm is the only setup request; its cookies remain confined to [cookieJar]. */

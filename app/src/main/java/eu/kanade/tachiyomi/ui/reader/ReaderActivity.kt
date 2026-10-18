@@ -797,6 +797,7 @@ class ReaderActivity : BaseActivity() {
             routeState.imageDomains,
             snapshot.imageDelaysMs,
         )
+        val currentEndpoint = com.zycomic.app.net.JmNetworkModule.currentImageEndpoint(routeState.imageDomain)
 
         ScrollbarLazyColumn(
             modifier = Modifier
@@ -814,7 +815,7 @@ class ReaderActivity : BaseActivity() {
             }
             item {
                 Text(
-                    "JM sources2 图源池；成功项按测速耗时排序\n当前：${routeState.imageDomain} · ${com.zycomic.app.net.JmNetworkModule.selectedImageIp ?: "IP 自动"}",
+                    "JM sources2 图源池；成功项按测速耗时排序\n当前：${routeState.imageDomain} · ${currentEndpoint?.ip ?: "IP 自动/未测"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -830,12 +831,7 @@ class ReaderActivity : BaseActivity() {
             )
             if (rankedEndpoints.isNotEmpty()) {
                 items(rankedEndpoints) { endpoint ->
-                    val selectedDomain = endpoint.domain.equals(routeState.imageDomain, ignoreCase = true)
-                    val selected = selectedDomain &&
-                        (
-                            com.zycomic.app.net.JmNetworkModule.selectedImageIp == null ||
-                                com.zycomic.app.net.JmNetworkModule.selectedImageIp.equals(endpoint.ip, ignoreCase = true)
-                            )
+                    val selected = endpoint == currentEndpoint
                     val delay = com.zycomic.app.reader.JmReaderImageSourcePolicy.delayFor(endpoint, snapshot.imageIpDelaysMs)
                     val verdict = snapshot.imageIpVerdicts.entries.firstOrNull {
                         it.key.domain.equals(endpoint.domain, ignoreCase = true) && it.key.ip.equals(endpoint.ip, ignoreCase = true)
@@ -867,7 +863,6 @@ class ReaderActivity : BaseActivity() {
                 }
             } else {
                 items(domains) { domain ->
-                    val selected = domain.equals(routeState.imageDomain, ignoreCase = true)
                     val delay = com.zycomic.app.reader.JmReaderImageSourcePolicy.delayFor(domain, snapshot.imageDelaysMs)
                     Row(
                         modifier = Modifier.fillMaxWidth()
@@ -876,13 +871,10 @@ class ReaderActivity : BaseActivity() {
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (selected) "● $domain" else "○ $domain",
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            text = "○ $domain",
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
-                        if (selected) {
-                            Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
-                        }
                         Text(
                             text = when {
                                 delay == null -> "未测"
