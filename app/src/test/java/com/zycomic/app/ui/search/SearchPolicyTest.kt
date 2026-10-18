@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Test
 class SearchPolicyTest {
     @Test
     fun `provider defaults and persisted values are stable`() {
-        assertEquals(SearchProvider.MANWA, SearchProvider.fromStorage(null))
-        assertEquals(SearchProvider.MANWA, SearchProvider.fromStorage("unknown"))
+        assertEquals(SearchProvider.JM, SearchProvider.fromStorage(null))
+        assertEquals(SearchProvider.JM, SearchProvider.fromStorage("unknown"))
         assertEquals(SearchProvider.MANWA.defaultDisplayMode, 3)
         assertEquals(SearchProvider.JM.defaultDisplayMode, 1)
         assertEquals(SearchProvider.JM, SearchProvider.fromStorage("jm"))

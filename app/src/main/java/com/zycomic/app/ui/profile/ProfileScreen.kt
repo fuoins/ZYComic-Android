@@ -76,6 +76,7 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.ContentPlatformSelector
+import com.zycomic.app.platform.StartupPlatformPolicy
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.CancellationException
@@ -97,12 +98,14 @@ fun ProfileScreen(
     val context = LocalContext.current
     var platform by remember { mutableStateOf(ContentPlatformPrefs.load("profile")) }
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
-        platform = selected
-        ContentPlatformPrefs.save("profile", selected)
+        if (StartupPlatformPolicy.checkSelection(context, selected)) {
+            platform = selected
+            ContentPlatformPrefs.save("profile", selected)
+        }
     }
     val user by UserRepository.userFlow.collectAsState()
-    LaunchedEffect(Unit) {
-        if (UserRepository.isLoggedIn) {
+    LaunchedEffect(platform) {
+        if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.isLoggedIn) {
             try {
                 UserRepository.refreshUserInfo()
             } catch (e: CancellationException) {

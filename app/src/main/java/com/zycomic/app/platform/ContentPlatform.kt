@@ -37,7 +37,7 @@ enum class ContentPlatform(val id: String, val accent: Color) {
     ;
 
     companion object {
-        fun fromId(id: String?): ContentPlatform = entries.firstOrNull { it.id == id } ?: MANWA
+        fun fromId(id: String?): ContentPlatform = entries.firstOrNull { it.id == id } ?: JM
     }
 }
 
@@ -50,7 +50,12 @@ internal object ContentPlatformPrefs {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
-    fun load(page: String): ContentPlatform = ContentPlatform.fromId(prefs.getString(page, null))
+    fun load(page: String): ContentPlatform {
+        val remembered = ContentPlatform.fromId(prefs.getString(page, null))
+        val resolved = StartupPlatformPolicy.resolve(remembered)
+        if (resolved != remembered) prefs.edit().putString(page, resolved.id).apply()
+        return resolved
+    }
 
     fun save(page: String, platform: ContentPlatform) {
         prefs.edit().putString(page, platform.id).apply()

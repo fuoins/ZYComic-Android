@@ -3,6 +3,8 @@ package com.zycomic.app.ui.search
 import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +84,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
     }
 
     // ---- 搜索来源、显示模式与 JM 排序（分别持久化）----
-    val provider = MutableStateFlow(initialProvider ?: SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null)))
+    val provider = MutableStateFlow(resolveInitialProvider(initialProvider))
     val displayMode = MutableStateFlow(loadDisplayMode(provider.value))
     val jmSortCode = MutableStateFlow(searchPrefs.getString(KEY_JM_SORT, "mr") ?: "mr")
     val gridColumns = MutableStateFlow(3)
@@ -102,8 +104,9 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         }
     }
 
-    fun selectProvider(selected: SearchProvider) {
-        if (provider.value == selected) return
+    fun selectProvider(selected: SearchProvider): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(selected.toContentPlatform())) return false
+        if (provider.value == selected) return true
         provider.value = selected
         searchPrefs.edit().putString(KEY_PROVIDER, selected.storageValue).apply()
         displayMode.value = loadDisplayMode(selected)
@@ -112,6 +115,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         } else {
             clearSearchResults()
         }
+        return true
     }
 
     fun setJmSortCode(code: String) {
@@ -157,6 +161,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
     }
 
     fun doSearch() {
+        if (!StartupPlatformPolicy.isEnabled(provider.value.toContentPlatform())) return
         val k = keyword.value.trim()
         if (k.isEmpty()) {
             clearSearchResults()
@@ -175,6 +180,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
     }
 
     fun loadMore() {
+        if (!StartupPlatformPolicy.isEnabled(provider.value.toContentPlatform())) return
         if (!hasSearched || _loading.value || _appending.value || !_hasMore.value) return
         startLoad(
             reset = false,
@@ -206,6 +212,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
     private suspend fun load(request: SearchRequest, reset: Boolean) {
         val coroutineJob = currentCoroutineContext()[Job]
         try {
+            if (!StartupPlatformPolicy.isEnabled(request.provider.toContentPlatform())) return
             if (request.provider == SearchProvider.JM) {
                 val pageResult = com.zycomic.app.reader.JmSource.browse(
                     mode = 0,
@@ -276,9 +283,25 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         private const val HISTORY_MAX = 20
         private lateinit var prefs: android.content.SharedPreferences
         private lateinit var searchPrefs: android.content.SharedPreferences
+
+        private fun resolveInitialProvider(initialProvider: SearchProvider?): SearchProvider {
+            val requested = initialProvider ?: SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null))
+            return StartupPlatformPolicy.resolve(requested.toContentPlatform()).toSearchProvider()
+        }
+
         fun init(context: Context) {
             prefs = context.getSharedPreferences("zycomic_display", Context.MODE_PRIVATE)
             searchPrefs = context.getSharedPreferences("zycomic_search", Context.MODE_PRIVATE)
         }
     }
+}
+
+private fun SearchProvider.toContentPlatform(): ContentPlatform = when (this) {
+    SearchProvider.MANWA -> ContentPlatform.MANWA
+    SearchProvider.JM -> ContentPlatform.JM
+}
+
+private fun ContentPlatform.toSearchProvider(): SearchProvider = when (this) {
+    ContentPlatform.MANWA -> SearchProvider.MANWA
+    ContentPlatform.JM -> SearchProvider.JM
 }

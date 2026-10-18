@@ -41,7 +41,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.data.repository.ReaderRepository
 import com.zycomic.app.net.ImageSourceDisplayPolicy
 import com.zycomic.app.net.JmRouteManager
-import com.zycomic.app.net.JmSpeedTester
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.ui.components.FilterChip
@@ -258,8 +257,11 @@ fun SettingsScreen() {
         SectionTitle("禁漫天堂独立线路")
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             Text(
-                if (jmState.usingFallbackLines) "当前使用 JM 官方内置兜底线路（远程配置未提供 lines2）"
-                else "当前使用远程配置 lines2",
+                if (jmState.usingFallbackLines) {
+                    "当前使用 JM 官方内置兜底线路（远程配置未提供 lines2）"
+                } else {
+                    "当前使用远程配置 lines2"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -329,7 +331,7 @@ fun SettingsScreen() {
                         jmTesting = true
                         jmTestError = null
                         scope.launch {
-                            runCatching { JmSpeedTester.run() }
+                            runCatching { com.zycomic.app.net.PlatformSpeedTestCoordinator.run(forceFresh = true, onlyPlatform = com.zycomic.app.platform.ContentPlatform.JM) }
                                 .onFailure { jmTestError = it.message ?: "JM 测速失败" }
                             jmTesting = false
                         }

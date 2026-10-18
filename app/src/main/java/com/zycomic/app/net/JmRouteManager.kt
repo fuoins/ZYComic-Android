@@ -2,6 +2,8 @@ package com.zycomic.app.net
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +32,7 @@ object JmRouteManager {
         val startedAtEpochMs: Long? = null,
         val completedAtEpochMs: Long? = null,
         val remoteVersion: Int? = null,
+        val configFingerprint: String? = null,
     )
 
     data class LogEntry(
@@ -67,6 +70,8 @@ object JmRouteManager {
 
     @Volatile private var routeRules: Map<String, List<String>> = emptyMap()
 
+    @Volatile private var configRevision: Long = 0L
+
     @Volatile private var jmSniDomains: Set<String> = emptySet()
 
     @Volatile private var consecutiveFailures = 0
@@ -79,6 +84,9 @@ object JmRouteManager {
     val baseUrl: String get() = lineHosts.getOrNull(_state.value.lineIndex) ?: lineHosts.firstOrNull().orEmpty()
     val lineHost: String get() = hostFromUrl(baseUrl)
     val activeImageDomain: String get() = _state.value.imageDomain
+    /** Persisted manual image selection, if it still belongs to the active candidate pool. */
+    val pinnedImageDomain: String?
+        get() = prefs()?.getString("selected_image", null)?.takeIf { pin -> imageDomains.any { it.equals(pin, true) } }
     val selectedLineIndex: Int get() = _state.value.lineIndex
     val isAutoSelectEnabled: Boolean get() = _state.value.autoSelect
     val isUsingFallbackLines: Boolean get() = _state.value.usingFallbackLines
@@ -153,10 +161,12 @@ object JmRouteManager {
         lineHealth.clear()
         imageHealth.clear()
         consecutiveFailures = 0
-        if (poolsChanged) {
+        configRevision++
+        val updatedFingerprint = currentSpeedTestConfigFingerprint()
+        if (_speedTestSnapshot.value.configFingerprint != updatedFingerprint ||
+            !isSpeedTestSnapshotValid(_speedTestSnapshot.value)
+        ) {
             _speedTestSnapshot.value = SpeedTestSnapshot(remoteVersion = version)
-        } else {
-            _speedTestSnapshot.value = _speedTestSnapshot.value.copy(remoteVersion = version)
         }
         persistSnapshot()
         if (!poolsChanged && auto) applyFastestLine()
@@ -193,7 +203,8 @@ object JmRouteManager {
             usingFallbackLines = prefs.getBoolean("using_fallback", current.usingFallbackLines),
             remoteVersion = prefs.getInt("remote_version", -1).takeIf { it >= 0 },
         )
-        _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null), _state.value.remoteVersion)
+        configRevision++
+        _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null))
         _logs.value = decodeLogs(prefs.getString(KEY_LOGS, null))
     }
 
@@ -237,13 +248,73 @@ object JmRouteManager {
     }
 
     @Synchronized
-    fun applySnapshot(snapshot: SpeedTestSnapshot) {
-        _speedTestSnapshot.value = snapshot.copy(remoteVersion = _state.value.remoteVersion)
+    fun applySnapshot(snapshot: SpeedTestSnapshot, expectedPlatformRevision: Long? = null): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+            (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision) ||
+            !isSpeedTestSnapshotValid(snapshot)
+        ) {
+            return false
+        }
+        _speedTestSnapshot.value = snapshot
         persistSnapshot()
         if (_state.value.autoSelect) applyFastestLine()
-        if (prefs()?.getString("selected_image", null).isNullOrBlank()) {
+        if (pinnedImageDomain == null) {
             fastestImageDomain()?.let { domain -> _state.value = _state.value.copy(imageDomain = domain) }
         }
+        return true
+    }
+
+    /** True only when the persisted snapshot exactly matches today's active JM configuration. */
+    fun reuseValidResults(expectedPlatformRevision: Long? = null): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+            (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision)
+        ) {
+            return false
+        }
+        val snapshot = _speedTestSnapshot.value
+        if (!isSpeedTestSnapshotValid(snapshot)) return false
+        return applySnapshot(snapshot, expectedPlatformRevision)
+    }
+
+    fun currentSpeedTestConfigRevision(): Long = configRevision
+
+    fun currentSpeedTestConfigFingerprint(): String {
+        val state = _state.value
+        val text = buildString {
+            append(state.remoteVersion ?: "builtin").append('\n')
+            state.lines.forEach { append(hostFromUrl(it).lowercase(Locale.ROOT)).append('\n') }
+            append("--images--\n")
+            state.imageDomains.forEach { append(it.lowercase(Locale.ROOT)).append('\n') }
+            append("--rules--\n")
+            routeRules.entries.sortedBy { it.key.lowercase(Locale.ROOT) }.forEach { (host, ips) ->
+                append(host.lowercase(Locale.ROOT)).append('=')
+                ips.sorted().forEach { append(it).append(',') }
+                append('\n')
+            }
+        }
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    fun isSpeedTestSnapshotValid(snapshot: SpeedTestSnapshot): Boolean {
+        val current = _state.value
+        val currentLines = current.lines.map { hostFromUrl(it).lowercase(Locale.ROOT) }.toSet()
+        val currentImages = current.imageDomains.map { it.lowercase(Locale.ROOT) }.toSet()
+        return JmSpeedTestValidityPolicy.isValid(
+            snapshotVersion = snapshot.remoteVersion,
+            currentVersion = current.remoteVersion,
+            snapshotFingerprint = snapshot.configFingerprint,
+            currentFingerprint = currentSpeedTestConfigFingerprint(),
+            snapshotLineCandidates = snapshot.lineDelaysMs.keys,
+            currentLineCandidates = currentLines,
+            snapshotImageCandidates = snapshot.imageDelaysMs.keys,
+            currentImageCandidates = currentImages,
+            lineDelays = snapshot.lineDelaysMs,
+            imageDelays = snapshot.imageDelaysMs,
+            startedAtEpochMs = snapshot.startedAtEpochMs,
+            completedAtEpochMs = snapshot.completedAtEpochMs,
+        )
     }
 
     @Synchronized
@@ -326,9 +397,15 @@ object JmRouteManager {
     }
 
     @Synchronized
-    fun recordSpeedTest(snapshot: SpeedTestSnapshot) {
-        applySnapshot(snapshot)
+    fun recordSpeedTest(snapshot: SpeedTestSnapshot, expectedPlatformRevision: Long? = null): Boolean {
+        if (!applySnapshot(snapshot, expectedPlatformRevision) ||
+            (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision) ||
+            !StartupPlatformPolicy.isEnabled(ContentPlatform.JM)
+        ) {
+            return false
+        }
         record("speed", "JM", "JM 独立线路/图床测速完成")
+        return true
     }
 
     @Synchronized
@@ -384,12 +461,13 @@ object JmRouteManager {
         put("started", snapshot.startedAtEpochMs ?: JSONObject.NULL)
         put("completed", snapshot.completedAtEpochMs ?: JSONObject.NULL)
         put("version", snapshot.remoteVersion ?: JSONObject.NULL)
+        put("configFingerprint", snapshot.configFingerprint ?: JSONObject.NULL)
         put("lines", JSONObject().apply { snapshot.lineDelaysMs.forEach { (host, delay) -> put(host, delay) } })
         put("images", JSONObject().apply { snapshot.imageDelaysMs.forEach { (host, delay) -> put(host, delay) } })
     }.toString()
 
-    private fun decodeSnapshot(raw: String?, version: Int?): SpeedTestSnapshot = runCatching {
-        val root = JSONObject(raw ?: return@runCatching SpeedTestSnapshot(remoteVersion = version))
+    private fun decodeSnapshot(raw: String?): SpeedTestSnapshot = runCatching {
+        val root = JSONObject(raw ?: return@runCatching SpeedTestSnapshot(remoteVersion = _state.value.remoteVersion))
         fun delays(key: String): Map<String, Long> {
             val obj = root.optJSONObject(key) ?: return emptyMap()
             val result = LinkedHashMap<String, Long>()
@@ -405,9 +483,10 @@ object JmRouteManager {
             imageDelaysMs = delays("images"),
             startedAtEpochMs = root.optLong("started").takeIf { it > 0 },
             completedAtEpochMs = root.optLong("completed").takeIf { it > 0 },
-            remoteVersion = version,
+            remoteVersion = root.optInt("version", -1).takeIf { it >= 0 },
+            configFingerprint = root.optString("configFingerprint").takeIf { it.isNotBlank() && it != "null" },
         )
-    }.getOrDefault(SpeedTestSnapshot(remoteVersion = version))
+    }.getOrDefault(SpeedTestSnapshot(remoteVersion = _state.value.remoteVersion))
 
     private fun encodeLogs(entries: List<LogEntry>): String = JSONArray().apply {
         entries.forEach { entry ->

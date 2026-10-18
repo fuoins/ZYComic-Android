@@ -75,6 +75,7 @@ import exh.log.EnhancedFilePrinter
 import exh.log.XLogLogcatLogger
 import exh.log.xLogD
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -110,6 +111,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     override fun onCreate() {
         super<Application>.onCreate()
 
+        com.zycomic.app.platform.StartupPlatformPolicy.load(this)
         // 初始化开发者配置
         DevConfig.init(this)
         DevConfig.migrateProxyDefaultIfNeeded()
@@ -148,7 +150,21 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 无有效远程快照的首次安装先等待配置；配置就绪后再进行用户 API 校验。
         ProcessLifecycleOwner.get().lifecycleScope.launch {
             DevConfig.awaitUsableRouteConfig()
-            com.zycomic.app.data.repository.UserRepository.verifyLogin()
+            if (com.zycomic.app.platform.StartupPlatformPolicy.isEnabled(com.zycomic.app.platform.ContentPlatform.MANWA)) {
+                com.zycomic.app.data.repository.UserRepository.verifyLogin()
+            }
+        }
+        // A toggle changed during a probe invalidates that generation and schedules enabled pools only.
+        ProcessLifecycleOwner.get().lifecycleScope.launch {
+            var previous = com.zycomic.app.platform.StartupPlatformPolicy.state.value
+            com.zycomic.app.platform.StartupPlatformPolicy.state.collect { policy ->
+                if (policy != previous) {
+                    previous = policy
+                    launch(Dispatchers.IO) {
+                        runCatching { com.zycomic.app.net.PlatformSpeedTestCoordinator.run() }
+                    }
+                }
+            }
         }
         // 启动后异步拉取权威远程配置。只有应用成功替换后，才针对新候选列表测速。
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
@@ -156,13 +172,10 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             if (result?.outcome == com.zycomic.app.net.RemoteConfigFetcher.Outcome.APPLIED) {
                 com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
                 try {
-                    runCatching { com.zycomic.app.net.SpeedTester.runForCurrentConfig() }
+                    runCatching { com.zycomic.app.net.PlatformSpeedTestCoordinator.run() }
                 } finally {
                     com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
                 }
-            }
-            if (com.zycomic.app.net.JmRouteManager.isAutoSelectEnabled) {
-                runCatching { com.zycomic.app.net.JmSpeedTester.run() }
             }
         }
 
@@ -321,8 +334,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     android.util.Log.i("App", "network changed: reuse recent speed test, skip retest")
                     return@launch
                 }
-                val r = com.zycomic.app.net.SpeedTester.runAndApply()
-                android.util.Log.i("App", "network changed retest done: line=${r.first}, img=${r.second}")
+                val r = com.zycomic.app.net.PlatformSpeedTestCoordinator.run(forceFresh = true)
+                android.util.Log.i("App", "network changed retest done: ${r.joinToString { it.summary() }}")
             } catch (e: Exception) {
                 android.util.Log.w("App", "network changed retest failed: ${e.message}")
             }

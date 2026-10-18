@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +19,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.History
@@ -34,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -60,6 +64,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.lifecycleScope
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.browse.BrowseViewModel
 import com.zycomic.app.ui.components.NetworkMaintenanceNotice
@@ -88,6 +94,8 @@ import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -106,6 +114,7 @@ class MainActivity : BaseActivity() {
         // 桌面快捷方式冷启动直达对应底部 tab
         shortcutTab = intent?.shortcutTab() ?: -1
 
+        StartupPlatformPolicy.load(this)
         com.zycomic.app.net.NetworkModule.init(this)
         setContent {
             val uiPreferences = remember { Injekt.get<UiPreferences>() }
@@ -157,6 +166,8 @@ private fun RemoteConfigGate(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 36.dp)) {
             Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(20.dp))
+            StartupPlatformSwitches()
             Spacer(modifier = Modifier.height(20.dp))
             when (state) {
                 com.zycomic.app.net.RouteConfigState.Loading -> {
@@ -265,13 +276,7 @@ fun AppContent(
     val speedTestProgress by settingsVm.speedTestProgress.collectAsState()
     val configRetest by com.zycomic.app.net.RemoteConfigFetcher.configRetest.collectAsState()
     val remoteInfo by settingsVm.remoteInfo.collectAsState()
-    val imageReuseNotice by settingsVm.imageReuseNotice.collectAsState()
-    val reusableImageSnapshot by com.zycomic.app.net.RouteManager.reusableImageSpeedTestSnapshot.collectAsState()
-    val reusableImageSnapshotIsValid = remember(reusableImageSnapshot) {
-        reusableImageSnapshot?.let {
-            com.zycomic.app.net.RouteManager.isReusableImageSpeedTestSnapshotValid(it)
-        } == true
-    }
+    val platformTestText by PlatformSpeedTestCoordinator.progressText.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
 
@@ -290,24 +295,18 @@ fun AppContent(
 
     LaunchedEffect(Unit) {
         if (isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) {
-            // 按需求去掉"整体 8s 超时 + 超时再重测一次"：
-            // 8s 这个值本身定不准（9 条线路 + 取样本 + 77 个图源，慢网必然掐断），
-            // 而重测又会撞上 SpeedTester 的防重入 —— 上一轮还在跑就直接 skip，
-            // 结果是"看着测过一轮，其实一个域都没探"，界面上全成了超时。
-            // 现在是每个探活各自测完再进入：单次请求 callTimeout 5s、取样本 6s 上限，
-            // 整轮耗时有界（一般几秒，最坏二十多秒），不会无限卡住。
-            val result = runCatching { settingsVm.autoSelectFastest() }.getOrNull()
-            if (result == null || result.first == -1) {
-                android.util.Log.w("SpeedTest", "startup speed test incomplete: $result")
-                Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
-            } else {
-                android.util.Log.d("SpeedTest", "speed test result line=${result.first} img=${result.second}")
-                Toast.makeText(context, "测速完成：最快线路${result.first + 1} + 图源${result.second + 1}（仅自动模式应用，临时手动选择保持不变）", Toast.LENGTH_SHORT).show()
-            }
+            runCatching { settingsVm.autoSelectFastest() }
+                .onFailure { Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show() }
             com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone = true
             speedTesting = false
         } else {
             speedTesting = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        PlatformSpeedTestCoordinator.completions.collect { report ->
+            Toast.makeText(context, report.summary(), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -460,7 +459,7 @@ fun AppContent(
         )
     } else {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 48.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp)) {
                 Text(
                     "网络配置：${remoteInfo.substringBefore("　上次错误：")}",
                     style = MaterialTheme.typography.bodySmall,
@@ -473,7 +472,7 @@ fun AppContent(
                 Spacer(modifier = Modifier.height(20.dp))
                 Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(24.dp))
-                CircularProgressIndicator(modifier = Modifier.size(64.dp), strokeWidth = 4.dp)
+                StartupPlatformSwitches()
                 Spacer(modifier = Modifier.height(24.dp))
                 if (configRetest?.duringStartup == true) {
                     Text(
@@ -499,36 +498,10 @@ fun AppContent(
                 }
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
-                    settingsVm.speedTestProgressMessage(speedTestProgress),
+                    platformTestText ?: settingsVm.speedTestProgressMessage(speedTestProgress),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (imageReuseNotice != null && configRetest?.duringStartup != true) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        imageReuseNotice.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                if (reusableImageSnapshotIsValid && configRetest?.duringStartup != true) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = { settingsVm.usePreviousImageResults() },
-                        enabled = imageReuseNotice == null,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("使用上次的图源测速结果")
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        "建议短期内测速过使用此功能，会节省大量时间，两次测速间隔时间过长不建议使用,可能出现图片加载不出来，若已选择并卡顿，可在漫画里切换图源点击重新测速或重启软件",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                }
             }
         }
     }
@@ -689,5 +662,23 @@ private fun KomikkuSettingsDialog(
                 navigator.lastItem.Content()
             }
         }
+    }
+}
+
+@Composable
+private fun StartupPlatformSwitches() {
+    val policy by StartupPlatformPolicy.state.collectAsState()
+    Column(modifier = Modifier.fillMaxWidth()) {
+        StartupSwitch(stringResource(KMR.strings.startup_disable_manwa), policy.disableManwa, StartupPlatformPolicy::setDisableManwa)
+        StartupSwitch(stringResource(KMR.strings.startup_disable_jm), policy.disableJm, StartupPlatformPolicy::setDisableJm)
+        StartupSwitch(stringResource(KMR.strings.startup_use_last_speed_test), policy.useLastResult, StartupPlatformPolicy::setUseLastResult)
+    }
+}
+
+@Composable
+private fun StartupSwitch(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

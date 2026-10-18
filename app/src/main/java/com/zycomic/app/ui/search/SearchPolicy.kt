@@ -13,7 +13,7 @@ enum class SearchProvider(
 
     companion object {
         fun fromStorage(value: String?): SearchProvider =
-            entries.firstOrNull { it.storageValue == value } ?: MANWA
+            entries.firstOrNull { it.storageValue == value } ?: JM
     }
 }
 

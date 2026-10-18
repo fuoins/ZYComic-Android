@@ -63,6 +63,7 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.PlatformNotConnectedContent
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
@@ -86,10 +87,13 @@ fun LibraryScreen(
     onRequireLogin: () -> Unit,
     onOpenSearch: (String) -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val platform by vm.currentPlatform.collectAsState()
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
-        ContentPlatformPrefs.save("library", selected)
-        vm.selectPlatform(selected)
+        if (StartupPlatformPolicy.checkSelection(context, selected)) {
+            ContentPlatformPrefs.save("library", selected)
+            vm.selectPlatform(selected)
+        }
     }
     val user by vm.user.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()

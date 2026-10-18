@@ -259,4 +259,7 @@
     <string name="content_platform_custom_tab_notice">禁漫天堂接口待接入；此 Tab 仅保存本地筛选配置。</string>
     <string name="content_platform_jm_reset_confirmation">将删除当前禁漫天堂平台下的自定义 Tab，恢复为空白分类页。确定？</string>
     <string name="content_platform_filter_jm">禁漫向</string>
+    <string name="startup_disable_manwa">不用漫蛙</string>
+    <string name="startup_disable_jm">不用禁漫天堂</string>
+    <string name="startup_use_last_speed_test">默认使用上次测速结果</string>
 </resources>

@@ -57,6 +57,7 @@ import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.PlatformNotConnectedContent
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -79,8 +80,10 @@ fun HistoryScreen(
     val context = LocalContext.current
     val platform by vm.currentPlatform.collectAsState()
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
-        ContentPlatformPrefs.save("history", selected)
-        vm.selectPlatform(selected)
+        if (StartupPlatformPolicy.checkSelection(context, selected)) {
+            ContentPlatformPrefs.save("history", selected)
+            vm.selectPlatform(selected)
+        }
     }
 
     val user by vm.user.collectAsState()

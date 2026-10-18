@@ -1,5 +1,7 @@
 package com.zycomic.app.net
 
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -19,37 +21,77 @@ object JmSpeedTester {
         check(running.compareAndSet(false, true)) { "JM 测速已在运行" }
         try {
             withContext(Dispatchers.IO) {
+                val platformRevision = StartupPlatformPolicy.state.value.revision
+                if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM)) {
+                    return@withContext JmRouteManager.SpeedTestSnapshot()
+                }
+                val configRevision = JmRouteManager.currentSpeedTestConfigRevision()
+                val configFingerprint = JmRouteManager.currentSpeedTestConfigFingerprint()
+                val linesToTest = JmRouteManager.lineHosts.toList()
+                val imagesToTest = JmRouteManager.imageDomains.toList()
+                fun stillCurrent(): Boolean =
+                    StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
+                        StartupPlatformPolicy.state.value.revision == platformRevision &&
+                        JmRouteManager.currentSpeedTestConfigRevision() == configRevision &&
+                        JmRouteManager.currentSpeedTestConfigFingerprint() == configFingerprint &&
+                        JmRouteManager.lineHosts == linesToTest &&
+                        JmRouteManager.imageDomains == imagesToTest
+
                 val started = System.currentTimeMillis()
                 val lines = linkedMapOf<String, Long>()
                 val images = linkedMapOf<String, Long>()
                 val probeClient = JmNetworkModule.newProbeClient()
                 try {
-                    JmRouteManager.lineHosts.forEach { line ->
+                    for (line in linesToTest) {
+                        if (!stillCurrent()) break
                         val host = runCatching { java.net.URI(line).host }.getOrNull().orEmpty()
                         if (host.isNotBlank()) {
                             val delay = measure(probeClient, "${line.trimEnd('/')}/setting?lang=TW", image = false)
-                            lines[host] = delay
+                            if (!stillCurrent()) break
+                            lines[host.lowercase(java.util.Locale.ROOT)] = delay
                             JmRouteManager.record("speed_line", host, if (delay < Long.MAX_VALUE) "${delay}ms" else "JM 线路不可达")
                         }
                     }
-                    JmRouteManager.imageDomains.forEach { host ->
+                    for (host in imagesToTest) {
+                        if (!stillCurrent()) break
                         val delay = measure(probeClient, "https://$host/media/users/nopic-.gif?v=0", image = true)
-                        images[host] = delay
+                        if (!stillCurrent()) break
+                        images[host.lowercase(java.util.Locale.ROOT)] = delay
                         JmRouteManager.record("speed_image", host, if (delay < Long.MAX_VALUE) "${delay}ms" else "JM 图床不可达/无图片响应")
                     }
                 } finally {
                     probeClient.connectionPool.evictAll()
                 }
-                JmRouteManager.SpeedTestSnapshot(
+                val snapshot = JmRouteManager.SpeedTestSnapshot(
                     lineDelaysMs = lines,
                     imageDelaysMs = images,
                     startedAtEpochMs = started,
                     completedAtEpochMs = System.currentTimeMillis(),
                     remoteVersion = JmRouteManager.state.value.remoteVersion,
-                ).also(JmRouteManager::recordSpeedTest)
+                    configFingerprint = configFingerprint,
+                )
+                if (stillCurrent() && lines.keys == linesToTest.mapNotNull { runCatching { java.net.URI(it).host }.getOrNull()?.lowercase(java.util.Locale.ROOT) }.toSet() &&
+                    images.keys == imagesToTest.map { it.lowercase(java.util.Locale.ROOT) }.toSet()
+                ) {
+                    JmRouteManager.recordSpeedTest(snapshot, platformRevision)
+                }
+                snapshot
             }
         } finally {
             running.set(false)
+        }
+    }
+
+    /** Apply a persisted exact-match snapshot without issuing any requests. */
+    suspend fun reuseValidResults(): Boolean = lock.withLock {
+        val revision = StartupPlatformPolicy.state.value.revision
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM)) return@withLock false
+        withContext(Dispatchers.IO) {
+            StartupPlatformPolicy.state.value.revision == revision &&
+                StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
+                JmRouteManager.reuseValidResults(revision) &&
+                StartupPlatformPolicy.state.value.revision == revision &&
+                StartupPlatformPolicy.isEnabled(ContentPlatform.JM)
         }
     }
 

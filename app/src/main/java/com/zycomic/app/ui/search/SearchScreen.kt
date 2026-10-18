@@ -59,12 +59,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
@@ -92,6 +94,7 @@ fun SearchScreen(
     val hasMore by vm.hasMore.collectAsState()
 
     val provider by vm.provider.collectAsState()
+    val context = LocalContext.current
     val displayMode by vm.displayMode.collectAsState()
     val jmSortCode by vm.jmSortCode.collectAsState()
     /** 删除模式必须 collect 成状态，直读 .value 不会随点击重组 */
@@ -187,7 +190,11 @@ fun SearchScreen(
         ) {
             com.zycomic.app.platform.ContentPlatformSelector(
                 selected = com.zycomic.app.platform.ContentPlatform.fromId(provider.storageValue),
-                onSelect = { vm.selectProvider(SearchProvider.fromStorage(it.id)) },
+                onSelect = {
+                    if (StartupPlatformPolicy.checkSelection(context, it)) {
+                        vm.selectProvider(SearchProvider.fromStorage(it.id))
+                    }
+                },
                 compact = true,
             )
             if (provider == SearchProvider.JM) {

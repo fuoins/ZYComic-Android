@@ -10,6 +10,7 @@ import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
+import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -193,6 +194,7 @@ class LibraryViewModel(val mode: Int = 2) {
     }
 
     fun selectPlatform(platform: ContentPlatform) {
+        if (!StartupPlatformPolicy.isEnabled(platform)) return
         if (currentPlatform.value == platform) return
         currentPlatform.value = platform
         if (platform == ContentPlatform.JM) {

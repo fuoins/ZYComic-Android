@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.repository.ReaderRepository
 import com.zycomic.app.net.ImageSourceDisplayPolicy
+import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
@@ -56,6 +57,25 @@ fun SpeedTestScreen(
 ) {
     val context = LocalContext.current
     val exportScope = rememberCoroutineScope()
+    val platformReports by PlatformSpeedTestCoordinator.reports.collectAsState()
+    val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
+    val platformProgress by PlatformSpeedTestCoordinator.progressText.collectAsState()
+    val platformExport = remember { mutableStateOf<String?>(null) }
+    val platformLogLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val json = platformExport.value
+        platformExport.value = null
+        if (uri != null && json != null) {
+            exportScope.launch {
+                val ok = runCatching {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(json) }
+                            ?: error("Unable to open the selected document")
+                    }
+                }.isSuccess
+                Toast.makeText(context, if (ok) "双平台日志已导出" else "双平台日志导出失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     val fullSnapshot by RouteManager.completedSpeedTestSnapshot.collectAsState()
     val speedTesterRunning by SpeedTester.isRunningFlow.collectAsState()
     val autoSelecting by vm.autoSelecting.collectAsState()
@@ -81,7 +101,7 @@ fun SpeedTestScreen(
     val exportFailedMessage = stringResource(KMR.strings.speed_test_export_failed)
     val noCompleteResultMessage = stringResource(KMR.strings.speed_test_export_no_complete_result)
     val exportInProgressMessage = stringResource(KMR.strings.speed_test_export_in_progress)
-    val speedTestActive = testing || autoSelecting || configRetest != null || speedTesterRunning
+    val speedTestActive = testing || autoSelecting || configRetest != null || speedTesterRunning || platformTestsRunning
     val canExport = fullSnapshot.canExport && !speedTestActive
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
@@ -183,7 +203,7 @@ fun SpeedTestScreen(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    Text(vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
+                    Text(platformProgress ?: vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
                     if (speedTestProgress.total > 0 &&
                         speedTestProgress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
                     ) {
@@ -197,6 +217,22 @@ fun SpeedTestScreen(
                 }
             }
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
+                item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text("双平台测速与实际选择", style = MaterialTheme.typography.titleMedium)
+                        platformReports.forEach { report ->
+                            Text(report.summary(), modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                            Text("线路候选：${report.lineCandidates.joinToString()}\n图源候选：${report.imageCandidates.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(
+                            enabled = platformReports.isNotEmpty() && !speedTestActive,
+                            onClick = {
+                                platformExport.value = PlatformSpeedTestCoordinator.reportsJson().toString(2)
+                                platformLogLauncher.launch("zycomic-platform-speed-test.json")
+                            },
+                        ) { Text("导出双平台选择日志") }
+                    }
+                }
                 item {
                     Text(
                         speedTestResultVersion?.let { "测速结果对应配置：远程配置 v$it" }

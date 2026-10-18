@@ -214,12 +214,28 @@ object JmSource : HttpSource() {
         val title = album.optString("name").trim()
         if (title.isBlank()) throw IOException("JM /album 缺少已确认字段 name；未将不完整详情标记为可用")
         val series = JmResponseParser.chapters(album)
+        val details = JmResponseParser.albumDetails(album)
         AlbumResult(
             manga = MangaDto(
                 id = albumId,
                 name = title,
+                author = details.author,
+                text = details.description,
                 picx = coverUrl(albumId),
+                tags = details.tags,
+                addtime = details.addtime,
+                hits = details.hits,
+                fav = details.favorite,
                 chapterList = series.items.map { ChapterDto(id = it.id, name = it.name, sort = it.sort) },
+                loveList = details.related.map { item ->
+                    MangaDto(
+                        id = item.id,
+                        name = item.name,
+                        author = item.author,
+                        text = item.description,
+                        picx = coverUrl(item.id),
+                    )
+                },
             ),
             chapterWarning = series.warning,
         )
@@ -380,15 +396,18 @@ object JmSource : HttpSource() {
         }
     }
 
-    private fun mangaFromAlbum(album: JSONObject, id: String, original: SManga): SManga = SManga.create().apply {
-        url = "/album/$id"
-        title = album.optString("name").takeIf { it.isNotBlank() } ?: original.title
-        thumbnail_url = coverUrl(id)
-        author = original.author
-        description = original.description
-        genre = original.genre
-        status = original.status
-        initialized = original.initialized
+    private fun mangaFromAlbum(album: JSONObject, id: String, original: SManga): SManga {
+        val details = JmResponseParser.albumDetails(album)
+        return SManga.create().apply {
+            url = "/album/$id"
+            title = album.optString("name").takeIf { it.isNotBlank() } ?: original.title
+            thumbnail_url = coverUrl(id)
+            author = details.author.ifBlank { original.author }
+            description = details.description.ifBlank { original.description }
+            genre = details.tags.map { it.name }.filter(String::isNotBlank).joinToString(", ").ifBlank { original.genre }
+            status = original.status
+            initialized = original.initialized
+        }
     }
 
     private fun toSourceManga(dto: MangaDto): SManga = SManga.create().apply {

@@ -7,12 +7,12 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.NetworkModule
+import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
@@ -170,43 +170,19 @@ class SettingsViewModel {
                 when (r.outcome) {
                     RemoteConfigFetcher.Outcome.APPLIED -> {
                         testing.value = true
-                        speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
-                        lineDelays.value = emptyMap()
-                        imgDelays.value = emptyMap()
-                        imgVerdicts.value = emptyMap()
-                        currentLineIndex.value = RouteManager.lineIndex
-                        currentLineIp.value = RouteManager.selectedLineIp
-                        currentImgIndex.value = RouteManager.imgIndex
-                        currentImgIp.value = RouteManager.selectedImgIp
-                        imgPinned.value = RouteManager.pinnedImgDomain
                         RemoteConfigFetcher.beginConfigRetest(r.version, duringStartup = false)
-                        val testResult = try {
-                            runCatching {
-                                SpeedTester.runForCurrentConfig(
-                                    onProgress = { lines, images, verdicts ->
-                                        lineDelays.value = lines
-                                        imgDelays.value = images
-                                        imgVerdicts.value = verdicts
-                                    },
-                                    onStageProgress = { speedTestProgress.value = it },
-                                )
-                            }
+                        try {
+                            PlatformSpeedTestCoordinator.run(
+                                onProgress = { lines, images, verdicts ->
+                                    lineDelays.value = lines
+                                    imgDelays.value = images
+                                    imgVerdicts.value = verdicts
+                                },
+                                onStageProgress = { speedTestProgress.value = it },
+                            )
+                            syncSelectedRoutes()
                         } finally {
                             RemoteConfigFetcher.finishConfigRetest(r.version)
-                        }
-                        testing.value = false
-                        if (testResult.isSuccess) {
-                            currentLineIndex.value = RouteManager.lineIndex
-                            currentLineIp.value = RouteManager.selectedLineIp
-                            currentImgIndex.value = RouteManager.imgIndex
-                            currentImgIp.value = RouteManager.selectedImgIp
-                            val summary = publishImgVerdicts()
-                            val (bestLine, bestImg) = testResult.getOrThrow()
-                            val fastestLine = if (bestLine >= 0) "线路 ${bestLine + 1}" else "线路暂无可用项"
-                            val fastestImage = if (bestImg >= 0) "图源 ${bestImg + 1}" else "图源暂无可用项"
-                            toast.value = "网络配置已更新（v${r.version}）；测速最快 $fastestLine、$fastestImage；$summary"
-                        } else {
-                            toast.value = "配置已更新（v${r.version}），但新列表测速失败：${testResult.exceptionOrNull()?.message ?: "请稍后重试"}"
                         }
                     }
                     RemoteConfigFetcher.Outcome.NOT_CHANGED -> toast.value = "网络配置已是最新"
@@ -414,23 +390,8 @@ class SettingsViewModel {
         scope.launch {
             imgVerdicts.value = emptyMap()
             NetworkModule.onVpnOrNetworkChanged("follow vpn toggled")
-            val (bl, bi) = SpeedTester.runAndApply(onProgress = { l, i, v ->
-                lineDelays.value = l
-                imgDelays.value = i
-                imgVerdicts.value = v
-            })
-            currentLineIndex.value = RouteManager.lineIndex
-            currentLineIp.value = RouteManager.selectedLineIp
-            currentImgIndex.value = RouteManager.imgIndex
-            currentImgIp.value = RouteManager.selectedImgIp
-            val summary = publishImgVerdicts()
-            if (SpeedTester.lastRunSkipped) {
-                toast.value = "已切换网络模式，但已有测速在跑，本轮未重测"
-            } else if (bl < 0) {
-                toast.value = "已切换网络模式，但测速未完成，沿用当前线路/图源；$summary"
-            } else if (bi < 0) {
-                toast.value = "已切换网络模式；线路 ${bl + 1}，图源不可用沿用当前；$summary"
-            }
+            PlatformSpeedTestCoordinator.run(forceFresh = true)
+            syncSelectedRoutes()
         }
     }
 
@@ -489,7 +450,8 @@ class SettingsViewModel {
             imgDelays.value = emptyMap()
             imgVerdicts.value = emptyMap()
             try {
-                val (bestLine, bestImg) = SpeedTester.runAndApply(
+                PlatformSpeedTestCoordinator.run(
+                    forceFresh = true,
                     onProgress = { l, i, v ->
                         lineDelays.value = l
                         imgDelays.value = i
@@ -497,18 +459,7 @@ class SettingsViewModel {
                     },
                     onStageProgress = { speedTestProgress.value = it },
                 )
-                currentLineIndex.value = RouteManager.lineIndex
-                currentLineIp.value = RouteManager.selectedLineIp
-                currentImgIndex.value = RouteManager.imgIndex
-                currentImgIp.value = RouteManager.selectedImgIp
-                val summary = publishImgVerdicts()
-                toast.value = when {
-                    // 整轮被防重入丢弃：一个域都没探，绝不能显示成"超时"
-                    SpeedTester.lastRunSkipped -> "已有测速在跑，本轮未执行（显示的仍是上一次结果）"
-                    bestLine >= 0 && bestImg >= 0 -> "测速最快线路 ${bestLine + 1}、图源 ${bestImg + 1}；$summary"
-                    bestLine >= 0 -> "测速最快线路 ${bestLine + 1}；$summary"
-                    else -> "线路全部不可用，沿用当前选择；$summary"
-                }
+                syncSelectedRoutes()
             } catch (e: Exception) {
                 android.util.Log.e("SpeedTest", "runSpeedTest failed", e)
                 speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.FAILED)
@@ -572,15 +523,10 @@ class SettingsViewModel {
     /**
      * App 启动自动测速 + 自动选择最快线路/图源（主体见 SpeedTester.runAndApply）。
      */
-    suspend fun autoSelectFastest(): Pair<Int, Int> {
-        android.util.Log.d("SpeedTest", "autoSelectFastest start")
+    suspend fun autoSelectFastest() {
         autoSelecting.value = true
-        speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
-        lineDelays.value = emptyMap()
-        imgDelays.value = emptyMap()
-        imgVerdicts.value = emptyMap()
-        return try {
-            val r = SpeedTester.runForCurrentConfig(
+        try {
+            PlatformSpeedTestCoordinator.run(
                 onProgress = { l, i, v ->
                     lineDelays.value = l
                     imgDelays.value = i
@@ -588,20 +534,21 @@ class SettingsViewModel {
                 },
                 onStageProgress = { speedTestProgress.value = it },
             )
-            currentLineIndex.value = RouteManager.lineIndex
-            currentLineIp.value = RouteManager.selectedLineIp
-            currentImgIndex.value = RouteManager.imgIndex
-            currentImgIp.value = RouteManager.selectedImgIp
-            r
-        } catch (e: Exception) {
-            speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.FAILED)
-            throw e
+            syncSelectedRoutes()
         } finally {
-            withContext(NonCancellable) {
-                publishImgVerdicts()
-            }
             autoSelecting.value = false
         }
+    }
+
+    private fun syncSelectedRoutes() {
+        currentLineIndex.value = RouteManager.lineIndex
+        currentLineIp.value = RouteManager.selectedLineIp
+        currentImgIndex.value = RouteManager.imgIndex
+        currentImgIp.value = RouteManager.selectedImgIp
+        imgPinned.value = RouteManager.pinnedImgDomain
+        lineDelays.value = RouteManager.lastLineIpDelays
+        imgDelays.value = RouteManager.lastImgIpDelays
+        imgVerdicts.value = RouteManager.lastImgIpVerdicts
     }
 
     companion object {

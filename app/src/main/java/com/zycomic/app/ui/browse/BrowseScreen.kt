@@ -114,17 +114,19 @@ fun BrowseScreen(
     onRequireLogin: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     pendingTag?.let { tag ->
         LaunchedEffect(tag) {
-            vm.applyPendingTag(tag)
+            if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.MANWA)) {
+                vm.applyPendingTag(tag)
+            }
             onPendingTagConsumed()
         }
     }
 
     val mainTab by vm.mainTab.collectAsState()
     val platform by vm.currentPlatform.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
     val tabs = vm.tabs
     val pagerState = rememberPagerState(
         initialPage = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
@@ -140,7 +142,14 @@ fun BrowseScreen(
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .filter { it != vm.mainTab.value }
-            .collect { page -> vm.selectMainTab(page) }
+            .collect { page ->
+                val target = vm.tabs.getOrNull(page)?.platformId
+                if (target != null && com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, target)) {
+                    vm.selectMainTab(page)
+                } else {
+                    pagerState.animateScrollToPage(vm.mainTab.value)
+                }
+            }
     }
 
     val selectionMode by vm.selectionMode.collectAsState()
@@ -278,9 +287,11 @@ fun BrowseScreen(
                             item(key = "tab_${item.platformId.id}_${item.id}") {
                                 val selected = pagerState.currentPage == index
                                 val selectTab: () -> Unit = {
-                                    scope.launch {
-                                        pagerState.animateScrollToPage(index)
-                                        vm.selectMainTab(index)
+                                    if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, item.platformId)) {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage(index)
+                                            vm.selectMainTab(index)
+                                        }
                                     }
                                 }
                                 if (item.pageType == BrowsePageType.YUZONG_RANK) {

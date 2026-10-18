@@ -2,6 +2,8 @@ package com.zycomic.app.net
 
 import android.util.Log
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -491,6 +493,43 @@ object SpeedTester {
 
     // ==================== 对外：全量/单点 ====================
 
+    private data class StandaloneImageResultGuard(val configRevision: Long, val platformRevision: Long, val result: Map<DomainIp, Long>)
+
+    @Volatile private var standaloneImageResultGuard: StandaloneImageResultGuard? = null
+
+    internal fun isStandaloneImageResultCurrent(result: Map<DomainIp, Long>): Boolean {
+        val guard = standaloneImageResultGuard ?: return false
+        return guard.result == result && guard.configRevision == RouteManager.configRevision &&
+            isPlatformCurrent(guard.platformRevision)
+    }
+
+    private fun isPlatformCurrent(revision: Long): Boolean =
+        StartupPlatformPolicy.state.value.revision == revision &&
+            StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)
+
+    internal fun currentLineEndpoints(): Set<DomainIp> = lineTargets().map { it.endpoint }.toSet()
+
+    internal fun currentImageEndpoints(): Set<DomainIp> = imgTargets().toSet()
+
+    suspend fun reuseValidResults(): Boolean {
+        val revision = StartupPlatformPolicy.state.value.revision
+        if (!isPlatformCurrent(revision) || !RouteManager.reuseValidResults()) return false
+        if (!isPlatformCurrent(revision)) return false
+        val line = RouteManager.lastLineIpDelays
+        val image = RouteManager.lastImgIpDelays
+        val fastestLine = fastestLineEndpoint(line)?.let { endpoint ->
+            RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, true) }
+        }?.takeIf { it >= 0 } ?: -1
+        val fastestImage = RouteManager.fastestImgEndpoint?.let { endpoint ->
+            RouteManager.imgDomains.indexOfFirst { it.equals(endpoint.domain, true) }
+        }?.takeIf { it >= 0 } ?: -1
+        lastRunAt = RouteManager.speedTestSnapshot.value.completedAtEpochMs ?: System.currentTimeMillis()
+        lastRunDirectStrategy = RouteManager.speedTestSnapshot.value.networkPath?.directStrategy
+        lastCompletedConfigRevision = RouteManager.configRevision
+        lastConfigRunResult = fastestLine to fastestImage
+        return true
+    }
+
     private data class LineTarget(val endpoint: DomainIp, val url: String)
 
     private fun lineDomain(url: String): String? =
@@ -527,6 +566,10 @@ object SpeedTester {
     suspend fun testAllLineEndpoints(
         onResult: ((DomainIp, Long) -> Unit)? = null,
     ): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
+        val platformRevision = StartupPlatformPolicy.state.value.revision
+        val configRevision = RouteManager.configRevision
+        fun stillCurrent() = isPlatformCurrent(platformRevision) && RouteManager.configRevision == configRevision
+        if (!stillCurrent()) return@withContext emptyMap()
         val client = NetworkModule.newLineProbeClient()
         try {
             val targets = lineTargets()
@@ -534,13 +577,13 @@ object SpeedTester {
                 targets.map { target ->
                     async {
                         probeSemaphore.withPermit {
-                            val delay = measureLineAtIp(client, target).delayMs
-                            onResult?.invoke(target.endpoint, delay)
+                            val delay = if (stillCurrent()) measureLineAtIp(client, target).delayMs else MAX
+                            if (stillCurrent()) onResult?.invoke(target.endpoint, delay)
                             target.endpoint to delay
                         }
                     }
                 }.awaitAll().toMap()
-            }
+            }.takeIf { stillCurrent() }.orEmpty()
         } finally {
             client.releaseProbe()
         }
@@ -553,6 +596,10 @@ object SpeedTester {
         domains: List<String> = RouteManager.imgDomains,
         onStageProgress: ((completed: Int, total: Int) -> Unit)? = null,
     ): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
+        val platformRevision = StartupPlatformPolicy.state.value.revision
+        val configRevision = RouteManager.configRevision
+        fun stillCurrent() = isPlatformCurrent(platformRevision) && RouteManager.configRevision == configRevision
+        if (!stillCurrent()) return@withContext emptyMap()
         val client = NetworkModule.newSpeedTestClient()
         try {
             val verdicts = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
@@ -563,19 +610,30 @@ object SpeedTester {
                 targets.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
-                            val result = measureImgAtIp(client, endpoint, samplePath)
-                            verdicts[endpoint] = result.verdict
-                            lastImgIpVerdicts = verdicts.toMap()
-                            onResult?.invoke(endpoint, result.delayMs, result.verdict)
+                            val result = if (stillCurrent()) {
+                                measureImgAtIp(client, endpoint, samplePath)
+                            } else {
+                                ImgProbe(MAX, ImgVerdict.UNREACHABLE, SpeedTestEndpointDiagnostic(false, null, 0L, null))
+                            }
+                            if (stillCurrent()) {
+                                verdicts[endpoint] = result.verdict
+                                lastImgIpVerdicts = verdicts.toMap()
+                                onResult?.invoke(endpoint, result.delayMs, result.verdict)
+                            }
                             onStageProgress?.invoke(completed.incrementAndGet(), targets.size)
                             endpoint to result.delayMs
                         }
                     }
                 }.awaitAll().toMap()
             }
-            lastImgIpVerdicts = verdicts.toMap()
-            lastImgVerdicts = aggregateImgVerdicts(verdicts)
-            delays
+            if (stillCurrent()) {
+                lastImgIpVerdicts = verdicts.toMap()
+                lastImgVerdicts = aggregateImgVerdicts(verdicts)
+                standaloneImageResultGuard = StandaloneImageResultGuard(configRevision, platformRevision, delays)
+            } else {
+                standaloneImageResultGuard = null
+            }
+            delays.takeIf { stillCurrent() }.orEmpty()
         } finally {
             client.releaseProbe()
         }
@@ -615,20 +673,36 @@ object SpeedTester {
     }
 
     suspend fun testSingleImgHost(domain: String): Long {
+        val platformRevision = StartupPlatformPolicy.state.value.revision
+        if (!isPlatformCurrent(platformRevision)) return MAX
+        val configRevision = RouteManager.configRevision
         val previousDelays = RouteManager.lastImgIpDelays
         val previousVerdicts = RouteManager.lastImgIpVerdicts
         val results = testAllImgEndpoints(domains = listOf(domain))
+        if (!isPlatformCurrent(platformRevision) || RouteManager.configRevision != configRevision) return MAX
         val newVerdicts = lastImgIpVerdicts
         val combinedDelays = previousDelays + results
         val combinedVerdicts = previousVerdicts + newVerdicts
         lastImgIpVerdicts = combinedVerdicts
         lastImgVerdicts = aggregateImgVerdicts(combinedVerdicts)
-        RouteManager.setEndpointDelays(RouteManager.lastLineIpDelays, combinedDelays, combinedVerdicts)
+        if (isPlatformCurrent(platformRevision)) {
+            RouteManager.setEndpointDelays(
+                RouteManager.lastLineIpDelays,
+                combinedDelays,
+                combinedVerdicts,
+                expectedConfigRevision = configRevision,
+                expectedPlatformRevision = platformRevision,
+            )
+        }
         return results.filterKeys { it.domain.equals(domain, ignoreCase = true) }
             .values.filter { it < MAX }.minOrNull() ?: MAX
     }
 
     suspend fun testLineEndpoints(lineUrl: String): Map<DomainIp, Long> = withContext(Dispatchers.IO) {
+        val platformRevision = StartupPlatformPolicy.state.value.revision
+        val configRevision = RouteManager.configRevision
+        fun stillCurrent() = isPlatformCurrent(platformRevision) && RouteManager.configRevision == configRevision
+        if (!stillCurrent()) return@withContext emptyMap()
         val host = lineDomain(lineUrl) ?: return@withContext emptyMap()
         val client = NetworkModule.newLineProbeClient()
         try {
@@ -637,11 +711,11 @@ object SpeedTester {
                 targets.map { target ->
                     async {
                         probeSemaphore.withPermit {
-                            target.endpoint to measureLineAtIp(client, target).delayMs
+                            target.endpoint to (if (stillCurrent()) measureLineAtIp(client, target).delayMs else MAX)
                         }
                     }
                 }.awaitAll().toMap()
-            }
+            }.takeIf { stillCurrent() }.orEmpty()
         } finally {
             client.releaseProbe()
         }
@@ -678,8 +752,18 @@ object SpeedTester {
         coroutineScope {
             val configRevisionAtStart = RouteManager.configRevision
             val configVersionAtStart = RouteManager.activeRemoteConfigVersion
+            val platformRevisionAtStart = StartupPlatformPolicy.state.value.revision
+            if (!isPlatformCurrent(platformRevisionAtStart)) {
+                lastRunSkipped = true
+                onStageProgress?.invoke(Progress(Phase.SKIPPED))
+                return@coroutineScope (-1 to -1)
+            }
+            fun runIsCurrent(): Boolean =
+                isPlatformCurrent(platformRevisionAtStart) &&
+                    configRevisionAtStart == RouteManager.configRevision &&
+                    configVersionAtStart == RouteManager.activeRemoteConfigVersion
             fun reportStage(progress: Progress) {
-                if (configRevisionAtStart == RouteManager.configRevision) {
+                if (runIsCurrent()) {
                     publishProgress(progress, onStageProgress)
                 }
             }
@@ -718,9 +802,13 @@ object SpeedTester {
                 val lineJobs = resolvedLines.map { target ->
                     async {
                         probeSemaphore.withPermit {
-                            val outcome = measureLineAtIp(lineClient, target)
+                            val outcome = if (runIsCurrent()) {
+                                measureLineAtIp(lineClient, target)
+                            } else {
+                                ProbeOutcome(MAX, -1, null, SpeedTestFailureCategory.OTHER, 0L)
+                            }
                             lineAcc[target.endpoint] = outcome.delayMs
-                            if (configRevisionAtStart == RouteManager.configRevision) {
+                            if (runIsCurrent()) {
                                 onProgress?.invoke(lineAcc.toMap(), emptyMap(), emptyMap())
                             }
                             val successful = lineAcc.values.count { it < MAX }
@@ -740,7 +828,7 @@ object SpeedTester {
                 val lineOutcomes = lineJobs.awaitAll().toMap()
                 val lines = lineOutcomes.mapValues { it.value.delayMs }
                 val lineDiagnostics = lineOutcomes.mapValues { it.value.toLineDiagnostic() }
-                if (configRevisionAtStart != RouteManager.configRevision) {
+                if (!runIsCurrent()) {
                     return@coroutineScope (-1 to -1)
                 }
                 val successfulLines = lines.values.count { it < MAX }
@@ -759,7 +847,12 @@ object SpeedTester {
                 }?.takeIf { it >= 0 }
                 if (bestLine != null && bestLineIndex != null) {
                     RouteManager.saveLastFastestLine(bestLineIndex)
-                    if (RouteManager.applyFastestLineEndpoint(bestLine)) {
+                    if (runIsCurrent() && RouteManager.applyFastestLineEndpoint(
+                            bestLine,
+                            expectedConfigRevision = configRevisionAtStart,
+                            expectedPlatformRevision = platformRevisionAtStart,
+                        )
+                    ) {
                         // 自动模式下让阶段 2 样本走最快线路；临时手动覆盖不被测速改写。
                         NetworkModule.rebuildApi("测速选出线路")
                     }
@@ -768,7 +861,9 @@ object SpeedTester {
 
                 // 阶段 2：兜底样本路径（固定封面 404 时才用到）
                 reportStage(Progress(Phase.FETCHING_SAMPLE))
+                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
                 val samplePath = obtainProbePath()
+                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
                 Log.i(TAG, "img probe sample path=$samplePath")
 
                 // 阶段 3：逐条图源域名/IP探测（包含真实图片内容校验）。
@@ -784,7 +879,7 @@ object SpeedTester {
                     async {
                         probeSemaphore.withPermit {
                             val reusable = requestedImageSnapshot.get()?.takeIf {
-                                configRevisionAtStart == RouteManager.configRevision &&
+                                runIsCurrent() &&
                                     RouteManager.isReusableImageSpeedTestSnapshotValid(it)
                             }
                             val previousDelay = reusable?.imgDelays?.get(endpoint)
@@ -796,7 +891,11 @@ object SpeedTester {
                                 verdict = previousVerdict
                                 reusedImageCount.incrementAndGet()
                             } else {
-                                val result = measureImgAtIp(imgClient, endpoint, samplePath)
+                                val result = if (runIsCurrent()) {
+                                    measureImgAtIp(imgClient, endpoint, samplePath)
+                                } else {
+                                    ImgProbe(MAX, ImgVerdict.UNREACHABLE, SpeedTestEndpointDiagnostic(false, null, 0L, null))
+                                }
                                 delay = result.delayMs
                                 verdict = result.verdict
                                 imageDiagnosticAcc[endpoint] = result.diagnostic
@@ -804,9 +903,11 @@ object SpeedTester {
                             }
                             imgAcc[endpoint] = delay
                             verdictAcc[endpoint] = verdict
-                            lastImgIpVerdicts = verdictAcc.toMap()
-                            lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
-                            if (configRevisionAtStart == RouteManager.configRevision) {
+                            if (runIsCurrent()) {
+                                lastImgIpVerdicts = verdictAcc.toMap()
+                                lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
+                            }
+                            if (runIsCurrent()) {
                                 onProgress?.invoke(lines, imgAcc.toMap(), verdictAcc.toMap())
                             }
                             reportStage(
@@ -828,6 +929,7 @@ object SpeedTester {
                 val imgs = imgJobs.awaitAll().toMap()
                 val imageDiagnostics = imageDiagnosticAcc.toMap()
                 val mixedImageResult = reusedImageCount.get() > 0
+                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
                 lastImgIpVerdicts = verdictAcc.toMap()
                 lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
 
@@ -850,12 +952,20 @@ object SpeedTester {
                         remoteVersion = configVersionAtStart,
                         expectedConfigRevision = configRevisionAtStart,
                         invalidateCompletedSnapshot = mixedImageResult,
+                        expectedPlatformRevision = platformRevisionAtStart,
                     )
                 ) {
                     return@coroutineScope (-1 to -1)
                 }
+                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
                 val bestImg = RouteManager.fastestImgEndpoint
-                val imgApplied = bestImg?.let(RouteManager::applyFastestImgEndpoint) == true
+                val imgApplied = bestImg?.let { endpoint ->
+                    RouteManager.applyFastestImgEndpoint(
+                        endpoint,
+                        expectedConfigRevision = configRevisionAtStart,
+                        expectedPlatformRevision = platformRevisionAtStart,
+                    )
+                } == true
                 val imgDomainChanged = imgApplied && bestImg != null &&
                     (!previousImgDomain.equals(bestImg.domain, ignoreCase = true) || previousImgIp != bestImg.ip)
                 // 按侧清理：线路变了只重建 API 侧；图源变了只驱逐图片侧空闲连接
@@ -876,11 +986,13 @@ object SpeedTester {
                             completedAtEpochMs = completedAt,
                             networkPath = networkPath,
                             completeSnapshot = true,
+                            expectedPlatformRevision = platformRevisionAtStart,
                         )
                     ) {
                         return@coroutineScope (-1 to -1)
                     }
                 }
+                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
                 lastRunAt = completedAt
                 lastRunDirectStrategy = networkPath.directStrategy
 
@@ -935,14 +1047,15 @@ object SpeedTester {
         onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return@withContext (-1 to -1)
         configRunLock.lock()
         try {
             while (true) {
+                if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return@withContext (-1 to -1)
                 while (running.get()) delay(50)
-                if (lastRunAt > 0L && lastCompletedConfigRevision == RouteManager.configRevision) {
-                    onProgress?.invoke(RouteManager.lastLineIpDelays, RouteManager.lastImgIpDelays, lastImgIpVerdicts)
-                    publishProgress(Progress(Phase.COMPLETE), onStageProgress)
-                    return@withContext lastConfigRunResult
+                if (StartupPlatformPolicy.state.value.useLastResult && reuseValidResults()) {
+                    return@withContext selectFastestLine(RouteManager.lastLineDelays) to
+                        (RouteManager.lastImgDelays.filterValues { it < MAX }.minByOrNull { it.value }?.key ?: -1)
                 }
 
                 val result = runAndApply(onProgress, onStageProgress)

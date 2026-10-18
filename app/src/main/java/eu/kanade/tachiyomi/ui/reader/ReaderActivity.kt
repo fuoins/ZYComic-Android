@@ -526,28 +526,8 @@ class ReaderActivity : BaseActivity() {
             }
 
             // 图源切换对话框
+            val isJmSource = state.manga?.source == com.zycomic.app.reader.JmSource.id
             if (showImgSourceDialog) {
-                val rm = com.zycomic.app.net.RouteManager
-                val imageDelaysSnapshot = rm.lastImgIpDelays
-                val imageVerdictsSnapshot = rm.lastImgIpVerdicts
-                val configuredImageDomains = rm.imgDomains
-                val successfulEndpointDelays = com.zycomic.app.net.ImageEndpointSelectionPolicy
-                    .rankedSuccessfulEndpoints(
-                        delays = imageDelaysSnapshot,
-                        verdicts = imageVerdictsSnapshot,
-                        configuredDomains = configuredImageDomains,
-                    )
-                    .mapNotNull { endpoint -> imageDelaysSnapshot[endpoint]?.let { delay -> endpoint to delay } }
-                val successfulEndpoints = successfulEndpointDelays.map { it.first }
-                val currentImageSource = ImageSourceDisplayPolicy.currentSource(
-                    configuredDomains = configuredImageDomains,
-                    successfulEndpoints = successfulEndpoints,
-                    pinnedDomain = rm.pinnedImgDomain,
-                    pinnedIp = rm.selectedImgIp,
-                    useFastestImgForAll = rm.useFastestImgForAll,
-                    serverRecommendedDomain = ReaderRepository.currentRecommendedImgDomain,
-                    serverFallbackDomain = ReaderRepository.currentImgDomains.firstOrNull(),
-                )
                 var imgTesting by remember { mutableStateOf(false) }
                 var imgTestCompleted by remember { mutableStateOf(0) }
                 var imgTestTotal by remember { mutableStateOf(0) }
@@ -557,91 +537,126 @@ class ReaderActivity : BaseActivity() {
                     onDismissRequest = { showImgSourceDialog = false },
                     title = { Text("切换图源") },
                     text = {
-                        ScrollbarLazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = dialogMaxHeight),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            if (imgTesting) {
-                                item {
-                                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                                        Text(
-                                            if (imgTestTotal > 0) "图源测速进度：$imgTestCompleted/$imgTestTotal"
-                                            else "正在解析图源测速端点…",
-                                            style = MaterialTheme.typography.bodySmall,
-                                        )
-                                        if (imgTestTotal > 0) {
-                                            LinearProgressIndicator(
-                                                progress = { (imgTestCompleted.toFloat() / imgTestTotal).coerceIn(0f, 1f) },
-                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        if (isJmSource) {
+                            JmReaderImageSourceList(
+                                maxHeight = dialogMaxHeight,
+                                testing = imgTesting,
+                                onSelect = { domain ->
+                                    showImgSourceDialog = false
+                                    switchImgSource(domain, "")
+                                },
+                            )
+                        } else {
+                            val rm = com.zycomic.app.net.RouteManager
+                            val imageDelaysSnapshot = rm.lastImgIpDelays
+                            val imageVerdictsSnapshot = rm.lastImgIpVerdicts
+                            val configuredImageDomains = rm.imgDomains
+                            val successfulEndpointDelays = com.zycomic.app.net.ImageEndpointSelectionPolicy
+                                .rankedSuccessfulEndpoints(
+                                    delays = imageDelaysSnapshot,
+                                    verdicts = imageVerdictsSnapshot,
+                                    configuredDomains = configuredImageDomains,
+                                )
+                                .mapNotNull { endpoint -> imageDelaysSnapshot[endpoint]?.let { delay -> endpoint to delay } }
+                            val successfulEndpoints = successfulEndpointDelays.map { it.first }
+                            val currentImageSource = ImageSourceDisplayPolicy.currentSource(
+                                configuredDomains = configuredImageDomains,
+                                successfulEndpoints = successfulEndpoints,
+                                pinnedDomain = rm.pinnedImgDomain,
+                                pinnedIp = rm.selectedImgIp,
+                                useFastestImgForAll = rm.useFastestImgForAll,
+                                serverRecommendedDomain = ReaderRepository.currentRecommendedImgDomain,
+                                serverFallbackDomain = ReaderRepository.currentImgDomains.firstOrNull(),
+                            )
+                            ScrollbarLazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = dialogMaxHeight),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                if (imgTesting) {
+                                    item {
+                                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                                            Text(
+                                                if (imgTestTotal > 0) {
+                                                    "图源测速进度：$imgTestCompleted/$imgTestTotal"
+                                                } else {
+                                                    "正在解析图源测速端点…"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
                                             )
-                                        } else {
-                                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                                            if (imgTestTotal > 0) {
+                                                LinearProgressIndicator(
+                                                    progress = { (imgTestCompleted.toFloat() / imgTestTotal).coerceIn(0f, 1f) },
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                                )
+                                            } else {
+                                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            item {
-                                Text(
-                                    "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
-                            }
-                            item {
-                                Text(
-                                    "宇总图源",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
-                            }
-                            item {
-                                if (currentImageSource.domain != null && !currentImageSource.hasSuccessfulEndpoint) {
+                                item {
+                                    Text(
+                                        "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    )
+                                }
+                                item {
+                                    Text(
+                                        "宇总图源",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    )
+                                }
+                                item {
+                                    if (currentImageSource.domain != null && !currentImageSource.hasSuccessfulEndpoint) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                text = "● ${currentImageSource.notInSuccessfulListDescription()}",
+                                                color = MaterialTheme.colorScheme.tertiary,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    } else if (currentImageSource.domain == null) {
+                                        Text(
+                                            currentImageSource.description(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(vertical = 4.dp),
+                                        )
+                                    }
+                                }
+                                if (successfulEndpoints.isEmpty()) {
+                                    item { Text("暂无测速成功的图源 IP", style = MaterialTheme.typography.bodySmall) }
+                                }
+                                items(successfulEndpointDelays) { (endpoint, delay) ->
+                                    val isSelected = currentImageSource.matchesEndpoint(endpoint)
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                            .clickable {
+                                                showImgSourceDialog = false
+                                                switchImgSource(endpoint.domain, endpoint.ip)
+                                            }
+                                            .padding(vertical = 6.dp),
                                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                     ) {
                                         Text(
-                                            text = "● ${currentImageSource.notInSuccessfulListDescription()}",
-                                            color = MaterialTheme.colorScheme.tertiary,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            text = if (isSelected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f),
                                         )
-                                    }
-                                } else if (currentImageSource.domain == null) {
-                                    Text(
-                                        currentImageSource.description(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(vertical = 4.dp),
-                                    )
-                                }
-                            }
-                            if (successfulEndpoints.isEmpty()) {
-                                item { Text("暂无测速成功的图源 IP", style = MaterialTheme.typography.bodySmall) }
-                            }
-                            items(successfulEndpointDelays) { (endpoint, delay) ->
-                                val isSelected = currentImageSource.matchesEndpoint(endpoint)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth()
-                                        .clickable {
-                                            showImgSourceDialog = false
-                                            switchImgSource(endpoint.domain, endpoint.ip)
+                                        if (isSelected) {
+                                            Text(currentImageSource.kind.label, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
                                         }
-                                        .padding(vertical = 6.dp),
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = if (isSelected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    if (isSelected) {
-                                        Text(currentImageSource.kind.label, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                                        Text("${delay}ms", style = MaterialTheme.typography.bodySmall)
                                     }
-                                    Text("${delay}ms", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
@@ -653,49 +668,85 @@ class ReaderActivity : BaseActivity() {
                                     imgTesting = true
                                     imgTestCompleted = 0
                                     imgTestTotal = 0
-                                    scope.launch(Dispatchers.IO) {
-                                        try {
-                                            val rm = com.zycomic.app.net.RouteManager
-                                            val previous = rm.fastestImgEndpoint
-                                            val delays = com.zycomic.app.net.SpeedTester.testAllImgEndpoints(
-                                                onStageProgress = { completed, total ->
-                                                    launch(Dispatchers.Main) {
-                                                        imgTestCompleted = maxOf(imgTestCompleted, completed)
-                                                        imgTestTotal = total
-                                                    }
-                                                },
-                                            )
-                                            rm.setEndpointDelays(rm.lastLineIpDelays, delays, com.zycomic.app.net.SpeedTester.lastImgIpVerdicts)
-                                            val fastest = rm.fastestImgEndpoint
-                                            if (rm.useFastestImgForAll && rm.pinnedImgDomain.isNullOrBlank() && fastest != null) {
-                                                rm.applyFastestImgEndpoint(fastest)
-                                                if (fastest != previous) {
-                                                    // 图源变了只驱逐图片侧空闲连接；不动 API 侧、不 cancelAll 在途图片
-                                                    com.zycomic.app.net.NetworkModule.rebindImageRoute("测速后切换最快图源")
-                                                    com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
-                                                    launch(Dispatchers.Main) {
+                                    if (isJmSource) {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val previousDomain = com.zycomic.app.net.JmRouteManager.activeImageDomain
+                                                val report = com.zycomic.app.net.PlatformSpeedTestCoordinator.run(
+                                                    forceFresh = true,
+                                                    onlyPlatform = com.zycomic.app.platform.ContentPlatform.JM,
+                                                    notifyCompletion = false,
+                                                ).first { it.platform == "禁漫天堂" }
+                                                val valid = report.status == "tested" || report.status == "reused"
+                                                val selectedDomain = com.zycomic.app.net.JmRouteManager.activeImageDomain
+                                                launch(Dispatchers.Main) {
+                                                    imgTesting = false
+                                                    if (valid && !selectedDomain.equals(previousDomain, ignoreCase = true)) {
                                                         showImgSourceDialog = false
-                                                        Toast.makeText(this@ReaderActivity, "已切换到最快图源", Toast.LENGTH_SHORT).show()
-                                                        val intent = intent
+                                                        val readerIntent = intent
                                                         finish()
-                                                        startActivity(intent)
+                                                        startActivity(readerIntent)
+                                                        Toast.makeText(this@ReaderActivity, report.summary(), Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        Toast.makeText(
+                                                            this@ReaderActivity,
+                                                            report.summary(),
+                                                            Toast.LENGTH_SHORT,
+                                                        ).show()
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                launch(Dispatchers.Main) {
+                                                    imgTesting = false
+                                                    Toast.makeText(this@ReaderActivity, "JM 图源测速失败", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val rm = com.zycomic.app.net.RouteManager
+                                                val previous = rm.fastestImgEndpoint
+                                                val delays = com.zycomic.app.net.SpeedTester.testAllImgEndpoints(
+                                                    onStageProgress = { completed, total ->
+                                                        launch(Dispatchers.Main) {
+                                                            imgTestCompleted = maxOf(imgTestCompleted, completed)
+                                                            imgTestTotal = total
+                                                        }
+                                                    },
+                                                )
+                                                rm.setEndpointDelays(rm.lastLineIpDelays, delays, com.zycomic.app.net.SpeedTester.lastImgIpVerdicts)
+                                                val fastest = rm.fastestImgEndpoint
+                                                if (rm.useFastestImgForAll && rm.pinnedImgDomain.isNullOrBlank() && fastest != null) {
+                                                    rm.applyFastestImgEndpoint(fastest)
+                                                    if (fastest != previous) {
+                                                        // 图源变了只驱逐图片侧空闲连接；不动 API 侧、不 cancelAll 在途图片
+                                                        com.zycomic.app.net.NetworkModule.rebindImageRoute("测速后切换最快图源")
+                                                        com.zycomic.app.data.repository.ReaderRepository.chapterCache.clear()
+                                                        launch(Dispatchers.Main) {
+                                                            showImgSourceDialog = false
+                                                            Toast.makeText(this@ReaderActivity, "已切换到最快图源", Toast.LENGTH_SHORT).show()
+                                                            val intent = intent
+                                                            finish()
+                                                            startActivity(intent)
+                                                        }
+                                                    } else {
+                                                        launch(Dispatchers.Main) {
+                                                            imgTesting = false
+                                                            Toast.makeText(this@ReaderActivity, "测速完成，当前已是最快", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 } else {
                                                     launch(Dispatchers.Main) {
                                                         imgTesting = false
-                                                        Toast.makeText(this@ReaderActivity, "测速完成，当前已是最快", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(this@ReaderActivity, "测速完成", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
-                                            } else {
+                                            } catch (e: Exception) {
                                                 launch(Dispatchers.Main) {
                                                     imgTesting = false
-                                                    Toast.makeText(this@ReaderActivity, "测速完成", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(this@ReaderActivity, "测速失败", Toast.LENGTH_SHORT).show()
                                                 }
-                                            }
-                                        } catch (e: Exception) {
-                                            launch(Dispatchers.Main) {
-                                                imgTesting = false
-                                                Toast.makeText(this@ReaderActivity, "测速失败", Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     }
@@ -734,13 +785,96 @@ class ReaderActivity : BaseActivity() {
         super.onPause()
     }
 
+    @Composable
+    private fun JmReaderImageSourceList(
+        maxHeight: androidx.compose.ui.unit.Dp,
+        testing: Boolean,
+        onSelect: (String) -> Unit,
+    ) {
+        val routeState by com.zycomic.app.net.JmRouteManager.state.collectAsState()
+        val snapshot by com.zycomic.app.net.JmRouteManager.speedTestSnapshot.collectAsState()
+        val domains = com.zycomic.app.reader.JmReaderImageSourcePolicy.rankedDomains(
+            routeState.imageDomains,
+            snapshot.imageDelaysMs,
+        )
+
+        ScrollbarLazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (testing) {
+                item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Text("JM 图源测速中…", style = MaterialTheme.typography.bodySmall)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    }
+                }
+            }
+            item {
+                Text(
+                    "JM sources2 图源池；成功项按测速耗时排序",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            if (domains.isEmpty()) {
+                item { Text("JM 当前没有可选图源", style = MaterialTheme.typography.bodySmall) }
+            }
+            items(domains) { domain ->
+                val selected = domain.equals(routeState.imageDomain, ignoreCase = true)
+                val delay = com.zycomic.app.reader.JmReaderImageSourcePolicy.delayFor(domain, snapshot.imageDelaysMs)
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable { onSelect(domain) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (selected) "● $domain" else "○ $domain",
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selected) {
+                        Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(
+                        text = when {
+                            delay == null -> "未测"
+                            delay == Long.MAX_VALUE -> "不可用"
+                            else -> "${delay}ms"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+
     /**
-     * 切换图源：确保域名在列表中 → setImgHost → （IO）重建网络 + 清章节缓存 → 回主线程重启 Activity。
+     * 切换图源：Manwa 确保域名在列表中 → setImgHost → （IO）重建网络 + 清章节缓存；
+     * JM 仅在 JM sources2 池内更新 JmRouteManager，不触碰 Manwa 路由。
      *
      * 重建网络里的 evictAll/cancelAll 会真正关 socket，属网络操作，绝不能跑在主线程，
      * 否则抛 NetworkOnMainThreadException（这里原先被外层 try/catch 吃掉，表现为"切了没反应/切换失败"）。
      */
     private fun switchImgSource(domain: String, ip: String) {
+        if (viewModel.state.value.manga?.source == com.zycomic.app.reader.JmSource.id) {
+            val selectedDomain = com.zycomic.app.net.JmRouteManager.state.value.imageDomains
+                .firstOrNull { it.equals(domain, ignoreCase = true) }
+            if (selectedDomain == null) {
+                Toast.makeText(this, "JM 图源不在当前 sources2 候选池中", Toast.LENGTH_SHORT).show()
+                return
+            }
+            com.zycomic.app.net.JmRouteManager.selectImageDomain(selectedDomain)
+            val readerIntent = intent
+            finish()
+            startActivity(readerIntent)
+            Toast.makeText(this, "已切换 JM 图源: $selectedDomain", Toast.LENGTH_SHORT).show()
+            return
+        }
         val rm = com.zycomic.app.net.RouteManager
         try {
             val idx = rm.imgDomains.indexOfFirst { it.equals(domain, true) }

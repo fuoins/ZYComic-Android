@@ -94,6 +94,55 @@ class JmResponseParserTest {
     }
 
     @Test
+    fun `album detail maps confirmed scalar and related fields`() {
+        val details = JmResponseParser.albumDetails(
+            JSONObject(
+                """{"author":["作者甲","作者乙"],"description":"作品简介","tags":["韩漫",{"id":17,"name":"校园"}],"addtime":1712345678,"total_views":"235","is_favorite":true,"related_list":[{"id":123,"name":"相关作品","author":"作者乙","description":"相关简介"}]}""",
+            ),
+        )
+
+        assertEquals("作者甲", details.author)
+        assertEquals("作品简介", details.description)
+        assertEquals(listOf("韩漫", "校园"), details.tags.map { it.name })
+        assertEquals(17, details.tags[1].id)
+        assertEquals("1712345678", details.addtime)
+        assertEquals(235, details.hits)
+        assertEquals(1, details.favorite)
+        assertEquals("123", details.related.single().id)
+        assertEquals("相关作品", details.related.single().name)
+        assertEquals("作者乙", details.related.single().author)
+        assertEquals("相关简介", details.related.single().description)
+    }
+
+    @Test
+    fun `album detail accepts scalar author and pipe tags and skips invalid related items`() {
+        val details = JmResponseParser.albumDetails(
+            JSONObject(
+                """{"author":"作者丙","description":null,"tags":"标签一| 标签二 ","is_favorite":0,"related_list":[null,{"id":"bad","name":"无效"},{"id":"456","name":"有效"}]}""",
+            ),
+        )
+
+        assertEquals("作者丙", details.author)
+        assertEquals("", details.description)
+        assertEquals(listOf("标签一", "标签二"), details.tags.map { it.name })
+        assertEquals(0, details.favorite)
+        assertEquals(listOf("456"), details.related.map { it.id })
+    }
+
+    @Test
+    fun `missing optional album details remain empty defaults`() {
+        val details = JmResponseParser.albumDetails(JSONObject("{}"))
+
+        assertEquals("", details.author)
+        assertEquals("", details.description)
+        assertTrue(details.tags.isEmpty())
+        assertEquals("", details.addtime)
+        assertEquals(0, details.hits)
+        assertEquals(0, details.favorite)
+        assertTrue(details.related.isEmpty())
+    }
+
+    @Test
     fun `structured and boolean ids cannot become real chapter ids`() {
         val result = chapters("""[{"id":{"id":123}},{"id":true},{"id":[123]},{"id":456}]""")
         assertEquals(listOf("456"), result.items.map { it.id })

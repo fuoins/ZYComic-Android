@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import com.zycomic.app.data.AllTags
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformSelector
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
 import eu.kanade.presentation.components.AdaptiveSheet
@@ -729,6 +731,7 @@ private fun FilterTabFormDialog(
     onOpenTagDialog: (Set<String>, (Set<String>) -> Unit) -> Unit,
     checkNameTaken: (String, ContentPlatform) -> Boolean,
 ) {
+    val context = LocalContext.current
     var name by remember(title) { mutableStateOf(initialName) }
     var draft by remember(title) { mutableStateOf(initial) }
     var jmDraft by remember(title) { mutableStateOf(initialJmFilters) }
@@ -782,7 +785,7 @@ private fun FilterTabFormDialog(
                         Text(stringResource(KMR.strings.content_platform_custom_tab_target), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                         ContentPlatformSelector(
                             selected = targetPlatform,
-                            onSelect = { targetPlatform = it },
+                            onSelect = { if (StartupPlatformPolicy.checkSelection(context, it)) targetPlatform = it },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         )
                         if (targetPlatform == ContentPlatform.JM) {

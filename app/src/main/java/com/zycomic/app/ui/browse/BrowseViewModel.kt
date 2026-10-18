@@ -10,6 +10,7 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatformPrefs
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.reader.JmSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -266,6 +267,7 @@ class BrowseViewModel {
     fun selectMainTab(tab: Int) {
         if (tabs.isEmpty() || tab !in tabs.indices) return
         val item = tabs[tab]
+        if (!StartupPlatformPolicy.isEnabled(item.platformId)) return
         if (mainTab.value == tab && currentPlatform.value == item.platformId) return
         val platformChanged = currentPlatform.value != item.platformId
         bindPlatform(item.platformId)
@@ -280,6 +282,7 @@ class BrowseViewModel {
     }
 
     private fun bindPlatform(platform: ContentPlatform) {
+        if (!StartupPlatformPolicy.isEnabled(platform)) return
         if (currentPlatform.value == platform) return
         currentJob?.cancel()
         requestSeq.incrementAndGet()
@@ -470,7 +473,7 @@ class BrowseViewModel {
 
     /** 从详情页标签点击返回：定位到第一个 FILTER tab，并把该标签作为当次临时筛选。 */
     fun applyPendingTag(tag: String) {
-        if (tabs.isEmpty()) return
+        if (tabs.isEmpty() || !StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return
         val idx = tabs.indexOfFirst { it.kind == TabKind.FILTER && it.platformId == ContentPlatform.MANWA }
         if (idx < 0) return
         bindPlatform(ContentPlatform.MANWA)
@@ -483,6 +486,7 @@ class BrowseViewModel {
 
     fun refresh(tab: Int = mainTab.value) {
         if (tabs.isEmpty() || tab !in tabs.indices) return
+        if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
             val ts = stateFor(tab)
             ts.jmJob?.cancel()
@@ -497,6 +501,7 @@ class BrowseViewModel {
 
     fun loadMore(tab: Int) {
         if (tab !in tabs.indices) return
+        if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
@@ -509,6 +514,7 @@ class BrowseViewModel {
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
         if (tab !in tabs.indices) return
+        if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
             doLoadJm(reset, tab)
             return
@@ -558,6 +564,7 @@ class BrowseViewModel {
             }
 
             if (reqId != requestSeq.get()) return
+            if (!StartupPlatformPolicy.isEnabled(item.platformId)) return
             ts.currentPage = lastInvoked + 1
 
             if (item.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.LATEST && reset) {
@@ -579,6 +586,7 @@ class BrowseViewModel {
     }
 
     private suspend fun doLoadJm(reset: Boolean, tab: Int) {
+        if (tab !in tabs.indices || !StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         val ts = stateFor(tab)
         val reqId = ++ts.jmRequestId
         if (reset) {
@@ -610,6 +618,7 @@ class BrowseViewModel {
                 previousFirstId = previousFirstId,
             )
             if (reqId != ts.jmRequestId) return
+            if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
             if (JmBrowsePolicy.shouldStopPaging(result.items, previousFirstId)) {
                 ts.loaded = true
                 ts.hasMore.value = false
@@ -738,6 +747,7 @@ class BrowseViewModel {
         platform: ContentPlatform = currentPlatform.value,
         jmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "mr"),
     ): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(platform)) return false
         val n = name.trim()
         if (n.isEmpty() || isNameTaken(n, platform = platform)) return false
         val item = BrowseTabItem(
@@ -834,15 +844,18 @@ class BrowseViewModel {
         tabs.clear()
         stateById.clear()
         tabs.addAll(BrowseTabStore.resetAll())
-        bindPlatform(ContentPlatform.MANWA)
-        mainTab.value = 0
-        BrowseTabStore.saveSelectedTab(0)
-        bindFilterFor(0)
+        val defaultPlatform = StartupPlatformPolicy.resolve(null)
+        val defaultTab = tabs.indexOfFirst { it.platformId == defaultPlatform }.coerceAtLeast(0)
+        bindPlatform(defaultPlatform)
+        mainTab.value = defaultTab
+        BrowseTabStore.saveSelectedTab(defaultTab)
+        bindFilterFor(defaultTab)
         refresh()
     }
 
     private fun goTo(index: Int) {
         val item = tabs.getOrNull(index) ?: return
+        if (!StartupPlatformPolicy.isEnabled(item.platformId)) return
         bindPlatform(item.platformId)
         mainTab.value = index
         BrowseTabStore.saveSelectedTab(index)
