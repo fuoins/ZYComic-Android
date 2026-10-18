@@ -84,4 +84,48 @@ class StartupPlatformPolicyTest {
         assertEquals(ContentPlatform.MANWA, StartupPlatformPolicy.resolve(state, ContentPlatform.MANWA))
         assertEquals(ContentPlatform.JM, StartupPlatformPolicy.resolve(state, ContentPlatform.JM))
     }
+
+    @Test
+    fun `legacy negative preferences migrate by inversion and retain the selected source`() {
+        assertEquals(
+            true to false,
+            StartupPlatformPolicy.migratedEnabledValues(
+                manwaEnabled = null,
+                jmEnabled = null,
+                legacyDisableManwa = false,
+                legacyDisableJm = true,
+            ),
+        )
+        assertEquals(
+            false to true,
+            StartupPlatformPolicy.migratedEnabledValues(
+                manwaEnabled = null,
+                jmEnabled = null,
+                legacyDisableManwa = true,
+                legacyDisableJm = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `positive preferences take precedence and migration never leaves both platforms disabled`() {
+        assertEquals(
+            true to false,
+            StartupPlatformPolicy.migratedEnabledValues(
+                manwaEnabled = true,
+                jmEnabled = false,
+                legacyDisableManwa = true,
+                legacyDisableJm = false,
+            ),
+        )
+        assertEquals(
+            false to true,
+            StartupPlatformPolicy.migratedEnabledValues(
+                manwaEnabled = false,
+                jmEnabled = false,
+                legacyDisableManwa = false,
+                legacyDisableJm = true,
+            ),
+        )
+    }
 }

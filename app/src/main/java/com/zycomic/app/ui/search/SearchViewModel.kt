@@ -106,9 +106,11 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
 
     fun selectProvider(selected: SearchProvider): Boolean {
         if (!StartupPlatformPolicy.isEnabled(selected.toContentPlatform())) return false
+        // This function is only called for an explicit user selection. Persist even when the
+        // selected provider is already the temporary fallback shown for a disabled preference.
+        searchPrefs.edit().putString(KEY_PROVIDER, selected.storageValue).apply()
         if (provider.value == selected) return true
         provider.value = selected
-        searchPrefs.edit().putString(KEY_PROVIDER, selected.storageValue).apply()
         displayMode.value = loadDisplayMode(selected)
         if (keyword.value.isNotBlank()) {
             doSearch()
@@ -285,8 +287,13 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         private lateinit var searchPrefs: android.content.SharedPreferences
 
         private fun resolveInitialProvider(initialProvider: SearchProvider?): SearchProvider {
-            val requested = initialProvider ?: SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null))
-            return StartupPlatformPolicy.resolve(requested.toContentPlatform()).toSearchProvider()
+            val state = StartupPlatformPolicy.state.value
+            return initialSearchProvider(
+                explicitProvider = initialProvider,
+                rememberedProvider = SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null)),
+                manwaEnabled = !state.disableManwa,
+                jmEnabled = !state.disableJm,
+            )
         }
 
         fun init(context: Context) {
@@ -299,9 +306,4 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
 private fun SearchProvider.toContentPlatform(): ContentPlatform = when (this) {
     SearchProvider.MANWA -> ContentPlatform.MANWA
     SearchProvider.JM -> ContentPlatform.JM
-}
-
-private fun ContentPlatform.toSearchProvider(): SearchProvider = when (this) {
-    ContentPlatform.MANWA -> SearchProvider.MANWA
-    ContentPlatform.JM -> SearchProvider.JM
 }

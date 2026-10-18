@@ -1,5 +1,6 @@
 package com.zycomic.app.reader
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -27,5 +28,21 @@ class JmPaginationTest {
         assertFalse(JmPagination.cappedListHasMore(page = 2, itemCount = 80, firstId = "z", previousFirstId = "z"))
         assertFalse(JmPagination.cappedListHasMore(page = 125, itemCount = 80, firstId = "z", previousFirstId = null))
         assertFalse(JmPagination.cappedListHasMore(page = 1, itemCount = 0, firstId = null, previousFirstId = null))
+    }
+
+    @Test
+    fun `weekly page total uses twenty items per page`() {
+        assertEquals(20, JmPagination.WEEK_ITEMS_PER_PAGE)
+        assertTrue(JmPagination.totalHasMore(page = 1, total = 21, itemsPerPage = JmPagination.WEEK_ITEMS_PER_PAGE))
+        assertFalse(JmPagination.totalHasMore(page = 1, total = 20, itemsPerPage = JmPagination.WEEK_ITEMS_PER_PAGE))
+        assertFalse(JmPagination.totalHasMore(page = 2, total = 21, itemsPerPage = JmPagination.WEEK_ITEMS_PER_PAGE))
+    }
+
+    @Test
+    fun `serialization page total uses forty items per page`() {
+        assertEquals(40, JmPagination.SERIALIZATION_ITEMS_PER_PAGE)
+        assertTrue(JmPagination.totalHasMore(page = 1, total = 41, itemsPerPage = JmPagination.SERIALIZATION_ITEMS_PER_PAGE))
+        assertFalse(JmPagination.totalHasMore(page = 1, total = 40, itemsPerPage = JmPagination.SERIALIZATION_ITEMS_PER_PAGE))
+        assertFalse(JmPagination.totalHasMore(page = 2, total = 41, itemsPerPage = JmPagination.SERIALIZATION_ITEMS_PER_PAGE))
     }
 }

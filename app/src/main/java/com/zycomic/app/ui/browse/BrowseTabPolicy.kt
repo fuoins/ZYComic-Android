@@ -13,6 +13,10 @@ internal object BrowseTabPolicy {
 
     fun identity(tab: BrowseTabItem) = Identity(tab.platformId, tab.id)
 
+    /** Only the canonical cross-platform ranking bypasses a disabled Manwa source. */
+    fun isIndependentRanking(tab: BrowseTabItem): Boolean =
+        tab.id == BrowseTabStore.ID_YUZONG && tab.kind == TabKind.SPECIAL && tab.pageType == BrowsePageType.YUZONG_RANK
+
     /** Rejects drafts that add, remove, duplicate or change any platform-qualified tab identity. */
     fun reorder(
         current: List<BrowseTabItem>,

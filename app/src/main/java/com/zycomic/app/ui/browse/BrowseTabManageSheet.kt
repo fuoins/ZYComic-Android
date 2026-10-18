@@ -434,7 +434,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "编辑 tab",
             initialName = item.name,
             initial = item.filter ?: FilterSnapshot(),
-            initialJmFilters = vm.jmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).value.let {
+            initialJmFilters = vm.defaultJmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).let {
                 if (item.id == JmBrowsePolicy.ALL_HOT_TAB_ID) it.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "") else it
             },
             fixedJmCategoryMode = item.id == JmBrowsePolicy.ALL_HOT_TAB_ID,
@@ -648,7 +648,8 @@ private fun JmTabFilterEditor(
                 listOf(
                     JmBrowsePolicy.MODE_RECOMMENDATIONS to "首页推荐",
                     JmBrowsePolicy.MODE_CATEGORY to "分类",
-                    JmBrowsePolicy.MODE_WEEK to "周榜",
+                    JmBrowsePolicy.MODE_WEEK to "每周必看",
+                    JmBrowsePolicy.MODE_SERIALIZATION to "每周连载更新",
                 ).forEach { (mode, label) ->
                     FilterChip(text = label, selected = filters.mode == mode) {
                         onChange(filters.copy(mode = mode, query = ""))
@@ -668,23 +669,39 @@ private fun JmTabFilterEditor(
             OutlinedTextField(
                 value = filters.weekId,
                 onValueChange = { onChange(filters.copy(weekId = it)) },
-                label = { Text("周榜 ID") },
+                label = { Text("期数 ID（留空为最新期）") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             )
-            OutlinedTextField(
-                value = filters.weekType,
-                onValueChange = { onChange(filters.copy(weekType = it)) },
-                label = { Text("周榜类型") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+            FilterSection("每周必看类型") {
+                listOf("日漫" to "manga", "韩漫" to "hanman", "其他" to "another").forEach { (label, value) ->
+                    FilterChip(text = label, selected = filters.weekType == value) {
+                        onChange(filters.copy(weekType = value))
+                    }
+                }
+            }
             Text(
-                "周榜参数保存在此 tab；这里不会请求远端周榜列表。",
+                "期数 ID 留空时使用最新期；默认类型为日漫。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 8.dp, top = 2.dp),
             )
+        }
+        JmBrowsePolicy.MODE_SERIALIZATION -> {
+            FilterSection("连载类型") {
+                listOf("全部" to "all", "日漫" to "manga", "韩漫" to "hanman").forEach { (label, value) ->
+                    FilterChip(text = label, selected = filters.serializationType == value) {
+                        onChange(filters.copy(serializationType = value))
+                    }
+                }
+            }
+            FilterSection("更新日期") {
+                listOf("周一" to 1, "周二" to 2, "周三" to 3, "周四" to 4, "周五" to 5, "周六" to 6, "周日" to 7, "已完结" to 0).forEach { (label, value) ->
+                    FilterChip(text = label, selected = filters.serializationDate == value) {
+                        onChange(filters.copy(serializationDate = value))
+                    }
+                }
+            }
         }
         else -> {
             FilterSection("JM 分类") {
@@ -808,7 +825,8 @@ private fun FilterTabFormDialog(
                             if (targetPlatform == ContentPlatform.JM) {
                                 when (jmDraft.mode) {
                                     JmBrowsePolicy.MODE_RECOMMENDATIONS -> "首页推荐"
-                                    JmBrowsePolicy.MODE_WEEK -> "周榜 · ${jmDraft.weekType.ifBlank { "未设类型" }} · ${jmDraft.weekId.ifBlank { "未设周次" }}"
+                                    JmBrowsePolicy.MODE_WEEK -> "每周必看 · ${jmDraft.weekType.ifBlank { "manga" }} · ${jmDraft.weekId.ifBlank { "最新期" }}"
+                                    JmBrowsePolicy.MODE_SERIALIZATION -> "每周连载更新 · ${jmDraft.serializationType} · ${if (jmDraft.serializationDate == 0) "已完结" else "周${jmDraft.serializationDate}"}"
                                     else -> {
                                         val category = JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions)
                                             .firstOrNull { it.second == jmDraft.category }?.first ?: "全部分类"

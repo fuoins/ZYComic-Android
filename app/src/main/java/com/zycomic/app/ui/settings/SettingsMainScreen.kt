@@ -2,9 +2,13 @@ package com.zycomic.app.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
@@ -18,19 +22,28 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.platform.rememberContentPlatformAccent
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 
@@ -50,6 +63,7 @@ fun SettingsMainScreen(
     onReplayOnboarding: () -> Unit,
 ) {
     val context = LocalContext.current
+    val platformPolicy by StartupPlatformPolicy.settingsState.collectAsState()
     var showDeveloperWarning by remember { mutableStateOf(false) }
     val topBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
@@ -77,6 +91,27 @@ fun SettingsMainScreen(
                     icon = Icons.Outlined.Palette,
                     onPreferenceClick = onOpenAppearance,
                 )
+            }
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text("内容平台", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "修改后下次启动生效；至少开启一个平台。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    SettingsPlatformSwitch("开启漫蛙", !platformPolicy.disableManwa, ContentPlatform.MANWA) {
+                        if (!StartupPlatformPolicy.setSettingsManwaEnabled(it)) {
+                            Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    SettingsPlatformSwitch("开启禁漫天堂", !platformPolicy.disableJm, ContentPlatform.JM) {
+                        if (!StartupPlatformPolicy.setSettingsJmEnabled(it)) {
+                            Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             }
             item {
                 TextPreferenceWidget(
@@ -155,5 +190,36 @@ fun SettingsMainScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun SettingsPlatformSwitch(
+    title: String,
+    checked: Boolean,
+    platform: ContentPlatform,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val accent = rememberContentPlatformAccent(platform)
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = accent.copy(alpha = 0.10f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, modifier = Modifier.weight(1f), color = accent, style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = accent,
+                    checkedTrackColor = accent.copy(alpha = 0.42f),
+                    checkedBorderColor = accent,
+                ),
+            )
+        }
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,7 +44,9 @@ import com.zycomic.app.net.ImageSourceDisplayPolicy
 import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
+import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.FilterChip
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -61,6 +64,8 @@ fun SettingsScreen() {
     var jmTestError by remember { mutableStateOf<String?>(null) }
     val filterEnabled by vm.filterEnabled.collectAsState()
     val platformSettings by StartupPlatformPolicy.settingsState.collectAsState()
+    val manwaAccent = rememberContentPlatformAccent(ContentPlatform.MANWA)
+    val jmAccent = rememberContentPlatformAccent(ContentPlatform.JM)
     val restartRequiredMessage = stringResource(KMR.strings.startup_platform_restart_toast)
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     val allTags by vm.allTags.collectAsState()
@@ -138,23 +143,25 @@ fun SettingsScreen() {
             modifier = Modifier.padding(horizontal = 16.dp),
         )
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(KMR.strings.startup_disable_manwa), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(KMR.strings.startup_enable_manwa), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = manwaAccent)
             Switch(
-                checked = platformSettings.disableManwa,
-                onCheckedChange = { disable ->
-                    val accepted = StartupPlatformPolicy.setSettingsDisableManwa(disable)
+                checked = !platformSettings.disableManwa,
+                onCheckedChange = { enabled ->
+                    val accepted = StartupPlatformPolicy.setSettingsManwaEnabled(enabled)
                     Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
                 },
+                colors = SwitchDefaults.colors(checkedThumbColor = manwaAccent, checkedTrackColor = manwaAccent.copy(alpha = 0.42f), checkedBorderColor = manwaAccent),
             )
         }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(KMR.strings.startup_disable_jm), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(KMR.strings.startup_enable_jm), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = jmAccent)
             Switch(
-                checked = platformSettings.disableJm,
-                onCheckedChange = { disable ->
-                    val accepted = StartupPlatformPolicy.setSettingsDisableJm(disable)
+                checked = !platformSettings.disableJm,
+                onCheckedChange = { enabled ->
+                    val accepted = StartupPlatformPolicy.setSettingsJmEnabled(enabled)
                     Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
                 },
+                colors = SwitchDefaults.colors(checkedThumbColor = jmAccent, checkedTrackColor = jmAccent.copy(alpha = 0.42f), checkedBorderColor = jmAccent),
             )
         }
 

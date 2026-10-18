@@ -45,7 +45,8 @@ class BrowseViewModel {
 
     private fun initialTabIndex(platform: ContentPlatform): Int {
         BrowseTabStore.loadSelectedTabOrNull()?.let { index ->
-            if (tabs.getOrNull(index)?.platformId == platform) return index
+            val item = tabs.getOrNull(index)
+            if (item != null && (BrowseTabPolicy.isIndependentRanking(item) || item.platformId == platform)) return index
         }
         val oldIndex = BrowseTabStore.loadSelectedTab(platform)
         val platformTabs = tabs.withIndex().filter { it.value.platformId == platform }
@@ -74,6 +75,7 @@ class BrowseViewModel {
     }
 
     private val stateById = HashMap<String, TabState>()
+    private val sessionFilters = SessionTabFilters<FilterSnapshot>()
 
     private fun stateFor(page: Int): TabState {
         val item = tabs.getOrNull(page) ?: return TabState()
@@ -89,6 +91,11 @@ class BrowseViewModel {
             }
             TabState(initial)
         }
+    }
+
+    internal fun defaultJmFiltersForTab(tab: Int): JmBrowsePolicy.Filters {
+        val item = tabs.getOrNull(tab) ?: return JmBrowsePolicy.Filters()
+        return JmBrowsePolicy.effectiveFilters(item.id, BrowseTabStore.loadJmFilters(item.id) ?: JmBrowsePolicy.initialFilters(item.id))
     }
 
     private fun saveJmFilters(tab: Int, filters: JmBrowsePolicy.Filters) {
@@ -122,7 +129,7 @@ class BrowseViewModel {
     internal fun jmFiltersForTab(tab: Int): StateFlow<JmBrowsePolicy.Filters> = stateFor(tab).jmFilters.asStateFlow()
 
     fun selectJmMode(mode: Int, tab: Int = mainTab.value) {
-        if (mode !in JmBrowsePolicy.MODE_RECOMMENDATIONS..JmBrowsePolicy.MODE_WEEK || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
+        if (mode !in setOf(JmBrowsePolicy.MODE_RECOMMENDATIONS, JmBrowsePolicy.MODE_CATEGORY, JmBrowsePolicy.MODE_WEEK, JmBrowsePolicy.MODE_SERIALIZATION) || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
         if (tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID && mode != JmBrowsePolicy.MODE_CATEGORY) return
         val state = stateFor(tab)
         val current = state.jmFilters.value
@@ -131,9 +138,8 @@ class BrowseViewModel {
             mode = mode,
             query = "",
             order = if (mode == JmBrowsePolicy.MODE_CATEGORY && current.order.isBlank()) "mr" else current.order,
-            weekType = if (mode == JmBrowsePolicy.MODE_WEEK && current.weekType.isBlank()) "hanman" else current.weekType,
+            weekType = if (mode == JmBrowsePolicy.MODE_WEEK && current.weekType.isBlank()) "manga" else current.weekType,
         )
-        saveJmFilters(tab, state.jmFilters.value)
         refresh(tab)
     }
 
@@ -142,11 +148,10 @@ class BrowseViewModel {
         if (value.isBlank() || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM || tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID) return
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(mode = JmBrowsePolicy.MODE_SEARCH, query = value)
-        saveJmFilters(tab, stateFor(tab).jmFilters.value)
         refresh(tab)
     }
 
-    fun updateJmFilters(tab: Int, order: String? = null, category: String? = null, weekId: String? = null, weekType: String? = null) {
+    fun updateJmFilters(tab: Int, order: String? = null, category: String? = null, weekId: String? = null, weekType: String? = null, serializationType: String? = null, serializationDate: Int? = null) {
         if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(
@@ -154,8 +159,9 @@ class BrowseViewModel {
             category = category?.trim() ?: current.category,
             weekId = weekId?.trim() ?: current.weekId,
             weekType = weekType?.trim() ?: current.weekType,
+            serializationType = serializationType ?: current.serializationType,
+            serializationDate = serializationDate ?: current.serializationDate,
         )
-        saveJmFilters(tab, stateFor(tab).jmFilters.value)
         refresh(tab)
     }
 
@@ -181,15 +187,15 @@ class BrowseViewModel {
     val allTags = MutableStateFlow<List<String>>(AllTags.LIST)
 
     // ---- 最近更新（SPECIAL: LATEST） ----
-    val newestDate = MutableStateFlow(prefs.getString("browse_newest_date_${currentPlatform.value.id}", "") ?: "") // ""=7天
+    val newestDate = MutableStateFlow("") // ""=7天
     val newestNums = MutableStateFlow(0)
 
     // ---- 排行（SPECIAL: RANKING）子类型：0 人气 / 1 新番 / 2 完结 ----
-    val rankType = MutableStateFlow(prefs.getInt("browse_rank_type_${currentPlatform.value.id}", 0))
+    val rankType = MutableStateFlow(0)
     private var rankTypeInitialized = false
     fun initDefaultRankType(default: Int) {
         if (!rankTypeInitialized) {
-            rankType.value = prefs.getInt("browse_rank_type_${currentPlatform.value.id}", default)
+            rankType.value = default
             rankTypeInitialized = true
         }
     }
@@ -197,7 +203,6 @@ class BrowseViewModel {
         rankTypeInitialized = true
         if (rankType.value != t) {
             rankType.value = t
-            prefs.edit().putInt("browse_rank_type_${currentPlatform.value.id}", t).apply()
             refresh()
         }
     }
@@ -251,29 +256,32 @@ class BrowseViewModel {
 
     init {
         if (tabs.isNotEmpty()) mainTab.value = mainTab.value.coerceIn(0, tabs.lastIndex)
-        tabs.getOrNull(mainTab.value)?.let { bindPlatform(it.platformId) }
+        tabs.getOrNull(mainTab.value)?.let { bindPlatform(it.platformId, allowIndependentRanking = isIndependentRanking(it)) }
         BrowseTabStore.saveSelectedTab(mainTab.value)
         bindFilterFor(mainTab.value)
         refresh()
     }
 
-    /** 进入某个 FILTER tab 时，把会话筛选重置为该 tab 的预设默认值。 */
+    private fun isIndependentRanking(item: BrowseTabItem): Boolean =
+        BrowseTabPolicy.isIndependentRanking(item)
+
+    private fun canSelect(item: BrowseTabItem): Boolean = isIndependentRanking(item) || StartupPlatformPolicy.isEnabled(item.platformId)
+
+    /** 会话内按平台和固定 Tab ID 保留临时值，重启后重新读取持久默认值。 */
     private fun bindFilterFor(page: Int) {
         val item = tabs.getOrNull(page) ?: return
         if (item.kind == TabKind.FILTER) {
-            curFilter.value = BrowseTabStore.loadFilter(item.platformId, item.id)
-                ?: item.filter?.copy()
-                ?: FilterSnapshot()
+            curFilter.value = sessionFilters.get("${item.platformId.id}:${item.id}") { item.filter?.copy() ?: FilterSnapshot() }
         }
     }
 
     fun selectMainTab(tab: Int) {
         if (tabs.isEmpty() || tab !in tabs.indices) return
         val item = tabs[tab]
-        if (!StartupPlatformPolicy.isEnabled(item.platformId)) return
+        if (!canSelect(item)) return
         if (mainTab.value == tab && currentPlatform.value == item.platformId) return
         val platformChanged = currentPlatform.value != item.platformId
-        bindPlatform(item.platformId)
+        bindPlatform(item.platformId, allowIndependentRanking = isIndependentRanking(item))
         if (platformChanged) {
             selectionMode.value = false
             selectedIds.value = emptySet()
@@ -284,8 +292,8 @@ class BrowseViewModel {
         if (!stateFor(tab).loaded) refresh()
     }
 
-    private fun bindPlatform(platform: ContentPlatform) {
-        if (!StartupPlatformPolicy.isEnabled(platform)) return
+    private fun bindPlatform(platform: ContentPlatform, allowIndependentRanking: Boolean = false) {
+        if (!allowIndependentRanking && !StartupPlatformPolicy.isEnabled(platform)) return
         if (currentPlatform.value == platform) return
         currentJob?.cancel()
         requestSeq.incrementAndGet()
@@ -299,22 +307,16 @@ class BrowseViewModel {
             }
         }
         prefs.edit()
-            .putString("browse_newest_date_${previous.id}", newestDate.value)
-            .putInt("browse_rank_type_${previous.id}", rankType.value)
             .putBoolean("browse_filter_expanded_${previous.id}", filterExpanded.value)
             .apply()
         currentPlatform.value = platform
-        ContentPlatformPrefs.save("browse", platform)
-        newestDate.value = prefs.getString("browse_newest_date_${platform.id}", "") ?: ""
-        rankType.value = prefs.getInt("browse_rank_type_${platform.id}", 0)
+        if (!allowIndependentRanking || StartupPlatformPolicy.isEnabled(platform)) ContentPlatformPrefs.save("browse", platform)
         filterExpanded.value = prefs.getBoolean("browse_filter_expanded_${platform.id}", true)
-        rankTypeInitialized = false
     }
 
     fun selectRankType(type: Int) {
         if (rankType.value == type) return
         rankType.value = type
-        prefs.edit().putInt("browse_rank_type_${currentPlatform.value.id}", type).apply()
         refresh()
     }
 
@@ -322,7 +324,7 @@ class BrowseViewModel {
     private fun updateCurrentFilter(snapshot: FilterSnapshot) {
         curFilter.value = snapshot
         tabs.getOrNull(mainTab.value)?.let { item ->
-            BrowseTabStore.saveFilter(item.platformId, item.id, snapshot)
+            sessionFilters.set("${item.platformId.id}:${item.id}", snapshot)
         }
     }
 
@@ -373,7 +375,6 @@ class BrowseViewModel {
 
     fun selectDate(date: String) {
         newestDate.value = date
-        prefs.edit().putString("browse_newest_date_${currentPlatform.value.id}", date).apply()
         refresh()
     }
 
@@ -489,6 +490,7 @@ class BrowseViewModel {
 
     fun refresh(tab: Int = mainTab.value) {
         if (tabs.isEmpty() || tab !in tabs.indices) return
+        if (isIndependentRanking(tabs[tab])) return
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
             val ts = stateFor(tab)
@@ -504,6 +506,7 @@ class BrowseViewModel {
 
     fun loadMore(tab: Int) {
         if (tab !in tabs.indices) return
+        if (isIndependentRanking(tabs[tab])) return
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
@@ -517,6 +520,7 @@ class BrowseViewModel {
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
         if (tab !in tabs.indices) return
+        if (isIndependentRanking(tabs[tab])) return
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
             doLoadJm(reset, tab)
@@ -547,7 +551,7 @@ class BrowseViewModel {
                         else -> MangaRepository.getNewest(p, newestDate.value, 30).first
                     }
                     TabKind.FILTER -> {
-                        val f = curFilter.value
+                        val f = sessionFilters.get("${item.platformId.id}:${item.id}") { item.filter ?: FilterSnapshot() }
                         MangaRepository.getClasses(
                             page = p,
                             gender = f.gender,
@@ -567,7 +571,7 @@ class BrowseViewModel {
             }
 
             if (reqId != requestSeq.get()) return
-            if (!StartupPlatformPolicy.isEnabled(item.platformId)) return
+            if (!canSelect(item)) return
             ts.currentPage = lastInvoked + 1
 
             if (item.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.LATEST && reset) {
@@ -603,11 +607,15 @@ class BrowseViewModel {
             ts.appending.value = true
         }
         try {
-            val filters = JmBrowsePolicy.effectiveFilters(tabs[tab].id, ts.jmFilters.value)
-            if (filters.mode == JmBrowsePolicy.MODE_WEEK && (filters.weekId.isBlank() || filters.weekType.isBlank())) {
-                ts.loaded = true
-                ts.hasMore.value = false
-                return
+            var filters = JmBrowsePolicy.effectiveFilters(tabs[tab].id, ts.jmFilters.value)
+            if (filters.mode == JmBrowsePolicy.MODE_WEEK && filters.weekId.isBlank()) {
+                val issues = JmSource.getWeekIssues()
+                if (reqId != ts.jmRequestId) return
+                _jmWeekIssues.value = issues.map { JmWeekChoice(it.id, it.title) }
+                jmWeekIssuesLoaded = true
+                val latest = issues.firstOrNull()?.id ?: error("每周必看暂无可用期数")
+                filters = filters.copy(weekId = latest, weekType = filters.weekType.ifBlank { "manga" })
+                ts.jmFilters.value = filters
             }
             val previousFirstId = ts.previousJmPageFirstId
             val result = JmSource.browse(
@@ -619,6 +627,8 @@ class BrowseViewModel {
                 weekId = filters.weekId,
                 weekType = filters.weekType,
                 previousFirstId = previousFirstId,
+                serializationType = filters.serializationType,
+                serializationDate = filters.serializationDate,
             )
             if (reqId != ts.jmRequestId) return
             if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
@@ -633,8 +643,7 @@ class BrowseViewModel {
             ts.mangas.value = merged
             ts.previousJmPageFirstId = result.items.firstOrNull()?.id
             ts.loaded = true
-            val isWeekRank = filters.mode == JmBrowsePolicy.MODE_WEEK
-            ts.hasMore.value = !isWeekRank && result.hasMore && addedItems
+            ts.hasMore.value = result.hasMore && addedItems
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -714,6 +723,8 @@ class BrowseViewModel {
         if (i < 0 || tabs[i].kind != TabKind.FILTER) return
         tabs[i] = tabs[i].copy(filter = snapshot)
         persist()
+        sessionFilters.set("${tabs[i].platformId.id}:$id", snapshot.copy())
+        stateFor(i).loaded = false
         if (mainTab.value == i) {
             updateCurrentFilter(snapshot.copy())
             refresh()
@@ -726,6 +737,7 @@ class BrowseViewModel {
         if (i < 0 || tabs[i].kind != TabKind.FILTER) return
         stateFor(i).jmFilters.value = filters
         saveJmFilters(i, filters)
+        stateFor(i).loaded = false
         if (mainTab.value == i) refresh(i)
     }
 
@@ -735,6 +747,7 @@ class BrowseViewModel {
         val deletedPlatform = tabs[i].platformId
         tabs.removeAt(i)
         stateById.remove("${deletedPlatform.id}:$id")
+        sessionFilters.remove("${deletedPlatform.id}:$id")
         if (deletedPlatform == ContentPlatform.JM) BrowseTabStore.deleteJmFilters(id)
         if (tabs.isEmpty()) tabs.addAll(BrowseTabStore.defaultTabs(ContentPlatform.MANWA))
         persist()
@@ -847,6 +860,7 @@ class BrowseViewModel {
     fun resetToDefaults() {
         tabs.clear()
         stateById.clear()
+        sessionFilters.clear()
         tabs.addAll(BrowseTabStore.resetAll())
         val defaultPlatform = StartupPlatformPolicy.resolve(null)
         val defaultTab = tabs.indexOfFirst { it.platformId == defaultPlatform }.coerceAtLeast(0)
@@ -859,8 +873,8 @@ class BrowseViewModel {
 
     private fun goTo(index: Int) {
         val item = tabs.getOrNull(index) ?: return
-        if (!StartupPlatformPolicy.isEnabled(item.platformId)) return
-        bindPlatform(item.platformId)
+        if (!canSelect(item)) return
+        bindPlatform(item.platformId, allowIndependentRanking = isIndependentRanking(item))
         mainTab.value = index
         BrowseTabStore.saveSelectedTab(index)
         bindFilterFor(index)

@@ -143,8 +143,8 @@ fun BrowseScreen(
             .distinctUntilChanged()
             .filter { it != vm.mainTab.value }
             .collect { page ->
-                val target = vm.tabs.getOrNull(page)?.platformId
-                if (target != null && com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, target)) {
+                val targetItem = vm.tabs.getOrNull(page)
+                if (targetItem != null && (targetItem.isUngatedYuzongRank() || com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, targetItem.platformId))) {
                     vm.selectMainTab(page)
                 } else {
                     pagerState.animateScrollToPage(vm.mainTab.value)
@@ -209,15 +209,15 @@ fun BrowseScreen(
                         AppBarActions(
                             if (platform == ContentPlatform.MANWA) {
                                 persistentListOf(
-                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", SearchProvider.MANWA) }),
+                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", null) }),
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                     AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                     AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
                                 )
                             } else {
                                 persistentListOf(
-                                    AppBar.Action(title = "JM 搜索", icon = Icons.Default.Search, onClick = {
-                                        onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, SearchProvider.JM)
+                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = {
+                                        onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, null)
                                     }),
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                     AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
@@ -286,46 +286,29 @@ fun BrowseScreen(
                             item(key = "tab_${item.platformId.id}_${item.id}") {
                                 val selected = pagerState.currentPage == index
                                 val selectTab: () -> Unit = {
-                                    if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, item.platformId)) {
+                                    if (item.isUngatedYuzongRank() || com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, item.platformId)) {
                                         scope.launch {
                                             pagerState.animateScrollToPage(index)
                                             vm.selectMainTab(index)
                                         }
                                     }
                                 }
-                                if (item.pageType == BrowsePageType.YUZONG_RANK) {
-                                    Box(
-                                        Modifier.clip(CircleShape)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null,
-                                                onClick = selectTab,
-                                            )
-                                            .padding(end = 6.dp),
-                                    ) {
-                                        BrowseTabCapsule(
-                                            name = item.name,
-                                            platform = item.platformId,
-                                            isYuzongRank = true,
-                                            selected = selected,
+                                Box(
+                                    Modifier.clip(CircleShape)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = selectTab,
                                         )
-                                    }
-                                } else {
-                                    Box(
-                                        Modifier.clip(CircleShape)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null,
-                                                onClick = selectTab,
-                                            )
-                                            .padding(end = 6.dp),
-                                    ) {
-                                        BrowseTabCapsule(
-                                            name = item.name,
-                                            platform = item.platformId,
-                                            selected = selected,
-                                        )
-                                    }
+                                        .padding(end = 6.dp),
+                                ) {
+                                    BrowseTabCapsule(
+                                        name = item.name,
+                                        platform = item.platformId,
+                                        isYuzongRank = item.isUngatedYuzongRank(),
+                                        isJmHome = item.platformId == ContentPlatform.JM && item.id == BrowseTabStore.ID_JM_HOME,
+                                        selected = selected,
+                                    )
                                 }
                             }
                             if (index == pagerState.currentPage) {
@@ -371,7 +354,7 @@ fun BrowseScreen(
                         }
                     },
                     bottomPadding = contentPadding.calculateBottomPadding(),
-                    onOpenSearch = { keyword -> onOpenSearch(keyword, SearchProvider.fromStorage(platform.id)) },
+                    onOpenSearch = { keyword, provider -> onOpenSearch(keyword, provider) },
                 )
             }
         }
@@ -395,7 +378,9 @@ fun BrowseScreen(
             orientation = orientation,
             onDismiss = { showFilterDialog = false },
             onOpenTagDialog = { showTagDialog = true },
-            displayOnly = vm.tabs.getOrNull(mainTab)?.let { it.kind == TabKind.SPECIAL && it.pageType == BrowsePageType.YUZONG_RANK } ?: false,
+            displayOnly = vm.tabs.getOrNull(mainTab)?.let {
+                it.isUngatedYuzongRank() || (it.platformId == ContentPlatform.JM && it.id == BrowseTabStore.ID_JM_HOME)
+            } ?: false,
         )
     }
 
@@ -424,6 +409,9 @@ fun BrowseScreen(
         )
     }
 }
+
+private fun BrowseTabItem.isUngatedYuzongRank(): Boolean =
+    BrowseTabPolicy.isIndependentRanking(this)
 
 @Composable
 private fun CategoryPlatformLegend() {
@@ -455,12 +443,17 @@ private fun BrowseTabContent(
     onToggleSelect: (String) -> Unit,
     onLongClick: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
-    onOpenSearch: (String) -> Unit,
+    onOpenSearch: (String, SearchProvider?) -> Unit,
 ) {
     val item = vm.tabs.getOrNull(page)
     val tabPlatform = item?.platformId ?: platform
     if (item?.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.YUZONG_RANK) {
-        com.zycomic.app.platform.YuzongRankContent(onSearchTitle = onOpenSearch, modifier = Modifier.fillMaxSize(), gridColumns = if (gridColumns > 0) gridColumns else 3, displayMode = displayMode)
+        com.zycomic.app.platform.YuzongRankContent(
+            onSearchTitle = { title -> onOpenSearch(title, null) },
+            modifier = Modifier.fillMaxSize(),
+            gridColumns = if (gridColumns > 0) gridColumns else 3,
+            displayMode = displayMode,
+        )
         return
     }
     val mangas by vm.mangasForTab(page).collectAsState()
@@ -489,8 +482,25 @@ private fun BrowseTabContent(
         }
     }
 
+    var jmHomeControlsExpanded by remember(item?.id) { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
+            if (item?.id == BrowseTabStore.ID_JM_HOME && tabPlatform == ContentPlatform.JM) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { jmHomeControlsExpanded = !jmHomeControlsExpanded }) {
+                        Icon(
+                            imageVector = if (jmHomeControlsExpanded) Icons.Outlined.Tune else Icons.Outlined.FilterList,
+                            contentDescription = if (jmHomeControlsExpanded) "收起首页筛选类别" else "展开首页筛选类别",
+                            tint = rememberContentPlatformAccent(ContentPlatform.JM),
+                        )
+                    }
+                    if (jmHomeControlsExpanded) Text("首页筛选类别", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (jmHomeControlsExpanded) JmBrowseControls(vm, page)
+            }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     loading && mangas.isEmpty() -> MangaGridSkeleton(
@@ -587,7 +597,12 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
     ) {
         if (JmBrowsePolicy.showsModePicker(tabId)) {
             FilterSection("浏览方式") {
-                listOf("推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS, "分类" to JmBrowsePolicy.MODE_CATEGORY, "周榜" to JmBrowsePolicy.MODE_WEEK).forEach { (label, value) ->
+                listOf(
+                    "推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS,
+                    "分类" to JmBrowsePolicy.MODE_CATEGORY,
+                    "每周必看" to JmBrowsePolicy.MODE_WEEK,
+                    "每周连载更新" to JmBrowsePolicy.MODE_SERIALIZATION,
+                ).forEach { (label, value) ->
                     FilterChip(text = label, selected = mode == value, onClick = { vm.selectJmMode(value, page) })
                 }
                 if (mode == JmBrowsePolicy.MODE_SEARCH) Text("搜索：${filters.query}", style = MaterialTheme.typography.bodySmall)
@@ -626,7 +641,8 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         JmBrowseSelector(
                             title = "期数",
-                            selected = weekIssues.firstOrNull { it.id == filters.weekId }?.title ?: "选择期数",
+                            selected = weekIssues.firstOrNull { it.id == filters.weekId }?.title
+                                ?: if (filters.weekId.isBlank()) weekIssues.firstOrNull()?.title ?: "选择期数" else "选择期数",
                             options = weekIssues.map { it.title to it.id },
                             onSelected = { vm.updateJmFilters(page, weekId = it) },
                             modifier = Modifier.weight(1f),
@@ -641,12 +657,26 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                     }
                 }
             }
+            JmBrowsePolicy.MODE_SERIALIZATION -> {
+                val serializationTypes = listOf("全部" to "all", "日漫" to "manga", "韩漫" to "hanman")
+                val serializationDates = listOf("周一" to 1, "周二" to 2, "周三" to 3, "周四" to 4, "周五" to 5, "周六" to 6, "周日" to 7, "已完结" to 0)
+                FilterSection("类型") {
+                    serializationTypes.forEach { (label, value) ->
+                        FilterChip(text = label, selected = filters.serializationType == value, onClick = { vm.updateJmFilters(page, serializationType = value) })
+                    }
+                }
+                FilterSection("更新日期") {
+                    serializationDates.forEach { (label, value) ->
+                        FilterChip(text = label, selected = filters.serializationDate == value, onClick = { vm.updateJmFilters(page, serializationDate = value) })
+                    }
+                }
+            }
             JmBrowsePolicy.MODE_SEARCH -> Text("搜索结果支持继续加载", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
-private val JmWeekTypes = listOf("韩漫" to "hanman", "其他类" to "another", "漫画" to "manga")
+private val JmWeekTypes = listOf("日漫" to "manga", "韩漫" to "hanman", "其他" to "another")
 
 @Composable
 private fun JmBrowseSelector(
@@ -810,9 +840,9 @@ private fun BrowseFilterDialog(
             text = {
                 Text(
                     if (vm.tabs.getOrNull(currentTab)?.platformId == ContentPlatform.JM) {
-                        "分类、排序与浏览方式仅保存到当前禁漫标签页，不影响其他标签页或漫蛙筛选。"
+                        "重新筛选只对本次有效，不会修改默认值；切换标签页后本次设置仍保留，重启软件后恢复标签页默认值。"
                     } else {
-                        "重新筛选按本次修改展示，不会修改默认筛选；切换离开该 Tab 再返回或重进软件时会恢复默认配置。若要将标签配置固定为一个 Tab，请点击 Tab 栏最右侧按钮进行配置。"
+                        "重新筛选只对本次有效，不会修改默认值；切换标签页后本次设置仍保留，重启软件后恢复标签页默认值。若要修改标签页默认筛选，请使用标签页管理。"
                     },
                 )
             },

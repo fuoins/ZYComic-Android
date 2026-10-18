@@ -8,6 +8,8 @@ import java.io.IOException
 /** Parses confirmed JM fields; album IDs are used as episode IDs only for an explicit empty series. */
 internal object JmResponseParser {
     data class WeekIssue(val id: String, val title: String)
+    data class ListItem(val id: String, val name: String, val author: String)
+    data class ListPage(val items: List<ListItem>, val total: Int)
     data class Chapter(val id: String, val name: String, val sort: Int)
     data class Chapters(val items: List<Chapter>, val warning: String?)
     data class RelatedManga(
@@ -60,8 +62,27 @@ internal object JmResponseParser {
             val item = categories.optJSONObject(index) ?: return@mapNotNull null
             val id = item.text("id")
             if (!validId(id)) return@mapNotNull null
-            WeekIssue(id, item.text("title").ifBlank { id })
+            WeekIssue(id, item.text("time").ifBlank { id })
         }
+    }
+
+    /** Parse the documented { total, list } response used by /week/filter and /serialization. */
+    fun listPage(payload: JSONObject, endpoint: String): ListPage {
+        val list = payload.optJSONArray("list")
+            ?: throw IOException("JM $endpoint 响应缺少已确认字段 list[]")
+        val total = payload.optString("total").toIntOrNull()?.takeIf { it >= 0 }
+            ?: throw IOException("JM $endpoint 响应缺少有效非负整数字段 total")
+        val items = (0 until list.length()).map { index ->
+            val item = list.optJSONObject(index)
+                ?: throw IOException("JM $endpoint list[$index] 不是对象")
+            val id = item.text("id")
+            val name = item.text("name")
+            if (!validId(id) || name.isBlank()) {
+                throw IOException("JM $endpoint.list[$index] 缺少有效字段 id/name")
+            }
+            ListItem(id, name, item.text("author"))
+        }.distinctBy { it.id }
+        return ListPage(items, total)
     }
 
     fun chapters(album: JSONObject, singleChapterAlbumId: String? = null): Chapters {

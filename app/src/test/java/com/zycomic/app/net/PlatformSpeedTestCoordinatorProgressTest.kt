@@ -1,0 +1,55 @@
+package com.zycomic.app.net
+
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class PlatformSpeedTestCoordinatorProgressTest {
+    @Test
+    fun `Manwa line and image progress messages expose real counters`() {
+        val line = PlatformSpeedTestCoordinator.manwaProgressMessage(
+            SpeedTester.Progress(
+                phase = SpeedTester.Phase.TESTING_LINES,
+                completed = 3,
+                total = 7,
+                successful = 2,
+                failed = 1,
+            ),
+        )
+        val images = PlatformSpeedTestCoordinator.manwaProgressMessage(
+            SpeedTester.Progress(
+                phase = SpeedTester.Phase.TESTING_IMAGES,
+                completed = 4,
+                total = 9,
+                successful = 2,
+                failed = 1,
+                noImage = 1,
+            ),
+        )
+
+        assertTrue(line.contains("漫蛙"))
+        assertTrue(line.contains("3/7"))
+        assertTrue(line.contains("可用 2，失败 1"))
+        assertTrue(images.contains("4/9"))
+        assertTrue(images.contains("无图 1"))
+    }
+
+    @Test
+    fun `Manwa completion message reports results and image reuse`() {
+        val message = PlatformSpeedTestCoordinator.manwaProgressMessage(
+            SpeedTester.Progress(
+                phase = SpeedTester.Phase.COMPLETE,
+                completed = 12,
+                total = 12,
+                successful = 8,
+                failed = 2,
+                noImage = 2,
+                freshImages = 10,
+                reusedImages = 2,
+            ),
+        )
+
+        assertTrue(message.contains("12/12"))
+        assertTrue(message.contains("可用 8、失败 2、无图 2"))
+        assertTrue(message.contains("新测 10、复用 2"))
+    }
+}

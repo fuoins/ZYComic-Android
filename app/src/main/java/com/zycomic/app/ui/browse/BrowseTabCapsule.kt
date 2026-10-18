@@ -25,6 +25,7 @@ fun BrowseTabCapsule(
     name: String,
     platform: ContentPlatform,
     isYuzongRank: Boolean = false,
+    isJmHome: Boolean = false,
     selected: Boolean = false,
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = 12.dp,
@@ -33,7 +34,7 @@ fun BrowseTabCapsule(
 ) {
     val platformAccent = rememberContentPlatformAccent(platform)
     val accent = if (isYuzongRank) MaterialTheme.colorScheme.primary else platformAccent
-    val background = if (selected) accent else accent.copy(alpha = 0.12f)
+    val background = if (selected) accent else accent.copy(alpha = if (isJmHome) 0.17f else 0.12f)
     val foreground = when {
         !selected -> accent
         isYuzongRank -> MaterialTheme.colorScheme.onPrimary
@@ -53,7 +54,7 @@ fun BrowseTabCapsule(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = foreground,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            fontWeight = if (selected || isJmHome) FontWeight.SemiBold else FontWeight.Medium,
         )
     }
 }

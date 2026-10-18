@@ -261,27 +261,12 @@ object BrowseTabStore {
     internal fun loadJmFilters(tabId: String): JmBrowsePolicy.Filters? =
         prefs.getString(jmFilterKey(tabId), null)?.let { raw ->
             runCatching {
-                val snapshot = JmFilterSnapshot.fromJson(JSONObject(raw), JmBrowsePolicy.MODE_CATEGORY)
-                JmBrowsePolicy.Filters(
-                    mode = snapshot.mode,
-                    query = snapshot.query,
-                    order = snapshot.order,
-                    category = snapshot.category,
-                    weekId = snapshot.weekId,
-                    weekType = snapshot.weekType,
-                )
+                JmFilterSnapshot.fromJson(JSONObject(raw), JmBrowsePolicy.MODE_CATEGORY).toFilters()
             }.getOrNull()
         }
 
     internal fun saveJmFilters(tabId: String, filters: JmBrowsePolicy.Filters) {
-        JmFilterSnapshot(
-            mode = filters.mode,
-            query = filters.query,
-            order = filters.order,
-            category = filters.category,
-            weekId = filters.weekId,
-            weekType = filters.weekType,
-        ).toJson().let { prefs.edit().putString(jmFilterKey(tabId), it.toString()).apply() }
+        JmFilterSnapshot.fromFilters(filters).toJson().let { prefs.edit().putString(jmFilterKey(tabId), it.toString()).apply() }
     }
 
     fun deleteJmFilters(tabId: String) {

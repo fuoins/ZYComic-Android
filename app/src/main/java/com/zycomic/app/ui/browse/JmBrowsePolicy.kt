@@ -8,6 +8,7 @@ internal object JmBrowsePolicy {
     const val MODE_CATEGORY = 1
     const val MODE_WEEK = 2
     const val MODE_SEARCH = 3
+    const val MODE_SERIALIZATION = 4
     const val ALL_HOT_TAB_ID = "jm_all_hot"
     const val ALL_HOT_ORDER = "tf"
     const val LATEST_A_CATEGORY = "__jm_latest_a__"
@@ -18,8 +19,12 @@ internal object JmBrowsePolicy {
         val order: String = "",
         val category: String = "",
         val weekId: String = "",
-        val weekType: String = "",
+        val weekType: String = "manga",
+        val serializationType: String = "all",
+        val serializationDate: Int = today(),
     )
+
+    fun today(): Int = ((java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7) + 1
 
     fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID
 
@@ -31,7 +36,7 @@ internal object JmBrowsePolicy {
                 order = filters.order.ifBlank { ALL_HOT_ORDER },
             )
         } else {
-            filters
+            if (filters.mode == MODE_CATEGORY && filters.order.isBlank()) filters.copy(order = "mr") else filters
         }
 
     fun initialFilters(tabId: String): Filters =

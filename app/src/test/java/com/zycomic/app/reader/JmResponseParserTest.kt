@@ -12,10 +12,10 @@ class JmResponseParserTest {
     @Test
     fun `week skips invalid items without losing valid issues`() {
         val result = JmResponseParser.weekIssues(
-            JSONObject("""{"categories":[{"id":"12","title":"第十二期"},{"title":"缺 ID"},null,3,{"id":13}]}"""),
+            JSONObject("""{"categories":[{"id":"12","time":"2026第12期"},{"title":"缺 ID"},null,3,{"id":13,"time":"第十三期"}]}"""),
         )
         assertEquals(listOf("12", "13"), result.map { it.id })
-        assertEquals(listOf("第十二期", "13"), result.map { it.title })
+        assertEquals(listOf("2026第12期", "第十三期"), result.map { it.title })
     }
 
     @Test
@@ -32,6 +32,42 @@ class JmResponseParserTest {
             """{"categories":[]}""",
             """{"categories":[null,{}, {"id":null}, {"id":0}, {"id":true}, {"id":"bad"}]}""",
         ).forEach { assertTrue(JmResponseParser.weekIssues(JSONObject(it)).isEmpty()) }
+    }
+
+    @Test
+    fun `week issue display uses time and safely falls back to id`() {
+        val result = JmResponseParser.weekIssues(
+            JSONObject("""{"categories":[{"id":"23","title":"不要展示标题","time":"2026第23期"},{"id":"24","time":" "}]}"""),
+        )
+        assertEquals(listOf("2026第23期", "24"), result.map { it.title })
+    }
+
+    @Test
+    fun `weekly and serialization list parser reads list and total`() {
+        val parsed = JmResponseParser.listPage(
+            JSONObject("""{"total":55,"list":[{"id":123,"name":"作品甲","author":"作者"},{"id":"456","name":"作品乙"}]}"""),
+            "/serialization",
+        )
+        assertEquals(55, parsed.total)
+        assertEquals(listOf("123", "456"), parsed.items.map { it.id })
+        assertEquals(listOf("作品甲", "作品乙"), parsed.items.map { it.name })
+        assertEquals("作者", parsed.items.first().author)
+        assertEquals("", parsed.items.last().author)
+    }
+
+    @Test
+    fun `list total parser rejects missing total list and invalid comic fields`() {
+        listOf(
+            """{"list":[]}""",
+            """{"total":1}""",
+            """{"total":-1,"list":[]}""",
+            """{"total":1,"list":[{"id":"bad","name":"标题"}]}""",
+            """{"total":1,"list":[{"id":"1","name":" "}]}""",
+        ).forEach { json ->
+            assertThrows(IOException::class.java) {
+                JmResponseParser.listPage(JSONObject(json), "/week/filter")
+            }
+        }
     }
 
     @Test

@@ -20,6 +20,37 @@ enum class SearchProvider(
         get() = this == JM
 }
 
+/** Resolve the active provider without mutating the user's remembered ordinary-search choice. */
+fun resolveSearchProvider(
+    preferred: SearchProvider?,
+    manwaEnabled: Boolean,
+    jmEnabled: Boolean,
+): SearchProvider {
+    val requested = preferred ?: SearchProvider.JM
+    val requestedEnabled = when (requested) {
+        SearchProvider.MANWA -> manwaEnabled
+        SearchProvider.JM -> jmEnabled
+    }
+    if (requestedEnabled) return requested
+    return when {
+        jmEnabled -> SearchProvider.JM
+        manwaEnabled -> SearchProvider.MANWA
+        else -> requested
+    }
+}
+
+/** Explicit detail-origin sources take precedence over the remembered ordinary-search choice. */
+fun initialSearchProvider(
+    explicitProvider: SearchProvider?,
+    rememberedProvider: SearchProvider?,
+    manwaEnabled: Boolean,
+    jmEnabled: Boolean,
+): SearchProvider = resolveSearchProvider(
+    preferred = explicitProvider ?: rememberedProvider,
+    manwaEnabled = manwaEnabled,
+    jmEnabled = jmEnabled,
+)
+
 /** Values confirmed by JMSource and the repository's JM contract report. */
 const val JM_DEFAULT_SEARCH_SORT_CODE = "tf"
 

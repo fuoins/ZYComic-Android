@@ -18,6 +18,36 @@ class SearchPolicyTest {
     }
 
     @Test
+    fun `disabled remembered provider falls back only for this active resolution`() {
+        val remembered = SearchProvider.JM
+        assertEquals(SearchProvider.MANWA, resolveSearchProvider(remembered, manwaEnabled = true, jmEnabled = false))
+        assertEquals(SearchProvider.JM, remembered)
+        assertEquals(SearchProvider.JM, resolveSearchProvider(remembered, manwaEnabled = true, jmEnabled = true))
+    }
+
+    @Test
+    fun `explicit detail source wins over ordinary saved choice when enabled`() {
+        assertEquals(
+            SearchProvider.JM,
+            initialSearchProvider(
+                explicitProvider = SearchProvider.JM,
+                rememberedProvider = SearchProvider.MANWA,
+                manwaEnabled = true,
+                jmEnabled = true,
+            ),
+        )
+        assertEquals(
+            SearchProvider.MANWA,
+            initialSearchProvider(
+                explicitProvider = SearchProvider.MANWA,
+                rememberedProvider = SearchProvider.JM,
+                manwaEnabled = true,
+                jmEnabled = true,
+            ),
+        )
+    }
+
+    @Test
     fun `JM only defaults missing sort and preserves remembered choices`() {
         assertEquals("tf", jmSearchSortCode(null))
         assertEquals("tf", jmSearchSortCode(""))

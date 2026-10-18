@@ -60,9 +60,13 @@ object PlatformSpeedTestCoordinator {
             val initialKey = currentKey()
             if (SpeedTestRunPolicy.canSkip(completedKey, initialKey, forceFresh, onlyPlatform != null)) return@withLock _reports.value
             _running.value = true
+            _progressText.value = null
+            _jmProgress.value = null
             try {
                 // A changed toggle/config starts a new generation; never publish the old generation.
                 while (true) {
+                    _progressText.value = null
+                    _jmProgress.value = null
                     val policy = StartupPlatformPolicy.state.value
                     val key = currentKey()
                     val reuseImages = SpeedTestRunPolicy.canReuseImages(policy.useLastResult, forceFresh, initialKey, key, completedKey)
@@ -71,18 +75,31 @@ object PlatformSpeedTestCoordinator {
                         if (key != currentKey()) break
                         val enabled = StartupPlatformPolicy.isEnabled(platform)
                         var status = "skipped"
-                        var reason = if (platform == ContentPlatform.MANWA) "不用漫蛙已开启" else "不用禁漫天堂已开启"
+                        var reason = if (platform == ContentPlatform.MANWA) "漫蛙未开启" else "禁漫天堂未开启"
                         val requested = onlyPlatform == null || onlyPlatform == platform
                         if (enabled && !requested) reason = "本轮仅重新检测${if (onlyPlatform == ContentPlatform.JM) "禁漫天堂" else "漫蛙"}"
                         if (enabled && requested) {
                             _jmProgress.value = null
+                            _progressText.value = null
                             _progressText.value = if (platform == ContentPlatform.MANWA) "正在检测漫蛙线路与图源…" else "正在检测禁漫天堂线路与图源…"
                             try {
                                 reason = if (reuseImages) "线路本次新测；仅复用匹配的图源结果" else "线路与图源本次重新测速"
                                 if (platform == ContentPlatform.MANWA) {
                                     if (reuseImages) SpeedTester.requestPreviousImageResults()
-                                    SpeedTester.runAndApply(onProgress, onStageProgress)
+                                    SpeedTester.runAndApply(onProgress) { progress ->
+                                        if (key == currentKey()) {
+                                            _progressText.value = manwaProgressMessage(progress)
+                                            onStageProgress?.invoke(progress)
+                                        }
+                                    }
                                     status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
+                                    if (status == "tested") {
+                                        _progressText.value = manwaProgressMessage(SpeedTester.progress.value)
+                                    } else if (SpeedTester.progress.value.phase != SpeedTester.Phase.SKIPPED) {
+                                        val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
+                                        _progressText.value = manwaProgressMessage(failed)
+                                        onStageProgress?.invoke(failed)
+                                    }
                                 } else {
                                     val snapshot = JmSpeedTester.run(reuseImages = reuseImages, isCurrent = { key == currentKey() }) { progress ->
                                         if (key == currentKey()) {
@@ -98,6 +115,11 @@ object PlatformSpeedTestCoordinator {
                             } catch (_: Exception) {
                                 status = "incomplete"
                                 reason = "本轮检测失败，保留当前选择"
+                                if (platform == ContentPlatform.MANWA) {
+                                    val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
+                                    _progressText.value = manwaProgressMessage(failed)
+                                    onStageProgress?.invoke(failed)
+                                }
                             }
                         }
                         result += report(platform, status, reason)
@@ -117,6 +139,19 @@ object PlatformSpeedTestCoordinator {
                 _jmProgress.value = null
             }
         }
+    }
+
+    internal fun manwaProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {
+        SpeedTester.Phase.PREPARING_LINES -> "漫蛙 · 正在解析线路域名和 IP…"
+        SpeedTester.Phase.TESTING_LINES -> "漫蛙 · 测试线路 IP ${progress.completed}/${progress.total}（可用 ${progress.successful}，失败 ${progress.failed}）"
+        SpeedTester.Phase.APPLYING_LINE -> "漫蛙 · 线路检测完成（可用 ${progress.successful}，失败 ${progress.failed}），正在更新测速排名"
+        SpeedTester.Phase.FETCHING_SAMPLE -> "漫蛙 · 正在获取图源验证样本…"
+        SpeedTester.Phase.PREPARING_IMAGES -> "漫蛙 · 正在解析图源域名和 IP…"
+        SpeedTester.Phase.TESTING_IMAGES -> "漫蛙 · 测试图源 IP ${progress.completed}/${progress.total}（可用 ${progress.successful}，连不上 ${progress.failed}，无图 ${progress.noImage}）"
+        SpeedTester.Phase.APPLYING_RESULTS -> "漫蛙 · 端点检测完成，正在更新排名并应用结果…"
+        SpeedTester.Phase.COMPLETE -> "漫蛙测速完成：图源 ${progress.completed}/${progress.total}，可用 ${progress.successful}、失败 ${progress.failed}、无图 ${progress.noImage}；本次新测 ${progress.freshImages}、复用 ${progress.reusedImages}"
+        SpeedTester.Phase.FAILED -> "漫蛙测速中断，继续使用当前线路和图源"
+        SpeedTester.Phase.SKIPPED -> "漫蛙已有测速任务正在运行，本轮未重复检测"
     }
 
     private fun report(platform: ContentPlatform, status: String, reason: String): PlatformSpeedTestReport = when (platform) {

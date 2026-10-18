@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
@@ -37,7 +38,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -65,7 +68,10 @@ import androidx.lifecycle.lifecycleScope
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.browse.BrowseViewModel
 import com.zycomic.app.ui.components.NetworkMaintenanceNotice
@@ -115,6 +121,7 @@ class MainActivity : BaseActivity() {
         shortcutTab = intent?.shortcutTab() ?: -1
 
         StartupPlatformPolicy.load(this)
+        ContentPlatformAccentPrefs.init(this)
         com.zycomic.app.net.NetworkModule.init(this)
         setContent {
             val uiPreferences = remember { Injekt.get<UiPreferences>() }
@@ -416,6 +423,7 @@ fun AppContent(
                             onRequireLogin = { loginOpen = true },
                             onOpenSearch = { kw ->
                                 searchKeyword = kw
+                                searchProvider = null
                                 showSearch = true
                             },
                         )
@@ -427,6 +435,7 @@ fun AppContent(
                             onRequireLogin = { loginOpen = true },
                             onOpenSearch = { kw ->
                                 searchKeyword = kw
+                                searchProvider = null
                                 showSearch = true
                             },
                         )
@@ -522,7 +531,7 @@ fun AppContent(
             onClose = { closeDetail() },
             onOpenManga = openDetail,
             onSearchKeyword = { kw ->
-                if (bookId.startsWith("jm:")) searchProvider = SearchProvider.JM
+                searchProvider = if (bookId.startsWith("jm:")) SearchProvider.JM else SearchProvider.MANWA
                 searchKeyword = kw
                 detailStack.clear()
                 showSearch = true
@@ -679,13 +688,13 @@ private fun StartupPlatformSwitches() {
     val context = LocalContext.current
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     Column(modifier = Modifier.fillMaxWidth()) {
-        StartupSwitch(stringResource(KMR.strings.startup_disable_manwa), policy.disableManwa) {
-            if (!StartupPlatformPolicy.setDisableManwa(it)) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA) {
+            if (!StartupPlatformPolicy.setManwaEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        StartupSwitch(stringResource(KMR.strings.startup_disable_jm), policy.disableJm) {
-            if (!StartupPlatformPolicy.setDisableJm(it)) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM) {
+            if (!StartupPlatformPolicy.setJmEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
@@ -696,9 +705,31 @@ private fun StartupPlatformSwitches() {
 }
 
 @Composable
-private fun StartupSwitch(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+private fun StartupSwitch(
+    title: String,
+    checked: Boolean,
+    platform: ContentPlatform? = null,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val accent = if (platform == null) null else rememberContentPlatformAccent(platform)
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = accent?.copy(alpha = 0.10f) ?: Color.Transparent,
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = accent ?: MaterialTheme.colorScheme.onSurface)
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = accent?.let {
+                    SwitchDefaults.colors(
+                        checkedThumbColor = it,
+                        checkedTrackColor = it.copy(alpha = 0.42f),
+                        checkedBorderColor = it,
+                    )
+                } ?: SwitchDefaults.colors(),
+            )
+        }
     }
 }

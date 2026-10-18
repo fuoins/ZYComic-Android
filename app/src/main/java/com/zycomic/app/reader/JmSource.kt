@@ -22,6 +22,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.IOException
+import java.util.Calendar
 import com.zycomic.app.data.dto.Chapter as ChapterDto
 import com.zycomic.app.data.dto.Manga as MangaDto
 
@@ -29,6 +30,7 @@ import com.zycomic.app.data.dto.Manga as MangaDto
 object JmSource : HttpSource() {
 
     private val weekTypes = setOf("hanman", "another", "manga")
+    private val serializationTypes = setOf("all", "manga", "hanman")
 
     data class BrowseResult(val items: List<MangaDto>, val hasMore: Boolean)
     data class WeekIssue(val id: String, val title: String)
@@ -101,8 +103,10 @@ object JmSource : HttpSource() {
         order: String = "",
         category: String = "",
         weekId: String = "",
-        weekType: String = "",
+        weekType: String = "manga",
         previousFirstId: String? = null,
+        serializationType: String = "all",
+        serializationDate: Int = todayIsoWeekday(),
     ): BrowseResult {
         val requestedPage = page.coerceAtLeast(1)
         val path: String
@@ -136,13 +140,20 @@ object JmSource : HttpSource() {
                     }
                 }
                 2 -> {
-                    if (weekId.isBlank() && weekType.isBlank()) {
+                    if (weekId.isBlank()) {
                         return BrowseResult(emptyList(), false)
                     } else {
-                        validateWeekSelection(weekId, weekType)
+                        val selectedWeekType = weekType.ifBlank { "manga" }
+                        validateWeekSelection(weekId, selectedWeekType)
                         path = "/week/filter"
-                        params = mapOf("id" to weekId, "type" to weekType, "page" to "0")
+                        params = JmBrowseParameters.weekFilter(weekId, selectedWeekType, requestedPage)
                     }
+                }
+                4 -> {
+                    val selectedSerializationType = serializationType.ifBlank { "all" }
+                    validateSerializationSelection(selectedSerializationType, serializationDate)
+                    path = "/serialization"
+                    params = JmBrowseParameters.serialization(selectedSerializationType, serializationDate, requestedPage)
                 }
                 else -> {
                     path = "/promote"
@@ -153,9 +164,11 @@ object JmSource : HttpSource() {
         }
 
         val payload = getJson(path, params)
-        if (path == "/week/filter") {
-            val items = parseList(payload, path, "list").first
-            return BrowseResult(items, false)
+        if (path == "/week/filter" || path == "/serialization") {
+            val parsed = JmResponseParser.listPage(payload.asObject(path), path)
+            val items = parsed.items.map { MangaDto(id = it.id, name = it.name, author = it.author, picx = coverUrl(it.id)) }
+            val pageSize = if (path == "/week/filter") JmPagination.WEEK_ITEMS_PER_PAGE else JmPagination.SERIALIZATION_ITEMS_PER_PAGE
+            return BrowseResult(items, JmPagination.totalHasMore(requestedPage, parsed.total, pageSize))
         }
         if (path == "/promote") {
             val items = parsePromote(payload)
@@ -199,7 +212,7 @@ object JmSource : HttpSource() {
         val order = filters.filterIsInstance<OrderCode>().firstOrNull()?.state.orEmpty()
         val category = filters.filterIsInstance<CategoryCode>().firstOrNull()?.state.orEmpty()
         val weekId = filters.filterIsInstance<WeekId>().firstOrNull()?.state.orEmpty()
-        val weekType = filters.filterIsInstance<WeekType>().firstOrNull()?.state.orEmpty()
+        val weekType = filters.filterIsInstance<WeekType>().firstOrNull()?.state.orEmpty().ifBlank { "manga" }
         val result = browse(mode, page, query, order, category, weekId, weekType)
         return MangasPage(result.items.map(::toSourceManga), result.hasMore)
     }
@@ -426,5 +439,15 @@ object JmSource : HttpSource() {
     private fun validateWeekSelection(id: String, type: String) {
         if (!id.matches(Regex("\\d+"))) throw IOException("JM 周榜必须提供有效期号 id")
         if (type !in weekTypes) throw IOException("JM 周榜 type 必须是 hanman、another 或 manga")
+    }
+
+    private fun validateSerializationSelection(type: String, date: Int) {
+        if (type !in serializationTypes) throw IOException("JM serialization type 必须是 all、manga 或 hanman")
+        if (date !in 0..7) throw IOException("JM serialization date 必须是 0 到 7")
+    }
+
+    private fun todayIsoWeekday(): Int {
+        val day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        return if (day == Calendar.SUNDAY) 7 else day - 1
     }
 }

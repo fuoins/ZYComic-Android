@@ -32,4 +32,22 @@ class JmFilterSnapshotTest {
         assertFalse(reloadedJson.has("gender"))
         assertFalse(reloadedJson.has("tags"))
     }
+
+    @Test
+    fun `serialization defaults survive restart independently of weekly must read`() {
+        val filters = JmBrowsePolicy.Filters(
+            mode = JmBrowsePolicy.MODE_SERIALIZATION,
+            serializationType = "hanman",
+            serializationDate = 0,
+        )
+        assertEquals(filters, JmFilterSnapshot.fromJson(JmFilterSnapshot.fromFilters(filters).toJson()).toFilters())
+    }
+
+    @Test
+    fun `old snapshots get manga all and todays weekday defaults`() {
+        val filters = JmFilterSnapshot.fromJson(JSONObject("{}")).toFilters()
+        assertEquals("manga", filters.weekType)
+        assertEquals("all", filters.serializationType)
+        assertTrue(filters.serializationDate in 1..7)
+    }
 }

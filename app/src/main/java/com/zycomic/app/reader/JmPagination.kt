@@ -3,6 +3,8 @@ package com.zycomic.app.reader
 /** Pure pagination rules for the JM endpoints; page numbers are one-based at this boundary. */
 internal object JmPagination {
     const val ITEMS_PER_PAGE = 80
+    const val WEEK_ITEMS_PER_PAGE = 20
+    const val SERIALIZATION_ITEMS_PER_PAGE = 40
     const val MAX_LIST_PAGES = 125
 
     fun searchHasMore(page: Int, total: Int): Boolean =
@@ -15,6 +17,9 @@ internal object JmPagination {
     fun cappedListHasMore(page: Int, itemCount: Int, firstId: String?, previousFirstId: String?): Boolean =
         page.coerceAtLeast(1) < MAX_LIST_PAGES && itemCount > 0 && firstId != previousFirstId
 
-    private fun pageCount(total: Int): Int =
-        if (total <= 0) 0 else (total - 1) / ITEMS_PER_PAGE + 1
+    fun totalHasMore(page: Int, total: Int, itemsPerPage: Int): Boolean =
+        page.coerceAtLeast(1) < pageCount(total, itemsPerPage)
+
+    private fun pageCount(total: Int, itemsPerPage: Int = ITEMS_PER_PAGE): Int =
+        if (total <= 0 || itemsPerPage <= 0) 0 else (total - 1) / itemsPerPage + 1
 }

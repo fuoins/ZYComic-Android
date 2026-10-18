@@ -19,6 +19,8 @@ object StartupPlatformPolicy {
     private const val PREFS = "zycomic_startup_platform_policy"
     private const val KEY_DISABLE_MANWA = "disable_manwa"
     private const val KEY_DISABLE_JM = "disable_jm"
+    private const val KEY_ENABLED_MANWA = "enabled_manwa"
+    private const val KEY_ENABLED_JM = "enabled_jm"
     private const val KEY_USE_LAST_RESULT = "use_last_result"
 
     private val _state = MutableStateFlow(State())
@@ -36,9 +38,13 @@ object StartupPlatformPolicy {
     fun load(context: Context) {
         if (loaded) return
         preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val storedManwa = preferences.getBoolean(KEY_DISABLE_MANWA, true)
-        val storedJm = preferences.getBoolean(KEY_DISABLE_JM, false)
-        val normalized = normalize(storedManwa, storedJm)
+        val enabled = migratedEnabledValues(
+            manwaEnabled = preferences.getBoolean(KEY_ENABLED_MANWA, false).takeIf { preferences.contains(KEY_ENABLED_MANWA) },
+            jmEnabled = preferences.getBoolean(KEY_ENABLED_JM, false).takeIf { preferences.contains(KEY_ENABLED_JM) },
+            legacyDisableManwa = preferences.getBoolean(KEY_DISABLE_MANWA, true),
+            legacyDisableJm = preferences.getBoolean(KEY_DISABLE_JM, false),
+        )
+        val normalized = normalize(!enabled.first, !enabled.second)
         _state.value = State(
             disableManwa = normalized.first,
             disableJm = normalized.second,
@@ -46,24 +52,19 @@ object StartupPlatformPolicy {
             revision = _state.value.revision,
         )
         _settingsState.value = _state.value
-        if (normalized.first != storedManwa || normalized.second != storedJm) {
-            preferences.edit()
-                .putBoolean(KEY_DISABLE_MANWA, normalized.first)
-                .putBoolean(KEY_DISABLE_JM, normalized.second)
-                .apply()
-        }
+        persist(_state.value)
         loaded = true
     }
 
-    /** Startup-wait controls apply immediately and become the next launch's saved configuration. */
-    fun setDisableManwa(disable: Boolean): Boolean = update(disableManwa = disable)
+    /** Startup controls apply immediately and become the next launch's saved configuration. */
+    fun setManwaEnabled(enabled: Boolean): Boolean = update(disableManwa = !enabled)
 
-    fun setDisableJm(disable: Boolean): Boolean = update(disableJm = disable)
+    fun setJmEnabled(enabled: Boolean): Boolean = update(disableJm = !enabled)
 
-    /** Settings controls update only the saved configuration; the current process keeps its live policy. */
-    fun setSettingsDisableManwa(disable: Boolean): Boolean = updateSettings(disableManwa = disable)
+    /** Settings controls update only the next-launch configuration; live state is unchanged. */
+    fun setSettingsManwaEnabled(enabled: Boolean): Boolean = updateSettings(disableManwa = !enabled)
 
-    fun setSettingsDisableJm(disable: Boolean): Boolean = updateSettings(disableJm = disable)
+    fun setSettingsJmEnabled(enabled: Boolean): Boolean = updateSettings(disableJm = !enabled)
 
     fun setUseLastResult(use: Boolean): Boolean = update(useLastResult = use)
 
@@ -76,8 +77,8 @@ object StartupPlatformPolicy {
     fun checkSelection(context: Context, platform: ContentPlatform): Boolean {
         if (isEnabled(platform)) return true
         val message = when (platform) {
-            ContentPlatform.MANWA -> "请在每次开屏页关闭不用漫蛙"
-            ContentPlatform.JM -> "请在每次开屏页关闭不用禁漫天堂"
+            ContentPlatform.MANWA -> "请在开屏页开启漫蛙"
+            ContentPlatform.JM -> "请在开屏页开启禁漫天堂"
         }
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         return false
@@ -125,6 +126,8 @@ object StartupPlatformPolicy {
 
     private fun persist(state: State) {
         preferences.edit()
+            .putBoolean(KEY_ENABLED_MANWA, !state.disableManwa)
+            .putBoolean(KEY_ENABLED_JM, !state.disableJm)
             .putBoolean(KEY_DISABLE_MANWA, state.disableManwa)
             .putBoolean(KEY_DISABLE_JM, state.disableJm)
             .putBoolean(KEY_USE_LAST_RESULT, state.useLastResult)
@@ -161,6 +164,18 @@ object StartupPlatformPolicy {
         disableManwa: Boolean? = null,
         disableJm: Boolean? = null,
     ): Boolean = !(disableManwa ?: state.disableManwa) || !(disableJm ?: state.disableJm)
+
+    /** Prefer explicit positive preferences; otherwise invert legacy negative flags during upgrade. */
+    internal fun migratedEnabledValues(
+        manwaEnabled: Boolean?,
+        jmEnabled: Boolean?,
+        legacyDisableManwa: Boolean,
+        legacyDisableJm: Boolean,
+    ): Pair<Boolean, Boolean> {
+        val manwa = manwaEnabled ?: !legacyDisableManwa
+        val jm = jmEnabled ?: !legacyDisableJm
+        return if (!manwa && !jm) false to true else manwa to jm
+    }
 
     internal fun isEnabled(state: State, platform: ContentPlatform): Boolean = when (platform) {
         ContentPlatform.MANWA -> !state.disableManwa
