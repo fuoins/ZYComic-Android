@@ -90,6 +90,7 @@ import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
+import com.zycomic.app.ui.search.SearchProvider
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
@@ -109,7 +110,7 @@ fun BrowseScreen(
     pendingTag: String?,
     onPendingTagConsumed: () -> Unit,
     onOpenManga: (String) -> Unit,
-    onOpenSearch: (String) -> Unit,
+    onOpenSearch: (String, SearchProvider?) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -155,8 +156,7 @@ fun BrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
-    var showJmSearchDialog by remember { mutableStateOf(false) }
-    var jmSearchText by remember { mutableStateOf("") }
+    var expandedJmFilterTabId by remember { mutableStateOf<String?>(null) }
     androidx.activity.compose.BackHandler(enabled = selectionMode) { vm.exitSelection() }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
@@ -201,7 +201,7 @@ fun BrowseScreen(
                         AppBarActions(
                             if (platform == ContentPlatform.MANWA) {
                                 persistentListOf(
-                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("") }),
+                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", SearchProvider.MANWA) }),
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                     AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
                                     AppBar.Action(title = "多选", icon = Icons.Outlined.Checklist, onClick = { vm.enterSelection() }),
@@ -209,8 +209,7 @@ fun BrowseScreen(
                             } else {
                                 persistentListOf(
                                     AppBar.Action(title = "JM 搜索", icon = Icons.Default.Search, onClick = {
-                                        jmSearchText = vm.jmFiltersForTab(mainTab).value.query
-                                        showJmSearchDialog = true
+                                        onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, SearchProvider.JM)
                                     }),
                                     AppBar.Action(title = "刷新", icon = Icons.Default.Refresh, onClick = { vm.refresh() }),
                                     AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuideDialog = true }),
@@ -319,13 +318,21 @@ fun BrowseScreen(
                                     }
                                 }
                             }
-                            if (index == pagerState.currentPage && platform == ContentPlatform.MANWA) {
+                            if (index == pagerState.currentPage &&
+                                (platform == ContentPlatform.MANWA || (item.platformId == ContentPlatform.JM && !item.builtin))
+                            ) {
                                 item(key = "filter_affordance") {
                                     TabBarIcon(
                                         icon = Icons.Outlined.FilterList,
-                                        contentDescription = "重新筛选",
+                                        contentDescription = if (item.platformId == ContentPlatform.JM) "JM 筛选" else "重新筛选",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        onClick = { showFilterDialog = true },
+                                        onClick = {
+                                            if (item.platformId == ContentPlatform.JM) {
+                                                expandedJmFilterTabId = if (expandedJmFilterTabId == item.id) null else item.id
+                                            } else {
+                                                showFilterDialog = true
+                                            }
+                                        },
                                     )
                                 }
                             }
@@ -362,7 +369,8 @@ fun BrowseScreen(
                         }
                     },
                     bottomPadding = contentPadding.calculateBottomPadding(),
-                    onOpenSearch = onOpenSearch,
+                    onOpenSearch = { keyword -> onOpenSearch(keyword, SearchProvider.fromStorage(platform.id)) },
+                    jmFiltersExpanded = tabs.getOrNull(page)?.id == expandedJmFilterTabId,
                 )
             }
         }
@@ -371,28 +379,6 @@ fun BrowseScreen(
     // 使用说明对话框
     if (showGuideDialog) {
         BrowseGuideDialog(onDismiss = { showGuideDialog = false })
-    }
-
-    if (showJmSearchDialog) {
-        AlertDialog(
-            onDismissRequest = { showJmSearchDialog = false },
-            title = { Text("禁漫天堂搜索") },
-            text = {
-                OutlinedTextField(
-                    value = jmSearchText,
-                    onValueChange = { jmSearchText = it },
-                    singleLine = true,
-                    label = { Text("关键词") },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.searchJm(jmSearchText, mainTab)
-                    showJmSearchDialog = false
-                }) { Text("搜索") }
-            },
-            dismissButton = { TextButton(onClick = { showJmSearchDialog = false }) { Text("取消") } },
-        )
     }
 
     // Tab 管理面板
@@ -440,7 +426,7 @@ fun BrowseScreen(
 
 @Composable
 private fun CategoryPlatformLegend() {
-    Column(verticalArrangement = Arrangement.spacedBy(1.dp), modifier = Modifier.padding(horizontal = 3.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(0.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
         PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.MANWA), label = "漫蛙")
         PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.JM), label = "禁漫天堂")
         PlatformLegendRow(color = MaterialTheme.colorScheme.primary, label = "宇总排行")
@@ -451,7 +437,7 @@ private fun CategoryPlatformLegend() {
 private fun PlatformLegendRow(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         Box(Modifier.width(10.dp).height(6.dp).clip(CircleShape).background(color))
-        Text(label, fontSize = 9.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, fontSize = 8.sp, lineHeight = 10.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -469,6 +455,7 @@ private fun BrowseTabContent(
     onLongClick: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenSearch: (String) -> Unit,
+    jmFiltersExpanded: Boolean,
 ) {
     val item = vm.tabs.getOrNull(page)
     val tabPlatform = item?.platformId ?: platform
@@ -504,7 +491,7 @@ private fun BrowseTabContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (tabPlatform == ContentPlatform.JM) JmBrowseControls(vm, page)
+            if (tabPlatform == ContentPlatform.JM) JmBrowseControls(vm, page, jmFiltersExpanded)
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     loading && mangas.isEmpty() -> MangaGridSkeleton(
@@ -578,9 +565,14 @@ private fun BrowseTabContent(
 }
 
 @Composable
-private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
+private fun JmBrowseControls(vm: BrowseViewModel, page: Int, filtersExpanded: Boolean) {
     val filters by vm.jmFiltersForTab(page).collectAsState()
-    val mode = filters.mode
+    val tab = vm.tabs.getOrNull(page)
+    val tabId = tab?.id.orEmpty()
+    val isAllHot = tabId == JmBrowsePolicy.ALL_HOT_TAB_ID
+    val isCustomTab = tab != null && !tab.builtin
+    if (isCustomTab && !filtersExpanded) return
+    val mode = if (isAllHot) JmBrowsePolicy.MODE_CATEGORY else filters.mode
     val categoryOptions = remember { JmBrowsePolicy.categorySelections(JmSource.categoryOptions) }
     val orderOptions = remember { JmBrowsePolicy.orderOptions(JmSource.orderOptions) }
     val weekIssues by vm.jmWeekIssues.collectAsState()
@@ -595,13 +587,15 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            listOf("推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS, "分类" to JmBrowsePolicy.MODE_CATEGORY, "周榜" to JmBrowsePolicy.MODE_WEEK).forEach { (label, value) ->
-                TextButton(onClick = { vm.selectJmMode(value, page) }) {
-                    Text(label, color = if (mode == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        if (JmBrowsePolicy.showsModePicker(tabId)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf("推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS, "分类" to JmBrowsePolicy.MODE_CATEGORY, "周榜" to JmBrowsePolicy.MODE_WEEK).forEach { (label, value) ->
+                    TextButton(onClick = { vm.selectJmMode(value, page) }) {
+                        Text(label, color = if (mode == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
+                if (mode == JmBrowsePolicy.MODE_SEARCH) Text("搜索：${filters.query}", style = MaterialTheme.typography.bodySmall, maxLines = 1)
             }
-            if (mode == JmBrowsePolicy.MODE_SEARCH) Text("搜索：${filters.query}", style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
         when (mode) {
             JmBrowsePolicy.MODE_CATEGORY -> {
@@ -638,6 +632,11 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Text("加载周榜期数…", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (weekIssues.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("暂无有效周榜期数", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { vm.loadJmWeekIssues(retry = true) }) { Text("重试") }
                     }
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

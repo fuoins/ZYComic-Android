@@ -2,18 +2,18 @@ package com.zycomic.app.reader
 
 import android.content.Context
 import android.util.Log
-import com.zycomic.app.data.dto.Manga as MangaDto
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import tachiyomi.domain.chapter.model.Chapter as DomainChapter
 import tachiyomi.domain.chapter.repository.ChapterRepository
-import tachiyomi.domain.manga.model.Manga as DomainManga
 import tachiyomi.domain.manga.repository.MangaRepository
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import com.zycomic.app.data.dto.Manga as MangaDto
+import tachiyomi.domain.chapter.model.Chapter as DomainChapter
+import tachiyomi.domain.manga.model.Manga as DomainManga
 
 /**
  * 阅读器启动器：把漫画/章节插入 komikku 数据库，然后以 Activity 方式启动 [ReaderActivity]。
@@ -38,11 +38,18 @@ object ReaderLauncher {
         sourceId: Long = ManwaSource.id,
     ) = withContext(Dispatchers.IO) {
         try {
+            val isJm = sourceId == JmSource.id
+            if (isJm) {
+                require(mangaDto.chapterList.isNotEmpty()) { "JM 暂无可读章节，请重新加载详情" }
+                require(mangaDto.chapterList.all { it.id.matches(Regex("[0-9]+")) && it.id.any { digit -> digit != '0' } }) {
+                    "JM 章节 ID 异常，请重新加载详情"
+                }
+                require(mangaDto.chapterList.any { it.id == chapterId }) { "JM 目标章节不存在，请重新加载详情" }
+            }
             val mangaRepository = Injekt.get<MangaRepository>()
             val chapterRepository = Injekt.get<ChapterRepository>()
 
             // 1. 构造 komikku Manga 并插入（upsert by url+source），拿到数据库 mangaId
-            val isJm = sourceId == JmSource.id
             val mangaPath = if (isJm) "/album/${mangaDto.id}" else "/manga/${mangaDto.id}"
             val domainManga = DomainManga.create().copy(
                 source = sourceId,

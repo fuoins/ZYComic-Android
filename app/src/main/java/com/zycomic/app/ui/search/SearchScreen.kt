@@ -76,10 +76,11 @@ import kotlinx.collections.immutable.persistentListOf
 @Composable
 fun SearchScreen(
     initialKeyword: String,
+    initialProvider: SearchProvider? = null,
     onClose: () -> Unit,
     onOpenManga: (String) -> Unit,
 ) {
-    val vm = remember { SearchViewModel() }
+    val vm = remember(initialProvider) { SearchViewModel(initialProvider) }
     DisposableEffect(vm) {
         onDispose { vm.dispose() }
     }
@@ -184,18 +185,11 @@ fun SearchScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SearchProvider.entries.forEach { option ->
-                TextButton(onClick = { vm.selectProvider(option) }) {
-                    Text(
-                        text = if (provider == option) "● ${option.displayName}" else option.displayName,
-                        color = if (provider == option) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
+            com.zycomic.app.platform.ContentPlatformSelector(
+                selected = com.zycomic.app.platform.ContentPlatform.fromId(provider.storageValue),
+                onSelect = { vm.selectProvider(SearchProvider.fromStorage(it.id)) },
+                compact = true,
+            )
             if (provider == SearchProvider.JM) {
                 Spacer(modifier = Modifier.weight(1f))
                 Box {
@@ -564,6 +558,7 @@ private fun SearchHistorySection(vm: SearchViewModel) {
 @Composable
 fun SearchOverlay(
     initialKeyword: String,
+    initialProvider: SearchProvider? = null,
     onClose: () -> Unit,
     onOpenManga: (String) -> Unit,
 ) {
@@ -573,6 +568,7 @@ fun SearchOverlay(
     ) {
         SearchScreen(
             initialKeyword = initialKeyword,
+            initialProvider = initialProvider,
             onClose = onClose,
             onOpenManga = onOpenManga,
         )

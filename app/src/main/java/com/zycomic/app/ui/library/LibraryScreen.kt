@@ -176,12 +176,14 @@ fun LibraryScreen(
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         subtitle?.let {
                             Text(
                                 text = it,
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }

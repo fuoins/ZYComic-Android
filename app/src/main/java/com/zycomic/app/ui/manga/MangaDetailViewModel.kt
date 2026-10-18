@@ -25,9 +25,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tachiyomi.domain.chapter.repository.ChapterRepository
-import tachiyomi.domain.manga.repository.MangaRepository as LocalMangaRepository
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import tachiyomi.domain.manga.repository.MangaRepository as LocalMangaRepository
 
 class MangaDetailViewModel(private val bookId: String) {
 
@@ -45,8 +45,11 @@ class MangaDetailViewModel(private val bookId: String) {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    val activeTab = MutableStateFlow(0)            // 0 章节 / 1 相关推荐
-    val chapterAsc = MutableStateFlow(false)       // 默认降序
+    private val _chapterWarning = MutableStateFlow<String?>(null)
+    val chapterWarning: StateFlow<String?> = _chapterWarning.asStateFlow()
+
+    val activeTab = MutableStateFlow(0) // 0 章节 / 1 相关推荐
+    val chapterAsc = MutableStateFlow(false) // 默认降序
     val folders = MutableStateFlow<List<Folder>>(emptyList())
     val favBusy = MutableStateFlow(false)
 
@@ -75,15 +78,27 @@ class MangaDetailViewModel(private val bookId: String) {
 
     val user = UserRepository.userFlow
 
-    init { load() }
+    init {
+        load()
+    }
 
     fun load() {
         scope.launch {
             _loading.value = true
             _error.value = null
+            _chapterWarning.value = null
             try {
-                _detail.value = if (isJm) JmSource.getAlbum(contentId) else MangaRepository.getDetail(bookId)
+                if (isJm) {
+                    val result = JmSource.getAlbum(contentId)
+                    _detail.value = result.manga
+                    _chapterWarning.value = result.chapterWarning
+                } else {
+                    _detail.value = MangaRepository.getDetail(bookId)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                _detail.value = null
                 _error.value = e.message ?: "加载失败"
             } finally {
                 _loading.value = false
@@ -91,8 +106,12 @@ class MangaDetailViewModel(private val bookId: String) {
         }
     }
 
-    fun selectTab(tab: Int) { activeTab.value = tab }
-    fun toggleChapterSort() { chapterAsc.value = !chapterAsc.value }
+    fun selectTab(tab: Int) {
+        activeTab.value = tab
+    }
+    fun toggleChapterSort() {
+        chapterAsc.value = !chapterAsc.value
+    }
 
     /** Merge local reader read status into the existing detail without reloading other fields. */
     fun syncChapterReadStatus() {
@@ -140,8 +159,11 @@ class MangaDetailViewModel(private val bookId: String) {
             try {
                 val d = _detail.value ?: return@launch
                 val bookIdInt = bookId.toIntOrNull() ?: return@launch
-                if (d.fav == 1) FavoriteRepository.removeFavorite(bookIdInt)
-                else FavoriteRepository.addFavorite(bookIdInt, 0)
+                if (d.fav == 1) {
+                    FavoriteRepository.removeFavorite(bookIdInt)
+                } else {
+                    FavoriteRepository.addFavorite(bookIdInt, 0)
+                }
                 _detail.value = d.copy(fav = if (d.fav == 1) 0 else 1)
                 UserRepository.refreshUserInfo()
             } catch (e: NotLoggedInException) {
@@ -285,7 +307,7 @@ class MangaDetailViewModel(private val bookId: String) {
     fun defaultChapterId(): String {
         val list = _detail.value?.chapterList ?: return ""
         val d = _detail.value!!
-        if (d.start.isNotBlank() && d.start != "0") return d.start
+        if (d.start.isNotBlank() && d.start != "0" && (!isJm || list.any { it.id == d.start })) return d.start
         return list.minByOrNull { it.sort }?.id ?: list.firstOrNull()?.id ?: ""
     }
 }

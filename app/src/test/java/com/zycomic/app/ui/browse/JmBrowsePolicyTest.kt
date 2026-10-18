@@ -18,6 +18,27 @@ class JmBrowsePolicyTest {
     }
 
     @Test
+    fun `all hot tab exposes category sorting without a mode picker`() {
+        assertFalse(JmBrowsePolicy.showsModePicker(JmBrowsePolicy.ALL_HOT_TAB_ID))
+        assertTrue(JmBrowsePolicy.showsModePicker("jm_recommendations"))
+        assertTrue(JmBrowsePolicy.showsModePicker("custom_jm_1"))
+    }
+
+    @Test
+    fun `stale all hot mode is normalized without changing recommendations`() {
+        val stale = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_WEEK, query = "legacy", order = "mv")
+        assertEquals(
+            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "mv"),
+            JmBrowsePolicy.effectiveFilters(JmBrowsePolicy.ALL_HOT_TAB_ID, stale),
+        )
+        assertEquals(stale, JmBrowsePolicy.effectiveFilters("jm_recommendations", stale))
+        assertEquals(
+            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = JmBrowsePolicy.ALL_HOT_ORDER),
+            JmBrowsePolicy.effectiveFilters(JmBrowsePolicy.ALL_HOT_TAB_ID, JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_RECOMMENDATIONS)),
+        )
+    }
+
+    @Test
     fun `option labels follow requested JM category and order contract without changing values`() {
         val categories = listOf(
             "Latest" to "",

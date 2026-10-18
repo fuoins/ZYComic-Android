@@ -134,7 +134,13 @@ fun HistoryScreen(
                 onSelectPlatform = selectPlatform,
                 searchQuery = searchQuery,
                 onChangeSearchQuery = vm::updateSearchQuery,
-                titleContent = { Text("历史") },
+                titleContent = {
+                    Text(
+                        text = "历史",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 searchSupported = platform == ContentPlatform.MANWA,
                 refreshSupported = platform == ContentPlatform.MANWA,
                 filterSupported = false,

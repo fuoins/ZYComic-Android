@@ -21,6 +21,19 @@ internal object JmBrowsePolicy {
         val weekType: String = "",
     )
 
+    fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID
+
+    fun effectiveFilters(tabId: String, filters: Filters): Filters =
+        if (tabId == ALL_HOT_TAB_ID) {
+            filters.copy(
+                mode = MODE_CATEGORY,
+                query = "",
+                order = filters.order.ifBlank { ALL_HOT_ORDER },
+            )
+        } else {
+            filters
+        }
+
     fun initialFilters(tabId: String): Filters =
         if (tabId == ALL_HOT_TAB_ID) {
             Filters(mode = MODE_CATEGORY, order = ALL_HOT_ORDER)

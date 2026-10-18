@@ -2,11 +2,10 @@ package com.zycomic.app.ui.manga
 
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
-import eu.kanade.tachiyomi.util.system.toShareIntent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,12 +32,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdd
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -50,9 +49,9 @@ import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -74,23 +73,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import tachiyomi.presentation.core.util.drawHorizontalScrollbar
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
@@ -103,7 +101,9 @@ import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import com.zycomic.app.ui.settings.AddBlacklistDialog
 import com.zycomic.app.util.LoginGate
+import eu.kanade.tachiyomi.util.system.toShareIntent
 import kotlinx.coroutines.launch
+import tachiyomi.presentation.core.util.drawHorizontalScrollbar
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -122,6 +122,7 @@ fun MangaDetailScreen(
     val detail by vm.detail.collectAsState()
     val loading by vm.loading.collectAsState()
     val error by vm.error.collectAsState()
+    val chapterWarning by vm.chapterWarning.collectAsState()
     val chapterAsc by vm.chapterAsc.collectAsState()
     val folders by vm.folders.collectAsState()
     val needLogin by vm.needLogin.collectAsState()
@@ -154,7 +155,10 @@ fun MangaDetailScreen(
     /** 通过 komikku 原生阅读器打开指定章节。chapterId 为字符串数字。 */
     fun openReader(chapterId: String) {
         val d = detail ?: return
-        if (chapterId.isBlank()) return
+        if (chapterId.isBlank() || (vm.isJm && d.chapterList.none { it.id == chapterId })) {
+            Toast.makeText(context, "没有有效的可读章节，请重试加载详情", Toast.LENGTH_LONG).show()
+            return
+        }
         scope.launch {
             try {
                 ReaderLauncher.launch(
@@ -316,118 +320,124 @@ fun MangaDetailScreen(
                                 Spacer(Modifier.height(6.dp))
                             }
                             // JM 报告只确认专辑名与章节，未提供状态、类别或地区字段。
-                            if (!vm.isJm) Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    if (d.state == "完结") Icons.Filled.DoneAll else Icons.Outlined.Schedule,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    d.state.ifBlank { "未知" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "·",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                val src = listOf(d.categoryName, areaText(d.bookArea))
-                                    .filter { it.isNotBlank() }
-                                    .joinToString("·")
-                                Text(
-                                    src.ifBlank { "未知" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            if (!vm.isJm) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        if (d.state == "完结") Icons.Filled.DoneAll else Icons.Outlined.Schedule,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        d.state.ifBlank { "未知" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "·",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    val src = listOf(d.categoryName, areaText(d.bookArea))
+                                        .filter { it.isNotBlank() }
+                                        .joinToString("·")
+                                    Text(
+                                        src.ifBlank { "未知" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
 
                     // JM 账号功能未接入；避免显示或触发漫蛙收藏/屏蔽操作。
                     if (!vm.isJm) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        val isFav = d.fav == 1
-                        // 收藏按钮：未收藏点击→添加到全部收藏夹；已收藏点击→取消收藏
-                        ActionItem(
-                            modifier = Modifier.weight(1f),
-                            icon = if (isFav) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                            label = if (isFav) "已收藏" else "未收藏",
-                            tint = if (isFav) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            onClick = { vm.toggleFavorite() },
-                        )
-                        // 添加到全部收藏夹：已收藏时toast提示
-                        ActionItem(
-                            modifier = Modifier.weight(1f),
-                            icon = Icons.Filled.BookmarkAdd,
-                            label = "全部收藏夹",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            onClick = {
-                                if (isFav) {
-                                    Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val isFav = d.fav == 1
+                            // 收藏按钮：未收藏点击→添加到全部收藏夹；已收藏点击→取消收藏
+                            ActionItem(
+                                modifier = Modifier.weight(1f),
+                                icon = if (isFav) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                label = if (isFav) "已收藏" else "未收藏",
+                                tint = if (isFav) {
+                                    MaterialTheme.colorScheme.primary
                                 } else {
-                                    vm.addToAllFolders()
-                                }
-                            },
-                        )
-                        // 添加到其他收藏夹：已收藏时toast提示
-                        ActionItem(
-                            modifier = Modifier.weight(1f),
-                            icon = Icons.Outlined.CreateNewFolder,
-                            label = "其他收藏夹",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            onClick = {
-                                if (isFav) {
-                                    Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    vm.openFolderPicker()
-                                    showFolderDialog = true
-                                }
-                            },
-                        )
-                        // 屏蔽：按需求放在"其他收藏夹"右侧。服务端接口是开关式 toggle，
-                        // 文案固定叫"屏蔽"，本次到底是屏蔽还是取消，以 blockMessage 的 toast 为准。
-                        ActionItem(
-                            modifier = Modifier.weight(1f),
-                            icon = Icons.Outlined.Block,
-                            label = "屏蔽",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            onClick = { if (!blockBusy) showBlockConfirm = true },
-                        )
-                    }
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                onClick = { vm.toggleFavorite() },
+                            )
+                            // 添加到全部收藏夹：已收藏时toast提示
+                            ActionItem(
+                                modifier = Modifier.weight(1f),
+                                icon = Icons.Filled.BookmarkAdd,
+                                label = "全部收藏夹",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                onClick = {
+                                    if (isFav) {
+                                        Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        vm.addToAllFolders()
+                                    }
+                                },
+                            )
+                            // 添加到其他收藏夹：已收藏时toast提示
+                            ActionItem(
+                                modifier = Modifier.weight(1f),
+                                icon = Icons.Outlined.CreateNewFolder,
+                                label = "其他收藏夹",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                onClick = {
+                                    if (isFav) {
+                                        Toast.makeText(context, "已收藏请勿再次点击收藏", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        vm.openFolderPicker()
+                                        showFolderDialog = true
+                                    }
+                                },
+                            )
+                            // 屏蔽：按需求放在"其他收藏夹"右侧。服务端接口是开关式 toggle，
+                            // 文案固定叫"屏蔽"，本次到底是屏蔽还是取消，以 blockMessage 的 toast 为准。
+                            ActionItem(
+                                modifier = Modifier.weight(1f),
+                                icon = Icons.Outlined.Block,
+                                label = "屏蔽",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                onClick = { if (!blockBusy) showBlockConfirm = true },
+                            )
+                        }
 
-                    if (showBlockConfirm) {
-                        AlertDialog(
-                            onDismissRequest = { showBlockConfirm = false },
-                            title = { Text("屏蔽这本漫画？") },
-                            text = {
-                                Text("屏蔽后这本漫画会从分类、搜索、排行里隐藏。\n\n" +
-                                    "注意：该漫画已在屏蔽列表时，重复点击会取消屏蔽。")
-                            },
-                            confirmButton = {
-                                TextButton(
-                                    onClick = {
-                                        showBlockConfirm = false
-                                        vm.toggleBlock()
-                                    },
-                                ) { Text("确认") }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showBlockConfirm = false }) { Text("取消") }
-                            },
-                        )
-                    }
-
+                        if (showBlockConfirm) {
+                            AlertDialog(
+                                onDismissRequest = { showBlockConfirm = false },
+                                title = { Text("屏蔽这本漫画？") },
+                                text = {
+                                    Text(
+                                        "屏蔽后这本漫画会从分类、搜索、排行里隐藏。\n\n" +
+                                            "注意：该漫画已在屏蔽列表时，重复点击会取消屏蔽。",
+                                    )
+                                },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = {
+                                            showBlockConfirm = false
+                                            vm.toggleBlock()
+                                        },
+                                    ) { Text("确认") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showBlockConfirm = false }) { Text("取消") }
+                                },
+                            )
+                        }
                     }
 
                     // 3. 可展开简介
@@ -501,6 +511,16 @@ fun MangaDetailScreen(
 
                     // 5. 章节列表头
                     val chapters = vm.sortedChapters()
+                    if (chapterWarning != null || (vm.isJm && chapters.isEmpty())) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Text(
+                                text = chapterWarning ?: "暂无可读章节（series 为空）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = { vm.load() }) { Text("重试加载章节") }
+                        }
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -623,7 +643,7 @@ fun MangaDetailScreen(
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = topBarAlpha * 0.95f)
+                            MaterialTheme.colorScheme.surface.copy(alpha = topBarAlpha * 0.95f),
                         )
                         .statusBarsPadding(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -646,7 +666,7 @@ fun MangaDetailScreen(
         }
 
         // 9. FAB 继续阅读
-        if (detail != null && !loading) {
+        if (detail != null && !loading && error == null && (!vm.isJm || detail!!.chapterList.isNotEmpty())) {
             FloatingActionButton(
                 onClick = { openReader(vm.defaultChapterId()) },
                 modifier = Modifier

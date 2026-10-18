@@ -32,6 +32,7 @@ object JmSource : HttpSource() {
 
     data class BrowseResult(val items: List<MangaDto>, val hasMore: Boolean)
     data class WeekIssue(val id: String, val title: String)
+    data class AlbumResult(val manga: MangaDto, val chapterWarning: String?)
 
     /** Display label and the exact API value; an empty category means latest A-comics. */
     val categoryOptions: List<Pair<String, String>> = listOf(
@@ -207,17 +208,20 @@ object JmSource : HttpSource() {
         throw UnsupportedOperationException("JM 报告未提供可验证的最新更新 JSON 接口")
 
     /** Fetch only report-confirmed album fields; missing series is an explicit schema error. */
-    suspend fun getAlbum(albumId: String): MangaDto = withContext(Dispatchers.IO) {
+    suspend fun getAlbum(albumId: String): AlbumResult = withContext(Dispatchers.IO) {
         if (!albumId.matches(Regex("\\d+"))) throw IOException("JM 专辑 ID 无效")
         val album = getJson("/album", mapOf("id" to albumId)).asObject("/album")
         val title = album.optString("name").trim()
         if (title.isBlank()) throw IOException("JM /album 缺少已确认字段 name；未将不完整详情标记为可用")
-        val series = parseDtoChapters(album)
-        MangaDto(
-            id = albumId,
-            name = title,
-            picx = coverUrl(albumId),
-            chapterList = series,
+        val series = JmResponseParser.chapters(album)
+        AlbumResult(
+            manga = MangaDto(
+                id = albumId,
+                name = title,
+                picx = coverUrl(albumId),
+                chapterList = series.items.map { ChapterDto(id = it.id, name = it.name, sort = it.sort) },
+            ),
+            chapterWarning = series.warning,
         )
     }
 
@@ -232,13 +236,7 @@ object JmSource : HttpSource() {
         val album = getJson("/album", mapOf("id" to id)).asObject("/album")
         val updatedManga = if (fetchDetails) mangaFromAlbum(album, id, manga) else manga
         val updatedChapters = if (fetchChapters) {
-            try {
-                parseChapters(album).takeIf { it.isNotEmpty() || chapters.isEmpty() } ?: chapters
-            } catch (error: IOException) {
-                if (chapters.isEmpty()) throw error
-                JmRouteManager.record("schema", "JM", "章节响应未通过字段校验；保留已有章节")
-                chapters
-            }
+            parseChapters(album)
         } else {
             chapters
         }
@@ -282,18 +280,7 @@ object JmSource : HttpSource() {
     /** Lists the available weekly issue selectors from /week.categories. */
     suspend fun getWeekIssues(): List<WeekIssue> {
         val payload = getJson("/week", emptyMap()).asObject("/week")
-        val categories = payload.optJSONArray("categories")
-            ?: throw IOException("JM /week 响应缺少已确认字段 categories[]")
-        return (0 until categories.length()).map { index ->
-            val item = categories.optJSONObject(index)
-                ?: throw IOException("JM /week categories[$index] 不是对象")
-            val id = item.optString("id").trim()
-            val title = item.optString("title").trim()
-            if (!id.matches(Regex("\\d+")) || title.isBlank()) {
-                throw IOException("JM /week categories[$index] 缺少有效字段 id/title")
-            }
-            WeekIssue(id, title)
-        }
+        return JmResponseParser.weekIssues(payload).map { WeekIssue(it.id, it.title) }
     }
 
     override suspend fun getImageUrl(page: Page): String = page.url
@@ -379,38 +366,14 @@ object JmSource : HttpSource() {
         )
     }
 
-    private fun parseDtoChapters(album: JSONObject): List<ChapterDto> {
-        val series = album.optJSONArray("series")
-            ?: throw IOException("JM /album 响应缺少已确认字段 series[]")
-        return (0 until series.length()).map { index ->
-            val item = series.optJSONObject(index)
-                ?: throw IOException("JM /album series[$index] 不是对象")
-            val id = item.optString("id").trim()
-            val name = item.optString("name").trim()
-            val sort = item.optString("sort").toIntOrNull()
-            if (!id.matches(Regex("\\d+")) || name.isBlank() || sort == null) {
-                throw IOException("JM /album series[$index] 缺少已确认的 id/name/sort 字段")
-            }
-            ChapterDto(id = id, name = name, sort = sort.toInt())
-        }
-    }
-
     private fun parseChapters(album: JSONObject): List<SChapter> {
-        val series = album.optJSONArray("series")
-            ?: throw IOException("JM /album 响应缺少已确认字段 series[]")
-        return (0 until series.length()).map { index ->
-            val item = series.optJSONObject(index)
-                ?: throw IOException("JM /album series[$index] 不是对象")
-            val id = item.optString("id").trim()
-            val name = item.optString("name").trim()
-            val sortValue = item.optString("sort").toIntOrNull()
-            if (!id.matches(Regex("\\d+")) || name.isBlank() || sortValue == null) {
-                throw IOException("JM /album series[$index] 缺少已确认的 id/name/sort 字段")
-            }
+        val series = JmResponseParser.chapters(album)
+        series.warning?.let { JmRouteManager.record("schema", "JM", it) }
+        return series.items.map { item ->
             SChapter.create().apply {
-                url = "/chapter/$id"
-                this.name = name
-                chapter_number = sortValue.toFloat()
+                url = "/chapter/${item.id}"
+                name = item.name
+                chapter_number = item.sort.toFloat()
                 scanlator = null
                 date_upload = 0L
             }

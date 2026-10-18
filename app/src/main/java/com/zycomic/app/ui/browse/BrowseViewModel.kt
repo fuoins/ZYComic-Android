@@ -76,7 +76,10 @@ class BrowseViewModel {
         val key = "${item.platformId.id}:${item.id}"
         return stateById.getOrPut(key) {
             val initial = if (item.platformId == ContentPlatform.JM) {
-                BrowseTabStore.loadJmFilters(item.id) ?: JmBrowsePolicy.initialFilters(item.id)
+                val stored = BrowseTabStore.loadJmFilters(item.id) ?: JmBrowsePolicy.initialFilters(item.id)
+                JmBrowsePolicy.effectiveFilters(item.id, stored).also { normalized ->
+                    if (normalized != stored) BrowseTabStore.saveJmFilters(item.id, normalized)
+                }
             } else {
                 JmBrowsePolicy.Filters()
             }
@@ -116,6 +119,7 @@ class BrowseViewModel {
 
     fun selectJmMode(mode: Int, tab: Int = mainTab.value) {
         if (mode !in JmBrowsePolicy.MODE_RECOMMENDATIONS..JmBrowsePolicy.MODE_WEEK || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
+        if (tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID && mode != JmBrowsePolicy.MODE_CATEGORY) return
         val state = stateFor(tab)
         val current = state.jmFilters.value
         if (current.mode == mode && current.query.isBlank()) return
@@ -131,7 +135,7 @@ class BrowseViewModel {
 
     fun searchJm(query: String, tab: Int = mainTab.value) {
         val value = query.trim()
-        if (value.isBlank() || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
+        if (value.isBlank() || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM || tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID) return
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(mode = JmBrowsePolicy.MODE_SEARCH, query = value)
         saveJmFilters(tab, stateFor(tab).jmFilters.value)
@@ -588,7 +592,7 @@ class BrowseViewModel {
             ts.appending.value = true
         }
         try {
-            val filters = ts.jmFilters.value
+            val filters = JmBrowsePolicy.effectiveFilters(tabs[tab].id, ts.jmFilters.value)
             if (filters.mode == JmBrowsePolicy.MODE_WEEK && (filters.weekId.isBlank() || filters.weekType.isBlank())) {
                 ts.loaded = true
                 ts.hasMore.value = false

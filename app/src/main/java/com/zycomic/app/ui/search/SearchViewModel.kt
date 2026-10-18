@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class SearchViewModel {
+class SearchViewModel(initialProvider: SearchProvider? = null) {
 
     private val scopeJob = SupervisorJob()
     private val scope = CoroutineScope(scopeJob + Dispatchers.Main.immediate)
@@ -82,7 +82,7 @@ class SearchViewModel {
     }
 
     // ---- 搜索来源、显示模式与 JM 排序（分别持久化）----
-    val provider = MutableStateFlow(SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null)))
+    val provider = MutableStateFlow(initialProvider ?: SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null)))
     val displayMode = MutableStateFlow(loadDisplayMode(provider.value))
     val jmSortCode = MutableStateFlow(searchPrefs.getString(KEY_JM_SORT, "mr") ?: "mr")
     val gridColumns = MutableStateFlow(3)

@@ -71,6 +71,7 @@ import com.zycomic.app.ui.login.LoginOverlay
 import com.zycomic.app.ui.manga.MangaDetailOverlay
 import com.zycomic.app.ui.profile.ProfileScreen
 import com.zycomic.app.ui.search.SearchOverlay
+import com.zycomic.app.ui.search.SearchProvider
 import com.zycomic.app.ui.settings.AboutScreen
 import com.zycomic.app.ui.settings.BookBlockScreen
 import com.zycomic.app.ui.settings.DataStorageScreen
@@ -256,6 +257,7 @@ fun AppContent(
     var loginOpen by remember { mutableStateOf(false) }
 
     var searchKeyword by remember { mutableStateOf("") }
+    var searchProvider by remember { mutableStateOf<SearchProvider?>(null) }
     var pendingTag by remember { mutableStateOf<String?>(null) }
 
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
@@ -399,8 +401,9 @@ fun AppContent(
                             pendingTag = pendingTag,
                             onPendingTagConsumed = { pendingTag = null },
                             onOpenManga = openDetail,
-                            onOpenSearch = { kw ->
+                            onOpenSearch = { kw, provider ->
                                 searchKeyword = kw
+                                searchProvider = provider
                                 showSearch = true
                             },
                             onRequireLogin = { loginOpen = true },
@@ -556,9 +559,11 @@ fun AppContent(
     if (showSearch) {
         SearchOverlay(
             initialKeyword = searchKeyword,
+            initialProvider = searchProvider,
             onClose = {
                 showSearch = false
                 searchKeyword = ""
+                searchProvider = null
             },
             onOpenManga = openDetail,
         )

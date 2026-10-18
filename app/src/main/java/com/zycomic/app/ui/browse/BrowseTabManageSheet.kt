@@ -359,14 +359,6 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     isYuzongRank = true,
                 )
                 Spacer(Modifier.height(8.dp))
-
-                SpecialAddButton(
-                    label = if (vm.canAddJmAllHot()) "增加 JM 全部热门" else "JM 全部热门已添加",
-                    enabled = vm.canAddJmAllHot(),
-                    onClick = { vm.addJmAllHotTab() },
-                    info = "禁漫天堂全部分类，默认按最多喜欢排序；保留 JM 推荐 tab",
-                    platform = ContentPlatform.JM,
-                )
             }
 
             Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
