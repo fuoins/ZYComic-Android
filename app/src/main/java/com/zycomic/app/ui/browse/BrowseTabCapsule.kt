@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -62,5 +63,20 @@ fun BrowseTabCapsule(
             fontWeight = if (selected || isJmHome) FontWeight.SemiBold else FontWeight.Medium,
         )
         trailingContent?.invoke()
+    }
+}
+
+/** A compact chip without Material's invisible 48dp row gap. */
+@Composable
+fun CompactBrowseFilterChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 0.dp,
+    ) {
+        androidx.compose.material3.FilterChip(
+            selected = selected,
+            onClick = onClick,
+            label = label,
+            modifier = Modifier.height(32.dp),
+        )
     }
 }

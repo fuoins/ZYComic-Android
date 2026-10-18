@@ -173,6 +173,7 @@ class JmResponseParserTest {
         )
 
         assertEquals("作者甲", details.author)
+        assertEquals(listOf("作者甲", "作者乙"), details.authors)
         assertEquals("作品简介", details.description)
         assertEquals(listOf("韩漫", "校园"), details.tags.map { it.name })
         assertEquals(17, details.tags[1].id)
@@ -222,8 +223,8 @@ class JmResponseParserTest {
 
     @Test
     fun `album parser maps jm detail attributes and forum page`() {
-        val details = JmResponseParser.albumDetails(JSONObject("""{"author":["作者"],"actors":["演员"],"works":["作品"],"likes":"12","liked":true,"total_views":"321","addtime":"1712345678"}"""))
-        assertEquals(listOf("作者"), details.authors)
+        val details = JmResponseParser.albumDetails(JSONObject("""{"author":["作者甲","作者乙"],"actors":["演员"],"works":["作品"],"likes":"12","liked":true,"total_views":"321","addtime":"1712345678"}"""))
+        assertEquals(listOf("作者甲", "作者乙"), details.authors)
         assertEquals(listOf("演员"), details.actors)
         assertEquals(listOf("作品"), details.works)
         assertEquals(12, details.likes)
@@ -237,6 +238,13 @@ class JmResponseParserTest {
         assertEquals("11", forum.comments.single().id)
         assertEquals("0", forum.comments.single().parentId)
         assertEquals("正文", forum.comments.single().content)
+        assertEquals("a.jpg", forum.comments.single().avatarUrl)
+        assertEquals("https://image.example/media/users/a.jpg", JmResponseParser.userAvatarUrl("https://image.example/", forum.comments.single().avatarUrl))
+        assertEquals("", JmResponseParser.userAvatarUrl("https://image.example", " "))
+        assertEquals(
+            "https://image.example/media/users/https://other.example/user.jpg",
+            JmResponseParser.userAvatarUrl("https://image.example", "https://other.example/user.jpg"),
+        )
     }
 
     private fun chapters(series: String) = JmResponseParser.chapters(JSONObject("""{"id":"999","series":$series}"""))

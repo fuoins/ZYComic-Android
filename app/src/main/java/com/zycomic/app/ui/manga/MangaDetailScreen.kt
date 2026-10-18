@@ -327,28 +327,40 @@ fun MangaDetailScreen(
                                 modifier = if (vm.isJm) Modifier else Modifier.clickable { onSearchKeyword(d.name) },
                             )
                             Spacer(Modifier.height(8.dp))
-                            val author = d.author
-                            if (author.isNotBlank()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                                        .clickable { onSearchKeyword(author) }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                            val authors = (if (vm.isJm) d.jmAuthors else emptyList())
+                                .ifEmpty { listOf(d.author) }
+                                .map(String::trim)
+                                .filter(String::isNotBlank)
+                                .distinct()
+                            if (authors.isNotEmpty()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
-                                    Icon(
-                                        Icons.Outlined.PersonOutline,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        author,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    )
+                                    authors.forEach { author ->
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                .clickable { onSearchKeyword(author) }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.PersonOutline,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                author,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            )
+                                        }
+                                    }
                                 }
                                 Spacer(Modifier.height(6.dp))
                             }

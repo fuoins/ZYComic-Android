@@ -68,7 +68,7 @@ class JmBrowsePolicyTest {
     fun `all hot tab exposes category sorting without a mode picker`() {
         assertFalse(JmBrowsePolicy.showsModePicker(JmBrowsePolicy.ALL_HOT_TAB_ID))
         assertTrue(JmBrowsePolicy.showsModePicker("jm_recommendations"))
-        assertTrue(JmBrowsePolicy.showsModePicker("custom_jm_1"))
+        assertFalse(JmBrowsePolicy.showsModePicker("custom_jm_1"))
     }
 
     @Test
@@ -83,6 +83,31 @@ class JmBrowsePolicyTest {
             JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = JmBrowsePolicy.ALL_HOT_ORDER),
             JmBrowsePolicy.effectiveFilters(JmBrowsePolicy.ALL_HOT_TAB_ID, JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_RECOMMENDATIONS)),
         )
+    }
+
+    @Test
+    fun `online home defaults ignore stored modes but allow transient weekly browsing`() {
+        val stored = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_WEEK, weekId = "123")
+        assertEquals(JmBrowsePolicy.initialFilters("jm_recommendations"), JmBrowsePolicy.defaultFilters("jm_recommendations", stored))
+        assertEquals(stored, JmBrowsePolicy.effectiveFilters("jm_recommendations", stored))
+    }
+
+    @Test
+    fun `custom JM tabs only select a category and default to all hot sorting`() {
+        val custom = "custom_jm_123"
+        val legacy = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_WEEK, query = "ignored", category = "doujin", promoteId = "old", promoteTitle = "old")
+        assertEquals(JmBrowsePolicy.MODE_CATEGORY, JmBrowsePolicy.effectiveFilters(custom, legacy).mode)
+        assertEquals("", JmBrowsePolicy.effectiveFilters(custom, legacy).query)
+        assertEquals("", JmBrowsePolicy.effectiveFilters(custom, legacy).promoteId)
+        assertEquals("tf", JmBrowsePolicy.initialFilters(custom).order)
+        assertFalse(JmBrowsePolicy.showsModePicker(custom))
+        assertFalse(JmBrowsePolicy.showsCategoryPicker(custom))
+        assertTrue(JmBrowsePolicy.showsCategoryPicker(JmBrowsePolicy.ALL_HOT_TAB_ID))
+        assertEquals(
+            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, category = "doujin", order = "tf"),
+            JmBrowsePolicy.customCategoryFilters(legacy.copy(order = "mr")),
+        )
+        assertEquals("doujin", JmBrowsePolicy.defaultFilters(custom, legacy).category)
     }
 
     @Test

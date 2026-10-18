@@ -433,7 +433,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             initialJmFilters = vm.defaultJmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).let {
                 if (item.id == JmBrowsePolicy.ALL_HOT_TAB_ID) it.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "") else it
             },
-            fixedJmCategoryMode = item.id == JmBrowsePolicy.ALL_HOT_TAB_ID,
+            jmHome = item.id == BrowseTabStore.ID_JM_HOME,
+            jmCategoryOnly = JmBrowsePolicy.isCustomCategoryTab(item.id),
             initialPlatform = item.platformId,
             allowPlatformSelect = false,
             onDismiss = { editing = null },
@@ -457,8 +458,9 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "新增筛选 tab",
             initialName = "",
             initial = FilterSnapshot(),
-            initialJmFilters = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "mr"),
-            fixedJmCategoryMode = false,
+            initialJmFilters = JmBrowsePolicy.customCategoryFilters(),
+            jmHome = false,
+            jmCategoryOnly = true,
             initialPlatform = vm.currentPlatform.value,
             allowPlatformSelect = true,
             onDismiss = { adding = false },
@@ -628,102 +630,38 @@ private fun FilterSnapshot.summary(): String {
     return "$g · 标签：$t · $a · $e · ${s}排序"
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun JmTabFilterEditor(
     filters: JmBrowsePolicy.Filters,
-    fixedCategoryMode: Boolean,
+    home: Boolean,
+    categoryOnly: Boolean,
     onChange: (JmBrowsePolicy.Filters) -> Unit,
 ) {
+    if (home) {
+        Text(
+            stringResource(KMR.strings.jm_home_online_defaults),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(8.dp),
+        )
+        return
+    }
     val categories = remember { JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions) }
-    val orders = remember { JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions) }
-
-    if (!fixedCategoryMode) {
-        FilterSection("JM 模式") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(
-                    JmBrowsePolicy.MODE_RECOMMENDATIONS to "首页推荐",
-                    JmBrowsePolicy.MODE_CATEGORY to "分类",
-                    JmBrowsePolicy.MODE_WEEK to "每周必看",
-                    JmBrowsePolicy.MODE_SERIALIZATION to "每周连载更新",
-                ).forEach { (mode, label) ->
-                    FilterChip(text = label, selected = filters.mode == mode) {
-                        onChange(filters.copy(mode = mode, query = ""))
-                    }
-                }
+    FilterSection("JM 分类") {
+        categories.forEach { (label, value) ->
+            FilterChip(text = label, selected = filters.category == value) {
+                onChange(filters.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "", category = value))
             }
         }
     }
-    when (filters.mode) {
-        JmBrowsePolicy.MODE_RECOMMENDATIONS -> Text(
-            "首页推荐模式会保留 JM 推荐内容，不会转换为分类列表。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-        )
-        JmBrowsePolicy.MODE_WEEK -> {
-            OutlinedTextField(
-                value = filters.weekId,
-                onValueChange = { onChange(filters.copy(weekId = it)) },
-                label = { Text("期数 ID（留空为最新期）") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-            FilterSection("每周必看类型") {
-                listOf("日漫" to "manga", "韩漫" to "hanman", "其他" to "another").forEach { (label, value) ->
-                    FilterChip(text = label, selected = filters.weekType == value) {
-                        onChange(filters.copy(weekType = value))
-                    }
+    if (!categoryOnly) {
+        val orders = remember { JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions) }
+        FilterSection("JM 排序") {
+            orders.forEach { (label, value) ->
+                FilterChip(text = label, selected = filters.order == value) {
+                    onChange(filters.copy(order = value))
                 }
             }
-            Text(
-                "期数 ID 留空时使用最新期；默认类型为日漫。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-            )
-        }
-        JmBrowsePolicy.MODE_SERIALIZATION -> {
-            FilterSection("连载类型") {
-                listOf("全部" to "all", "日漫" to "manga", "韩漫" to "hanman").forEach { (label, value) ->
-                    FilterChip(text = label, selected = filters.serializationType == value) {
-                        onChange(filters.copy(serializationType = value))
-                    }
-                }
-            }
-            FilterSection("更新日期") {
-                listOf("周一" to 1, "周二" to 2, "周三" to 3, "周四" to 4, "周五" to 5, "周六" to 6, "周日" to 7, "已完结" to 0).forEach { (label, value) ->
-                    FilterChip(text = label, selected = filters.serializationDate == value) {
-                        onChange(filters.copy(serializationDate = value))
-                    }
-                }
-            }
-        }
-        else -> {
-            FilterSection("JM 分类") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    categories.forEach { (label, value) ->
-                        FilterChip(text = label, selected = filters.category == value) {
-                            onChange(filters.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "", category = value))
-                        }
-                    }
-                }
-            }
-            FilterSection("JM 排序") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    orders.forEach { (label, value) ->
-                        FilterChip(text = label, selected = filters.order == value) {
-                            onChange(filters.copy(order = value))
-                        }
-                    }
-                }
-            }
-            Text(
-                "分类与排序只用于此 JM tab，不会读取或写入漫蛙筛选。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-            )
         }
     }
 }
@@ -737,7 +675,8 @@ private fun FilterTabFormDialog(
     initialName: String,
     initial: FilterSnapshot,
     initialJmFilters: JmBrowsePolicy.Filters,
-    fixedJmCategoryMode: Boolean,
+    jmHome: Boolean,
+    jmCategoryOnly: Boolean,
     initialPlatform: ContentPlatform,
     allowPlatformSelect: Boolean,
     onDismiss: () -> Unit,
@@ -819,10 +758,11 @@ private fun FilterTabFormDialog(
                     ) {
                         Text(
                             if (targetPlatform == ContentPlatform.JM) {
-                                when (jmDraft.mode) {
-                                    JmBrowsePolicy.MODE_RECOMMENDATIONS -> "首页推荐"
-                                    JmBrowsePolicy.MODE_WEEK -> "每周必看 · ${jmDraft.weekType.ifBlank { "manga" }} · ${jmDraft.weekId.ifBlank { "最新期" }}"
-                                    JmBrowsePolicy.MODE_SERIALIZATION -> "每周连载更新 · ${jmDraft.serializationType} · ${if (jmDraft.serializationDate == 0) "已完结" else "周${jmDraft.serializationDate}"}"
+                                when {
+                                    jmHome -> BrowseTabStore.JM_HOME_NAME
+                                    jmDraft.mode == JmBrowsePolicy.MODE_RECOMMENDATIONS -> "首页推荐"
+                                    jmDraft.mode == JmBrowsePolicy.MODE_WEEK -> "每周必看 · ${jmDraft.weekType.ifBlank { "manga" }} · ${jmDraft.weekId.ifBlank { "最新期" }}"
+                                    jmDraft.mode == JmBrowsePolicy.MODE_SERIALIZATION -> "每周连载更新 · ${jmDraft.serializationType} · ${if (jmDraft.serializationDate == 0) "已完结" else "周${jmDraft.serializationDate}"}"
                                     else -> {
                                         val category = JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions)
                                             .firstOrNull { it.second == jmDraft.category }?.first ?: "全部分类"
@@ -849,7 +789,8 @@ private fun FilterTabFormDialog(
                         if (targetPlatform == ContentPlatform.JM) {
                             JmTabFilterEditor(
                                 filters = jmDraft,
-                                fixedCategoryMode = fixedJmCategoryMode,
+                                home = jmHome,
+                                categoryOnly = jmCategoryOnly,
                                 onChange = { jmDraft = it },
                             )
                         } else {

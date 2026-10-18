@@ -321,8 +321,9 @@ object JmSource : HttpSource() {
         val result = JmResponseParser.forumPage(payload)
         val count = result.total
         val pageCount = count?.let { (it + JM_COMMENT_PAGE_SIZE - 1) / JM_COMMENT_PAGE_SIZE }
+        val imageUrl = "https://${JmRouteManager.activeImageDomain}"
         val comments = result.comments.distinctBy { it.id }.map { comment ->
-            comment.copy(avatarUrl = "https://${JmRouteManager.activeImageDomain}/media/users/${comment.avatarUrl.trimStart('/')}")
+            comment.copy(avatarUrl = JmResponseParser.userAvatarUrl(imageUrl, comment.avatarUrl))
         }
         return JmCommentPage(count, comments, pageCount == null || page < pageCount)
     }

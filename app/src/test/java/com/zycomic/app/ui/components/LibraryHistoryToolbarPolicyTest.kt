@@ -5,6 +5,26 @@ import org.junit.jupiter.api.Test
 
 class LibraryHistoryToolbarPolicyTest {
     @Test
+    fun `history reserves the first action slot and keeps shared actions compact`() {
+        assertEquals(
+            listOf(
+                LibraryHistoryToolbarPolicy.Action.EMPTY,
+                LibraryHistoryToolbarPolicy.Action.SEARCH,
+                LibraryHistoryToolbarPolicy.Action.REFRESH,
+            ),
+            LibraryHistoryToolbarPolicy.leadingActions(history = true),
+        )
+        assertEquals(
+            listOf(
+                LibraryHistoryToolbarPolicy.Action.SEARCH,
+                LibraryHistoryToolbarPolicy.Action.REFRESH,
+                LibraryHistoryToolbarPolicy.Action.FILTER,
+            ),
+            LibraryHistoryToolbarPolicy.leadingActions(history = false),
+        )
+    }
+
+    @Test
     fun `history refresh occupies favorites filter position`() {
         val history = LibraryHistoryToolbarPolicy.leadingActions(history = true)
         val favorites = LibraryHistoryToolbarPolicy.leadingActions(history = false)

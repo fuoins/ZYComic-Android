@@ -36,7 +36,21 @@ internal object JmBrowsePolicy {
 
     fun today(): Int = ((java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7) + 1
 
-    fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID
+    fun isCustomCategoryTab(tabId: String): Boolean = tabId.startsWith("custom_jm_")
+
+    fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID && !isCustomCategoryTab(tabId)
+
+    fun showsCategoryPicker(tabId: String): Boolean = !isCustomCategoryTab(tabId)
+
+    /** Home always opens on the online feed; its transient destinations are not editable defaults. */
+    fun defaultFilters(tabId: String, stored: Filters?): Filters =
+        if (tabId == "jm_recommendations") initialFilters(tabId) else effectiveFilters(tabId, stored ?: initialFilters(tabId))
+
+    fun customCategoryFilters(filters: Filters = Filters()): Filters = Filters(
+        mode = MODE_CATEGORY,
+        category = filters.category,
+        order = ALL_HOT_ORDER,
+    )
 
     fun jmHomeModes(): List<Pair<String, Int>> = listOf(
         "每周必看" to MODE_WEEK,
@@ -44,11 +58,13 @@ internal object JmBrowsePolicy {
     )
 
     fun effectiveFilters(tabId: String, filters: Filters): Filters =
-        if (tabId == ALL_HOT_TAB_ID) {
+        if (tabId == ALL_HOT_TAB_ID || isCustomCategoryTab(tabId)) {
             filters.copy(
                 mode = MODE_CATEGORY,
                 query = "",
                 order = filters.order.ifBlank { ALL_HOT_ORDER },
+                promoteId = "",
+                promoteTitle = "",
             )
         } else if (
             tabId == "jm_recommendations" &&
@@ -68,7 +84,7 @@ internal object JmBrowsePolicy {
         }
 
     fun initialFilters(tabId: String): Filters =
-        if (tabId == ALL_HOT_TAB_ID) {
+        if (tabId == ALL_HOT_TAB_ID || isCustomCategoryTab(tabId)) {
             Filters(mode = MODE_CATEGORY, order = ALL_HOT_ORDER)
         } else {
             Filters()

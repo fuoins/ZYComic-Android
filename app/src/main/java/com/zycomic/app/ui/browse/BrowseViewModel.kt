@@ -83,7 +83,7 @@ class BrowseViewModel {
         return stateById.getOrPut(key) {
             val initial = if (item.platformId == ContentPlatform.JM) {
                 val stored = BrowseTabStore.loadJmFilters(item.id) ?: JmBrowsePolicy.initialFilters(item.id)
-                JmBrowsePolicy.effectiveFilters(item.id, stored).also { normalized ->
+                JmBrowsePolicy.defaultFilters(item.id, stored).also { normalized ->
                     if (normalized != stored) BrowseTabStore.saveJmFilters(item.id, normalized)
                 }
             } else {
@@ -95,7 +95,7 @@ class BrowseViewModel {
 
     internal fun defaultJmFiltersForTab(tab: Int): JmBrowsePolicy.Filters {
         val item = tabs.getOrNull(tab) ?: return JmBrowsePolicy.Filters()
-        return JmBrowsePolicy.effectiveFilters(item.id, BrowseTabStore.loadJmFilters(item.id) ?: JmBrowsePolicy.initialFilters(item.id))
+        return JmBrowsePolicy.defaultFilters(item.id, BrowseTabStore.loadJmFilters(item.id))
     }
 
     private fun saveJmFilters(tab: Int, filters: JmBrowsePolicy.Filters) {
@@ -203,7 +203,7 @@ class BrowseViewModel {
 
     fun selectJmMode(mode: Int, tab: Int = mainTab.value) {
         if (mode !in setOf(JmBrowsePolicy.MODE_RECOMMENDATIONS, JmBrowsePolicy.MODE_CATEGORY, JmBrowsePolicy.MODE_WEEK, JmBrowsePolicy.MODE_SERIALIZATION) || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
-        if (tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID && mode != JmBrowsePolicy.MODE_CATEGORY) return
+        if (!JmBrowsePolicy.showsModePicker(tabs[tab].id) && mode != JmBrowsePolicy.MODE_CATEGORY) return
         val state = stateFor(tab)
         val current = state.jmFilters.value
         if (current.mode == mode && current.query.isBlank() && current.promoteId.isBlank()) return
@@ -220,7 +220,7 @@ class BrowseViewModel {
 
     fun searchJm(query: String, tab: Int = mainTab.value) {
         val value = query.trim()
-        if (value.isBlank() || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM || tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID) return
+        if (value.isBlank() || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM || !JmBrowsePolicy.showsModePicker(tabs[tab].id)) return
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(mode = JmBrowsePolicy.MODE_SEARCH, query = value)
         refresh(tab)
@@ -231,7 +231,7 @@ class BrowseViewModel {
         val current = stateFor(tab).jmFilters.value
         stateFor(tab).jmFilters.value = current.copy(
             order = order?.trim() ?: current.order,
-            category = category?.trim() ?: current.category,
+            category = if (JmBrowsePolicy.showsCategoryPicker(tabs[tab].id)) category?.trim() ?: current.category else current.category,
             weekId = weekId?.trim() ?: current.weekId,
             weekType = weekType?.trim() ?: current.weekType,
             serializationType = serializationType ?: current.serializationType,
@@ -815,9 +815,10 @@ class BrowseViewModel {
     /** Save a JM tab's own category/order state, never converting it to a Manwa FilterSnapshot. */
     internal fun updateTabDefaultJmFilters(id: String, filters: JmBrowsePolicy.Filters) {
         val i = tabs.indexOfFirst { it.id == id && it.platformId == ContentPlatform.JM }
-        if (i < 0 || tabs[i].kind != TabKind.FILTER) return
-        stateFor(i).jmFilters.value = filters
-        saveJmFilters(i, filters)
+        if (i < 0 || tabs[i].kind != TabKind.FILTER || id == BrowseTabStore.ID_JM_HOME) return
+        val defaults = if (JmBrowsePolicy.isCustomCategoryTab(id)) JmBrowsePolicy.customCategoryFilters(filters) else JmBrowsePolicy.effectiveFilters(id, filters)
+        stateFor(i).jmFilters.value = defaults
+        saveJmFilters(i, defaults)
         stateFor(i).loaded = false
         if (mainTab.value == i) refresh(i)
     }
@@ -853,7 +854,7 @@ class BrowseViewModel {
         name: String,
         snapshot: FilterSnapshot?,
         platform: ContentPlatform = currentPlatform.value,
-        jmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "mr"),
+        jmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.customCategoryFilters(),
     ): Boolean {
         if (!StartupPlatformPolicy.isEnabled(platform)) return false
         val n = name.trim()
@@ -866,7 +867,7 @@ class BrowseViewModel {
             filter = snapshot.takeIf { platform == ContentPlatform.MANWA },
             platformId = platform,
         )
-        if (platform == ContentPlatform.JM) BrowseTabStore.saveJmFilters(item.id, jmFilters)
+        if (platform == ContentPlatform.JM) BrowseTabStore.saveJmFilters(item.id, JmBrowsePolicy.customCategoryFilters(jmFilters))
         addNewTab(item)
         return true
     }

@@ -94,6 +94,12 @@ internal object JmResponseParser {
         return ForumPage(payload.opt("total").asIntOrNull(), comments.distinctBy { it.id })
     }
 
+    fun userAvatarUrl(imageUrl: String, photo: String): String {
+        val photoPath = photo.trim().trimStart('/')
+        if (photoPath.isBlank()) return ""
+        return "${imageUrl.trimEnd('/')}/media/users/$photoPath"
+    }
+
     fun weekIssues(payload: JSONObject): List<WeekIssue> {
         val categories = payload.optJSONArray("categories")
             ?: throw IOException("JM /week 响应缺少有效 categories[]，请重试")

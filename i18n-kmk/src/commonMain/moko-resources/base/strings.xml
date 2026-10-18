@@ -334,4 +334,5 @@
     <string name="jm_account_done">完成</string>
     <string name="jm_account_cancel">取消</string>
     <string name="jm_password_profile_notice">修改前会先读取完整资料，仅替换密码后提交，以保留姓名、生日等原有资料。</string>
+    <string name="jm_home_online_defaults">采用在线获取，不支持更改默认</string>
 </resources>

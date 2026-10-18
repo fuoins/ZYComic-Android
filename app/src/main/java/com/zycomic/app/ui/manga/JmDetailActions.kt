@@ -7,13 +7,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,9 +33,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.zycomic.app.data.dto.Manga
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -138,6 +146,8 @@ private fun JmCommentsDialog(vm: MangaDetailViewModel, onDismiss: () -> Unit) {
     val hasMore by vm.jmCommentsHasMore.collectAsState()
     val busy by vm.jmActionBusy.collectAsState()
     val account by vm.jmAccountName.collectAsState()
+    val context = LocalContext.current
+    val jmImageLoader = remember(context) { com.zycomic.app.ui.components.JmCoverImageLoader.get(context) }
     var draft by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -147,9 +157,34 @@ private fun JmCommentsDialog(vm: MangaDetailViewModel, onDismiss: () -> Unit) {
                 LazyColumn(Modifier.weight(1f, fill = false).heightIn(min = 100.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(comments, key = { it.id }) { comment ->
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(comment.username, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                            Text(comment.content, style = MaterialTheme.typography.bodyMedium)
-                            Text(comment.time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                if (comment.avatarUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = comment.avatarUrl,
+                                        contentDescription = null,
+                                        imageLoader = jmImageLoader,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(36.dp).clip(CircleShape),
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Outlined.PersonOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(36.dp).clip(CircleShape),
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    comment.username,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(comment.time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(comment.content, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 44.dp))
                             HorizontalDivider()
                         }
                     }

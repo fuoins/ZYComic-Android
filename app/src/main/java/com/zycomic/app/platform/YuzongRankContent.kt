@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.zycomic.app.ui.browse.CompactBrowseFilterChip
 import kotlinx.coroutines.launch
 
 @androidx.compose.runtime.Composable
@@ -154,16 +154,17 @@ private fun PlatformChipRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PlatformCatalog.platforms.forEach { p ->
-            FilterChip(
+            CompactBrowseFilterChip(
                 selected = p.id == selected.id,
                 onClick = { onSelect(p) },
                 label = { Text(p.label) },
             )
         }
-        IconButton(onClick = onInfoClick) {
+        IconButton(onClick = onInfoClick, modifier = Modifier.size(32.dp)) {
             Icon(
                 imageVector = Icons.Outlined.Info,
                 contentDescription = "宇总排行说明",
@@ -186,7 +187,7 @@ private fun SubChipRow(
     ) {
         items(platform.subs.size) { i ->
             val sub = platform.subs[i]
-            FilterChip(
+            CompactBrowseFilterChip(
                 selected = sub.id == selectedSub,
                 onClick = { onSelect(sub.id) },
                 label = { Text(sub.label) },

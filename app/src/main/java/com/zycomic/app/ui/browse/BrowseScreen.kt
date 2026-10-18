@@ -705,11 +705,11 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 choices.forEach { choice ->
                     key(choice.label) {
-                        androidx.compose.material3.FilterChip(
+                        CompactBrowseFilterChip(
                             selected = choice.selected,
                             onClick = choice.onClick,
                             label = { Text(choice.label) },
@@ -732,9 +732,11 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
         }
         when (mode) {
             JmBrowsePolicy.MODE_CATEGORY -> if (!isHome || filters.promoteId.isBlank()) {
-                FilterSection("分类") {
-                    categoryOptions.forEach { (label, value) ->
-                        FilterChip(text = label, selected = filters.category == value, onClick = { vm.updateJmFilters(page, category = value) })
+                if (JmBrowsePolicy.showsCategoryPicker(tabId)) {
+                    FilterSection("分类") {
+                        categoryOptions.forEach { (label, value) ->
+                            FilterChip(text = label, selected = filters.category == value, onClick = { vm.updateJmFilters(page, category = value) })
+                        }
                     }
                 }
                 FilterSection("排序方式") {
