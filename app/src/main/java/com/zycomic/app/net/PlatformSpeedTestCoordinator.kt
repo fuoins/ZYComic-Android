@@ -24,6 +24,8 @@ object PlatformSpeedTestCoordinator {
     val running = _running.asStateFlow()
     private val _progressText = MutableStateFlow<String?>(null)
     val progressText = _progressText.asStateFlow()
+    private val _jmProgress = MutableStateFlow<JmSpeedTestProgress?>(null)
+    val jmProgress = _jmProgress.asStateFlow()
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
     private var completedKey: SpeedTestRunKey? = null
@@ -73,6 +75,7 @@ object PlatformSpeedTestCoordinator {
                         val requested = onlyPlatform == null || onlyPlatform == platform
                         if (enabled && !requested) reason = "本轮仅重新检测${if (onlyPlatform == ContentPlatform.JM) "禁漫天堂" else "漫蛙"}"
                         if (enabled && requested) {
+                            _jmProgress.value = null
                             _progressText.value = if (platform == ContentPlatform.MANWA) "正在检测漫蛙线路与图源…" else "正在检测禁漫天堂线路与图源…"
                             try {
                                 reason = if (reuseImages) "线路本次新测；仅复用匹配的图源结果" else "线路与图源本次重新测速"
@@ -81,7 +84,12 @@ object PlatformSpeedTestCoordinator {
                                     SpeedTester.runAndApply(onProgress, onStageProgress)
                                     status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
                                 } else {
-                                    val snapshot = JmSpeedTester.run(reuseImages = reuseImages)
+                                    val snapshot = JmSpeedTester.run(reuseImages = reuseImages, isCurrent = { key == currentKey() }) { progress ->
+                                        if (key == currentKey()) {
+                                            _jmProgress.value = progress
+                                            _progressText.value = progress.message()
+                                        }
+                                    }
                                     status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
                                     if (status == "incomplete") reason = "本轮结果未完整提交，保留当前选择"
                                 }
@@ -106,6 +114,7 @@ object PlatformSpeedTestCoordinator {
             } finally {
                 _running.value = false
                 _progressText.value = null
+                _jmProgress.value = null
             }
         }
     }

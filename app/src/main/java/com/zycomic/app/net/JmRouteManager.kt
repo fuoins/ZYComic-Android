@@ -293,6 +293,7 @@ object JmRouteManager {
     /** API pools/versions do not invalidate otherwise identical image-host/IP results. */
     fun currentImageConfigFingerprint(): String {
         val text = buildString {
+            append("probe=").append(JmSpeedProbeProtocol.IMAGE_PATH).append('\n')
             imageDomains.forEach { host ->
                 append(host.lowercase(Locale.ROOT)).append('=')
                 resolveIp(host).sorted().forEach { append(it).append(',') }
@@ -337,6 +338,7 @@ object JmRouteManager {
     fun currentSpeedTestConfigFingerprint(): String {
         val state = _state.value
         val text = buildString {
+            append(JmSpeedProbeProtocol.LINE_PATH).append('|').append(JmSpeedProbeProtocol.IMAGE_PATH).append('\n')
             append(state.remoteVersion ?: "builtin").append('\n')
             state.lines.forEach { append(hostFromUrl(it).lowercase(Locale.ROOT)).append('\n') }
             append("--images--\n")

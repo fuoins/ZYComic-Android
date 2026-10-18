@@ -60,6 +60,7 @@ fun SpeedTestScreen(
     val platformReports by PlatformSpeedTestCoordinator.reports.collectAsState()
     val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
     val platformProgress by PlatformSpeedTestCoordinator.progressText.collectAsState()
+    val jmTestProgress by PlatformSpeedTestCoordinator.jmProgress.collectAsState()
     val platformExport = remember { mutableStateOf<String?>(null) }
     val platformLogLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val json = platformExport.value
@@ -204,7 +205,13 @@ fun SpeedTestScreen(
                         )
                     }
                     Text(platformProgress ?: vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
-                    if (speedTestProgress.total > 0 &&
+                    val jmProgress = jmTestProgress
+                    if (jmProgress != null && jmProgress.total > 0) {
+                        LinearProgressIndicator(
+                            progress = { jmProgress.completed.toFloat() / jmProgress.total },
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                    } else if (jmProgress == null && speedTestProgress.total > 0 &&
                         speedTestProgress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
                     ) {
                         LinearProgressIndicator(

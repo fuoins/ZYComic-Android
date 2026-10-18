@@ -277,6 +277,7 @@ fun AppContent(
     val configRetest by com.zycomic.app.net.RemoteConfigFetcher.configRetest.collectAsState()
     val remoteInfo by settingsVm.remoteInfo.collectAsState()
     val platformTestText by PlatformSpeedTestCoordinator.progressText.collectAsState()
+    val jmTestProgress by PlatformSpeedTestCoordinator.jmProgress.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
 
@@ -483,7 +484,13 @@ fun AppContent(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                if (speedTestProgress.total > 0 &&
+                val jmProgress = jmTestProgress
+                if (jmProgress != null && jmProgress.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { jmProgress.completed.toFloat() / jmProgress.total },
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                    )
+                } else if (jmProgress == null && speedTestProgress.total > 0 &&
                     speedTestProgress.phase in setOf(
                         com.zycomic.app.net.SpeedTester.Phase.TESTING_LINES,
                         com.zycomic.app.net.SpeedTester.Phase.TESTING_IMAGES,

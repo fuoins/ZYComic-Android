@@ -72,10 +72,18 @@ object JmNetworkModule {
 
     /** A probe client with its own pool and no API/image retry interceptors. */
     fun newProbeClient(): OkHttpClient = baseClient.newBuilder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .callTimeout(10, TimeUnit.SECONDS)
+        // Match Manwa's endpoint budget, without sharing its transport or routing state.
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .writeTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)
         .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+        .dispatcher(
+            okhttp3.Dispatcher().apply {
+                maxRequests = 24
+                maxRequestsPerHost = 24
+            },
+        )
         .retryOnConnectionFailure(false)
         .followRedirects(false)
         .followSslRedirects(false)

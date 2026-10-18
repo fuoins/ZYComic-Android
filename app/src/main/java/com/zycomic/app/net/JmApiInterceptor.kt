@@ -5,14 +5,13 @@ import okhttp3.Interceptor
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.io.IOException
 import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
 /** JM API 专用协议；不调用 ManwaInterceptor / Crypto。 */
-class JmApiInterceptor : Interceptor {
+class JmApiInterceptor(private val recordRouteHealth: Boolean = true) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
@@ -36,27 +35,29 @@ class JmApiInterceptor : Interceptor {
         val response = try {
             chain.proceed(request)
         } catch (error: IOException) {
-            if (!isImage && !isUnsigned) JmRouteManager.recordApiFailure(host, error.javaClass.simpleName)
+            if (recordRouteHealth && !isImage && !isUnsigned) {
+                JmRouteManager.recordApiFailure(host, error.javaClass.simpleName)
+            }
             throw error
         }
         if (isImage || isUnsigned || response.body == null) return response
 
         val raw = response.body!!.string()
         if (!response.isSuccessful) {
-            JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
+            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
 
         val envelope = try {
             JSONObject(raw)
         } catch (error: Exception) {
-            JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
+            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
             throw IOException("JM API envelope is not JSON", error)
         }
         val apiCode = envelope.optInt("code", -1)
         if (apiCode != 200) {
             val message = envelope.optString("errorMsg").takeIf { it.isNotBlank() }
-            JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
+            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
             throw IOException("JM API rejected request (code=$apiCode)${message?.let { ": $it" }.orEmpty()}")
         }
 
@@ -65,12 +66,13 @@ class JmApiInterceptor : Interceptor {
             val encrypted = data as? String
                 ?: throw IOException("JM API data 不是报告确认的加密字符串")
             val plaintext = decryptPayload(encrypted, timestamp)
-            // Confirm the decrypted payload is JSON before passing it to the source parser.
-            JSONTokener(plaintext).nextValue()
-            JmRouteManager.recordApiSuccess(host)
+            if (!JmSpeedProbeProtocol.isValidDecryptedJson(plaintext)) {
+                throw IOException("JM 解密载荷必须是有效的 JSON 对象或数组")
+            }
+            if (recordRouteHealth) JmRouteManager.recordApiSuccess(host)
             response.newBuilder().body(plaintext.toResponseBody(response.body?.contentType())).build()
         } catch (error: Exception) {
-            JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
+            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
             if (error is IOException) throw error
             throw IOException("JM API response could not be decoded", error)
         }
