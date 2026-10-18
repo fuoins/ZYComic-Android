@@ -165,6 +165,7 @@ class BrowseViewModel {
             slug = section.slug,
             page = 1,
             today = JmBrowsePolicy.today(),
+            filterValue = section.filterValue,
         )
         val updated = when (route.path) {
             "/serialization" -> filters.copy(
@@ -191,7 +192,8 @@ class BrowseViewModel {
             )
             else -> filters.copy(
                 mode = if (section.type.contains("category_id")) JmBrowsePolicy.MODE_CATEGORY else JmBrowsePolicy.MODE_UNAVAILABLE_SECTION,
-                category = section.slug,
+                category = com.zycomic.app.reader.JmBrowseParameters.confirmedPromoteCategory(section.slug)
+                    ?: com.zycomic.app.reader.JmBrowseParameters.confirmedPromoteCategory(section.filterValue).orEmpty(),
                 query = "",
                 promoteId = section.id,
                 promoteTitle = section.title,
@@ -684,9 +686,10 @@ class BrowseViewModel {
         try {
             var filters = JmBrowsePolicy.effectiveFilters(tabs[tab].id, ts.jmFilters.value)
             if (filters.mode == JmBrowsePolicy.MODE_CATEGORY && filters.promoteId.isNotBlank()) {
-                check(com.zycomic.app.reader.JmBrowseParameters.confirmedPromoteCategory(filters.category) != null) {
-                    "JM 分类 slug 尚未确认：${filters.promoteTitle}；不接受数字分类 ID 或未知值，请重试"
-                }
+                val confirmedCategory = com.zycomic.app.reader.JmBrowseParameters.confirmedPromoteCategory(filters.category)
+                    ?: error("JM 分类 slug 尚未确认：${filters.promoteTitle}；不接受数字分类 ID 或未知值，请重试")
+                filters = filters.copy(category = confirmedCategory)
+                ts.jmFilters.value = filters
             }
             if (filters.mode == JmBrowsePolicy.MODE_WEEK && filters.weekId.isBlank()) {
                 val issues = JmSource.getWeekIssues()

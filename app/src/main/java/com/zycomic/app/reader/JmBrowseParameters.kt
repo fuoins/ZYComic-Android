@@ -13,14 +13,19 @@ internal object JmBrowseParameters {
 
     // JMComic 首页板块与更多相关 API 实测报告 §2/§3 confirms this exact Chinese slug.
     const val TRANSLATION_GROUP_SLUG = "禁漫漢化組"
+    private const val LEGACY_TRANSLATION_GROUP_SLUG = "禁漫汉化组"
     private val confirmedCategorySlugs = setOf(
         "doujin", "single", "short", "another", "hanman", "meiman", "another_cosplay", "3D",
         TRANSLATION_GROUP_SLUG,
     )
 
     fun confirmedPromoteCategory(slug: String): String? {
-        return slug.takeIf { it in confirmedCategorySlugs }
+        val canonical = if (slug == LEGACY_TRANSLATION_GROUP_SLUG) TRANSLATION_GROUP_SLUG else slug
+        return canonical.takeIf { it in confirmedCategorySlugs }
     }
+
+    private fun confirmedPromoteCategory(slug: String, filterValue: String): String? =
+        confirmedPromoteCategory(slug) ?: confirmedPromoteCategory(filterValue)
 
     fun hasComicPreview(type: String): Boolean = type == "promote" || type.contains("category_id")
 
@@ -30,7 +35,14 @@ internal object JmBrowseParameters {
     )
 
     /** Routes a /promote block by API metadata, never by its display title. */
-    fun promoteRoute(type: String, id: String, slug: String, page: Int, today: Int): JmPromoteRoute = when {
+    fun promoteRoute(
+        type: String,
+        id: String,
+        slug: String,
+        page: Int,
+        today: Int,
+        filterValue: String = "",
+    ): JmPromoteRoute = when {
         id == "26" -> JmPromoteRoute(
             path = "/serialization",
             params = serialization("all", today.coerceIn(1, 7), page.coerceAtLeast(1)),
@@ -42,9 +54,9 @@ internal object JmBrowseParameters {
             pageSize = PROMOTE_LIST_PAGE_SIZE,
             zeroBasedPage = true,
         )
-        type.contains("category_id") && confirmedPromoteCategory(slug) != null -> JmPromoteRoute(
+        type.contains("category_id") && confirmedPromoteCategory(slug, filterValue) != null -> JmPromoteRoute(
             path = "/categories/filter",
-            params = mapOf("c" to confirmedPromoteCategory(slug)!!, "o" to "mr", "page" to page.coerceAtLeast(1).toString()),
+            params = mapOf("c" to confirmedPromoteCategory(slug, filterValue)!!, "o" to "mr", "page" to page.coerceAtLeast(1).toString()),
             pageSize = 80,
         )
         type == "library" || type == "novels" -> JmPromoteRoute(path = null)

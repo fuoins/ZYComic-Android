@@ -1,0 +1,199 @@
+package com.zycomic.app.net
+
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import java.io.IOException
+
+class JmImageReaderRetryTest {
+    @Test
+    fun `remaining JM routes exclude attempted hostnames without consulting Manwa endpoints`() {
+        val hosts = JmRouteManager.imageCandidates()
+        val attempted = setOf(DomainIp(hosts.first().uppercase(), "192.0.2.1"))
+        assertEquals(
+            hosts.drop(1).map { DomainIp(it, "").normalizedForComparison() },
+            JmRouteManager.imageRetryEndpoints(attempted),
+        )
+        assertTrue(JmRouteManager.imageRetryEndpoints(hosts.map { DomainIp(it, "") }.toSet()).isEmpty())
+    }
+
+    @Test
+    fun `manual retry round cannot restart automatic rounds after the existing limit`() {
+        ImageAttemptCoordinator().use { coordinator ->
+            val page = ReaderPage(0, imageUrl = IMAGE_URL)
+            page.automaticRetryRound.set(PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS + 1)
+            val attempt = scope(page, coordinator)
+            repeat(PageAttemptScope.MAX_ENDPOINTS_PER_ROUND) {
+                assertTrue(attempt.recordEndpointAttempt(DomainIp("image$it.example", "")))
+            }
+            assertFalse(attempt.retryAfterFailure(true))
+            assertEquals(4, page.automaticRetryRound.get())
+        }
+    }
+
+    @Test
+    fun `502 advances existing page round and next untried JM host succeeds`() {
+        ImageAttemptCoordinator().use { coordinator ->
+            val page = ReaderPage(0, imageUrl = IMAGE_URL)
+            val hosts = (1..4).map { "image$it.example" }
+            val visited = mutableListOf<String>()
+            val failures = mutableListOf<Pair<String, String>>()
+            val client = client(hosts, failures) { request ->
+                assertEquals(null, request.url.queryParameter("_jm_scramble"))
+                assertTrue(request.tag(PageAttemptScope::class.java) != null)
+                visited += request.url.host
+                if (request.url.host == hosts.last()) 200 else 502
+            }
+            val first = scope(page, coordinator)
+            val error = assertThrows(IOException::class.java) { load(client, first) }
+            assertTrue(error.message.orEmpty().contains("HTTP 502"))
+            assertEquals(3, page.endpointsAttemptedInRound.get())
+            assertEquals(hosts.take(3), visited)
+            assertTrue(first.retryAfterFailure(remaining(hosts, page)))
+            assertEquals(2, page.automaticRetryRound.get())
+            assertEquals(0, page.endpointsAttemptedInRound.get())
+            load(client, scope(page, coordinator))
+            assertEquals(hosts, visited)
+            assertEquals(hosts.take(3), failures.map { it.first })
+            assertTrue(failures.all { "HTTP 502" in it.second })
+            assertEquals(4, page.attemptedImageEndpoints.size)
+            assertFalse(first.hasActiveEndpointRequest)
+        }
+    }
+
+    @Test
+    fun `persistent transient HTTP errors stop after three existing rounds without repeating endpoints`() {
+        for (status in listOf(502, 503, 504)) {
+            ImageAttemptCoordinator().use { coordinator ->
+                val page = ReaderPage(0, imageUrl = IMAGE_URL)
+                val hosts = (1..10).map { "image$it.example" }
+                val visited = mutableListOf<String>()
+                val failures = mutableListOf<Pair<String, String>>()
+                val client = client(hosts, failures) { request ->
+                    visited += request.url.host
+                    status
+                }
+                for (round in 1..PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS) {
+                    val attempt = scope(page, coordinator)
+                    assertThrows(IOException::class.java) { load(client, attempt) }
+                    assertEquals(round * PageAttemptScope.MAX_ENDPOINTS_PER_ROUND, visited.size)
+                    assertEquals(round < PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS, attempt.retryAfterFailure(remaining(hosts, page)))
+                }
+                assertEquals(3, page.automaticRetryRound.get())
+                assertEquals(9, visited.distinct().size)
+                assertEquals(9, failures.size)
+                assertTrue(remaining(hosts, page))
+            }
+        }
+    }
+
+    @Test
+    fun `exhausted small JM pool does not enqueue an infinite retry`() {
+        ImageAttemptCoordinator().use { coordinator ->
+            val page = ReaderPage(0, imageUrl = IMAGE_URL)
+            val hosts = listOf("first.example", "second.example")
+            val failures = mutableListOf<Pair<String, String>>()
+            val client = client(hosts, failures) { 502 }
+            val attempt = scope(page, coordinator)
+            assertThrows(IOException::class.java) { load(client, attempt) }
+            assertEquals(2, page.endpointsAttemptedInRound.get())
+            assertFalse(attempt.retryAfterFailure(remaining(hosts, page)))
+            assertEquals(1, page.automaticRetryRound.get())
+        }
+    }
+
+    @Test
+    fun `transport failure is recorded and continues through the same page strategy`() {
+        ImageAttemptCoordinator().use { coordinator ->
+            val page = ReaderPage(0, imageUrl = IMAGE_URL)
+            val failures = mutableListOf<Pair<String, String>>()
+            val client = client(listOf("first.example", "second.example"), failures) { request ->
+                if (request.url.host == "first.example") throw IOException("connection reset")
+                200
+            }
+            load(client, scope(page, coordinator))
+            assertEquals(listOf("first.example" to "connection reset"), failures)
+            assertEquals(2, page.endpointsAttemptedInRound.get())
+        }
+    }
+
+    @Test
+    fun `stale or cancelled page cannot request or record a failed endpoint`() {
+        ImageAttemptCoordinator().use { coordinator ->
+            val page = ReaderPage(0, imageUrl = IMAGE_URL)
+            val failures = mutableListOf<Pair<String, String>>()
+            var requests = 0
+            val client = client(listOf("first.example"), failures) {
+                requests++
+                502
+            }
+            val attempt = scope(page, coordinator)
+            attempt.cancel(ImageCancelReason.USER_RETRY)
+            assertThrows(IOException::class.java) { load(client, attempt) }
+            assertEquals(0, requests)
+            assertEquals(0, failures.size)
+            assertEquals(0, page.endpointsAttemptedInRound.get())
+            assertFalse(attempt.retryAfterFailure(true))
+        }
+    }
+
+    @Test
+    fun `unscoped cover keeps its existing fallback without a reader budget`() {
+        val hosts = (1..4).map { "image$it.example" }
+        val failures = mutableListOf<Pair<String, String>>()
+        val client = client(hosts, failures) { if (it.url.host == hosts.last()) 200 else 502 }
+        client.newCall(Request.Builder().url("https://${hosts.first()}/media/albums/123_3x4.jpg").build()).execute().use {
+            assertTrue(it.isSuccessful)
+        }
+        assertEquals(3, failures.size)
+    }
+
+    private fun scope(page: ReaderPage, coordinator: ImageAttemptCoordinator) =
+        PageAttemptScope(page, page.generation.get(), coordinator, canRace = false)
+
+    private fun remaining(hosts: List<String>, page: ReaderPage): Boolean =
+        hosts.any { DomainIp(it, "").normalizedForComparison() !in page.attemptedImageEndpoints }
+
+    private fun load(client: OkHttpClient, attempt: PageAttemptScope) {
+        client.newCall(
+            Request.Builder().url(IMAGE_URL).tag(PageAttemptScope::class.java, attempt).build(),
+        ).execute().use { assertTrue(it.isSuccessful) }
+    }
+
+    private fun client(
+        hosts: List<String>,
+        failures: MutableList<Pair<String, String>>,
+        status: (Request) -> Int,
+    ): OkHttpClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(false)
+        .addInterceptor(
+            JmImageInterceptor(
+                imageCandidates = { hosts },
+                prepareImageRoute = {},
+                recordImageSuccess = {},
+                recordImageFailure = { host, reason -> failures += host to reason },
+            ),
+        )
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val code = status(request)
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("test")
+                .header("Content-Type", if (code == 200) "image/gif" else "text/html")
+                .body((if (code == 200) "GIF89a" else "Bad gateway").toResponseBody("image/gif".toMediaType()))
+                .build()
+        }
+        .build()
+
+    private companion object {
+        const val IMAGE_URL = "https://origin.example/media/photos/123/00001.jpg?_jm_scramble=220980"
+    }
+}

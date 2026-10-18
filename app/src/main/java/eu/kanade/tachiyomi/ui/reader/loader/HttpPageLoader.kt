@@ -22,8 +22,8 @@ import exh.source.isEhBasedSource
 import exh.util.DataSaver
 import exh.util.DataSaver.Companion.getImage
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -274,7 +274,9 @@ internal class HttpPageLoader(
         synchronized(queueLock) {
             if (!schedulingEnabled || isRecycled || !readingOrderInitialized || page !in currentWindow ||
                 page.status != Page.State.Queue || page in capacityLimitedPages
-            ) return
+            ) {
+                return
+            }
             synchronized(page) {
                 val generation = page.generation.get()
                 val oldQueueToken = page.queuedToken.get()
@@ -399,7 +401,7 @@ internal class HttpPageLoader(
         val pagesToWake = synchronized(queueLock) {
             var remainingBackgroundCapacity = (
                 preloadTaskLimit - activeScopes.values.count { it.page !in visiblePages }
-            ).coerceAtLeast(0)
+                ).coerceAtLeast(0)
             capacityLimitedPages.toList().filter { page ->
                 when {
                     page !in currentWindow || page.status != Page.State.Queue -> {
@@ -447,7 +449,12 @@ internal class HttpPageLoader(
 
     override fun retryPage(page: ReaderPage) {
         successfullyCachedPages.remove(page)
-        val sourceKey = RouteManager.imgRewriteTarget ?: RouteManager.imgHost
+        val isJm = source === com.zycomic.app.reader.JmSource
+        val sourceKey = if (isJm) {
+            "jm:${com.zycomic.app.net.JmRouteManager.activeImageDomain}"
+        } else {
+            RouteManager.imgRewriteTarget ?: RouteManager.imgHost
+        }
         if (page.retryBudgetSource != sourceKey) {
             page.retryBudgetSource = sourceKey
             page.manualRetryCount.set(0)
@@ -463,12 +470,18 @@ internal class HttpPageLoader(
             return
         }
         page.manualRetryCount.incrementAndGet()
+        val wasActive = cancelPage(page, ImageCancelReason.USER_RETRY, requeue = true)
+        if (isJm) {
+            // Only an explicit manual retry may revisit transiently failed JM hosts.
+            // Do not reset automatic rounds: the existing manual/automatic limits still apply.
+            page.attemptedImageEndpoints.clear()
+            page.endpointsAttemptedInRound.set(0)
+        }
         if (page.automaticRetryRound.get() >= PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS) {
             page.automaticRetryRound.incrementAndGet()
             page.endpointsAttemptedInRound.set(0)
         }
         page.automaticRetryExhausted = false
-        val wasActive = cancelPage(page, ImageCancelReason.USER_RETRY, requeue = true)
         val imageUrl = page.imageUrl
         if (!imageUrl.isNullOrBlank()) {
             chapterCache.remove(imageUrl)
@@ -690,22 +703,7 @@ internal class HttpPageLoader(
                 deferRetry = true
             } else {
                 val remainingEndpoints = remainingUntriedEndpoints(page)
-                val attemptsThisRound = page.endpointsAttemptedInRound.get()
-                val canContinueRound = attemptsThisRound in 1 until PageAttemptScope.MAX_ENDPOINTS_PER_ROUND &&
-                    remainingEndpoints.isNotEmpty()
-                val canAdvanceRound = attemptsThisRound >= PageAttemptScope.MAX_ENDPOINTS_PER_ROUND &&
-                    page.automaticRetryRound.get() < PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS &&
-                    remainingEndpoints.isNotEmpty()
-                val advanced = if (canAdvanceRound) {
-                    attempt?.beginNextAutomaticRound() ?: run {
-                        page.automaticRetryRound.incrementAndGet()
-                        page.endpointsAttemptedInRound.set(0)
-                        true
-                    }
-                } else {
-                    false
-                }
-                if (canContinueRound || advanced) {
+                if (attempt?.retryAfterFailure(remainingEndpoints.isNotEmpty()) == true) {
                     page.automaticRetryExhausted = false
                     page.status = Page.State.Queue
                     page.loadStatus = ReaderPageLoadStatus.Queued
@@ -765,6 +763,9 @@ internal class HttpPageLoader(
     private fun remainingUntriedEndpoints(page: ReaderPage): List<com.zycomic.app.net.DomainIp> {
         val host = runCatching { java.net.URI(page.imageUrl.orEmpty()).host }.getOrNull() ?: return emptyList()
         val tried = page.attemptedImageEndpoints.mapTo(HashSet()) { it.normalizedForComparison() }
+        if (source === com.zycomic.app.reader.JmSource) {
+            return com.zycomic.app.net.JmRouteManager.imageRetryEndpoints(tried)
+        }
         return RouteManager.imageRetryEndpoints(host, tried)
             .mapNotNull { candidate ->
                 candidate ?: runCatching {

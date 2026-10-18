@@ -455,6 +455,13 @@ object JmRouteManager {
         return JmImagePolicy.imageCandidates(preferredFirst, available, DEFAULT_IMAGE_DOMAINS)
     }
 
+    /** Hostname routes match JmImageInterceptor; DNS/IP choice remains owned by JM transport. */
+    fun imageRetryEndpoints(excluded: Set<DomainIp>): List<DomainIp> {
+        val tried = excluded.mapTo(HashSet()) { it.normalizedForComparison().domain }
+        return imageCandidates().map { DomainIp(it, "").normalizedForComparison() }
+            .filterNot { it.domain in tried }
+    }
+
     @Synchronized
     fun recordSpeedTest(snapshot: SpeedTestSnapshot, expectedPlatformRevision: Long? = null): Boolean {
         if (!applySnapshot(snapshot, expectedPlatformRevision) ||

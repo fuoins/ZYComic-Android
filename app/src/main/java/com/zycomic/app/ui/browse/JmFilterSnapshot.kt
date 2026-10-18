@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.browse
 
+import com.zycomic.app.reader.JmBrowseParameters
 import org.json.JSONObject
 
 /** JSON representation for a JM tab's independent filters; deliberately separate from Manwa FilterSnapshot. */
@@ -59,7 +60,7 @@ internal data class JmFilterSnapshot(
             mode = json.optInt("mode", defaultMode),
             query = json.optString("query"),
             order = json.optString("order"),
-            category = json.optString("category"),
+            category = JmBrowseParameters.confirmedPromoteCategory(json.optString("category")) ?: json.optString("category"),
             weekId = json.optString("weekId"),
             weekType = json.optString("weekType").ifBlank { "manga" },
             serializationType = json.optString("serializationType").ifBlank { "all" },

@@ -227,6 +227,14 @@ class PageAttemptScope(
             if (added) page.endpointsAttemptedInRound.incrementAndGet()
         }
 
+    /** Shared loader decision: continue untried endpoints, bounded by the existing round budget. */
+    fun retryAfterFailure(hasRemainingEndpoints: Boolean): Boolean {
+        if (!isCurrent || !hasRemainingEndpoints) return false
+        val attempts = page.endpointsAttemptedInRound.get()
+        if (attempts in 1 until MAX_ENDPOINTS_PER_ROUND) return true
+        return attempts >= MAX_ENDPOINTS_PER_ROUND && beginNextAutomaticRound()
+    }
+
     fun beginNextAutomaticRound(): Boolean {
         while (true) {
             val round = page.automaticRetryRound.get()

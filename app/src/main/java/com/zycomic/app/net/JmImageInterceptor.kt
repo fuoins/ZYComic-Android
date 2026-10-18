@@ -16,7 +16,12 @@ import java.io.IOException
 import java.util.zip.GZIPInputStream
 
 /** JM 专属图床 fallback 与已验证的章节图 gunzip / 条带逆序流程。 */
-class JmImageInterceptor : Interceptor {
+class JmImageInterceptor internal constructor(
+    private val imageCandidates: () -> List<String> = JmRouteManager::imageCandidates,
+    private val prepareImageRoute: (String) -> Unit = JmNetworkModule::prepareImageRoute,
+    private val recordImageSuccess: (String) -> Unit = JmRouteManager::recordImageSuccess,
+    private val recordImageFailure: (String, String) -> Unit = JmRouteManager::recordImageFailure,
+) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
@@ -35,7 +40,9 @@ class JmImageInterceptor : Interceptor {
             )
         }
         val networkUrl = original.url.newBuilder().removeAllQueryParameters(SCRAMBLE_QUERY).build()
-        val configuredCandidates = JmRouteManager.imageCandidates()
+        val scope = original.tag(PageAttemptScope::class.java)
+        if (scope != null && !scope.isCurrent) throw IOException("图片加载已取消")
+        val configuredCandidates = imageCandidates()
         val candidates = if (path.startsWith("/media/albums/")) {
             JmRelatedMangaPolicy.imageHostsForAlbum(original.url.host, configuredCandidates)
         } else {
@@ -44,6 +51,12 @@ class JmImageInterceptor : Interceptor {
         var lastError: IOException? = null
         var lastStatus: Int? = null
         for (host in candidates) {
+            if (scope != null) {
+                if (!scope.isCurrent) throw IOException("图片加载已取消")
+                if (scope.page.endpointsAttemptedInRound.get() >= PageAttemptScope.MAX_ENDPOINTS_PER_ROUND) break
+                // JM transport owns DNS/IP selection; the retry identity is the hostname route.
+                if (!scope.recordEndpointAttempt(DomainIp(host, ""))) continue
+            }
             val url = networkUrl.newBuilder().host(host).build()
             val request = original.newBuilder()
                 .url(url)
@@ -53,14 +66,16 @@ class JmImageInterceptor : Interceptor {
                 .header("X-Requested-With", JmApiInterceptor.PACKAGE_NAME)
                 .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
                 .build()
+            val startedAt = System.nanoTime()
+            scope?.endpointRequestStarted((scope.page.endpointsAttemptedInRound.get() - 1).coerceAtLeast(0), PageAttemptScope.MAX_ENDPOINTS_PER_ROUND)
             try {
-                JmNetworkModule.prepareImageRoute(host)
+                prepareImageRoute(host)
                 val response = chain.proceed(request)
                 val isImage = response.header("Content-Type")?.substringBefore(';')
                     ?.startsWith("image/", ignoreCase = true) == true
                 if (response.isSuccessful && isImage) {
                     return try {
-                        JmRouteManager.recordImageSuccess(host)
+                        recordImageSuccess(host)
                         restoreScrambledImage(response, scramble)
                     } catch (error: IOException) {
                         response.close()
@@ -69,10 +84,14 @@ class JmImageInterceptor : Interceptor {
                 }
                 lastStatus = response.code
                 response.close()
-                JmRouteManager.recordImageFailure(host, "JM 图床 HTTP $lastStatus")
+                recordImageFailure(host, "JM 图床 HTTP $lastStatus")
             } catch (error: IOException) {
+                if (scope != null && !scope.isCurrent) throw error
                 lastError = error
-                JmRouteManager.recordImageFailure(host, error.message ?: error.javaClass.simpleName)
+                recordImageFailure(host, error.message ?: error.javaClass.simpleName)
+            } finally {
+                scope?.endpointRequestFinished()
+                scope?.addNetworkTime(System.nanoTime() - startedAt)
             }
         }
         throw lastError ?: IOException("JM image request failed${lastStatus?.let { " (HTTP $it)" } ?: ""}")

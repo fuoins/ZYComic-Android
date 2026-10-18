@@ -5,6 +5,7 @@ import com.zycomic.app.net.JmApiInterceptor
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.net.PageAttemptScope
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -14,6 +15,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -144,7 +146,7 @@ object JmSource : HttpSource() {
             when (mode) {
                 1 -> {
                     validateOrder(order)
-                    val normalizedCategory = category
+                    val normalizedCategory = JmBrowseParameters.confirmedPromoteCategory(category) ?: category
                     if (normalizedCategory.isNotEmpty() && categoryOptions.none { it.second == normalizedCategory && it.second.isNotEmpty() }) {
                         throw IOException("JM 分类必须是已确认的 slug；不接受数字分类 ID 或未知值: $normalizedCategory")
                     }
@@ -391,7 +393,17 @@ object JmSource : HttpSource() {
 
     override suspend fun getImage(page: Page): Response {
         val imageUrl = page.imageUrl ?: throw IOException("JM 阅读页缺少图片 URL")
-        return JmNetworkModule.imageClient.newCall(Request.Builder().url(imageUrl).headers(headers).build()).awaitSuccess()
+        val attempt = (page as? ReaderPage)?.activeAttempt?.get()
+        val request = Request.Builder().url(imageUrl).headers(headers)
+            .tag(PageAttemptScope::class.java, attempt)
+            .build()
+        val call = JmNetworkModule.imageClient.newCall(request)
+        val registration = attempt?.registerCall(call, -1)
+        return try {
+            call.awaitSuccess()
+        } finally {
+            registration?.close()
+        }
     }
 
     private suspend fun getJson(path: String, params: Map<String, String>): Any = withContext(Dispatchers.IO) {
@@ -489,7 +501,7 @@ object JmSource : HttpSource() {
         return result.distinctBy { it.id }
     }
 
-    private fun parsePromoteSections(payload: Any): List<PromoteSection> {
+    internal fun parsePromoteSections(payload: Any): List<PromoteSection> {
         val root = payload as? JSONArray ?: throw IOException("JM /promote 响应不是报告中的 JSON 数组")
         return (0 until root.length()).map { blockIndex ->
             val block = root.optJSONObject(blockIndex)

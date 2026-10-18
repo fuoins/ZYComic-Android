@@ -52,6 +52,19 @@ class JmFilterSnapshotTest {
     }
 
     @Test
+    fun `persisted exact legacy translation group slug is canonicalized but unknown value is retained`() {
+        val legacy = JmFilterSnapshot.fromJson(JSONObject("""{"category":"禁漫汉化组","promoteId":"998"}""")).toFilters()
+        assertEquals("禁漫漢化組", legacy.category)
+
+        val unknown = JmFilterSnapshot.fromJson(JSONObject("""{"category":"jm_hanhua","promoteId":"998"}""")).toFilters()
+        assertEquals("jm_hanhua", unknown.category)
+        val rejectedNearMiss = JmFilterSnapshot.fromJson(JSONObject("""{"category":"禁漫漢化组","promoteId":"998"}""")).toFilters()
+        assertEquals("禁漫漢化组", rejectedNearMiss.category)
+        val numeric = JmFilterSnapshot.fromJson(JSONObject("""{"category":"998","promoteId":"998"}""")).toFilters()
+        assertEquals("998", numeric.category)
+    }
+
+    @Test
     fun `homepage section id and title survive restart`() {
         val filters = JmBrowsePolicy.Filters(
             mode = JmBrowsePolicy.MODE_PROMOTE_LIST,

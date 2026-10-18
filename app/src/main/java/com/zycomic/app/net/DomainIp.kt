@@ -1,6 +1,6 @@
 package com.zycomic.app.net
 
-/** A single hostname routed to one concrete address for probing or selection. */
+/** A hostname/address endpoint; an empty IP denotes a JM transport-managed hostname route. */
 data class DomainIp(
     val domain: String,
     val ip: String,
