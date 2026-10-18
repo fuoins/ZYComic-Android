@@ -14,7 +14,13 @@ class JmAuthPolicyTest {
         assertTrue(JmAuthPolicy.mayAttachJwt("/album", "GET", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/forum", "GET", "api.test", listOf("api.test")))
         assertTrue(JmAuthPolicy.mayAttachJwt("/chapter", "GET", "api.test", listOf("api.test")))
+        assertTrue(JmAuthPolicy.mayAttachJwt("/useredit/12345678", "GET", "api.test", listOf("api.test")))
+        assertTrue(JmAuthPolicy.mayAttachJwt("/useredit/12345678", "POST", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/media/users/a.jpg", "GET", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/register", "POST", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/forgot", "POST", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/confirm", "POST", "api.test", listOf("api.test")))
+        assertFalse(JmAuthPolicy.mayAttachJwt("/useredit/not-a-uid", "POST", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/favorite", "POST", "redirect.test", listOf("api.test")))
     }
 

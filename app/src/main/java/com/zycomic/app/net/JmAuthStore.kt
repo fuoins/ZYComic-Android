@@ -16,6 +16,7 @@ object JmAuthStore {
     private const val PREFS = "jm_auth_secure"
     private const val TOKEN = "jwt_ciphertext"
     private const val ACCOUNT_NAME = "account_name"
+    private const val ACCOUNT_UID = "account_uid"
     private const val KEY_ALIAS = "zycomic_jm_jwt_v1"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
@@ -23,6 +24,8 @@ object JmAuthStore {
 
     @Volatile var accountName: String? = null
         private set
+
+    @Volatile private var accountUid: String? = null
 
     private val _accountNameFlow = MutableStateFlow<String?>(null)
     val accountNameFlow: StateFlow<String?> = _accountNameFlow.asStateFlow()
@@ -36,6 +39,7 @@ object JmAuthStore {
     fun initialize(context: Context) {
         preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         accountName = if (token() != null) preferences?.getString(ACCOUNT_NAME, null) else null
+        accountUid = if (token() != null) preferences?.getString(ACCOUNT_UID, null) else null
         _accountNameFlow.value = accountName
         _loggedInFlow.value = token() != null
     }
@@ -52,7 +56,7 @@ object JmAuthStore {
     }.getOrNull()
 
     @Synchronized
-    fun save(token: String, username: String) {
+    fun save(token: String, username: String, uid: String? = null) {
         require(token.isNotBlank())
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
@@ -61,16 +65,22 @@ object JmAuthStore {
             .edit()
             .putString(TOKEN, Base64.encodeToString(packed, Base64.NO_WRAP))
             .putString(ACCOUNT_NAME, username)
+            .apply { if (uid == null) remove(ACCOUNT_UID) else putString(ACCOUNT_UID, uid) }
             .apply()
         accountName = username
+        accountUid = uid
         _accountNameFlow.value = username
         _loggedInFlow.value = true
     }
 
     @Synchronized
+    fun uid(): String? = accountUid
+
+    @Synchronized
     fun clear() {
-        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.apply()
+        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.remove(ACCOUNT_UID)?.apply()
         accountName = null
+        accountUid = null
         _accountNameFlow.value = null
         _loggedInFlow.value = false
     }

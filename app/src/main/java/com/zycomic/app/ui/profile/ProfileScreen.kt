@@ -79,6 +79,7 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.ui.login.JmPasswordChangeDialog
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.CancellationException
@@ -119,6 +120,7 @@ fun ProfileScreen(
         }
     }
     var showPointLogs by remember { mutableStateOf(false) }
+    var showJmChangePwd by remember { mutableStateOf(false) }
     var showChangePwd by remember { mutableStateOf(false) }
     var showRewardDialog by remember { mutableStateOf(false) }
     var showAdDebug by remember { mutableStateOf<String?>(null) }
@@ -209,6 +211,13 @@ fun ProfileScreen(
             }
 
             if (platform == ContentPlatform.JM && jmLoggedIn) {
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(KMR.strings.jm_change_password),
+                        icon = Icons.Outlined.Lock,
+                        onPreferenceClick = { showJmChangePwd = true },
+                    )
+                }
                 item {
                     TextPreferenceWidget(
                         title = stringResource(KMR.strings.jm_logout),
@@ -304,6 +313,10 @@ fun ProfileScreen(
 
     if (showPointLogs) {
         PointLogsOverlay(onClose = { showPointLogs = false })
+    }
+
+    if (showJmChangePwd) {
+        JmPasswordChangeDialog(onDismiss = { showJmChangePwd = false })
     }
 
     if (showChangePwd) {

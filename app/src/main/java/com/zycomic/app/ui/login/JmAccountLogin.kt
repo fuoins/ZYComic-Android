@@ -44,7 +44,8 @@ internal object JmAccountLogin {
                     throw IOException(message)
                 }
                 val displayName = member.optString("username").ifBlank { username.trim() }
-                JmAuthStore.save(token, displayName)
+                val uid = member.optString("uid").takeIf { it.isNotBlank() && it.all(Char::isDigit) }
+                JmAuthStore.save(token, displayName, uid)
             }
         }
     }

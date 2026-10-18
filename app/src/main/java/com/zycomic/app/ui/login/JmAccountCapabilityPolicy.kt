@@ -4,8 +4,8 @@ package com.zycomic.app.ui.login
 internal object JmAccountCapabilityPolicy {
     fun supportsUsernamePasswordLogin(): Boolean = true
     fun supportsEmailLogin(): Boolean = false
-    fun supportsRegistration(): Boolean = false
-    fun supportsActivation(): Boolean = false
-    fun supportsForgotPassword(): Boolean = false
-    fun supportsPasswordChange(): Boolean = false
+    fun supportsRegistration(): Boolean = true
+    fun supportsActivation(): Boolean = true
+    fun supportsForgotPassword(): Boolean = true
+    fun supportsPasswordChange(): Boolean = true
 }

@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -35,7 +34,6 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -78,7 +76,7 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
     var platform by remember { mutableStateOf(ContentPlatformPrefs.load("profile")) }
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
-    var showJmLimitations by remember { mutableStateOf(false) }
+    var jmBusy by remember { mutableStateOf(false) }
     val mode by vm.mode.collectAsState()
     val username by vm.username.collectAsState()
     val password by vm.password.collectAsState()
@@ -92,6 +90,8 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
     val error by vm.error.collectAsState()
     val success by vm.success.collectAsState()
 
+    androidx.activity.compose.BackHandler(enabled = jmBusy) {}
+
     LaunchedEffect(success) { if (success) onClose() }
     LaunchedEffect(platform, mode) {
         if (platform == ContentPlatform.MANWA && mode == 0) vm.refreshCaptcha()
@@ -99,7 +99,7 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface) }
+            IconButton(onClick = onClose, enabled = !jmBusy) { Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface) }
             Spacer(Modifier.width(8.dp))
             Text(
                 if (platform == ContentPlatform.JM) {
@@ -120,7 +120,7 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
                 selected = platform,
                 compact = true,
                 onSelect = { selected ->
-                    if (!loading && selected != platform && StartupPlatformPolicy.checkSelection(context, selected)) {
+                    if (!loading && !jmBusy && selected != platform && StartupPlatformPolicy.checkSelection(context, selected)) {
                         vm.resetForPlatform()
                         platform = selected
                         ContentPlatformPrefs.save("login", selected)
@@ -143,22 +143,7 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
                     shape = MaterialTheme.shapes.small,
                 ) { Text(stringResource(KMR.strings.jm_logout)) }
             } else {
-                OutlinedTextField(value = username, onValueChange = { vm.username.value = it }, label = { Text(stringResource(KMR.strings.jm_username_login_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = password, onValueChange = { vm.password.value = it }, label = { Text("密码") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-                Text(stringResource(KMR.strings.jm_password_login_notice), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-                Spacer(Modifier.height(16.dp))
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) }
-                Button(onClick = vm::loginJm, enabled = !loading, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small) {
-                    if (loading) {
-                        CircularProgressIndicator(modifier = Modifier.height(20.dp).width(20.dp), color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Text(stringResource(KMR.strings.jm_login))
-                    }
-                }
-                TextButton(onClick = { showJmLimitations = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(KMR.strings.jm_account_more_actions))
-                }
+                JmAccountPanel(onLoggedIn = onClose, onBusyChanged = { jmBusy = it })
             }
         } else {
             val tabs = listOf("账号登录", "邮箱登录", "注册")
@@ -249,16 +234,5 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
                 OutlinedButton(onClick = { vm.mode.value = 1 }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small) { Text("忘记密码") }
             }
         }
-    }
-
-    if (showJmLimitations) {
-        AlertDialog(
-            onDismissRequest = { showJmLimitations = false },
-            title = { Text(stringResource(KMR.strings.jm_auth_unavailable_title)) },
-            text = {
-                Text(stringResource(KMR.strings.jm_auth_evidence_notice))
-            },
-            confirmButton = { TextButton(onClick = { showJmLimitations = false }) { Text("知道了") } },
-        )
     }
 }

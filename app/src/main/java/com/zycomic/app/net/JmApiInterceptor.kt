@@ -77,7 +77,14 @@ class JmApiInterceptor(private val recordRouteHealth: Boolean = true, private va
                 throw IOException("JM 解密载荷必须是有效的 JSON 对象或数组")
             }
             if (recordRouteHealth) JmRouteManager.recordApiSuccess(host)
-            response.newBuilder().body(plaintext.toResponseBody(response.body?.contentType())).build()
+            response.newBuilder()
+                .apply {
+                    if (envelope.optString("errorMsg") == "Profile was successfully updated!") {
+                        header("X-JM-Error-Msg", "Profile was successfully updated!")
+                    }
+                }
+                .body(plaintext.toResponseBody(response.body?.contentType()))
+                .build()
         } catch (error: Exception) {
             if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
             if (error is IOException) throw error

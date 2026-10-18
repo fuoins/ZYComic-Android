@@ -6,12 +6,16 @@ object JmAuthPolicy {
         if (path.startsWith("/media/") || path == "/login") return false
         if (trustedApiHosts.none { it.equals(host, ignoreCase = true) }) return false
         return when {
-            method.equals("POST", true) -> path in setOf("/favorite", "/like", "/comment")
-            method.equals("GET", true) -> path == "/album" || path == "/chapter"
+            method.equals("POST", true) -> isUserEdit(path) || path in setOf("/favorite", "/like", "/comment")
+            method.equals("GET", true) -> path == "/album" || path == "/chapter" || isUserEdit(path)
             else -> false
         }
     }
 
     fun isLogin(path: String): Boolean = path == "/login"
     fun isImage(path: String): Boolean = path.startsWith("/media/")
+
+    private fun isUserEdit(path: String): Boolean = USER_EDIT_PATH.matches(path)
+
+    private val USER_EDIT_PATH = Regex("/useredit/[0-9]+")
 }
