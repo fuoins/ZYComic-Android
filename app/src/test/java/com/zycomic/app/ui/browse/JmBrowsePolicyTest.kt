@@ -9,6 +9,34 @@ import org.junit.jupiter.api.Test
 class JmBrowsePolicyTest {
 
     @Test
+    fun `weekly default preserves existing home destinations and sections`() {
+        assertEquals(
+            listOf("每周必看" to JmBrowsePolicy.MODE_WEEK, "每周连载更新" to JmBrowsePolicy.MODE_SERIALIZATION),
+            JmBrowsePolicy.jmHomeModes(),
+        )
+        assertEquals(JmBrowsePolicy.MODE_WEEK, JmBrowsePolicy.initialFilters("jm_recommendations").mode)
+        assertEquals(
+            JmBrowsePolicy.MODE_WEEK,
+            JmBrowsePolicy.effectiveFilters("jm_recommendations", JmBrowsePolicy.Filters()).mode,
+        )
+        assertTrue(JmBrowsePolicy.isVisibleHomeSection("998", "not_in_category_id"))
+        assertTrue(JmBrowsePolicy.isVisibleHomeSection("29", "promote"))
+        assertTrue(JmBrowsePolicy.isVisibleHomeSection("26", "promote", includeSerialization = true))
+        assertFalse(JmBrowsePolicy.isVisibleHomeSection("26", "promote"))
+        assertFalse(JmBrowsePolicy.isVisibleHomeSection("1001", "library"))
+        assertFalse(JmBrowsePolicy.isVisibleHomeSection("1002", "novels"))
+    }
+
+    @Test
+    fun `weekly selection never also highlights the previous primary section`() {
+        assertFalse(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_WEEK, "998", "998"))
+        assertFalse(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_SERIALIZATION, "998", "998"))
+        assertTrue(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_CATEGORY, "998", "998"))
+        assertTrue(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_PROMOTE_LIST, "29", "29"))
+        assertFalse(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_CATEGORY, "999", "998"))
+    }
+
+    @Test
     fun `all hot defaults to all categories and most liked order`() {
         assertEquals(
             JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "tf", category = ""),
@@ -20,7 +48,7 @@ class JmBrowsePolicyTest {
     @Test
     fun `JM home keeps weekly mode and legacy filters remain normalizable`() {
         assertEquals(
-            JmBrowsePolicy.MODE_RECOMMENDATIONS,
+            JmBrowsePolicy.MODE_WEEK,
             JmBrowsePolicy.effectiveFilters("jm_recommendations", JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY)).mode,
         )
         assertEquals(
@@ -65,7 +93,7 @@ class JmBrowsePolicyTest {
     }
 
     @Test
-    fun `online home defaults ignore stored modes but allow transient weekly browsing`() {
+    fun `weekly home defaults ignore stored modes but allow transient weekly browsing`() {
         val stored = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_WEEK, weekId = "123")
         assertEquals(JmBrowsePolicy.initialFilters("jm_recommendations"), JmBrowsePolicy.defaultFilters("jm_recommendations", stored))
         assertEquals(stored, JmBrowsePolicy.effectiveFilters("jm_recommendations", stored))

@@ -1,9 +1,37 @@
 package com.zycomic.app.net
 
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PlatformSpeedTestCoordinatorProgressTest {
+    @Test
+    fun `JM progress text keeps stage and counters without endpoint identity`() {
+        val progress = JmSpeedTestProgress(
+            phase = JmSpeedTestProgress.Phase.TESTING_LINES,
+            completed = 3,
+            total = 8,
+            successful = 2,
+            failed = 1,
+            endpoint = "jm.example.test [192.0.2.18]",
+            endpointSuccessful = true,
+            endpointElapsedMs = 42,
+            elapsedMs = 12_000,
+        )
+
+        val message = progress.message()
+
+        assertTrue(message.contains("线路测速"))
+        assertTrue(message.contains("3/8"))
+        assertTrue(message.contains("成功 2 / 失败 1"))
+        assertTrue(message.contains("已用 12秒"))
+        assertFalse(message.contains("jm.example.test"))
+        assertFalse(message.contains("192.0.2.18"))
+        assertEquals("jm.example.test [192.0.2.18]", progress.endpoint)
+        assertEquals(42L, progress.endpointElapsedMs)
+    }
+
     @Test
     fun `Manwa line and image progress messages expose real counters`() {
         val line = PlatformSpeedTestCoordinator.manwaProgressMessage(

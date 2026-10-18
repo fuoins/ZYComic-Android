@@ -186,7 +186,7 @@ class JmEndpointProbeRunnerTest {
     }
 
     @Test
-    fun `progress message describes phase counts endpoint result and elapsed time`() {
+    fun `progress message describes phase counts and elapsed time without endpoint identity`() {
         val failureMessage = JmSpeedTestProgress(
             phase = JmSpeedTestProgress.Phase.TESTING_LINES,
             completed = 2,
@@ -203,9 +203,8 @@ class JmEndpointProbeRunnerTest {
         assertTrue(failureMessage.contains("2/5"))
         assertTrue(failureMessage.contains("成功 1 / 失败 1"))
         assertTrue(failureMessage.contains("已用 12秒"))
-        assertTrue(failureMessage.contains("https://line.example"))
-        assertTrue(failureMessage.contains("失败"))
-        assertTrue(failureMessage.contains("842ms"))
+        assertFalse(failureMessage.contains("https://line.example"))
+        assertFalse(failureMessage.contains("842ms"))
 
         val successMessage = JmSpeedTestProgress(
             phase = JmSpeedTestProgress.Phase.TESTING_IMAGES,
@@ -217,6 +216,8 @@ class JmEndpointProbeRunnerTest {
             endpointElapsedMs = 9,
         ).message()
         assertTrue(successMessage.contains("图源测速"))
-        assertTrue(successMessage.contains("https://image.example · 成功 · 9ms"))
+        assertTrue(successMessage.contains("成功 1 / 失败 0"))
+        assertFalse(successMessage.contains("https://image.example"))
+        assertFalse(successMessage.contains("9ms"))
     }
 }

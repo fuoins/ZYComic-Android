@@ -35,6 +35,7 @@ data class JmSpeedTestProgress(
     val total: Int = 0,
     val successful: Int = 0,
     val failed: Int = 0,
+    // Per-endpoint details remain available to diagnostics; never include them in ordinary progress text.
     val endpoint: String? = null,
     val endpointSuccessful: Boolean? = null,
     val endpointElapsedMs: Long? = null,
@@ -52,17 +53,8 @@ data class JmSpeedTestProgress(
             Phase.COMPLETE -> "测速完成"
             Phase.FAILED -> "测速未完成"
         }
-        val result = when (endpointSuccessful) {
-            true -> "成功"
-            false -> "失败"
-            null -> "检测中"
-        }
         return buildString {
             append("禁漫天堂 · $stage $completed/$total · 成功 $successful / 失败 $failed · 已用 ${elapsedMs / 1000}秒")
-            endpoint?.let {
-                append("\n$it · $result")
-                endpointElapsedMs?.let { ms -> append(" · ${ms}ms") }
-            }
         }
     }
 }

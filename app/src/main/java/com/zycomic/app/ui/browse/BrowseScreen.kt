@@ -542,6 +542,11 @@ private fun BrowseTabContent(
     val appending by vm.appendingForTab(page).collectAsState()
     val hasMore by vm.hasMoreForTab(page).collectAsState()
     val error by vm.errorForTab(page).collectAsState()
+    val jmFilters by vm.jmFiltersForTab(page).collectAsState()
+    val isJmHome = item?.id == BrowseTabStore.ID_JM_HOME && tabPlatform == ContentPlatform.JM
+    LaunchedEffect(isJmHome) {
+        if (isJmHome) vm.loadJmPromoteSections()
+    }
 
     // Pager 使用稳定的 Tab ID 作为 key，因此可保存的网格状态会随 Tab 排序保留在原 Tab。
     val gridState = rememberLazyGridState()
@@ -570,6 +575,16 @@ private fun BrowseTabContent(
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
+                    isJmHome && jmFilters.mode == JmBrowsePolicy.MODE_UNAVAILABLE_SECTION -> Box(
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "${jmFilters.promoteTitle} 暂未接入对应内容 API；当前不会将其伪装为漫画列表。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     loading && mangas.isEmpty() -> MangaGridSkeleton(
                         columns = if (gridColumns > 0) gridColumns else 3,
                         displayMode = displayMode,
@@ -664,7 +679,38 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
             .padding(horizontal = 12.dp, vertical = if (isHome) 0.dp else 6.dp),
         verticalArrangement = Arrangement.spacedBy(if (isHome) 0.dp else 4.dp),
     ) {
-        if (!isHome && JmBrowsePolicy.showsModePicker(tabId)) {
+        if (isHome) {
+            val sections by vm.jmPromoteSections.collectAsState()
+            val choices = buildList {
+                JmBrowsePolicy.jmHomeModes().forEach { (label, value) ->
+                    add(JmHomeChoice(label, mode == value) { vm.selectJmMode(value, page) })
+                }
+                sections.filter { JmBrowsePolicy.isVisibleHomeSection(it.id, it.type) }.forEach { section ->
+                    add(
+                        JmHomeChoice(
+                            label = section.title,
+                            selected = JmBrowsePolicy.isSelectedHomeSection(mode, filters.promoteId, section.id),
+                            onClick = { vm.openJmPromoteSection(section, page) },
+                        ),
+                    )
+                }
+            }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                choices.forEach { choice ->
+                    key(choice.label) {
+                        CompactBrowseFilterChip(
+                            selected = choice.selected,
+                            onClick = choice.onClick,
+                            label = { Text(choice.label) },
+                        )
+                    }
+                }
+            }
+        } else if (JmBrowsePolicy.showsModePicker(tabId)) {
             FilterSection("浏览方式") {
                 listOf(
                     "推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS,
@@ -742,10 +788,17 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                     }
                 }
             }
+            JmBrowsePolicy.MODE_PROMOTE_LIST, JmBrowsePolicy.MODE_UNAVAILABLE_SECTION -> Unit
             JmBrowsePolicy.MODE_SEARCH -> Text("搜索结果支持继续加载", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
+
+private data class JmHomeChoice(
+    val label: String,
+    val selected: Boolean,
+    val onClick: () -> Unit,
+)
 
 private val JmWeekTypes = listOf("日漫" to "manga", "韩漫" to "hanman", "其他" to "another")
 
