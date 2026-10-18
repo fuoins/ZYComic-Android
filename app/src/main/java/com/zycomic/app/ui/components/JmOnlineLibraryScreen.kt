@@ -50,6 +50,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +67,7 @@ import com.zycomic.app.platform.ContentPlatform
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.material.Scaffold
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -122,6 +124,8 @@ private fun JmOnlineLibraryContent(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
+    var listLayoutToken by remember { mutableStateOf<JmLibraryLayoutToken?>(null) }
+    val activeGrid = grid && !history
     val visibleItems = remember(items, query) {
         val text = query.orEmpty().trim()
         if (text.isEmpty()) items else items.filter { it.name.contains(text, true) || it.author.contains(text, true) }
@@ -179,7 +183,7 @@ private fun JmOnlineLibraryContent(
         }
     }
     suspend fun loadPage(generation: Int) {
-        if (!hasMore || !loggedIn || generation != loadGeneration) return
+        if (!JmOnlineLibraryPolicy.shouldRequestPage(loggedIn, hasMore, generation == loadGeneration)) return
         loading = true
         error = null
         try {
@@ -210,15 +214,34 @@ private fun JmOnlineLibraryContent(
         hasMore = true
         error = null
         if (!loggedIn) return@LaunchedEffect
-        listState.scrollToItem(0)
-        gridState.scrollToItem(0)
+        // Request first: loading, error and empty UI do not compose a lazy list.
         loadPage(generation)
         snapshotFlow {
-            val last = if (grid && !history) gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 else listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val expectedLayout = JmLibraryLayoutToken(generation, grid && !history)
+            val last = if (listLayoutToken != expectedLayout) {
+                -1
+            } else if (grid && !history) {
+                gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            } else {
+                listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            }
             Triple(last, visibleItems.size, error == null && !busy)
         }.collect { (last, size, healthy) ->
             if (healthy && query.isNullOrBlank() && size > 0 && last >= (size - 3).coerceAtLeast(0) && hasMore) loadPage(generation)
         }
+    }
+    // Scroll independently of loading, and only after the active lazy container has actually laid out.
+    LaunchedEffect(loadGeneration, activeGrid) {
+        val expectedLayout = JmLibraryLayoutToken(loadGeneration, activeGrid)
+        snapshotFlow {
+            JmOnlineLibraryPolicy.shouldScrollToTop(
+                hasVisibleItems = visibleItems.isNotEmpty(),
+                loading = loading,
+                hasError = error != null,
+                listLaidOut = listLayoutToken == expectedLayout,
+            )
+        }.first { it }
+        if (activeGrid) gridState.scrollToItem(0) else listState.scrollToItem(0)
     }
     BackHandler(enabled = selectionMode) { exitSelection() }
 
@@ -307,7 +330,14 @@ private fun JmOnlineLibraryContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                grid && !history -> LazyVerticalGrid(columns = GridCells.Fixed(3), state = gridState, modifier = Modifier.weight(1f)) {
+                activeGrid -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    state = gridState,
+                    modifier = Modifier.weight(1f).onGloballyPositioned {
+                        val token = JmLibraryLayoutToken(loadGeneration, activeGrid)
+                        if (listLayoutToken != token) listLayoutToken = token
+                    },
+                ) {
                     gridItems(visibleItems, key = { it.id }) { item ->
                         JmLibraryCard(item, item.id in selected, selectionMode, onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") }, onLongClick = {
                             selectionMode = true
@@ -316,7 +346,13 @@ private fun JmOnlineLibraryContent(
                     }
                     item { JmPageFooter(loading, error, hasMore, items.size, ::refresh) }
                 }
-                else -> LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).onGloballyPositioned {
+                        val token = JmLibraryLayoutToken(loadGeneration, activeGrid)
+                        if (listLayoutToken != token) listLayoutToken = token
+                    },
+                ) {
                     items(visibleItems, key = { it.id }) { item ->
                         JmLibraryRow(
                             item = item,
@@ -498,6 +534,8 @@ private fun JmOnlineLibraryContent(
         )
     }
 }
+
+private data class JmLibraryLayoutToken(val generation: Int, val grid: Boolean)
 
 @Composable
 private fun JmPageFooter(loading: Boolean, error: String?, hasMore: Boolean, count: Int, refresh: () -> Unit) {

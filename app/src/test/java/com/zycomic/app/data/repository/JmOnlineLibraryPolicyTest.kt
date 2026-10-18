@@ -193,6 +193,20 @@ class JmOnlineLibraryPolicyTest {
         )
     }
 
+    @Test
+    fun `initial request does not wait for a lazy layout and scroll waits for successful laid out content`() {
+        assertTrue(JmOnlineLibraryPolicy.shouldRequestPage(loggedIn = true, hasMore = true, generationIsCurrent = true))
+        assertFalse(JmOnlineLibraryPolicy.shouldRequestPage(loggedIn = false, hasMore = true, generationIsCurrent = true))
+        assertFalse(JmOnlineLibraryPolicy.shouldRequestPage(loggedIn = true, hasMore = false, generationIsCurrent = true))
+        assertFalse(JmOnlineLibraryPolicy.shouldRequestPage(loggedIn = true, hasMore = true, generationIsCurrent = false))
+
+        assertFalse(JmOnlineLibraryPolicy.shouldScrollToTop(hasVisibleItems = true, loading = false, hasError = false, listLaidOut = false))
+        assertFalse(JmOnlineLibraryPolicy.shouldScrollToTop(hasVisibleItems = true, loading = true, hasError = false, listLaidOut = true))
+        assertFalse(JmOnlineLibraryPolicy.shouldScrollToTop(hasVisibleItems = false, loading = false, hasError = false, listLaidOut = true))
+        assertFalse(JmOnlineLibraryPolicy.shouldScrollToTop(hasVisibleItems = true, loading = false, hasError = true, listLaidOut = true))
+        assertTrue(JmOnlineLibraryPolicy.shouldScrollToTop(hasVisibleItems = true, loading = false, hasError = false, listLaidOut = true))
+    }
+
     private fun item(id: String, name: String) = JmOnlineLibraryItem(
         id = id,
         name = name,

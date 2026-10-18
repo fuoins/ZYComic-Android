@@ -111,6 +111,7 @@ fun ProfileScreen(
     val user by UserRepository.userFlow.collectAsState()
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
+    val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
     LaunchedEffect(platform) {
         if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.isLoggedIn) {
             try {
@@ -142,14 +143,23 @@ fun ProfileScreen(
     // KMK --> JM check-in runs only while this profile is entered, never as a background worker.
     var jmAutoCheckIn by remember(context) { mutableStateOf(JmCheckInRepository.isAutoEnabled(context)) }
     var jmCheckingIn by remember { mutableStateOf(false) }
-    var jmCheckInMessage by remember(platform, jmLoggedIn, jmAccount) { mutableStateOf<String?>(null) }
+    val jmToday = LocalDate.now().toString()
+    var jmCheckInMessage by remember(platform, jmLoggedIn, jmAccount, jmSessionRevision, jmToday) {
+        mutableStateOf(
+            if (platform == ContentPlatform.JM && jmLoggedIn) {
+                JmCheckInRepository.todaySuccessMessage(context, jmToday)
+            } else {
+                null
+            },
+        )
+    }
     val jmCheckInFailure = stringResource(KMR.strings.jm_check_in_failed)
     suspend fun checkInJm(automatic: Boolean) {
         if (jmCheckingIn) return
         jmCheckingIn = true
-        jmCheckInMessage = null
         try {
-            jmCheckInMessage = JmCheckInRepository.checkIn(context, automatic)
+            val result = JmCheckInRepository.checkIn(context, automatic)
+            jmCheckInMessage = result ?: JmCheckInRepository.todaySuccessMessage(context, jmToday) ?: jmCheckInMessage
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -158,7 +168,7 @@ fun ProfileScreen(
             jmCheckingIn = false
         }
     }
-    LaunchedEffect(platform, jmLoggedIn, jmAccount, jmAutoCheckIn) {
+    LaunchedEffect(platform, jmLoggedIn, jmAccount, jmSessionRevision, jmAutoCheckIn, jmToday) {
         if (platform == ContentPlatform.JM && StartupPlatformPolicy.isEnabled(platform) && jmLoggedIn && jmAutoCheckIn) {
             checkInJm(automatic = true)
         }

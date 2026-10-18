@@ -169,7 +169,15 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         }
         // 启动后异步拉取权威远程配置。只有应用成功替换后，才针对新候选列表测速。
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
-            val result = runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }.getOrNull()
+            var configurationUpdated = false
+            val result = try {
+                runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }.getOrNull()
+                    .also { configurationUpdated = it?.configurationUpdated == true }
+            } finally {
+                // Release before requesting the retest: startup/UI/network callers all share
+                // this final config generation instead of probing the cached config first.
+                com.zycomic.app.net.PlatformSpeedTestCoordinator.finishStartupConfigCheck(configurationUpdated)
+            }
             if (result?.configurationUpdated == true) {
                 com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
                 try {

@@ -315,6 +315,8 @@
     <string name="jm_saved_cover">封面已保存到相册</string>
     <string name="manwa_speed_log_title">漫蛙测速日志</string>
     <string name="jm_speed_log_title">禁漫测速日志</string>
+    <string name="jm_speed_log_endpoint_ip_note">IP 是该域名的测速端点，不表示该域名独占固定 IP。</string>
+    <string name="jm_speed_log_selected_domain">当前选中域名</string>
     <string name="browse_tab_edit_title">编辑tab名称和默认选项</string>
     <string name="browse_tab_add_custom">增加自定义筛选tab</string>
     <string name="jm_account_login_title">禁漫账号登录</string>

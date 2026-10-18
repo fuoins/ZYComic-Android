@@ -5,6 +5,10 @@ import java.util.Locale
 
 /** Pure ordering helpers shared by the JM speed-test screen and its exported log. */
 internal object JmSpeedTestLogPolicy {
+    /** A route selects a domain; an IP is only one of that domain's measured endpoints. */
+    fun isSelectedDomain(endpoint: DomainIp, selectedDomain: String): Boolean =
+        endpoint.domain.equals(selectedDomain, ignoreCase = true)
+
     fun rankEndpoints(
         delays: Map<DomainIp, Long>,
         failedEndpoints: Set<DomainIp> = emptySet(),

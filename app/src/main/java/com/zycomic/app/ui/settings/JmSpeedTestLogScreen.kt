@@ -3,11 +3,13 @@ package com.zycomic.app.ui.settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -26,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.JmNetworkModule
@@ -160,17 +163,27 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     ) { Text(if (running) "测速中…" else "重新测速") }
                 }
             }
-            item { Text("线路端点（域名 · IP）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text("线路端点（域名 · IP）", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        stringResource(KMR.strings.jm_speed_log_endpoint_ip_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             if (lineRows.isEmpty()) {
                 item { Text("暂无线路端点记录", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
             }
             items(lineRows) { endpoint ->
                 val delay = snapshot.lineIpDelaysMs.getValue(endpoint)
+                val isSelectedDomain = JmSpeedTestLogPolicy.isSelectedDomain(endpoint, selectedLine)
                 EndpointLogRow(
                     endpoint = endpoint,
                     delay = delay,
                     verdict = null,
-                    marker = null,
+                    marker = if (isSelectedDomain) stringResource(KMR.strings.jm_speed_log_selected_domain) else null,
                 )
             }
             item { Text("图源端点（域名 · IP）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
@@ -201,13 +214,20 @@ private fun EndpointLogRow(endpoint: DomainIp, delay: Long, verdict: JmSpeedTest
     }
     Text(
         "${endpoint.domain} · ${endpoint.ip}    $result${marker?.let { "    [$it]" }.orEmpty()}",
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = if (marker != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         style = MaterialTheme.typography.bodyMedium,
         color = when {
             delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
             marker != null -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.onSurface
         },
+        fontWeight = if (marker != null) FontWeight.SemiBold else FontWeight.Normal,
     )
 }
 

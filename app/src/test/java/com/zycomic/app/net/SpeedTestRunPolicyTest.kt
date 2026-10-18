@@ -14,7 +14,7 @@ class SpeedTestRunPolicyTest {
     }
 
     @Test
-    fun `startup and initial connectivity callback share the same completed round`() {
+    fun `startup and config callers share the same completed generation`() {
         assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
         assertFalse(SpeedTestRunPolicy.canSkip(key, key, true, false))
         assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, true))
@@ -42,32 +42,24 @@ class SpeedTestRunPolicyTest {
     }
 
     @Test
-    fun `applied remote config forces complete retest despite unchanged image pool and reuse preference`() {
-        assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = true))
-        assertFalse(
-            SpeedTestRunPolicy.canReuseImages(
-                requested = true,
-                forceFresh = false,
-                initial = key,
-                current = key,
-                completed = key,
-                remoteConfigUpdated = true,
-            ),
-        )
+    fun `applied remote config requires fresh images but not a duplicate completed run`() {
+        assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
+        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, key, remoteConfigUpdated = true))
+        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
+    }
+
+    @Test
+    fun `ordinary caller after a config change also requires fresh images on both platforms`() {
+        for (changed in listOf(key.copy(manwaConfigRevision = 4), key.copy(jmConfigRevision = 5))) {
+            assertFalse(SpeedTestRunPolicy.canSkip(key, changed, false, false))
+            assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, changed, changed, key))
+            assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, changed, null))
+        }
     }
 
     @Test
     fun `unchanged remote config preserves completed-run and image reuse behavior`() {
-        assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = false))
-        assertTrue(
-            SpeedTestRunPolicy.canReuseImages(
-                requested = true,
-                forceFresh = false,
-                initial = key,
-                current = key,
-                completed = key,
-                remoteConfigUpdated = false,
-            ),
-        )
+        assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
+        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, key, key, key))
     }
 }

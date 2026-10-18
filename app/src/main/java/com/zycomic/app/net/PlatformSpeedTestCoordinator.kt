@@ -18,6 +18,7 @@ import org.json.JSONObject
 /** One orchestration entry point for startup, config changes, settings and network retests. */
 object PlatformSpeedTestCoordinator {
     private val lock = Mutex()
+    private val startupConfig = StartupSpeedTestGate()
     private val _reports = MutableStateFlow<List<PlatformSpeedTestReport>>(emptyList())
     val reports = _reports.asStateFlow()
     private val _running = MutableStateFlow(false)
@@ -29,6 +30,11 @@ object PlatformSpeedTestCoordinator {
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
     private var completedKey: SpeedTestRunKey? = null
+
+    internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
+        startupConfig.complete(configurationUpdated)
+    }
+
     private fun currentKey() = SpeedTestRunKey(
         StartupPlatformPolicy.state.value.revision,
         RouteManager.configRevision,
@@ -56,6 +62,7 @@ object PlatformSpeedTestCoordinator {
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
     ): List<PlatformSpeedTestReport> = withContext(Dispatchers.IO) {
+        val startupConfigUpdated = startupConfig.awaitConfigurationUpdated()
         DevConfig.awaitUsableRouteConfig()
         lock.withLock {
             val initialKey = currentKey()
@@ -64,7 +71,6 @@ object PlatformSpeedTestCoordinator {
                     initialKey,
                     forceFresh,
                     onlyPlatform != null,
-                    remoteConfigUpdated,
                 )
             ) {
                 return@withLock _reports.value
@@ -79,13 +85,21 @@ object PlatformSpeedTestCoordinator {
                     _jmProgress.value = null
                     val policy = StartupPlatformPolicy.state.value
                     val key = currentKey()
+                    // Config-triggered and startup callers share one final generation. Even if
+                    // the ordinary startup caller wins the lock, updated config gets fresh images.
+                    val freshConfig = remoteConfigUpdated || (startupConfigUpdated && completedKey == null) ||
+                        initialKey.manwaConfigRevision != key.manwaConfigRevision ||
+                        initialKey.jmConfigRevision != key.jmConfigRevision ||
+                        completedKey?.let {
+                            it.manwaConfigRevision != key.manwaConfigRevision || it.jmConfigRevision != key.jmConfigRevision
+                        } == true
                     val reuseImages = SpeedTestRunPolicy.canReuseImages(
                         policy.useLastResult,
                         forceFresh,
                         initialKey,
                         key,
                         completedKey,
-                        remoteConfigUpdated,
+                        freshConfig,
                     )
                     val result = mutableListOf<PlatformSpeedTestReport>()
                     for (platform in listOf(ContentPlatform.MANWA, ContentPlatform.JM)) {
@@ -105,7 +119,7 @@ object PlatformSpeedTestCoordinator {
                                     if (reuseImages) SpeedTester.requestPreviousImageResults()
                                     SpeedTester.runAndApply(
                                         onProgress = onProgress,
-                                        allowImageReuse = !remoteConfigUpdated,
+                                        allowImageReuse = !freshConfig,
                                         onStageProgress = { progress ->
                                             if (key == currentKey()) {
                                                 _progressText.value = manwaProgressMessage(progress)

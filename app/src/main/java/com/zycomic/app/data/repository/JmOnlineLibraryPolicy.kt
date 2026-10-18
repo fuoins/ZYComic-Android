@@ -171,6 +171,14 @@ internal object JmOnlineLibraryPolicy {
         else -> JmOnlineLibraryContentState.EMPTY
     }
 
+    /** Page requests must not wait for a lazy list: the first response makes that list available to compose. */
+    fun shouldRequestPage(loggedIn: Boolean, hasMore: Boolean, generationIsCurrent: Boolean): Boolean =
+        loggedIn && hasMore && generationIsCurrent
+
+    /** Scroll only after successful content has produced a real lazy-list layout. */
+    fun shouldScrollToTop(hasVisibleItems: Boolean, loading: Boolean, hasError: Boolean, listLaidOut: Boolean): Boolean =
+        hasVisibleItems && !loading && !hasError && listLaidOut
+
     /** Stop when the API repeats a page (watch_list repeats page one when out of range). */
     fun hasMore(total: Int, existingItemIds: Collection<String>, nextPageIds: Collection<String>): Boolean {
         val existing = existingItemIds.toSet()

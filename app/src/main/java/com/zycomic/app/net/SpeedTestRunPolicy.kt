@@ -14,8 +14,7 @@ internal object SpeedTestRunPolicy {
         current: SpeedTestRunKey,
         forceFresh: Boolean,
         platformOnly: Boolean,
-        remoteConfigUpdated: Boolean = false,
-    ): Boolean = !forceFresh && !remoteConfigUpdated && !platformOnly && completed == current
+    ): Boolean = !forceFresh && !platformOnly && completed == current
 
     fun canReuseImages(
         requested: Boolean,
@@ -24,6 +23,11 @@ internal object SpeedTestRunPolicy {
         current: SpeedTestRunKey,
         completed: SpeedTestRunKey?,
         remoteConfigUpdated: Boolean = false,
-    ): Boolean = requested && !forceFresh && !remoteConfigUpdated && initial.networkIdentity == current.networkIdentity &&
-        (completed == null || completed.networkIdentity == current.networkIdentity)
+    ): Boolean = requested && !forceFresh && !remoteConfigUpdated && initial == current &&
+        (completed == null || sameConfigurationAndNetwork(completed, current))
+
+    private fun sameConfigurationAndNetwork(previous: SpeedTestRunKey, current: SpeedTestRunKey): Boolean =
+        previous.manwaConfigRevision == current.manwaConfigRevision &&
+            previous.jmConfigRevision == current.jmConfigRevision &&
+            previous.networkIdentity == current.networkIdentity
 }

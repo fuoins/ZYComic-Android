@@ -34,6 +34,14 @@ object JmCheckInRepository {
         preferences(context).edit().putBoolean(KEY_AUTO_ENABLED, enabled).apply()
     }
 
+    /** Restore the current account's successful status from local storage without making a request. */
+    fun todaySuccessMessage(context: Context, today: String): String? {
+        val accountHash = currentValidUid()?.let(::hashAccount)
+        return JmCheckInUiState.restoredMessage(accountHash, today) { hash ->
+            preferences(context).getString(KEY_SUCCESS_PREFIX + hash, null)
+        }
+    }
+
     suspend fun checkIn(context: Context, automatic: Boolean): String? = withContext(Dispatchers.IO) {
         mutex.withLock {
             val prefs = preferences(context)
@@ -222,6 +230,14 @@ internal interface JmCheckInState {
     fun markAttempt(accountHash: String, date: String)
     fun markSuccess(accountHash: String, date: String)
     fun currentAccountHash(): String?
+}
+
+/** Pure local UI-state policy, deliberately independent of the network and Android storage. */
+internal object JmCheckInUiState {
+    fun restoredMessage(accountHash: String?, today: String, successfulDateForAccount: (String) -> String?): String? {
+        val successfulDate = accountHash?.let(successfulDateForAccount) ?: return null
+        return if (successfulDate == today) "今日已签到" else null
+    }
 }
 
 internal class JmCheckInEngine(

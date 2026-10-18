@@ -90,6 +90,46 @@ class JmCheckInEngineTest {
     }
 
     @Test
+    fun `restored success is offline scoped to the current account and today`() {
+        val yesterday = LocalDate.parse(today).minusDays(1).toString()
+        val successfulDates = mapOf(account to today, "other-account" to yesterday)
+        val readDate: (String) -> String? = { successfulDates[it] }
+
+        assertEquals("今日已签到", JmCheckInUiState.restoredMessage(account, today, readDate))
+        assertNull(JmCheckInUiState.restoredMessage("other-account", today, readDate))
+        assertNull(JmCheckInUiState.restoredMessage(null, today, readDate))
+        assertNull(JmCheckInUiState.restoredMessage(account, LocalDate.parse(today).plusDays(1).toString(), readDate))
+    }
+
+    @Test
+    fun `automatic check-in can be attempted again after date rollover`() = runBlocking {
+        val yesterday = LocalDate.parse(today).minusDays(1).toString()
+        val api = FakeApi()
+        val state = FakeState(account).apply {
+            successful[account] = yesterday
+            attempted[account] = yesterday
+        }
+        val engine = JmCheckInEngine(api, state)
+
+        assertEquals("签到成功", engine.checkIn("101", account, today, automatic = true))
+        assertEquals(today, state.successful[account])
+        assertEquals(today, state.attempted[account])
+        assertEquals(1, api.submitCount)
+    }
+
+    @Test
+    fun `an automatic skip does not clear a persisted success date`() = runBlocking {
+        val state = FakeState(account).apply {
+            autoEnabled = false
+            successful[account] = today
+        }
+        val engine = JmCheckInEngine(FakeApi(), state)
+
+        assertNull(engine.checkIn("101", account, today, automatic = true))
+        assertEquals(today, state.successful[account])
+    }
+
+    @Test
     fun `automatic disabled skips request without marking an attempt`() = runBlocking {
         val api = FakeApi()
         val state = FakeState(account).apply { autoEnabled = false }
