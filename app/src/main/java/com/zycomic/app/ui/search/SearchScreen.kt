@@ -65,6 +65,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
+import coil3.imageLoader
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.DisplaySettingsSection
@@ -95,6 +96,13 @@ fun SearchScreen(
 
     val provider by vm.provider.collectAsState()
     val context = LocalContext.current
+    val resultImageLoader = remember(context, provider) {
+        if (provider.usesJmCoverImageLoader) {
+            com.zycomic.app.ui.components.JmCoverImageLoader.get(context)
+        } else {
+            context.imageLoader
+        }
+    }
     val displayMode by vm.displayMode.collectAsState()
     val jmSortCode by vm.jmSortCode.collectAsState()
     /** 删除模式必须 collect 成状态，直读 .value 不会随点击重组 */
@@ -250,6 +258,7 @@ fun SearchScreen(
                     itemsIndexed(mangas, key = { i, m -> m.id + "_$i" }) { _, m ->
                         SearchMangaListRow(
                             manga = m,
+                            imageLoader = resultImageLoader,
                             onClick = { onOpenManga(searchDetailId(provider, m.id)) },
                         )
                     }
@@ -278,6 +287,7 @@ fun SearchScreen(
                         SearchMangaGridItem(
                             manga = m,
                             displayMode = displayMode,
+                            imageLoader = resultImageLoader,
                             onClick = { onOpenManga(searchDetailId(provider, m.id)) },
                         )
                     }
@@ -367,6 +377,7 @@ private fun SerializeBadge(text: String, modifier: Modifier = Modifier) {
 private fun SearchMangaGridItem(
     manga: Manga,
     displayMode: Int,
+    imageLoader: coil3.ImageLoader,
     onClick: () -> Unit,
 ) {
     Column(
@@ -383,6 +394,7 @@ private fun SearchMangaGridItem(
         ) {
             SubcomposeAsyncImage(
                 model = coverUrl(manga),
+                imageLoader = imageLoader,
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -440,6 +452,7 @@ private fun SearchMangaGridItem(
 @Composable
 private fun SearchMangaListRow(
     manga: Manga,
+    imageLoader: coil3.ImageLoader,
     onClick: () -> Unit,
 ) {
     Row(
@@ -451,6 +464,7 @@ private fun SearchMangaListRow(
     ) {
         SubcomposeAsyncImage(
             model = coverUrl(manga),
+            imageLoader = imageLoader,
             contentDescription = manga.name,
             modifier = Modifier
                 .width(66.dp)

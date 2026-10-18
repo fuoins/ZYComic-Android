@@ -47,34 +47,33 @@ object BrowseTabStore {
     const val ID_YUZONG = "custom_yuzong"
     const val YUZONG_NAME = "宇总排行"
 
+    const val ID_JM_HOME = "jm_recommendations"
+    const val JM_HOME_NAME = "首页"
+    const val LEGACY_JM_HOME_NAME = "JM 推荐"
+    const val JM_ALL_HOT_NAME = "全部热门"
+    val LEGACY_JM_ALL_HOT_NAMES = setOf("JM 全部热门", "JM全部热门")
+
     private fun specialLatest() = BrowseTabItem(id = ID_LATEST_ADD, name = LATEST_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.LATEST)
     private fun specialRanking() = BrowseTabItem(id = ID_RANKING, name = RANKING_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.RANKING)
     private fun specialYuzong() = BrowseTabItem(id = ID_YUZONG, name = YUZONG_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.YUZONG_RANK)
-    private fun specialJmHome() = BrowseTabItem(
-        id = "jm_recommendations",
-        name = "JM 推荐",
+    fun jmHomeTab() = BrowseTabItem(
+        id = ID_JM_HOME,
+        name = JM_HOME_NAME,
         kind = TabKind.FILTER,
         builtin = true,
         platformId = ContentPlatform.JM,
     )
 
-    private fun specialJmAllHot() = BrowseTabItem(
+    fun jmAllHotTab() = BrowseTabItem(
         id = JmBrowsePolicy.ALL_HOT_TAB_ID,
-        name = "JM全部热门",
+        name = JM_ALL_HOT_NAME,
         kind = TabKind.FILTER,
         builtin = true,
         platformId = ContentPlatform.JM,
     )
-
-    private fun normalizeLegacyAllHotName(item: BrowseTabItem): BrowseTabItem =
-        if (item.id == JmBrowsePolicy.ALL_HOT_TAB_ID && item.builtin && item.name == "JM 全部热门") {
-            item.copy(name = "JM全部热门")
-        } else {
-            item
-        }
 
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
-        if (platform == ContentPlatform.JM) return listOf(specialJmHome(), specialJmAllHot())
+        if (platform == ContentPlatform.JM) return listOf(jmHomeTab(), jmAllHotTab())
         return listOf(
             specialYuzong(),
             BrowseTabItem(
@@ -137,7 +136,7 @@ object BrowseTabStore {
                     if (item.id.isBlank()) {
                         null
                     } else {
-                        normalizeLegacyAllHotName(
+                        BrowseTabPolicy.migrateLegacyJmName(
                             item.copy(
                                 name = if (item.id == ID_JINMAN && item.name == "禁漫热门") "禁漫向热门" else item.name,
                                 platformId = platform,
@@ -168,35 +167,35 @@ object BrowseTabStore {
             }.getOrNull()
             if (mixed != null) {
                 val normalized = mixed.map { item ->
-                    normalizeLegacyAllHotName(
+                    BrowseTabPolicy.migrateLegacyJmName(
                         if (item.platformId == ContentPlatform.JM && item.filter != null) item.copy(filter = null) else item,
                     )
                 }
-                saveAll(normalized)
                 if (!prefs.getBoolean(JM_ALL_HOT_SEEDED_KEY, false)) {
-                    val migrated = normalized.toMutableList()
-                    if (migrated.none { it.platformId == ContentPlatform.JM }) migrated.add(specialJmHome())
-                    if (migrated.none { it.platformId == ContentPlatform.JM && it.id == JmBrowsePolicy.ALL_HOT_TAB_ID }) {
-                        migrated.add(specialJmAllHot())
-                    }
-                    saveAll(migrated)
+                    val selectedIdentity = loadSelectedTabOrNull()?.let { normalized.getOrNull(it) }?.let(BrowseTabPolicy::identity)
+                    val migrated = BrowseTabPolicy.addMissingJmDefaults(normalized, defaultTabs(ContentPlatform.JM))
+                    val selectedIndex = selectedIdentity?.let { selected -> migrated.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
+                    saveAll(migrated, selectedIndex)
                     prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
                     return migrated
                 }
+                saveAll(normalized)
                 return normalized
             }
         }
 
-        val migrated = load(ContentPlatform.MANWA) + load(ContentPlatform.JM)
+        val migrated = load(ContentPlatform.JM) + load(ContentPlatform.MANWA)
         saveAll(migrated)
         prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
         return migrated
     }
 
-    fun saveAll(tabs: List<BrowseTabItem>) {
+    fun saveAll(tabs: List<BrowseTabItem>, selectedTabIndex: Int? = null) {
         val array = JSONArray()
         tabs.forEach { array.put(it.toJson()) }
-        prefs.edit().putString(MIXED_KEY_TABS, array.toString()).apply()
+        val editor = prefs.edit().putString(MIXED_KEY_TABS, array.toString())
+        selectedTabIndex?.let { editor.putInt(MIXED_KEY_SELECTED_TAB, it.coerceAtLeast(0)) }
+        editor.apply()
     }
 
     /** v5 maps persisted legacy area/end IDs once; all other tab data stays unchanged. */
@@ -238,6 +237,8 @@ object BrowseTabStore {
     fun loadSelectedTab(platform: ContentPlatform): Int = prefs.getInt(selectedTabKey(platform), 0)
 
     fun loadSelectedTab(): Int = prefs.getInt(MIXED_KEY_SELECTED_TAB, 0)
+
+    fun loadSelectedTabOrNull(): Int? = if (prefs.contains(MIXED_KEY_SELECTED_TAB)) loadSelectedTab() else null
 
     fun saveSelectedTab(platform: ContentPlatform, index: Int) {
         prefs.edit().putInt(selectedTabKey(platform), index.coerceAtLeast(0)).apply()
@@ -298,7 +299,7 @@ object BrowseTabStore {
     }
 
     fun resetAll(): List<BrowseTabItem> {
-        val defaults = defaultTabs(ContentPlatform.MANWA) + defaultTabs(ContentPlatform.JM)
+        val defaults = defaultTabs(ContentPlatform.JM) + defaultTabs(ContentPlatform.MANWA)
         saveAll(defaults)
         val editor = prefs.edit()
         prefs.all.keys.filter { it.startsWith("filter_manwa_") || it.startsWith("filter_jm_") }.forEach { editor.remove(it) }

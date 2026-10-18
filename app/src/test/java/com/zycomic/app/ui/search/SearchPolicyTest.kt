@@ -11,8 +11,17 @@ class SearchPolicyTest {
         assertEquals(SearchProvider.MANWA.defaultDisplayMode, 3)
         assertEquals(SearchProvider.JM.defaultDisplayMode, 1)
         assertEquals(SearchProvider.JM, SearchProvider.fromStorage("jm"))
+        assertEquals(false, SearchProvider.MANWA.usesJmCoverImageLoader)
+        assertEquals(true, SearchProvider.JM.usesJmCoverImageLoader)
         assertEquals("search_grid_columns_portrait", searchGridColumnsPreferenceKey(SearchProvider.MANWA, false))
         assertEquals("jm_search_grid_columns_portrait", searchGridColumnsPreferenceKey(SearchProvider.JM, false))
+    }
+
+    @Test
+    fun `JM only defaults missing sort and preserves remembered choices`() {
+        assertEquals("tf", jmSearchSortCode(null))
+        assertEquals("tf", jmSearchSortCode(""))
+        JmSearchSortOptions.forEach { (_, code) -> assertEquals(code, jmSearchSortCode(code)) }
     }
 
     @Test
@@ -21,6 +30,8 @@ class SearchPolicyTest {
             listOf("mr", "mv", "mv_m", "mv_w", "mv_t", "mp", "tf"),
             JmSearchSortOptions.map { it.second },
         )
+        assertEquals(JM_DEFAULT_SEARCH_SORT_CODE, "tf")
+        assertEquals("最多喜欢", JmSearchSortOptions.first { it.second == JM_DEFAULT_SEARCH_SORT_CODE }.first)
     }
 
     @Test

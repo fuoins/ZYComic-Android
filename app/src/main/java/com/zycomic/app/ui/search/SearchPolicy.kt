@@ -15,9 +15,16 @@ enum class SearchProvider(
         fun fromStorage(value: String?): SearchProvider =
             entries.firstOrNull { it.storageValue == value } ?: JM
     }
+
+    val usesJmCoverImageLoader: Boolean
+        get() = this == JM
 }
 
 /** Values confirmed by JMSource and the repository's JM contract report. */
+const val JM_DEFAULT_SEARCH_SORT_CODE = "tf"
+
+fun jmSearchSortCode(saved: String?): String = saved?.takeIf { it.isNotBlank() } ?: JM_DEFAULT_SEARCH_SORT_CODE
+
 val JmSearchSortOptions: List<Pair<String, String>> = listOf(
     "最新" to "mr",
     "总排行" to "mv",

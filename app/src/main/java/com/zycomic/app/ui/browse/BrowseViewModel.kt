@@ -44,6 +44,9 @@ class BrowseViewModel {
     val mainTab = MutableStateFlow(initialTabIndex(initialPlatform))
 
     private fun initialTabIndex(platform: ContentPlatform): Int {
+        BrowseTabStore.loadSelectedTabOrNull()?.let { index ->
+            if (tabs.getOrNull(index)?.platformId == platform) return index
+        }
         val oldIndex = BrowseTabStore.loadSelectedTab(platform)
         val platformTabs = tabs.withIndex().filter { it.value.platformId == platform }
         return platformTabs.getOrNull(oldIndex)?.index
@@ -655,21 +658,14 @@ class BrowseViewModel {
      */
     fun isProtected(item: BrowseTabItem): Boolean = false
 
-    /** 拖动排序：把 [from] 项移动到 [to]，按 id 校正选中下标并持久化；顶部顺序实时变化。 */
-    fun moveTab(from: Int, to: Int) {
-        if (from == to) return
-        if (from !in tabs.indices || to !in tabs.indices) return
-        val selected = tabs.getOrNull(mainTab.value)?.let { it.platformId to it.id }
-        val moved = tabs.removeAt(from)
-        tabs.add(to, moved)
-        persist()
-        if (selected != null) {
-            val ni = tabs.indexOfFirst { it.platformId == selected.first && it.id == selected.second }
-            if (ni >= 0) {
-                mainTab.value = ni
-                BrowseTabStore.saveSelectedTab(ni)
-            }
-        }
+    /** Persists one complete drag draft and restores selection by stable platform-qualified identity. */
+    fun reorderTabs(draft: List<BrowseTabItem>): Boolean {
+        val result = BrowseTabPolicy.reorder(tabs.toList(), draft, mainTab.value) ?: return false
+        tabs.clear()
+        tabs.addAll(result.tabs)
+        mainTab.value = result.selectedIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
+        BrowseTabStore.saveAll(tabs.toList(), mainTab.value)
+        return true
     }
 
     fun isNameTaken(
@@ -683,6 +679,24 @@ class BrowseViewModel {
     }
 
     private fun persist() = BrowseTabStore.saveAll(tabs.toList())
+
+    private fun addNewTab(item: BrowseTabItem): Int {
+        val (next, index) = BrowseTabPolicy.insertNewTab(tabs.toList(), item)
+        tabs.clear()
+        tabs.addAll(next)
+        persist()
+        goTo(index)
+        return index
+    }
+
+    private fun addFixedJmTab(item: BrowseTabItem): Boolean {
+        val addition = BrowseTabPolicy.addFixedJmTab(tabs.toList(), item) ?: return false
+        tabs.clear()
+        tabs.addAll(addition.first)
+        persist()
+        goTo(addition.second)
+        return true
+    }
 
     fun renameTab(id: String, name: String): Boolean {
         val i = tabs.indexOfFirst { it.id == id }
@@ -758,10 +772,8 @@ class BrowseViewModel {
             filter = snapshot.takeIf { platform == ContentPlatform.MANWA },
             platformId = platform,
         )
-        tabs.add(item)
         if (platform == ContentPlatform.JM) BrowseTabStore.saveJmFilters(item.id, jmFilters)
-        persist()
-        goTo(tabs.lastIndex)
+        addNewTab(item)
         return true
     }
 
@@ -822,23 +834,15 @@ class BrowseViewModel {
         return true
     }
 
-    fun canAddJmAllHot(): Boolean = tabs.none { it.platformId == ContentPlatform.JM && it.id == JmBrowsePolicy.ALL_HOT_TAB_ID }
+    fun canAddJmHome(): Boolean = BrowseTabPolicy.canAddFixedJmTab(tabs, BrowseTabStore.ID_JM_HOME)
 
-    fun addJmAllHotTab(): Boolean {
-        if (!canAddJmAllHot()) return false
-        tabs.add(
-            BrowseTabItem(
-                id = JmBrowsePolicy.ALL_HOT_TAB_ID,
-                name = "JM 全部热门",
-                kind = TabKind.FILTER,
-                builtin = true,
-                platformId = ContentPlatform.JM,
-            ),
-        )
-        persist()
-        goTo(tabs.lastIndex)
-        return true
-    }
+    /** Adds the fixed-ID JM homepage tab once; deleting it makes it available to add again. */
+    fun addJmHomeTab(): Boolean = addFixedJmTab(BrowseTabStore.jmHomeTab())
+
+    fun canAddJmAllHot(): Boolean = BrowseTabPolicy.canAddFixedJmTab(tabs, JmBrowsePolicy.ALL_HOT_TAB_ID)
+
+    /** Adds the fixed-ID JM all-hot tab once; deleting it makes it available to add again. */
+    fun addJmAllHotTab(): Boolean = addFixedJmTab(BrowseTabStore.jmAllHotTab())
 
     fun resetToDefaults() {
         tabs.clear()

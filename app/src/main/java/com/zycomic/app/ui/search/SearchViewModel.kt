@@ -86,7 +86,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
     // ---- 搜索来源、显示模式与 JM 排序（分别持久化）----
     val provider = MutableStateFlow(resolveInitialProvider(initialProvider))
     val displayMode = MutableStateFlow(loadDisplayMode(provider.value))
-    val jmSortCode = MutableStateFlow(searchPrefs.getString(KEY_JM_SORT, "mr") ?: "mr")
+    val jmSortCode = MutableStateFlow(jmSearchSortCode(searchPrefs.getString(KEY_JM_SORT, null)))
     val gridColumns = MutableStateFlow(3)
 
     init {

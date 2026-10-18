@@ -165,7 +165,6 @@ fun BrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showGuideDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
-    var expandedJmFilterTabId by remember { mutableStateOf<String?>(null) }
     androidx.activity.compose.BackHandler(enabled = selectionMode) { vm.exitSelection() }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
@@ -329,21 +328,13 @@ fun BrowseScreen(
                                     }
                                 }
                             }
-                            if (index == pagerState.currentPage &&
-                                (platform == ContentPlatform.MANWA || (item.platformId == ContentPlatform.JM && !item.builtin))
-                            ) {
+                            if (index == pagerState.currentPage) {
                                 item(key = "filter_affordance") {
                                     TabBarIcon(
                                         icon = Icons.Outlined.FilterList,
                                         contentDescription = if (item.platformId == ContentPlatform.JM) "JM 筛选" else "重新筛选",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        onClick = {
-                                            if (item.platformId == ContentPlatform.JM) {
-                                                expandedJmFilterTabId = if (expandedJmFilterTabId == item.id) null else item.id
-                                            } else {
-                                                showFilterDialog = true
-                                            }
-                                        },
+                                        onClick = { showFilterDialog = true },
                                     )
                                 }
                             }
@@ -381,7 +372,6 @@ fun BrowseScreen(
                     },
                     bottomPadding = contentPadding.calculateBottomPadding(),
                     onOpenSearch = { keyword -> onOpenSearch(keyword, SearchProvider.fromStorage(platform.id)) },
-                    jmFiltersExpanded = tabs.getOrNull(page)?.id == expandedJmFilterTabId,
                 )
             }
         }
@@ -466,7 +456,6 @@ private fun BrowseTabContent(
     onLongClick: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenSearch: (String) -> Unit,
-    jmFiltersExpanded: Boolean,
 ) {
     val item = vm.tabs.getOrNull(page)
     val tabPlatform = item?.platformId ?: platform
@@ -502,7 +491,6 @@ private fun BrowseTabContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (tabPlatform == ContentPlatform.JM) JmBrowseControls(vm, page, jmFiltersExpanded)
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     loading && mangas.isEmpty() -> MangaGridSkeleton(
@@ -575,14 +563,13 @@ private fun BrowseTabContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun JmBrowseControls(vm: BrowseViewModel, page: Int, filtersExpanded: Boolean) {
+private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
     val filters by vm.jmFiltersForTab(page).collectAsState()
     val tab = vm.tabs.getOrNull(page)
     val tabId = tab?.id.orEmpty()
     val isAllHot = tabId == JmBrowsePolicy.ALL_HOT_TAB_ID
-    val isCustomTab = tab != null && !tab.builtin
-    if (isCustomTab && !filtersExpanded) return
     val mode = if (isAllHot) JmBrowsePolicy.MODE_CATEGORY else filters.mode
     val categoryOptions = remember { JmBrowsePolicy.categorySelections(JmSource.categoryOptions) }
     val orderOptions = remember { JmBrowsePolicy.orderOptions(JmSource.orderOptions) }
@@ -599,37 +586,23 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int, filtersExpanded: Bo
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (JmBrowsePolicy.showsModePicker(tabId)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            FilterSection("浏览方式") {
                 listOf("推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS, "分类" to JmBrowsePolicy.MODE_CATEGORY, "周榜" to JmBrowsePolicy.MODE_WEEK).forEach { (label, value) ->
-                    TextButton(onClick = { vm.selectJmMode(value, page) }) {
-                        Text(label, color = if (mode == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    FilterChip(text = label, selected = mode == value, onClick = { vm.selectJmMode(value, page) })
                 }
-                if (mode == JmBrowsePolicy.MODE_SEARCH) Text("搜索：${filters.query}", style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                if (mode == JmBrowsePolicy.MODE_SEARCH) Text("搜索：${filters.query}", style = MaterialTheme.typography.bodySmall)
             }
         }
         when (mode) {
             JmBrowsePolicy.MODE_CATEGORY -> {
-                Text("分类", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    items(categoryOptions, key = { it.second }) { (label, value) ->
-                        FilterChip(
-                            text = label,
-                            selected = filters.category == value,
-                            modifier = Modifier.padding(end = 2.dp),
-                            onClick = { vm.updateJmFilters(page, category = value) },
-                        )
+                FilterSection("分类") {
+                    categoryOptions.forEach { (label, value) ->
+                        FilterChip(text = label, selected = filters.category == value, onClick = { vm.updateJmFilters(page, category = value) })
                     }
                 }
-                Text("排序", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    items(orderOptions, key = { it.second }) { (label, value) ->
-                        FilterChip(
-                            text = label,
-                            selected = filters.order == value,
-                            modifier = Modifier.padding(end = 2.dp),
-                            onClick = { vm.updateJmFilters(page, order = value) },
-                        )
+                FilterSection("排序方式") {
+                    orderOptions.forEach { (label, value) ->
+                        FilterChip(text = label, selected = filters.order == value, onClick = { vm.updateJmFilters(page, order = value) })
                     }
                 }
             }
@@ -818,6 +791,7 @@ private fun BrowseFilterDialog(
             if (!displayOnly && page == 0) {
                 val item = vm.tabs.getOrNull(currentTab)
                 when {
+                    item?.platformId == ContentPlatform.JM -> JmBrowseControls(vm, currentTab)
                     item == null -> CategoryFilter(vm, onOpenTagDialog)
                     item.kind == TabKind.FILTER -> CategoryFilter(vm, onOpenTagDialog)
                     item.pageType == BrowsePageType.RANKING -> RankFilter(vm)
@@ -834,7 +808,13 @@ private fun BrowseFilterDialog(
             onDismissRequest = { showInfo = false },
             title = { Text("说明") },
             text = {
-                Text("重新筛选按本次修改展示，不会修改默认筛选；切换离开该 Tab 再返回或重进软件时会恢复默认配置。若要将标签配置固定为一个 Tab，请点击 Tab 栏最右侧按钮进行配置。")
+                Text(
+                    if (vm.tabs.getOrNull(currentTab)?.platformId == ContentPlatform.JM) {
+                        "分类、排序与浏览方式仅保存到当前禁漫标签页，不影响其他标签页或漫蛙筛选。"
+                    } else {
+                        "重新筛选按本次修改展示，不会修改默认筛选；切换离开该 Tab 再返回或重进软件时会恢复默认配置。若要将标签配置固定为一个 Tab，请点击 Tab 栏最右侧按钮进行配置。"
+                    },
+                )
             },
             confirmButton = { TextButton(onClick = { showInfo = false }) { Text("确认") } },
         )
