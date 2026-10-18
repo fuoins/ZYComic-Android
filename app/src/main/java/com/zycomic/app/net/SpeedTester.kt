@@ -29,7 +29,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * 关键一致性原则：测速使用的 OkHttpClient 传输层（DNS/SNI/证书/出口/cookie）由
  * [NetworkModule.applyTransportStrategy] 统一构建，与当前网络下的运行时 api/image client
- * 完全一致—— VPN 开时测速即走系统 DNS+SNI 的 VPN 路径，无 VPN 时走 RuleDns+去 SNI 直连。
+ * 完全一致—— VPN 开时测速即走系统 DNS+保留 SNI 的 VPN 路径；直连时走 RuleDns，且仅对显式配置中的非 Cloudflare 主机尝试去 SNI。
+ * 连接失败也可能来自 DNS、TLS、HTTP 状态或源站，不应仅凭失败结果归因于 SNI。
  *
  * 两类探活都打"真实业务数据"，避免假 200 蒙混：
  * - 线路探活：[NetworkModule.newLineProbeClient]（挂 [ManwaInterceptor]）打分类接口

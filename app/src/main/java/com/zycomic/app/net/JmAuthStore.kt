@@ -2,6 +2,9 @@ package com.zycomic.app.net
 
 import android.content.Context
 import android.util.Base64
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -12,6 +15,7 @@ import javax.crypto.spec.GCMParameterSpec
 object JmAuthStore {
     private const val PREFS = "jm_auth_secure"
     private const val TOKEN = "jwt_ciphertext"
+    private const val ACCOUNT_NAME = "account_name"
     private const val KEY_ALIAS = "zycomic_jm_jwt_v1"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
@@ -20,8 +24,20 @@ object JmAuthStore {
     @Volatile var accountName: String? = null
         private set
 
+    private val _accountNameFlow = MutableStateFlow<String?>(null)
+    val accountNameFlow: StateFlow<String?> = _accountNameFlow.asStateFlow()
+
+    private val _loggedInFlow = MutableStateFlow(false)
+    val loggedInFlow: StateFlow<Boolean> = _loggedInFlow.asStateFlow()
+
+    val isLoggedIn: Boolean
+        get() = token() != null
+
     fun initialize(context: Context) {
         preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        accountName = if (token() != null) preferences?.getString(ACCOUNT_NAME, null) else null
+        _accountNameFlow.value = accountName
+        _loggedInFlow.value = token() != null
     }
 
     @Synchronized
@@ -44,14 +60,19 @@ object JmAuthStore {
         checkNotNull(preferences) { "JM auth store has not been initialized" }
             .edit()
             .putString(TOKEN, Base64.encodeToString(packed, Base64.NO_WRAP))
+            .putString(ACCOUNT_NAME, username)
             .apply()
         accountName = username
+        _accountNameFlow.value = username
+        _loggedInFlow.value = true
     }
 
     @Synchronized
     fun clear() {
-        preferences?.edit()?.remove(TOKEN)?.apply()
+        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.apply()
         accountName = null
+        _accountNameFlow.value = null
+        _loggedInFlow.value = false
     }
 
     private fun getOrCreateKey(): SecretKey {

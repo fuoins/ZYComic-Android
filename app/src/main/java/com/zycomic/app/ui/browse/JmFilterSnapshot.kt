@@ -12,6 +12,8 @@ internal data class JmFilterSnapshot(
     val weekType: String = "manga",
     val serializationType: String = "all",
     val serializationDate: Int = JmBrowsePolicy.today(),
+    val promoteId: String = "",
+    val promoteTitle: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("mode", mode)
@@ -22,6 +24,8 @@ internal data class JmFilterSnapshot(
         put("weekType", weekType)
         put("serializationType", serializationType)
         put("serializationDate", serializationDate)
+        put("promoteId", promoteId)
+        put("promoteTitle", promoteTitle)
     }
 
     fun toFilters(): JmBrowsePolicy.Filters = JmBrowsePolicy.Filters(
@@ -33,6 +37,8 @@ internal data class JmFilterSnapshot(
         weekType = weekType,
         serializationType = serializationType,
         serializationDate = serializationDate,
+        promoteId = promoteId,
+        promoteTitle = promoteTitle,
     )
 
     companion object {
@@ -45,6 +51,8 @@ internal data class JmFilterSnapshot(
             weekType = filters.weekType,
             serializationType = filters.serializationType,
             serializationDate = filters.serializationDate,
+            promoteId = filters.promoteId,
+            promoteTitle = filters.promoteTitle,
         )
 
         fun fromJson(json: JSONObject, defaultMode: Int = 0): JmFilterSnapshot = JmFilterSnapshot(
@@ -56,6 +64,8 @@ internal data class JmFilterSnapshot(
             weekType = json.optString("weekType").ifBlank { "manga" },
             serializationType = json.optString("serializationType").ifBlank { "all" },
             serializationDate = json.optInt("serializationDate", JmBrowsePolicy.today()),
+            promoteId = json.optString("promoteId"),
+            promoteTitle = json.optString("promoteTitle"),
         )
     }
 }

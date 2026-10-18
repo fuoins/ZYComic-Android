@@ -1,6 +1,5 @@
 package com.zycomic.app.ui.browse
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,12 +20,14 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
@@ -60,6 +61,7 @@ import com.zycomic.app.data.AllTags
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
 import eu.kanade.presentation.components.AdaptiveSheet
@@ -306,7 +308,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
             }
             Text(
-                "编辑可修改名称和平台筛选；点击“更改顺序”可暂存排序后统一保存。",
+                "可编辑tab名称和默认选项；通过标签胶囊管理或调整顺序。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -314,6 +316,11 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
 
             Text("添加标签页", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp))
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(KMR.strings.browse_tab_add_custom))
+                }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -332,11 +339,6 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                         info = "禁漫天堂全部分类内容，默认按最多喜欢排序。",
                         platform = ContentPlatform.JM,
                     )
-                }
-                OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("增加自定义筛选 tab")
                 }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -376,30 +378,24 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 TextButton(onClick = { showReorder = true }) { Text("更改顺序") }
             }
 
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp),
+                    .padding(horizontal = 12.dp)
+                    .verticalScroll(rememberScrollState()),
             ) {
-                itemsIndexed(vm.tabs, key = { _, it -> "${it.platformId.id}_${it.id}" }) { _, item ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                    ) {
-                        BrowseTabCapsule(
-                            name = item.name,
-                            platform = item.platformId,
-                            isYuzongRank = item.pageType == BrowsePageType.YUZONG_RANK,
-                            modifier = Modifier.weight(1f).padding(start = 10.dp),
-                            horizontalPadding = 10.dp,
-                            verticalPadding = 6.dp,
-                            fontSize = 14.sp,
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                ) {
+                    vm.tabs.forEach { item ->
+                        ManagedTabPill(
+                            item = item,
+                            onEdit = { if (item.kind == TabKind.FILTER) editing = item else editingSpecial = item },
+                            onDelete = { deletingItem = item },
                         )
-                        TextButton(onClick = {
-                            if (item.kind == TabKind.FILTER) editing = item else editingSpecial = item
-                        }) { Text("编辑") }
-                        IconButton(onClick = { deletingItem = item }) { Icon(Icons.Outlined.Delete, contentDescription = "删除") }
                     }
                 }
             }
@@ -431,7 +427,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
     // ---- 编辑 tab（名称 + 默认筛选） ----
     editing?.let { item ->
         FilterTabFormDialog(
-            title = "编辑 tab",
+            title = stringResource(KMR.strings.browse_tab_edit_title),
             initialName = item.name,
             initial = item.filter ?: FilterSnapshot(),
             initialJmFilters = vm.defaultJmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).let {
@@ -560,7 +556,7 @@ private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDis
                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Tune, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
-                        Text("编辑 tab", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        Text(stringResource(KMR.strings.browse_tab_edit_title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                         IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "关闭") }
                     }
                     OutlinedTextField(
@@ -979,35 +975,25 @@ private fun SpecialAddButton(
     isYuzongRank: Boolean = false,
 ) {
     var showInfo by remember { mutableStateOf(false) }
+    val accent = if (isYuzongRank) MaterialTheme.colorScheme.primary else rememberContentPlatformAccent(platform)
     Surface(
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = CircleShape,
+        color = accent.copy(alpha = 0.13f),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(CircleShape)
                     .clickable(enabled = enabled, onClick = onClick)
-                    .padding(start = 8.dp, top = 3.dp, bottom = 3.dp),
+                    .padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
             ) {
-                if (enabled) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(3.dp))
-                }
-                BrowseTabCapsule(
-                    name = label,
-                    platform = platform,
-                    isYuzongRank = isYuzongRank,
-                    horizontalPadding = 2.dp,
-                    verticalPadding = 3.dp,
-                    fontSize = 12.sp,
-                )
-                Spacer(Modifier.width(6.dp))
+                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = accent)
+                Spacer(Modifier.width(4.dp))
+                Text(label, fontSize = 12.sp, color = accent, fontWeight = FontWeight.Medium)
             }
-            IconButton(onClick = { showInfo = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Outlined.Info, contentDescription = "${label}说明", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(17.dp))
+            IconButton(onClick = { showInfo = true }, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Outlined.Info, contentDescription = "${label}说明", tint = accent, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -1018,5 +1004,33 @@ private fun SpecialAddButton(
             text = { Text(info) },
             confirmButton = { TextButton(onClick = { showInfo = false }) { Text("知道了") } },
         )
+    }
+}
+
+@Composable
+private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onDelete: () -> Unit) {
+    val accent = if (item.pageType == BrowsePageType.YUZONG_RANK) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        rememberContentPlatformAccent(item.platformId)
+    }
+    Surface(shape = CircleShape, color = accent.copy(alpha = 0.13f)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 11.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+        ) {
+            Text(
+                item.name,
+                style = MaterialTheme.typography.labelLarge,
+                color = accent,
+                maxLines = 1,
+            )
+            IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Outlined.Edit, contentDescription = "编辑 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
+            }
+            IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Outlined.Delete, contentDescription = "删除 ${item.name}", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+            }
+        }
     }
 }

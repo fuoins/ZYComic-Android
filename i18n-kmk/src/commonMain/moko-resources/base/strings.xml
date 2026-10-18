@@ -305,4 +305,16 @@
     <string name="jm_account_manage">账号管理</string>
     <string name="jm_login_first">请先登录禁漫账号</string>
     <string name="jm_saved_cover">封面已保存到相册</string>
+    <string name="manwa_speed_log_title">漫蛙测速日志</string>
+    <string name="jm_speed_log_title">禁漫测速日志</string>
+    <string name="browse_tab_edit_title">编辑tab名称和默认选项</string>
+    <string name="browse_tab_add_custom">增加自定义筛选tab</string>
+    <string name="jm_account_login_title">禁漫账号登录</string>
+    <string name="jm_username_login_label">禁漫账号 / 用户名</string>
+    <string name="jm_password_login_notice">目前仅开放已验证的用户名和密码登录（无验证码）。</string>
+    <string name="jm_account_more_actions">注册、邮箱登录或找回密码？</string>
+    <string name="jm_auth_unavailable_title">禁漫账号功能暂未开放</string>
+    <string name="jm_auth_evidence_notice">当前已验证的客户端流程只有用户名和密码登录。邮箱登录（如有独立流程）、注册请求、激活、忘记密码后的重设以及设密接口，尚缺可复核的脱敏成功请求与响应样本；为避免误操作账号，不会猜测接口或提交账户变更。</string>
+    <string name="jm_account_title">禁漫天堂账号</string>
+    <string name="jm_account_signed_out">未登录禁漫账号；与漫蛙账号独立</string>
 </resources>

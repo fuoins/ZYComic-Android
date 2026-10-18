@@ -442,7 +442,10 @@ class SettingsViewModel {
     // ==================== HTTP 测速（主体在 SpeedTester.runAndApply，三处复用）====================
 
     /** 设置页"重新测速"按钮：测速后自动选最快、重建网络并 Toast。 */
-    fun runSpeedTest(keepImageReuseNotice: Boolean = false) {
+    fun runSpeedTest(
+        keepImageReuseNotice: Boolean = false,
+        onlyPlatform: com.zycomic.app.platform.ContentPlatform? = null,
+    ) {
         scope.launch {
             if (!keepImageReuseNotice) imageReuseNotice.value = null
             testing.value = true
@@ -453,6 +456,7 @@ class SettingsViewModel {
             try {
                 PlatformSpeedTestCoordinator.run(
                     forceFresh = true,
+                    onlyPlatform = onlyPlatform,
                     onProgress = { l, i, v ->
                         lineDelays.value = l
                         imgDelays.value = i

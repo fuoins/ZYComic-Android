@@ -9,6 +9,8 @@ internal object JmBrowsePolicy {
     const val MODE_WEEK = 2
     const val MODE_SEARCH = 3
     const val MODE_SERIALIZATION = 4
+    const val MODE_PROMOTE_LIST = 5
+    const val MODE_UNAVAILABLE_SECTION = 6
     const val ALL_HOT_TAB_ID = "jm_all_hot"
     const val ALL_HOT_ORDER = "tf"
     const val LATEST_A_CATEGORY = "__jm_latest_a__"
@@ -22,11 +24,18 @@ internal object JmBrowsePolicy {
         val weekType: String = "manga",
         val serializationType: String = "all",
         val serializationDate: Int = today(),
+        val promoteId: String = "",
+        val promoteTitle: String = "",
     )
 
     fun today(): Int = ((java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7) + 1
 
     fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID
+
+    fun jmHomeModes(): List<Pair<String, Int>> = listOf(
+        "每周必看" to MODE_WEEK,
+        "每周连载更新" to MODE_SERIALIZATION,
+    )
 
     fun effectiveFilters(tabId: String, filters: Filters): Filters =
         if (tabId == ALL_HOT_TAB_ID) {
@@ -35,6 +44,19 @@ internal object JmBrowsePolicy {
                 query = "",
                 order = filters.order.ifBlank { ALL_HOT_ORDER },
             )
+        } else if (
+            tabId == "jm_recommendations" &&
+            (
+                filters.mode !in setOf(
+                    MODE_SEARCH,
+                    MODE_WEEK,
+                    MODE_SERIALIZATION,
+                    MODE_PROMOTE_LIST,
+                    MODE_UNAVAILABLE_SECTION,
+                ) && !(filters.mode == MODE_CATEGORY && filters.promoteId.isNotBlank())
+                )
+        ) {
+            filters.copy(mode = MODE_RECOMMENDATIONS, query = "")
         } else {
             if (filters.mode == MODE_CATEGORY && filters.order.isBlank()) filters.copy(order = "mr") else filters
         }

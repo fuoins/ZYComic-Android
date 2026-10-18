@@ -18,6 +18,36 @@ class JmBrowsePolicyTest {
     }
 
     @Test
+    fun `JM home exposes weekly destinations and normalizes unsupported old modes`() {
+        assertEquals(
+            listOf("每周必看" to JmBrowsePolicy.MODE_WEEK, "每周连载更新" to JmBrowsePolicy.MODE_SERIALIZATION),
+            JmBrowsePolicy.jmHomeModes(),
+        )
+        assertEquals(
+            JmBrowsePolicy.MODE_RECOMMENDATIONS,
+            JmBrowsePolicy.effectiveFilters("jm_recommendations", JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY)).mode,
+        )
+        assertEquals(
+            JmBrowsePolicy.MODE_WEEK,
+            JmBrowsePolicy.effectiveFilters("jm_recommendations", JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_WEEK)).mode,
+        )
+        assertEquals(
+            JmBrowsePolicy.MODE_PROMOTE_LIST,
+            JmBrowsePolicy.effectiveFilters(
+                "jm_recommendations",
+                JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_PROMOTE_LIST, promoteId = "29"),
+            ).mode,
+        )
+        assertEquals(
+            JmBrowsePolicy.MODE_UNAVAILABLE_SECTION,
+            JmBrowsePolicy.effectiveFilters(
+                "jm_recommendations",
+                JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_UNAVAILABLE_SECTION, promoteId = "1002"),
+            ).mode,
+        )
+    }
+
+    @Test
     fun `all hot tab exposes category sorting without a mode picker`() {
         assertFalse(JmBrowsePolicy.showsModePicker(JmBrowsePolicy.ALL_HOT_TAB_ID))
         assertTrue(JmBrowsePolicy.showsModePicker("jm_recommendations"))

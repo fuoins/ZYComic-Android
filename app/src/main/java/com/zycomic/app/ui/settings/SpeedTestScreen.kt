@@ -41,7 +41,6 @@ import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
 import com.zycomic.app.net.SpeedTestUiTextPolicy
 import com.zycomic.app.net.SpeedTester
-import com.zycomic.app.ui.components.NetworkMaintenanceNotice
 import eu.kanade.tachiyomi.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -90,11 +89,7 @@ fun SpeedTestScreen(
     val currentImgIp = RouteManager.selectedImgIp
     val pinnedImg = RouteManager.pinnedImgDomain
     val imgPinDisplayRevision = RouteManager.imgPinDisplayRevision
-    val autoSel by vm.autoSelectEnabled.collectAsState()
     val useFastestImg = RouteManager.useFastestImgForAll
-    val followVpn by vm.followSystemVpn.collectAsState()
-    val vpnOnlyAutoRetest by vm.vpnOnlyAutoRetest.collectAsState()
-    val remoteChecking by vm.remoteChecking.collectAsState()
     val configRetest by RemoteConfigFetcher.configRetest.collectAsState()
     val speedTestResultVersion by vm.speedTestResultVersion.collectAsState()
     val speedTestProgress by vm.speedTestProgress.collectAsState()
@@ -172,7 +167,7 @@ fun SpeedTestScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("测速日志") },
+                title = { Text(stringResource(KMR.strings.manwa_speed_log_title)) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -182,19 +177,6 @@ fun SpeedTestScreen(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(
-                    enabled = !remoteChecking,
-                    onClick = { vm.checkRemoteConfig() },
-                ) {
-                    Text(if (remoteChecking) "检查中…" else "检查更新")
-                }
-            }
-            NetworkMaintenanceNotice(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
             if (speedTestActive || (speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.reusedImages > 0)) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     configRetest?.let {
@@ -251,114 +233,6 @@ fun SpeedTestScreen(
                     )
                 }
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("自动选择最快线路", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (autoSel) {
-                                    "已开启，当前线路 ${currentLineIdx + 1}（手动选择仅临时覆盖，重启后恢复自动）"
-                                } else {
-                                    "已关闭，纯手动模式"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = autoSel, onCheckedChange = { vm.setAutoSelectEnabled(it) })
-                    }
-                }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("封面和章节用测速最快图源", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (useFastestImg) {
-                                    "已开启：未手动固定时优先用测速最快；无成功项时沿用服务端推荐"
-                                } else {
-                                    "已关闭：使用服务端推荐（手动固定仍优先）"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = useFastestImg, onCheckedChange = { vm.setUseFastestImgForAll(it) })
-                    }
-                }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("当前图源", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                SpeedTestUiTextPolicy.imageSourceDescription(
-                                    currentImageSource.kind,
-                                    inSuccessfulList = currentImageSource.hasSuccessfulEndpoint,
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (!pinnedImg.isNullOrBlank()) {
-                            Button(onClick = { vm.resetImgHostToAuto() }) { Text("恢复自动") }
-                        }
-                    }
-                }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("自动跟随系统 VPN", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (followVpn) {
-                                    "已开启：系统 VPN 开则图片走 VPN、关则直连"
-                                } else {
-                                    "已关闭：强制直连（硬编码IP+去SNI），即使开着系统 VPN 也不走 VPN，用于抓包调试"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = followVpn, onCheckedChange = { vm.setFollowSystemVpn(it) })
-                    }
-                }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("VPN 单独变化后自动测速", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "${if (vpnOnlyAutoRetest) "已开启" else "已关闭"}：只控制可确认的 VPN 单独变化后的自动测速和新排名应用；不控制路由选择或连接清理。真实网络变化仍测速，底层网络无法确认时沿用原行为。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = vpnOnlyAutoRetest,
-                            onCheckedChange = { vm.setVpnOnlyAutoRetest(it) },
-                        )
-                    }
-                }
-                item {
-                    Text(
-                        "按每个域名/IP测速延迟升序；失败端点留在日志末尾，阅读器只显示成功项",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp),
-                    )
-                }
-                item {
                     Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
                 items(lineOrder.withIndex().toList()) { (position, entry) ->
@@ -368,7 +242,7 @@ fun SpeedTestScreen(
                     }
                     SpeedRow(
                         index = position,
-                        host = SpeedTestUiTextPolicy.lineEndpointLabel(position),
+                        host = SpeedTestUiTextPolicy.endpointLabel(endpoint.domain, endpoint.ip),
                         delay = entry.value,
                         isSelected = index == currentLineIdx && endpoint.ip == currentLineIp,
                         onClick = { if (index >= 0) vm.selectLine(index, endpoint.ip) },
@@ -383,7 +257,7 @@ fun SpeedTestScreen(
                     val index = RouteManager.imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
                     SpeedRow(
                         index = position,
-                        host = SpeedTestUiTextPolicy.imageEndpointLabel(position),
+                        host = SpeedTestUiTextPolicy.endpointLabel(endpoint.domain, endpoint.ip),
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
                         isSelected = currentImageSource.matchesEndpoint(endpoint),
@@ -442,7 +316,7 @@ fun SpeedTestScreen(
                             Text(stringResource(KMR.strings.speed_test_export_log))
                         }
                         Button(
-                            onClick = { vm.runSpeedTest() },
+                            onClick = { vm.runSpeedTest(onlyPlatform = com.zycomic.app.platform.ContentPlatform.MANWA) },
                             enabled = !speedTestActive,
                             modifier = Modifier.weight(1f),
                         ) {
@@ -508,4 +382,104 @@ private fun formatDelay(delay: Long?, verdict: SpeedTester.ImgVerdict? = null): 
     delay == null -> "未测"
     delay == Long.MAX_VALUE -> "超时"
     else -> "${delay}ms"
+}
+
+/** Network diagnostics live in developer settings rather than cluttering the speed-test log. */
+@Composable
+fun ManwaDeveloperControls(vm: SettingsViewModel) {
+    val autoSel by vm.autoSelectEnabled.collectAsState()
+    val currentLineIdx by vm.currentLineIndex.collectAsState()
+    val useFastestImg = RouteManager.useFastestImgForAll
+    val followVpn by vm.followSystemVpn.collectAsState()
+    val vpnOnlyAutoRetest by vm.vpnOnlyAutoRetest.collectAsState()
+    val pinnedImg = RouteManager.pinnedImgDomain
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("自动选择最快线路", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (autoSel) {
+                        "已开启，当前线路 ${currentLineIdx + 1}（手动选择仅临时覆盖，重启后恢复自动）"
+                    } else {
+                        "已关闭，纯手动模式"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = autoSel, onCheckedChange = { vm.setAutoSelectEnabled(it) })
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("封面和章节用测速最快图源", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (useFastestImg) {
+                        "已开启：未手动固定时优先用测速最快；无成功项时沿用服务端推荐"
+                    } else {
+                        "已关闭：使用服务端推荐（手动固定仍优先）"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = useFastestImg, onCheckedChange = { vm.setUseFastestImgForAll(it) })
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("当前图源", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    pinnedImg ?: "自动选择",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!pinnedImg.isNullOrBlank()) {
+                Button(onClick = { vm.resetImgHostToAuto() }) { Text("恢复自动") }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("自动跟随系统 VPN", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (followVpn) {
+                        "已开启：系统 VPN 开则图片走 VPN、关则直连"
+                    } else {
+                        "已关闭：强制直连，即使开着系统 VPN 也不走 VPN；仅对配置中的非 Cloudflare 主机尝试去除 SNI"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = followVpn, onCheckedChange = { vm.setFollowSystemVpn(it) })
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("VPN 单独变化后自动测速", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "${if (vpnOnlyAutoRetest) "已开启" else "已关闭"}：只控制可确认的 VPN 单独变化后的自动测速和新排名应用；不控制路由选择或连接清理。真实网络变化仍测速，底层网络无法确认时沿用原行为。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = vpnOnlyAutoRetest,
+                onCheckedChange = { vm.setVpnOnlyAutoRetest(it) },
+            )
+        }
+    }
 }

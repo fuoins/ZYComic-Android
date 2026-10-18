@@ -30,7 +30,7 @@ import javax.net.ssl.X509TrustManager
 
 /**
  * 网络模块：构建 OkHttpClient 与 Retrofit，整合所有拦截器。
- * 直连模式：RuleDns 做 rule 域名 IP 直连，SniRemovingSocketFactory 移除 SNI，trust-all 信任证书。
+ * 直连模式：RuleDns 使用已配置 IP；仅对显式 SNI 配置中的非 Cloudflare 主机尝试移除 SNI，trust-all 信任证书。
  *
  * 拦截器链顺序（application interceptors）：
  * 0. [LineFailoverInterceptor] —— API 请求失败计数，连续失败自动切线路
@@ -143,13 +143,13 @@ object NetworkModule {
     /**
      * 传输层策略（与拦截器无关）：cookieJar + trust-all，以及按当前网络决定的 DNS/SNI。
      * 运行时 client 与测速 client 必须共用本方法，保证"测速走的路径 = 运行时图片走的路径"。
-     * - 直连策略：远程 RuleDns 指定 IP + SniRemoving 去 SNI；
+     * - 直连策略：RuleDns 使用远程指定 IP；仅对显式配置且非 Cloudflare 的主机尝试移除 SNI；
      * - 跟随 VPN（系统 VPN 开且开关 ON）：系统 DNS + 保留 SNI，流量走 VPN 隧道。
      */
     private fun OkHttpClient.Builder.applyTransportStrategy(): OkHttpClient.Builder {
         cookieJar(cookieJar)
         if (shouldUseDirectStrategy()) {
-            // 国内直连 / 强制直连：远程 RuleDns 指定 IP + SniRemoving 去 SNI
+            // 国内直连 / 强制直连：RuleDns 使用远程指定 IP；SNI 仅按配置及 Cloudflare 例外逐主机处理。
             val baseSslContext = SSLContext.getInstance("TLS").apply {
                 init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
             }
@@ -179,9 +179,7 @@ object NetworkModule {
     /** Create a one-address child client while retaining all transport and interceptor policy. */
     fun newProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient =
         client.newBuilder()
-            // Direct runtime traffic may deliberately remove SNI; endpoint probes must instead
-            // authenticate/route with the original URL hostname while pinning only the socket IP.
-            .sslSocketFactory(sniPreservingProbeSocketFactory, trustAllManager)
+            // Keep the exact TLS/SNI factory selected by applyTransportStrategy; only pin DNS.
             .dns(object : Dns {
                 override fun lookup(requestedHost: String): List<InetAddress> =
                     if (requestedHost.equals(hostname, ignoreCase = true)) {
@@ -205,7 +203,6 @@ object NetworkModule {
         val builder = base.newBuilder()
         builder.interceptors().removeAll { it is ImageInterceptor }
         return builder
-            .sslSocketFactory(sniPreservingProbeSocketFactory, trustAllManager)
             .dns(object : Dns {
                 override fun lookup(requestedHost: String): List<InetAddress> =
                     if (requestedHost.equals(hostname, ignoreCase = true)) {
@@ -465,14 +462,6 @@ object NetworkModule {
         override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
     }
 
-    /** Per-IP probes connect to a pinned address but must retain the URL hostname for TLS SNI. */
-    private val sniPreservingProbeSocketFactory: SSLSocketFactory by lazy {
-        val delegate = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-        }.socketFactory
-        SniRemovingSocketFactory(delegate, preserveHostname = true)
-    }
-
     private fun OkHttpClient.Builder.enableTrustAll(): OkHttpClient.Builder {
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
@@ -541,12 +530,11 @@ object NetworkModule {
     }
 
     /**
-     * 自定义 SSLSocketFactory：对 sni 列表中的域名，在 createSocket 后移除 SNI。
+     * 自定义 SSLSocketFactory：对配置的域名（且非 Cloudflare IP），在 createSocket 后移除 SNI。
      * 包装原始 SSLSocketFactory，委托所有方法，仅在 createSocket 后处理 SNI。
      */
     private class SniRemovingSocketFactory(
         private val delegate: SSLSocketFactory,
-        private val preserveHostname: Boolean = false,
     ) : SSLSocketFactory() {
 
         override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
@@ -554,10 +542,12 @@ object NetworkModule {
 
         override fun createSocket(s: java.net.Socket?, host: String?, port: Int, autoClose: Boolean): java.net.Socket {
             val peerAddress = s?.inetAddress
-            val shouldOmitHostname = !preserveHostname && host != null &&
-                DevConfig.getSniDomains().contains(host) &&
-                peerAddress != null &&
-                !NetworkModule.isInCloudflare(peerAddress)
+            val shouldOmitHostname = host != null && peerAddress != null &&
+                ManwaSniPolicy.shouldOmitSni(
+                    host = host,
+                    configuredDomains = DevConfig.getSniDomains(),
+                    peerIsCloudflare = NetworkModule.isInCloudflare(peerAddress),
+                )
             // The connected TCP socket already selects the destination. Omitting the hostname
             // prevents Conscrypt from inferring SNI from the peer host during socket creation.
             val socket = delegate.createSocket(s, if (shouldOmitHostname) null else host, port, autoClose)
@@ -592,27 +582,7 @@ object NetworkModule {
                 recordProbeSniDecision(socket, null, peerIp, false, false, "host_missing")
                 return
             }
-            if (preserveHostname) {
-                // Observe client-side parameters only; this is not a wire ClientHello claim.
-                val before = runCatching { socket.sslParameters.serverNames?.size }.getOrNull()
-                var failure: String? = null
-                try {
-                    val parameters = socket.sslParameters
-                    parameters.serverNames = listOf(javax.net.ssl.SNIHostName(host))
-                    socket.sslParameters = parameters
-                } catch (error: Exception) {
-                    failure = error.javaClass.name
-                }
-                val after = runCatching { socket.sslParameters.serverNames?.size }.getOrNull()
-                recordProbeSniDecision(
-                    socket, host, peerIp, DevConfig.getSniDomains().contains(host),
-                    socket.inetAddress?.let(NetworkModule::isInCloudflare) == true,
-                    if (failure == null) "original_hostname_sni_requested" else "original_hostname_provider_default",
-                    before, after, after?.let { it == 0 }, failure,
-                )
-                return
-            }
-            val configuredDomainMatch = DevConfig.getSniDomains().contains(host)
+            val configuredDomainMatch = ManwaSniPolicy.isConfiguredHost(host, DevConfig.getSniDomains())
             if (!configuredDomainMatch) {
                 recordProbeSniDecision(socket, host, peerIp, false, false, "domain_not_configured")
                 return

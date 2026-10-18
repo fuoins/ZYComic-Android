@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.SignDay
 import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.net.JmAuthStore
+import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.ContentPlatformSelector
@@ -104,6 +106,8 @@ fun ProfileScreen(
         }
     }
     val user by UserRepository.userFlow.collectAsState()
+    val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
+    val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
     LaunchedEffect(platform) {
         if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.isLoggedIn) {
             try {
@@ -156,7 +160,14 @@ fun ProfileScreen(
 
             // ---- 用户信息 ----
             item {
-                if (user == null) {
+                if (platform == ContentPlatform.JM) {
+                    TextPreferenceWidget(
+                        title = stringResource(KMR.strings.jm_account_title),
+                        subtitle = if (jmLoggedIn) "已登录：${jmAccount ?: "禁漫账号"}" else stringResource(KMR.strings.jm_account_signed_out),
+                        icon = if (!jmLoggedIn) Icons.Outlined.Login else Icons.Outlined.Info,
+                        onPreferenceClick = { if (!jmLoggedIn) onRequireLogin() },
+                    )
+                } else if (user == null) {
                     TextPreferenceWidget(
                         title = "点击登录",
                         subtitle = "登录后可使用收藏、评论等功能",
@@ -197,8 +208,21 @@ fun ProfileScreen(
                 }
             }
 
+            if (platform == ContentPlatform.JM && jmLoggedIn) {
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(KMR.strings.jm_logout),
+                        icon = Icons.Outlined.Logout,
+                        onPreferenceClick = {
+                            JmAuthStore.clear()
+                            JmNetworkModule.clearCookies()
+                        },
+                    )
+                }
+            }
+
             // ---- 积分明细 / 退出 ----
-            if (user != null) {
+            if (platform == ContentPlatform.MANWA && user != null) {
                 item {
                     TextPreferenceWidget(
                         title = "积分明细(仔细看等级划分)",

@@ -88,6 +88,7 @@ import com.zycomic.app.ui.settings.AboutScreen
 import com.zycomic.app.ui.settings.BookBlockScreen
 import com.zycomic.app.ui.settings.DataStorageScreen
 import com.zycomic.app.ui.settings.DeveloperSettingsScreen
+import com.zycomic.app.ui.settings.JmSpeedTestLogScreen
 import com.zycomic.app.ui.settings.SettingsMainScreen
 import com.zycomic.app.ui.settings.SettingsViewModel
 import com.zycomic.app.ui.settings.SpeedTestScreen
@@ -219,6 +220,7 @@ private enum class SettingsDialog {
     BookBlock,
     DeveloperSettings,
     SpeedTest,
+    JmSpeedTestLog,
     DataStorage,
     About,
 }
@@ -340,6 +342,7 @@ fun AppContent(
     val openBookBlock = { requireLogin { settingsDialog = SettingsDialog.BookBlock } }
     val openDeveloperSettings = { settingsDialog = SettingsDialog.DeveloperSettings }
     val openSpeedTest = { settingsDialog = SettingsDialog.SpeedTest }
+    val openJmSpeedTestLog = { settingsDialog = SettingsDialog.JmSpeedTestLog }
     val openDataStorage = { settingsDialog = SettingsDialog.DataStorage }
     val openAbout = { settingsDialog = SettingsDialog.About }
     val blockGayTags = { requireLogin { showGayConfirm = true } }
@@ -602,8 +605,11 @@ fun AppContent(
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 DeveloperSettingsScreen(
+                    vm = settingsVm,
                     onClose = { settingsDialog = null },
-                    onOpenSpeedTest = openSpeedTest,
+                    onOpenManwaSpeedTest = openSpeedTest,
+                    onOpenJmSpeedTest = openJmSpeedTestLog,
+                    onCheckUpdates = { settingsVm.checkRemoteConfig() },
                 )
             }
         }
@@ -613,6 +619,14 @@ fun AppContent(
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 SpeedTestScreen(vm = settingsVm, onClose = { settingsDialog = SettingsDialog.DeveloperSettings })
+            }
+        }
+        SettingsDialog.JmSpeedTestLog -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = SettingsDialog.DeveloperSettings },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                JmSpeedTestLogScreen(onClose = { settingsDialog = SettingsDialog.DeveloperSettings })
             }
         }
         SettingsDialog.DataStorage -> {

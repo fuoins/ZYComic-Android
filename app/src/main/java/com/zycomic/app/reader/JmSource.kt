@@ -36,6 +36,14 @@ object JmSource : HttpSource() {
 
     data class BrowseResult(val items: List<MangaDto>, val hasMore: Boolean)
     data class WeekIssue(val id: String, val title: String)
+    data class PromoteSection(
+        val id: String,
+        val title: String,
+        val type: String,
+        val slug: String,
+        val filterValue: String,
+        val items: List<MangaDto>,
+    )
     data class AlbumResult(val manga: MangaDto, val chapterWarning: String?)
 
     /** Display label and the exact API value; an empty category means latest A-comics. */
@@ -62,6 +70,9 @@ object JmSource : HttpSource() {
         "最多图片" to "mp",
         "最多喜欢" to "tf",
     )
+
+    /** /promote is a section catalogue, not a flat comic list. */
+    suspend fun getPromoteSections(): List<PromoteSection> = parsePromoteSections(getJson("/promote", emptyMap()))
 
     override val name: String = "禁漫天堂"
     override val lang: String = "zh"
@@ -109,6 +120,7 @@ object JmSource : HttpSource() {
         previousFirstId: String? = null,
         serializationType: String = "all",
         serializationDate: Int = todayIsoWeekday(),
+        promoteId: String = "",
     ): BrowseResult {
         val requestedPage = page.coerceAtLeast(1)
         val path: String
@@ -157,6 +169,14 @@ object JmSource : HttpSource() {
                     path = "/serialization"
                     params = JmBrowseParameters.serialization(selectedSerializationType, serializationDate, requestedPage)
                 }
+                5 -> {
+                    if (!promoteId.matches(Regex("\\d+")) || promoteId == "26") {
+                        throw IOException("JM /promote_list 必须使用有效的非周更板块 id")
+                    }
+                    path = "/promote_list"
+                    params = JmBrowseParameters.promoteList(promoteId, requestedPage - 1)
+                }
+                6 -> return BrowseResult(emptyList(), false)
                 else -> {
                     path = "/promote"
                     // Keep the existing promote endpoint's zero-based page convention.
@@ -186,12 +206,16 @@ object JmSource : HttpSource() {
             return BrowseResult(items, hasMore)
         }
 
-        val (items, total) = parseList(payload, path, "content", requireTotal = true)
+        val listField = if (path == "/promote_list") "list" else "content"
+        val (items, total) = parseList(payload, path, listField, requireTotal = true)
+        if (path == "/promote_list") {
+            return BrowseResult(items, JmPagination.totalHasMore(requestedPage, total, JmBrowseParameters.PROMOTE_LIST_PAGE_SIZE))
+        }
         val adjacentFirstId = previousFirstId ?: if (requestedPage > 1) {
             parseList(
                 getJson(path, params + ("page" to (requestedPage - 1).toString())),
                 path,
-                "content",
+                listField,
                 requireTotal = true,
             ).first.firstOrNull()?.id
         } else {
@@ -406,6 +430,7 @@ object JmSource : HttpSource() {
             val content = block.optJSONArray("content")
                 ?: throw IOException("JM /promote[$blockIndex] 缺少字段 content[]")
             foundContent = true
+            if (!JmBrowseParameters.hasComicPreview(block.optString("type"))) continue
             for (itemIndex in 0 until content.length()) {
                 val item = content.optJSONObject(itemIndex)
                     ?: throw IOException("JM /promote[$blockIndex].content[$itemIndex] 不是对象")
@@ -414,6 +439,34 @@ object JmSource : HttpSource() {
         }
         if (!foundContent) throw IOException("JM /promote 响应缺少已确认字段 content[]")
         return result.distinctBy { it.id }
+    }
+
+    private fun parsePromoteSections(payload: Any): List<PromoteSection> {
+        val root = payload as? JSONArray ?: throw IOException("JM /promote 响应不是报告中的 JSON 数组")
+        return (0 until root.length()).map { blockIndex ->
+            val block = root.optJSONObject(blockIndex)
+                ?: throw IOException("JM /promote[$blockIndex] 不是对象")
+            val content = block.optJSONArray("content")
+                ?: throw IOException("JM /promote[$blockIndex] 缺少字段 content[]")
+            val id = block.opt("id")?.toString()?.takeIf { it.matches(Regex("\\d+")) }
+                ?: throw IOException("JM /promote[$blockIndex] 缺少有效 id")
+            val type = block.optString("type")
+            // Creator and novel previews have their own schemas; they are not manga records.
+            val comicCount = if (JmBrowseParameters.hasComicPreview(type)) content.length() else 0
+            val items = (0 until comicCount).map { itemIndex ->
+                val item = content.optJSONObject(itemIndex)
+                    ?: throw IOException("JM /promote[$blockIndex].content[$itemIndex] 不是对象")
+                mangaFromKnownListItem(item, "/promote[$blockIndex].content[$itemIndex]")
+            }
+            PromoteSection(
+                id = id,
+                title = block.optString("title").ifBlank { "板块 $id" },
+                type = type,
+                slug = block.optString("slug"),
+                filterValue = block.optString("filter_val"),
+                items = items,
+            )
+        }
     }
 
     /** Parse only the documented endpoint list field; never recurse into unrelated IDs. */

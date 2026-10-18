@@ -1,6 +1,8 @@
 package com.zycomic.app.ui.settings
 
 import com.zycomic.app.net.DomainIp
+import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.net.JmSpeedTester
 import com.zycomic.app.net.SpeedTester
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -51,5 +53,34 @@ class AvailableDomainTextTest {
         )
 
         assertEquals("", result)
+    }
+
+    @Test
+    fun `JM available domain text includes only successful line and image domains`() {
+        val jmLine = DomainIp("jm-line.example", "203.0.113.8")
+        val failedLine = DomainIp("failed-line.example", "203.0.113.9")
+        val jmImage = DomainIp("jm-image.example", "198.51.100.8")
+        val noImage = DomainIp("no-image.example", "198.51.100.9")
+        val snapshot = JmRouteManager.SpeedTestSnapshot(
+            lineIpDelaysMs = mapOf(jmLine to 52L, failedLine to Long.MAX_VALUE),
+            imageIpDelaysMs = mapOf(jmImage to 73L, noImage to Long.MAX_VALUE),
+            imageIpVerdicts = mapOf(jmImage to JmSpeedTester.ImgVerdict.OK, noImage to JmSpeedTester.ImgVerdict.NO_IMAGE),
+        )
+
+        assertEquals(
+            "jm-line.example\n\n jm-image.example".replace("\n\n ", "\n\n"),
+            buildJmAvailableDomainText(
+                snapshot,
+                lineCandidates = listOf("https://jm-line.example", "https://failed-line.example"),
+                imageCandidates = listOf("jm-image.example", "no-image.example"),
+            ),
+        )
+    }
+
+    @Test
+    fun `available domain export selection supports all and each platform`() {
+        assertEquals("manwa.example\n\njm.example", selectAvailableDomainText("manwa.example", "jm.example", AvailableDomainGroup.ALL))
+        assertEquals("manwa.example", selectAvailableDomainText("manwa.example", "jm.example", AvailableDomainGroup.MANWA))
+        assertEquals("jm.example", selectAvailableDomainText("manwa.example", "jm.example", AvailableDomainGroup.JM))
     }
 }

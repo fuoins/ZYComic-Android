@@ -50,4 +50,21 @@ class JmFilterSnapshotTest {
         assertEquals("all", filters.serializationType)
         assertTrue(filters.serializationDate in 1..7)
     }
+
+    @Test
+    fun `homepage section id and title survive restart`() {
+        val filters = JmBrowsePolicy.Filters(
+            mode = JmBrowsePolicy.MODE_PROMOTE_LIST,
+            promoteId = "29",
+            promoteTitle = "C108&推薦本本",
+        )
+        assertEquals(filters, JmFilterSnapshot.fromJson(JmFilterSnapshot.fromFilters(filters).toJson()).toFilters())
+    }
+
+    @Test
+    fun `old snapshot does not invent a homepage section`() {
+        val filters = JmFilterSnapshot.fromJson(JSONObject("{}")).toFilters()
+        assertEquals("", filters.promoteId)
+        assertEquals("", filters.promoteTitle)
+    }
 }

@@ -1,10 +1,8 @@
 package com.zycomic.app.net
 
-/** User-facing speed-test labels; endpoint identities remain available in diagnostic exports only. */
+/** User-facing speed-test labels; diagnostic screens retain endpoint domain and IP. */
 internal object SpeedTestUiTextPolicy {
-    fun lineEndpointLabel(index: Int): String = "线路端点 ${index + 1}"
-
-    fun imageEndpointLabel(index: Int): String = "图源端点 ${index + 1}"
+    fun endpointLabel(domain: String, ip: String): String = "$domain · $ip"
 
     fun platformEndpointProgress(
         platform: String,
@@ -29,7 +27,7 @@ internal object SpeedTestUiTextPolicy {
         if (hasLineAddress) null else "启动自动选线未解析到线路地址，已保留当前线路"
 
     fun imageSourceDescription(kind: ImageSourceDisplayPolicy.Kind, inSuccessfulList: Boolean): String = buildString {
-        append(kind.label).append("：当前选择，具体域名/IP已隐藏")
+        append(kind.label).append("：当前选择")
         if (!inSuccessfulList) append("（当前项不在测速成功列表中，不代表测速成功）")
     }
 }

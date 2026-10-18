@@ -1,7 +1,9 @@
 package com.zycomic.app.ui.browse
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +33,7 @@ fun BrowseTabCapsule(
     horizontalPadding: Dp = 12.dp,
     verticalPadding: Dp = 7.dp,
     fontSize: TextUnit = 12.sp,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     val platformAccent = rememberContentPlatformAccent(platform)
     val accent = if (isYuzongRank) MaterialTheme.colorScheme.primary else platformAccent
@@ -42,11 +45,13 @@ fun BrowseTabCapsule(
         else -> Color.White
     }
 
-    Box(
+    Row(
         modifier = modifier
             .clip(CircleShape)
             .background(background)
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = name,
@@ -56,5 +61,6 @@ fun BrowseTabCapsule(
             color = foreground,
             fontWeight = if (selected || isJmHome) FontWeight.SemiBold else FontWeight.Medium,
         )
+        trailingContent?.invoke()
     }
 }

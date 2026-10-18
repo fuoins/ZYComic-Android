@@ -45,8 +45,9 @@ fun LibraryHistoryToolbar(
     onSelectAll: () -> Unit,
     onInvertSelection: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior?,
+    history: Boolean = false,
 ) {
-    val slotWidth = 48.dp
+    val slotWidth = 40.dp
     val actions: @Composable RowScope.() -> Unit = {
         if (selectionMode) {
             ToolbarSlot(onClick = onSelectAll, description = "全选", icon = Icons.Outlined.SelectAll, width = slotWidth)
@@ -54,22 +55,28 @@ fun LibraryHistoryToolbar(
             ToolbarSlot(onClick = null, width = slotWidth)
             ToolbarSlot(onClick = null, width = slotWidth)
         } else {
-            ToolbarSlot(
-                onClick = if (searchSupported) ({ onChangeSearchQuery("") }) else null,
-                description = if (searchQuery == null) "搜索" else "清除搜索",
-                icon = if (searchQuery == null) Icons.Outlined.Search else Icons.Outlined.Close,
-                width = slotWidth,
-            )
-            ToolbarSlot(
-                onClick = onRefresh.takeIf { refreshSupported },
-                description = "刷新",
-                icon = Icons.Outlined.Refresh,
-                width = slotWidth,
-            )
-            if (filterSupported) {
-                ToolbarSlot(onClick = onFilter, description = "筛选", icon = Icons.Outlined.FilterList, width = slotWidth)
-            } else {
-                ToolbarSlot(onClick = null, width = slotWidth)
+            LibraryHistoryToolbarPolicy.leadingActions(history).forEach { action ->
+                when (action) {
+                    LibraryHistoryToolbarPolicy.Action.SEARCH -> ToolbarSlot(
+                        onClick = if (searchSupported) ({ onChangeSearchQuery("") }) else null,
+                        description = if (searchQuery == null) "搜索" else "清除搜索",
+                        icon = if (searchQuery == null) Icons.Outlined.Search else Icons.Outlined.Close,
+                        width = slotWidth,
+                    )
+                    LibraryHistoryToolbarPolicy.Action.REFRESH -> ToolbarSlot(
+                        onClick = onRefresh.takeIf { refreshSupported },
+                        description = "刷新",
+                        icon = Icons.Outlined.Refresh,
+                        width = slotWidth,
+                    )
+                    LibraryHistoryToolbarPolicy.Action.FILTER -> ToolbarSlot(
+                        onClick = onFilter.takeIf { filterSupported },
+                        description = "筛选",
+                        icon = Icons.Outlined.FilterList,
+                        width = slotWidth,
+                    )
+                    LibraryHistoryToolbarPolicy.Action.EMPTY -> ToolbarSlot(onClick = null, width = slotWidth)
+                }
             }
             ToolbarSlot(
                 onClick = onEnterSelection.takeIf { platform == ContentPlatform.MANWA },
@@ -79,7 +86,7 @@ fun LibraryHistoryToolbar(
             )
         }
         Box(
-            modifier = Modifier.width(112.dp).height(48.dp),
+            modifier = Modifier.width(100.dp).height(48.dp),
             contentAlignment = Alignment.Center,
         ) {
             ContentPlatformSelector(
@@ -123,7 +130,7 @@ private fun ToolbarSlot(
         contentAlignment = Alignment.Center,
     ) {
         if (onClick != null && icon != null) {
-            IconButton(onClick = onClick) {
+            IconButton(onClick = onClick, modifier = Modifier.width(width)) {
                 Icon(imageVector = icon, contentDescription = description)
             }
         }

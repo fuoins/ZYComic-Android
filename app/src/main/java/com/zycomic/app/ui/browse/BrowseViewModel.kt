@@ -126,7 +126,79 @@ class BrowseViewModel {
     private var jmWeekIssuesLoaded = false
     private var jmWeekIssuesJob: Job? = null
 
+    private val _jmPromoteSections = MutableStateFlow<List<JmSource.PromoteSection>>(emptyList())
+    val jmPromoteSections: StateFlow<List<JmSource.PromoteSection>> = _jmPromoteSections.asStateFlow()
+    private val _jmPromoteSectionsLoading = MutableStateFlow(false)
+    val jmPromoteSectionsLoading: StateFlow<Boolean> = _jmPromoteSectionsLoading.asStateFlow()
+    private val _jmPromoteSectionsError = MutableStateFlow<String?>(null)
+    val jmPromoteSectionsError: StateFlow<String?> = _jmPromoteSectionsError.asStateFlow()
+    private var jmPromoteSectionsLoaded = false
+    private var jmPromoteSectionsJob: Job? = null
+
     internal fun jmFiltersForTab(tab: Int): StateFlow<JmBrowsePolicy.Filters> = stateFor(tab).jmFilters.asStateFlow()
+
+    fun loadJmPromoteSections(retry: Boolean = false) {
+        if (_jmPromoteSectionsLoading.value || (jmPromoteSectionsLoaded && !retry)) return
+        jmPromoteSectionsJob?.cancel()
+        _jmPromoteSectionsLoading.value = true
+        _jmPromoteSectionsError.value = null
+        jmPromoteSectionsJob = scope.launch {
+            try {
+                _jmPromoteSections.value = JmSource.getPromoteSections()
+                jmPromoteSectionsLoaded = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _jmPromoteSectionsError.value = e.message ?: "JM 首页板块加载失败"
+            } finally {
+                _jmPromoteSectionsLoading.value = false
+            }
+        }
+    }
+
+    fun openJmPromoteSection(section: JmSource.PromoteSection, tab: Int = mainTab.value) {
+        if (tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
+        val filters = stateFor(tab).jmFilters.value
+        val route = com.zycomic.app.reader.JmBrowseParameters.promoteRoute(
+            type = section.type,
+            id = section.id,
+            slug = section.slug,
+            page = 1,
+            today = JmBrowsePolicy.today(),
+        )
+        val updated = when (route.path) {
+            "/serialization" -> filters.copy(
+                mode = JmBrowsePolicy.MODE_SERIALIZATION,
+                query = "",
+                serializationType = "all",
+                serializationDate = JmBrowsePolicy.today(),
+                promoteId = section.id,
+                promoteTitle = section.title,
+            )
+            "/promote_list" -> filters.copy(
+                mode = JmBrowsePolicy.MODE_PROMOTE_LIST,
+                query = "",
+                promoteId = section.id,
+                promoteTitle = section.title,
+            )
+            "/categories/filter" -> filters.copy(
+                mode = JmBrowsePolicy.MODE_CATEGORY,
+                query = "",
+                category = section.slug,
+                order = "mr",
+                promoteId = section.id,
+                promoteTitle = section.title,
+            )
+            else -> filters.copy(
+                mode = JmBrowsePolicy.MODE_UNAVAILABLE_SECTION,
+                query = "",
+                promoteId = section.id,
+                promoteTitle = section.title,
+            )
+        }
+        stateFor(tab).jmFilters.value = updated
+        refresh(tab)
+    }
 
     fun selectJmMode(mode: Int, tab: Int = mainTab.value) {
         if (mode !in setOf(JmBrowsePolicy.MODE_RECOMMENDATIONS, JmBrowsePolicy.MODE_CATEGORY, JmBrowsePolicy.MODE_WEEK, JmBrowsePolicy.MODE_SERIALIZATION) || tab !in tabs.indices || tabs[tab].platformId != ContentPlatform.JM) return
@@ -629,6 +701,7 @@ class BrowseViewModel {
                 previousFirstId = previousFirstId,
                 serializationType = filters.serializationType,
                 serializationDate = filters.serializationDate,
+                promoteId = filters.promoteId,
             )
             if (reqId != ts.jmRequestId) return
             if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return

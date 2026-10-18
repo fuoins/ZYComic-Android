@@ -159,6 +159,7 @@ fun HistoryScreen(
                 onSelectAll = vm::selectAll,
                 onInvertSelection = vm::invertSelection,
                 scrollBehavior = scrollBehavior,
+                history = true,
             )
         },
         bottomBar = {

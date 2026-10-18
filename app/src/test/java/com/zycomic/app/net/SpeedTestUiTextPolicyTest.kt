@@ -8,18 +8,15 @@ import org.junit.jupiter.api.Test
 
 class SpeedTestUiTextPolicyTest {
     @Test
-    fun `endpoint labels and selected image description do not disclose domain or IP`() {
-        assertEquals("线路端点 1", SpeedTestUiTextPolicy.lineEndpointLabel(0))
-        assertEquals("图源端点 3", SpeedTestUiTextPolicy.imageEndpointLabel(2))
+    fun `endpoint labels preserve domain and IP and image description does not claim they are hidden`() {
+        assertEquals("example.test · 192.0.2.1", SpeedTestUiTextPolicy.endpointLabel("example.test", "192.0.2.1"))
 
         val description = SpeedTestUiTextPolicy.imageSourceDescription(
             ImageSourceDisplayPolicy.Kind.MANUAL_PIN,
             inSuccessfulList = false,
         )
-        assertTrue(description.contains("具体域名/IP已隐藏"))
         assertTrue(description.contains("不代表测速成功"))
-        assertFalse(description.contains("example"))
-        assertFalse(description.contains("192.0.2.1"))
+        assertFalse(description.contains("已隐藏"))
     }
 
     @Test

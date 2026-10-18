@@ -2,6 +2,7 @@ package com.zycomic.app.ui.browse
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -270,10 +271,28 @@ fun BrowseScreen(
             val tabRowStateHolder = rememberSaveableStateHolder()
             tabRowStateHolder.SaveableStateProvider("category_tab_row_shared") {
                 val tabRowState = rememberLazyListState()
-                LaunchedEffect(pagerState.currentPage, tabs.size) {
-                    // 选中 tab 后插入的筛选图标 lazy 下标 = currentPage+1；滚动使其露出，不与固定管理按钮重叠
-                    runCatching {
-                        tabRowState.animateScrollToItem(pagerState.currentPage.coerceAtMost(tabs.lastIndex.coerceAtLeast(0)))
+                var recenterRequest by remember { mutableStateOf(0) }
+                LaunchedEffect(pagerState.currentPage, tabs.size, recenterRequest) {
+                    val target = pagerState.currentPage
+                    val targetTab = tabs.getOrNull(target) ?: return@LaunchedEffect
+                    val key = "tab_${targetTab.platformId.id}_${targetTab.id}"
+                    if (tabRowState.layoutInfo.visibleItemsInfo.none { it.key == key }) {
+                        tabRowState.animateScrollToItem(target)
+                    }
+                    androidx.compose.runtime.withFrameNanos { }
+                    val layout = tabRowState.layoutInfo
+                    val item = layout.visibleItemsInfo.firstOrNull { it.key == key }
+                    if (item != null) {
+                        tabRowState.animateScrollBy(
+                            BrowseTabCenteringPolicy.scrollDelta(
+                                item.offset,
+                                item.size,
+                                layout.viewportStartOffset,
+                                layout.viewportEndOffset,
+                                tabRowState.canScrollBackward,
+                                tabRowState.canScrollForward,
+                            ),
+                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -287,6 +306,7 @@ fun BrowseScreen(
                                 val selected = pagerState.currentPage == index
                                 val selectTab: () -> Unit = {
                                     if (item.isUngatedYuzongRank() || com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, item.platformId)) {
+                                        if (selected) recenterRequest++
                                         scope.launch {
                                             pagerState.animateScrollToPage(index)
                                             vm.selectMainTab(index)
@@ -461,6 +481,11 @@ private fun BrowseTabContent(
     val appending by vm.appendingForTab(page).collectAsState()
     val hasMore by vm.hasMoreForTab(page).collectAsState()
     val error by vm.errorForTab(page).collectAsState()
+    val jmFilters by vm.jmFiltersForTab(page).collectAsState()
+    val isJmHome = item?.id == BrowseTabStore.ID_JM_HOME && tabPlatform == ContentPlatform.JM
+    LaunchedEffect(isJmHome) {
+        if (isJmHome) vm.loadJmPromoteSections()
+    }
 
     // Pager 使用稳定的 Tab ID 作为 key，因此可保存的网格状态会随 Tab 排序保留在原 Tab。
     val gridState = rememberLazyGridState()
@@ -482,88 +507,153 @@ private fun BrowseTabContent(
         }
     }
 
-    var jmHomeControlsExpanded by remember(item?.id) { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             if (item?.id == BrowseTabStore.ID_JM_HOME && tabPlatform == ContentPlatform.JM) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { jmHomeControlsExpanded = !jmHomeControlsExpanded }) {
-                        Icon(
-                            imageVector = if (jmHomeControlsExpanded) Icons.Outlined.Tune else Icons.Outlined.FilterList,
-                            contentDescription = if (jmHomeControlsExpanded) "收起首页筛选类别" else "展开首页筛选类别",
-                            tint = rememberContentPlatformAccent(ContentPlatform.JM),
-                        )
-                    }
-                    if (jmHomeControlsExpanded) Text("首页筛选类别", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (jmHomeControlsExpanded) JmBrowseControls(vm, page)
+                JmBrowseControls(vm, page)
             }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                when {
-                    loading && mangas.isEmpty() -> MangaGridSkeleton(
-                        columns = if (gridColumns > 0) gridColumns else 3,
-                        displayMode = displayMode,
-                    )
-                    error != null && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
-                            TextButton(onClick = { vm.refresh() }) { Text("重试") }
-                        }
-                    }
-                    mangas.isEmpty() && !loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有漫画") }
-                    else -> Column(modifier = Modifier.fillMaxSize()) {
-                        PullToRefreshBox(
-                            isRefreshing = isRefreshing,
-                            onRefresh = {
-                                isRefreshing = true
-                                vm.refresh()
-                            },
-                            modifier = Modifier.weight(1f),
+            if (isJmHome && jmFilters.mode == JmBrowsePolicy.MODE_RECOMMENDATIONS) {
+                JmPromoteHomeContent(
+                    vm = vm,
+                    page = page,
+                    onOpenManga = onOpenManga,
+                )
+            } else {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        isJmHome && jmFilters.mode == JmBrowsePolicy.MODE_UNAVAILABLE_SECTION -> Box(
+                            modifier = Modifier.fillMaxSize().padding(24.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            LaunchedEffect(loading) {
-                                if (!loading) isRefreshing = false
+                            Text(
+                                "${jmFilters.promoteTitle} 暂未接入对应内容 API；当前不会将其伪装为漫画列表。",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        loading && mangas.isEmpty() -> MangaGridSkeleton(
+                            columns = if (gridColumns > 0) gridColumns else 3,
+                            displayMode = displayMode,
+                        )
+                        error != null && mangas.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(error ?: "加载失败", color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = { vm.refresh() }) { Text("重试") }
                             }
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
-                                state = gridState,
-                                contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.fillMaxSize(),
+                        }
+                        mangas.isEmpty() && !loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有漫画") }
+                        else -> Column(modifier = Modifier.fillMaxSize()) {
+                            PullToRefreshBox(
+                                isRefreshing = isRefreshing,
+                                onRefresh = {
+                                    isRefreshing = true
+                                    vm.refresh()
+                                },
+                                modifier = Modifier.weight(1f),
                             ) {
-                                items(gridItems, key = { it.second }) { (m, _) ->
-                                    MangaGridItem(
-                                        manga = m,
-                                        isJm = tabPlatform == ContentPlatform.JM,
-                                        displayMode = displayMode,
-                                        selected = selectionMode && m.id in selectedIds,
-                                        selectionMode = selectionMode,
-                                        onClick = {
-                                            if (selectionMode && tabPlatform == ContentPlatform.MANWA) {
-                                                onToggleSelect(m.id)
-                                            } else {
-                                                onOpenManga(if (tabPlatform == ContentPlatform.JM) "jm:${m.id}" else m.id)
-                                            }
-                                        },
-                                        onLongClick = { onLongClick(m.id) },
-                                    )
+                                LaunchedEffect(loading) {
+                                    if (!loading) isRefreshing = false
                                 }
-                                if (appending) {
-                                    item(span = { GridItemSpan(maxLineSpan) }) {
-                                        Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                                    state = gridState,
+                                    contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxSize(),
+                                ) {
+                                    items(gridItems, key = { it.second }) { (m, _) ->
+                                        MangaGridItem(
+                                            manga = m,
+                                            isJm = tabPlatform == ContentPlatform.JM,
+                                            displayMode = displayMode,
+                                            selected = selectionMode && m.id in selectedIds,
+                                            selectionMode = selectionMode,
+                                            onClick = {
+                                                if (selectionMode && tabPlatform == ContentPlatform.MANWA) {
+                                                    onToggleSelect(m.id)
+                                                } else {
+                                                    onOpenManga(if (tabPlatform == ContentPlatform.JM) "jm:${m.id}" else m.id)
+                                                }
+                                            },
+                                            onLongClick = { onLongClick(m.id) },
+                                        )
+                                    }
+                                    if (appending) {
+                                        item(span = { GridItemSpan(maxLineSpan) }) {
+                                            Row(modifier = Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                        }
+                                    } else if (!hasMore && mangas.isNotEmpty()) {
+                                        item(span = { GridItemSpan(maxLineSpan) }) {
+                                            Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
-                                } else if (!hasMore && mangas.isNotEmpty()) {
-                                    item(span = { GridItemSpan(maxLineSpan) }) {
-                                        Text("没有更多了", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JmPromoteHomeContent(
+    vm: BrowseViewModel,
+    page: Int,
+    onOpenManga: (String) -> Unit,
+) {
+    val sections by vm.jmPromoteSections.collectAsState()
+    val loading by vm.jmPromoteSectionsLoading.collectAsState()
+    val error by vm.jmPromoteSectionsError.collectAsState()
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp),
+    ) {
+        when {
+            loading && sections.isEmpty() -> Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            error != null && sections.isEmpty() -> Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { vm.loadJmPromoteSections(retry = true) }) { Text("重试") }
+            }
+            sections.isEmpty() -> Text("暂无首页板块", modifier = Modifier.padding(20.dp))
+            else -> sections.forEach { section ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { vm.openJmPromoteSection(section, page) }) { Text("更多") }
+                }
+                if (section.type == "library" || section.type == "novels") {
+                    Text(
+                        "该板块需要专用 ${if (section.type == "library") "creator_author/creator_work" else "/novels"} API 接入；不会将预览项伪装为漫画。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                } else {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(section.items, key = { "${section.id}_${it.id}" }) { manga ->
+                            Box(Modifier.width(118.dp)) {
+                                MangaGridItem(
+                                    manga = manga,
+                                    isJm = true,
+                                    displayMode = 2,
+                                    selected = false,
+                                    selectionMode = false,
+                                    onClick = { onOpenManga("jm:${manga.id}") },
+                                    onLongClick = {},
+                                )
                             }
                         }
                     }
@@ -579,6 +669,7 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
     val filters by vm.jmFiltersForTab(page).collectAsState()
     val tab = vm.tabs.getOrNull(page)
     val tabId = tab?.id.orEmpty()
+    val isHome = tabId == BrowseTabStore.ID_JM_HOME
     val isAllHot = tabId == JmBrowsePolicy.ALL_HOT_TAB_ID
     val mode = if (isAllHot) JmBrowsePolicy.MODE_CATEGORY else filters.mode
     val categoryOptions = remember { JmBrowsePolicy.categorySelections(JmSource.categoryOptions) }
@@ -592,10 +683,55 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = if (isHome) 0.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isHome) 0.dp else 4.dp),
     ) {
-        if (JmBrowsePolicy.showsModePicker(tabId)) {
+        if (isHome) {
+            val sections by vm.jmPromoteSections.collectAsState()
+            val accent = rememberContentPlatformAccent(ContentPlatform.JM)
+            val choices = buildList {
+                add(JmHomeChoice("每周必看", mode == JmBrowsePolicy.MODE_WEEK) { vm.selectJmMode(JmBrowsePolicy.MODE_WEEK, page) })
+                add(JmHomeChoice("每周连载更新", mode == JmBrowsePolicy.MODE_SERIALIZATION) { vm.selectJmMode(JmBrowsePolicy.MODE_SERIALIZATION, page) })
+                sections.filterNot { it.id == "26" }.forEach { section ->
+                    add(
+                        JmHomeChoice(
+                            label = section.title,
+                            selected = filters.promoteId == section.id && mode != JmBrowsePolicy.MODE_RECOMMENDATIONS,
+                            onClick = { vm.openJmPromoteSection(section, page) },
+                        ),
+                    )
+                }
+            }
+            choices.chunked((choices.size + 1) / 2).forEach { row ->
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().height(27.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items(row.size) { index ->
+                        val choice = row[index]
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(accent.copy(alpha = if (choice.selected) 0.25f else 0.11f))
+                                .clickable(onClick = choice.onClick)
+                                .padding(horizontal = 9.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                choice.label,
+                                color = accent,
+                                fontSize = 11.sp,
+                                fontWeight = if (choice.selected) FontWeight.SemiBold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (JmBrowsePolicy.showsModePicker(tabId)) {
             FilterSection("浏览方式") {
                 listOf(
                     "推荐" to JmBrowsePolicy.MODE_RECOMMENDATIONS,
@@ -609,7 +745,7 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
             }
         }
         when (mode) {
-            JmBrowsePolicy.MODE_CATEGORY -> {
+            JmBrowsePolicy.MODE_CATEGORY -> if (!isHome || filters.promoteId.isBlank()) {
                 FilterSection("分类") {
                     categoryOptions.forEach { (label, value) ->
                         FilterChip(text = label, selected = filters.category == value, onClick = { vm.updateJmFilters(page, category = value) })
@@ -671,10 +807,17 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                     }
                 }
             }
+            JmBrowsePolicy.MODE_PROMOTE_LIST, JmBrowsePolicy.MODE_UNAVAILABLE_SECTION -> Unit
             JmBrowsePolicy.MODE_SEARCH -> Text("搜索结果支持继续加载", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
+
+private data class JmHomeChoice(
+    val label: String,
+    val selected: Boolean,
+    val onClick: () -> Unit,
+)
 
 private val JmWeekTypes = listOf("日漫" to "manga", "韩漫" to "hanman", "其他" to "another")
 
