@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
-/** Parses confirmed fields only; never substitutes an album ID for a chapter ID. */
+/** Parses confirmed JM fields; album IDs are used as episode IDs only for an explicit empty series. */
 internal object JmResponseParser {
     data class WeekIssue(val id: String, val title: String)
     data class Chapter(val id: String, val name: String, val sort: Int)
@@ -64,11 +64,19 @@ internal object JmResponseParser {
         }
     }
 
-    fun chapters(album: JSONObject): Chapters {
+    fun chapters(album: JSONObject, singleChapterAlbumId: String? = null): Chapters {
         val series = album.optJSONArray("series")
             ?: throw IOException("JM /album 章节数据异常：缺少有效 series[]，请重试")
+        if (series.length() == 0) {
+            val albumId = singleChapterAlbumId?.let {
+                it.takeIf(::validId) ?: throw IOException("JM /album 专辑 ID 无效，无法创建单话")
+            }
+            return Chapters(
+                items = albumId?.let { listOf(Chapter(it, "第1话", 1)) }.orEmpty(),
+                warning = null,
+            )
+        }
         var skipped = 0
-        var missingNames = 0
         var missingSorts = 0
         val items = (0 until series.length()).mapNotNull { index ->
             val item = series.optJSONObject(index)
@@ -77,13 +85,13 @@ internal object JmResponseParser {
                 skipped++
                 return@mapNotNull null
             }
-            val name = item!!.text("name").ifBlank {
-                missingNames++
-                "章节 $id"
-            }
+            val sourceName = item!!.text("name")
             val sort = item.text("sort").toIntOrNull() ?: run {
                 missingSorts++
                 index + 1
+            }
+            val name = sourceName.takeIf(String::isNotBlank)?.let { "第${sort}话 $it" } ?: run {
+                "第${sort}话"
             }
             Chapter(id, name, sort)
         }
@@ -92,10 +100,19 @@ internal object JmResponseParser {
         }
         val warnings = buildList {
             if (skipped > 0) add("已跳过 $skipped 项无效章节")
-            if (missingNames > 0) add("$missingNames 项缺少名称，已使用章节 ID")
             if (missingSorts > 0) add("$missingSorts 项缺少有效排序，已使用返回顺序")
         }
         return Chapters(items, warnings.takeIf { it.isNotEmpty() }?.joinToString("；"))
+    }
+
+    fun chapterImages(payload: JSONObject): List<String> {
+        val images = payload.optJSONArray("images")
+            ?: throw IOException("JM /chapter 响应缺少已确认字段 images[]")
+        if (images.length() == 0) throw IOException("JM /chapter images[] 为空，没有可读图片")
+        return (0 until images.length()).map { index ->
+            (images.opt(index) as? String)?.trim()?.takeIf(String::isNotEmpty)
+                ?: throw IOException("JM /chapter images[$index] 不是有效图片文件名")
+        }
     }
 
     private fun validId(id: String): Boolean = id.matches(Regex("[0-9]+")) && id.any { it != '0' }

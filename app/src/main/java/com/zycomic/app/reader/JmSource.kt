@@ -213,7 +213,7 @@ object JmSource : HttpSource() {
         val album = getJson("/album", mapOf("id" to albumId)).asObject("/album")
         val title = album.optString("name").trim()
         if (title.isBlank()) throw IOException("JM /album 缺少已确认字段 name；未将不完整详情标记为可用")
-        val series = JmResponseParser.chapters(album)
+        val series = JmResponseParser.chapters(album, singleChapterAlbumId = albumId)
         val details = JmResponseParser.albumDetails(album)
         AlbumResult(
             manga = MangaDto(
@@ -252,7 +252,7 @@ object JmSource : HttpSource() {
         val album = getJson("/album", mapOf("id" to id)).asObject("/album")
         val updatedManga = if (fetchDetails) mangaFromAlbum(album, id, manga) else manga
         val updatedChapters = if (fetchChapters) {
-            parseChapters(album)
+            parseChapters(album, id)
         } else {
             chapters
         }
@@ -261,32 +261,21 @@ object JmSource : HttpSource() {
 
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val chapterId = chapterId(chapter.url) ?: throw IOException("无法从 JM 章节 URL 解析章节 ID")
-        val payload = getJson("/comic_read", mapOf("id" to chapterId)).asObject("/comic_read")
-        val images = payload.optJSONArray("images")
-            ?: throw IOException("JM /comic_read 响应缺少已确认字段 images[]")
-        if (images.length() == 0) throw IOException("JM /comic_read images[] 为空")
+        val payload = getJson("/chapter", mapOf("id" to chapterId)).asObject("/chapter")
+        val images = JmResponseParser.chapterImages(payload)
         val host = JmRouteManager.activeImageDomain
         if (host.isBlank()) throw IOException("JM 图源列表为空")
-        val scrambleThreshold = payload.optString("scramble_id").toIntOrNull()
-            ?: throw IOException("JM /comic_read 响应缺少有效整数字段 scramble_id")
-        return (0 until images.length()).map { index ->
-            val imageObject = images.optJSONObject(index)
-                ?: throw IOException("JM /comic_read images[$index] 不是对象")
-            val imageValue = imageObject.optString("image").trim()
-            if (imageValue.isBlank()) throw IOException("JM /comic_read images[$index] 缺少字段 image")
-            val originalUrl = try {
-                imageValue.toHttpUrl()
-            } catch (error: IllegalArgumentException) {
-                throw IOException("JM /comic_read images[$index].image 不是绝对 HTTP URL", error)
-            }
-            if (originalUrl.scheme != "http" && originalUrl.scheme != "https") {
-                throw IOException("JM /comic_read images[$index].image 必须使用 HTTP(S)")
-            }
-            // Keep the API's rotated path and query intact; only swap the static image host.
-            val url = originalUrl.newBuilder()
-                .host(host)
-                .removeAllQueryParameters("_jm_scramble")
-                .addQueryParameter("_jm_scramble", scrambleThreshold.toString())
+        return images.mapIndexed { index, imageName ->
+            val url = "https://$host".toHttpUrl().newBuilder()
+                .addPathSegment("media")
+                .addPathSegment("photos")
+                .addPathSegment(chapterId)
+                .addPathSegment(imageName.trim())
+                .apply {
+                    payload.optString("scramble_id").toIntOrNull()?.let { threshold ->
+                        addQueryParameter("_jm_scramble", threshold.toString())
+                    }
+                }
                 .build()
                 .toString()
             Page(index, url, url)
@@ -382,8 +371,8 @@ object JmSource : HttpSource() {
         )
     }
 
-    private fun parseChapters(album: JSONObject): List<SChapter> {
-        val series = JmResponseParser.chapters(album)
+    private fun parseChapters(album: JSONObject, albumId: String): List<SChapter> {
+        val series = JmResponseParser.chapters(album, singleChapterAlbumId = albumId)
         series.warning?.let { JmRouteManager.record("schema", "JM", it) }
         return series.items.map { item ->
             SChapter.create().apply {

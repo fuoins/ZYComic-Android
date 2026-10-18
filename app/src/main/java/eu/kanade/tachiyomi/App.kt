@@ -326,15 +326,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     android.util.Log.i("App", "VPN-only change: network stack refreshed, automatic retest disabled")
                     return@launch
                 }
-                // 2) 30s 内已在相同策略下测速成功则不重复测（避免冷启动回调与启动测速重复）
-                val fresh = System.currentTimeMillis() - com.zycomic.app.net.SpeedTester.lastRunAt < 30_000L
-                val sameStrategy = com.zycomic.app.net.SpeedTester.lastRunDirectStrategy ==
-                    com.zycomic.app.net.NetworkModule.shouldUseDirectStrategy()
-                if (fresh && sameStrategy) {
-                    android.util.Log.i("App", "network changed: reuse recent speed test, skip retest")
-                    return@launch
-                }
-                val r = com.zycomic.app.net.PlatformSpeedTestCoordinator.run(forceFresh = true)
+                // Share startup's completed/in-flight generation only for the same actual network.
+                // A real network/config change has a different key and must never be hidden by a timer.
+                val r = com.zycomic.app.net.PlatformSpeedTestCoordinator.run()
                 android.util.Log.i("App", "network changed retest done: ${r.joinToString { it.summary() }}")
             } catch (e: Exception) {
                 android.util.Log.w("App", "network changed retest failed: ${e.message}")
@@ -350,6 +344,26 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         try {
             val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                 as? android.net.ConnectivityManager ?: return
+            // Registration immediately replays the current networks. Seed the baseline so these
+            // initial notifications do not enqueue a second round behind the startup probes.
+            synchronized(networkRetestLock) {
+                observedNonVpnNetworks.clear()
+                cm.allNetworks.filterTo(observedNonVpnNetworks) { network ->
+                    cm.getNetworkCapabilities(network)?.let { caps ->
+                        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    } == true
+                }
+                val active = cm.activeNetwork
+                val vpn = active?.let(cm::getNetworkCapabilities)
+                    ?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                val underlying = when {
+                    active == null || vpn == null -> null
+                    !vpn -> setOf(active)
+                    else -> observedNonVpnNetworks.singleOrNull()?.let { setOf(it) }
+                }
+                lastDefaultNetworkState = DefaultNetworkState(active, vpn, underlying)
+            }
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) = scheduleNetworkRetest(
                     network,

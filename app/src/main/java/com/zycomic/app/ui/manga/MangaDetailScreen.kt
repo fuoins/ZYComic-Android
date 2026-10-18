@@ -460,7 +460,7 @@ fun MangaDetailScreen(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(MaterialTheme.colorScheme.surfaceVariant)
                                         .clickable {
-                                            onTagClick(tag.name)
+                                            if (vm.isJm) onSearchKeyword(tag.name) else onTagClick(tag.name)
                                             Toast.makeText(
                                                 context,
                                                 "已根据${tag.name}标签进行搜索",
@@ -476,34 +476,36 @@ fun MangaDetailScreen(
                                     )
                                 }
                             }
-                            val blockChipShape = RoundedCornerShape(8.dp)
-                            Box(
-                                modifier = Modifier
-                                    .clip(blockChipShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                                    .border(1.dp, MaterialTheme.colorScheme.primary, blockChipShape)
-                                    .clickable {
-                                        if (LoginGate.ensureLogin(context)) {
-                                            showAddBlacklistDialog = true
-                                        } else {
-                                            onRequireLogin()
+                            if (!vm.isJm) {
+                                val blockChipShape = RoundedCornerShape(8.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(blockChipShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                        .border(1.dp, MaterialTheme.colorScheme.primary, blockChipShape)
+                                        .clickable {
+                                            if (LoginGate.ensureLogin(context)) {
+                                                showAddBlacklistDialog = true
+                                            } else {
+                                                onRequireLogin()
+                                            }
                                         }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Add,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(2.dp))
+                                        Text(
+                                            "屏蔽标签+",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Filled.Add,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Spacer(Modifier.width(2.dp))
-                                    Text(
-                                        "屏蔽标签+",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
                                 }
                             }
                         }
@@ -733,7 +735,7 @@ fun MangaDetailScreen(
             },
         )
     }
-    if (showAddBlacklistDialog) {
+    if (!vm.isJm && showAddBlacklistDialog) {
         AddBlacklistDialog(
             tags = detailTags,
             adding = addingBlacklist,

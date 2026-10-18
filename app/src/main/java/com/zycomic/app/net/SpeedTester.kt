@@ -537,17 +537,25 @@ object SpeedTester {
 
     private fun lineTargets(): List<LineTarget> = RouteManager.lineHosts.flatMap { url ->
         val domain = lineDomain(url) ?: return@flatMap emptyList()
-        NetworkModule.resolveProbeIps(domain).map { ip -> LineTarget(DomainIp(domain, ip), url) }
+        DomainIpProbePolicy.endpoints(domain, NetworkModule.resolveProbeIps(domain))
+            .map { endpoint -> LineTarget(endpoint, url) }
     }.distinctBy { it.endpoint }
 
     private fun imgTargets(domains: List<String> = RouteManager.imgDomains): List<DomainIp> = domains.flatMap { domain ->
-        NetworkModule.resolveProbeIps(domain).map { ip -> DomainIp(domain, ip) }
+        DomainIpProbePolicy.endpoints(domain, NetworkModule.resolveProbeIps(domain))
     }.distinct()
 
     private suspend fun measureLineAtIp(client: OkHttpClient, target: LineTarget): ProbeOutcome {
         val routed = NetworkModule.newProbeClientForIp(client, target.endpoint.domain, target.endpoint.ip)
         return try {
-            measureLineOnce(routed, target.url)
+            measureLineOnce(routed, target.url).also { outcome ->
+                Log.i(
+                    TAG,
+                    "line endpoint domain=${target.endpoint.domain} ip=${target.endpoint.ip} " +
+                        "result=${if (outcome.delayMs < MAX) "ok" else outcome.failureCategory?.name ?: "failed"} " +
+                        "delayMs=${outcome.delayMs.takeIf { it < MAX } ?: "unavailable"}",
+                )
+            }
         } finally {
             routed.releaseProbe()
         }
@@ -556,7 +564,14 @@ object SpeedTester {
     private suspend fun measureImgAtIp(client: OkHttpClient, endpoint: DomainIp, samplePath: String?): ImgProbe {
         val routed = NetworkModule.newProbeClientForIp(client, endpoint.domain, endpoint.ip)
         return try {
-            measureImg(routed, endpoint.domain, samplePath)
+            measureImg(routed, endpoint.domain, samplePath).also { result ->
+                Log.i(
+                    TAG,
+                    "image endpoint domain=${endpoint.domain} ip=${endpoint.ip} " +
+                        "verdict=${result.verdict.name.lowercase(java.util.Locale.ROOT)} " +
+                        "delayMs=${result.delayMs.takeIf { it < MAX } ?: "unavailable"}",
+                )
+            }
         } finally {
             routed.releaseProbe()
         }
@@ -1053,10 +1068,7 @@ object SpeedTester {
             while (true) {
                 if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return@withContext (-1 to -1)
                 while (running.get()) delay(50)
-                if (StartupPlatformPolicy.state.value.useLastResult && reuseValidResults()) {
-                    return@withContext selectFastestLine(RouteManager.lastLineDelays) to
-                        (RouteManager.lastImgDelays.filterValues { it < MAX }.minByOrNull { it.value }?.key ?: -1)
-                }
+                if (StartupPlatformPolicy.state.value.useLastResult) requestPreviousImageResults()
 
                 val result = runAndApply(onProgress, onStageProgress)
                 if (!lastRunSkipped && lastCompletedConfigRevision == RouteManager.configRevision) {

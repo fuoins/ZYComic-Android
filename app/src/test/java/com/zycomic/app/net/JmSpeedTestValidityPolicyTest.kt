@@ -53,4 +53,38 @@ class JmSpeedTestValidityPolicyTest {
         assertFalse(valid(completed = 99L))
         assertFalse(valid(completed = null))
     }
+
+    private fun reusableImages(
+        fingerprint: String? = "images-and-ips",
+        network: String? = "direct",
+        delays: Map<String, Long> = imageDelays,
+        completed: Long? = 200L,
+    ) = JmSpeedTestValidityPolicy.canReuseImages(
+        fingerprint,
+        "images-and-ips",
+        network,
+        "direct",
+        delays,
+        images,
+        100L,
+        completed,
+    )
+
+    @Test
+    fun `image reuse does not depend on API lines or remote version`() {
+        assertTrue(reusableImages())
+        assertTrue(reusableImages(delays = mapOf("img.example" to Long.MAX_VALUE)))
+    }
+
+    @Test
+    fun `image cache requires matching hosts IP rules transport and complete results`() {
+        assertFalse(reusableImages(fingerprint = null))
+        assertFalse(reusableImages(fingerprint = "changed-image-ip"))
+        assertFalse(reusableImages(network = "vpn"))
+        assertFalse(reusableImages(delays = emptyMap()))
+        assertFalse(reusableImages(delays = mapOf("other.example" to 80L)))
+        assertFalse(reusableImages(delays = mapOf("img.example" to -1L)))
+        assertFalse(reusableImages(completed = null))
+        assertFalse(reusableImages(completed = 99L))
+    }
 }

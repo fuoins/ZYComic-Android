@@ -46,7 +46,7 @@ class JmResponseParserTest {
     fun `complete series keeps real chapter ids names and sort`() {
         val result = chapters("""[{"id":123,"name":"第一章","sort":"5"},{"id":"456","name":"第二章","sort":6}]""")
         assertEquals(listOf("123", "456"), result.items.map { it.id })
-        assertEquals(listOf("第一章", "第二章"), result.items.map { it.name })
+        assertEquals(listOf("第5话 第一章", "第6话 第二章"), result.items.map { it.name })
         assertEquals(listOf(5, 6), result.items.map { it.sort })
         assertNull(result.warning)
     }
@@ -54,10 +54,17 @@ class JmResponseParserTest {
     @Test
     fun `missing names and sort use safe display fallbacks`() {
         val result = chapters("""[{"id":123},{"id":"456","name":null,"sort":"bad"}]""")
-        assertEquals(listOf("章节 123", "章节 456"), result.items.map { it.name })
+        assertEquals(listOf("第1话", "第2话"), result.items.map { it.name })
         assertEquals(listOf(1, 2), result.items.map { it.sort })
-        assertTrue(result.warning!!.contains("2 项缺少名称"))
+        assertTrue(result.warning?.contains("缺少名称") != true)
         assertTrue(result.warning!!.contains("2 项缺少有效排序"))
+    }
+
+    @Test
+    fun `empty names with valid sort are normal chapters without warnings or ID suffixes`() {
+        val result = chapters("""[{"id":123,"name":"","sort":1},{"id":456,"name":null,"sort":2}]""")
+        assertEquals(listOf("第1话", "第2话"), result.items.map { it.name })
+        assertNull(result.warning)
     }
 
     @Test
@@ -76,12 +83,40 @@ class JmResponseParserTest {
     }
 
     @Test
+    fun `explicit empty series uses album id for Venera compatible single episode`() {
+        val result = JmResponseParser.chapters(
+            JSONObject("""{"series":[]}"""),
+            singleChapterAlbumId = "999",
+        )
+        assertEquals(listOf("999"), result.items.map { it.id })
+        assertEquals(listOf("第1话"), result.items.map { it.name })
+        assertEquals(listOf(1), result.items.map { it.sort })
+        assertNull(result.warning)
+    }
+
+    @Test
+    fun `chapter image parser accepts Venera filenames and reports empty image lists`() {
+        assertEquals(
+            listOf("001.jpg", "002.jpg"),
+            JmResponseParser.chapterImages(JSONObject("""{"images":[" 001.jpg ","002.jpg"]}""")),
+        )
+        listOf("{}", """{"images":[]}""", """{"images":[""]}""").forEach {
+            val error = assertThrows(IOException::class.java) { JmResponseParser.chapterImages(JSONObject(it)) }
+            assertTrue(error.message!!.contains("images"))
+        }
+    }
+
+    @Test
     fun `malformed series throws instead of fabricating album based chapters`() {
         listOf("{}", """{"id":"999","series":null}""", """{"series":{}}""").forEach {
             val error = assertThrows(IOException::class.java) { JmResponseParser.chapters(JSONObject(it)) }
             assertTrue(error.message!!.contains("series[]"))
             assertTrue(error.message!!.contains("重试"))
         }
+        val error = assertThrows(IOException::class.java) {
+            JmResponseParser.chapters(JSONObject("{}"), singleChapterAlbumId = "999")
+        }
+        assertTrue(error.message!!.contains("series[]"))
     }
 
     @Test

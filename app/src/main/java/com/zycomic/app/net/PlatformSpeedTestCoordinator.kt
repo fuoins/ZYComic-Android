@@ -26,9 +26,25 @@ object PlatformSpeedTestCoordinator {
     val progressText = _progressText.asStateFlow()
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
-    private data class RunKey(val policy: Long, val manwaConfig: Long, val jmConfig: Long)
-    private var completedKey: RunKey? = null
-    private fun currentKey() = RunKey(StartupPlatformPolicy.state.value.revision, RouteManager.configRevision, JmRouteManager.currentSpeedTestConfigRevision())
+    private var completedKey: SpeedTestRunKey? = null
+    private fun currentKey() = SpeedTestRunKey(
+        StartupPlatformPolicy.state.value.revision,
+        RouteManager.configRevision,
+        JmRouteManager.currentSpeedTestConfigRevision(),
+        currentNetworkIdentity(),
+    )
+
+    private fun currentNetworkIdentity(): String {
+        val manager = DevConfig.appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val active = manager?.activeNetwork
+        val underlying = manager?.allNetworks.orEmpty().filter { network ->
+            manager?.getNetworkCapabilities(network)?.let { caps ->
+                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            } == true
+        }.map { it.toString() }.sorted()
+        return "$active|$underlying|${NetworkModule.shouldUseDirectStrategy()}|${DevConfig.isFollowSystemVpnEnabled()}"
+    }
 
     suspend fun run(
         forceFresh: Boolean = false,
@@ -40,13 +56,14 @@ object PlatformSpeedTestCoordinator {
         DevConfig.awaitUsableRouteConfig()
         lock.withLock {
             val initialKey = currentKey()
-            if (!forceFresh && onlyPlatform == null && completedKey == initialKey) return@withLock _reports.value
+            if (SpeedTestRunPolicy.canSkip(completedKey, initialKey, forceFresh, onlyPlatform != null)) return@withLock _reports.value
             _running.value = true
             try {
                 // A changed toggle/config starts a new generation; never publish the old generation.
                 while (true) {
                     val policy = StartupPlatformPolicy.state.value
-                    val key = RunKey(policy.revision, RouteManager.configRevision, JmRouteManager.currentSpeedTestConfigRevision())
+                    val key = currentKey()
+                    val reuseImages = SpeedTestRunPolicy.canReuseImages(policy.useLastResult, forceFresh, initialKey, key, completedKey)
                     val result = mutableListOf<PlatformSpeedTestReport>()
                     for (platform in listOf(ContentPlatform.MANWA, ContentPlatform.JM)) {
                         if (key != currentKey()) break
@@ -58,23 +75,15 @@ object PlatformSpeedTestCoordinator {
                         if (enabled && requested) {
                             _progressText.value = if (platform == ContentPlatform.MANWA) "正在检测漫蛙线路与图源…" else "正在检测禁漫天堂线路与图源…"
                             try {
-                                val reused = !forceFresh && policy.useLastResult && when (platform) {
-                                    ContentPlatform.MANWA -> SpeedTester.reuseValidResults()
-                                    ContentPlatform.JM -> JmSpeedTester.reuseValidResults()
-                                }
-                                if (reused) {
-                                    status = "reused"
-                                    reason = "配置、候选与网络策略匹配"
+                                reason = if (reuseImages) "线路本次新测；仅复用匹配的图源结果" else "线路与图源本次重新测速"
+                                if (platform == ContentPlatform.MANWA) {
+                                    if (reuseImages) SpeedTester.requestPreviousImageResults()
+                                    SpeedTester.runAndApply(onProgress, onStageProgress)
+                                    status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
                                 } else {
-                                    reason = if (forceFresh || !policy.useLastResult) "已请求重新测速" else "缺少匹配当前配置/候选/网络策略的有效旧结果"
-                                    if (platform == ContentPlatform.MANWA) {
-                                        SpeedTester.runAndApply(onProgress, onStageProgress)
-                                        status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
-                                    } else {
-                                        val snapshot = JmSpeedTester.run()
-                                        status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
-                                        if (status == "incomplete") reason = "本轮结果未完整提交，保留当前选择"
-                                    }
+                                    val snapshot = JmSpeedTester.run(reuseImages = reuseImages)
+                                    status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
+                                    if (status == "incomplete") reason = "本轮结果未完整提交，保留当前选择"
                                 }
                             } catch (e: CancellationException) {
                                 throw e
@@ -128,9 +137,10 @@ object PlatformSpeedTestCoordinator {
             manualImage = JmRouteManager.pinnedImageDomain != null,
             lineCandidates = JmRouteManager.lineHosts.toList(),
             imageCandidates = JmRouteManager.imageDomains.toList(),
-            lineDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.lineDelaysMs,
-            imageDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.imageDelaysMs,
+            lineDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.lineIpDelaysMs.mapKeys { "${it.key.domain} [${it.key.ip}]" },
+            imageDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.mapKeys { "${it.key.domain} [${it.key.ip}]" },
             remoteVersion = JmRouteManager.state.value.remoteVersion,
+            imageStatus = if (status == "tested" && JmRouteManager.speedTestSnapshot.value.imageResultsReused) "reused" else status,
         )
     }
 

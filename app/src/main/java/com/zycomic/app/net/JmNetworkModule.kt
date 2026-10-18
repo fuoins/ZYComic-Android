@@ -18,8 +18,23 @@ object JmNetworkModule {
     private val confirmMutex = Mutex()
     private val confirmedHosts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    @Volatile private var selectedImageEndpoint: DomainIp? = null
+
+    val selectedImageIp: String?
+        get() = selectedImageEndpoint?.takeIf { endpoint ->
+            endpoint.domain.equals(JmRouteManager.activeImageDomain, true) &&
+                endpoint in JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs
+        }?.ip
+
     private val jmDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
+            selectedImageEndpoint?.takeIf { endpoint ->
+                endpoint.domain.equals(hostname, ignoreCase = true) &&
+                    JmRouteManager.imageDomains.any { it.equals(endpoint.domain, true) } &&
+                    endpoint in JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs
+            }?.let { endpoint ->
+                return listOf(InetAddress.getByName(endpoint.ip))
+            }
             val configured = JmRouteManager.resolveIp(hostname)
             if (configured.isNotEmpty()) {
                 return configured.mapNotNull { ip -> runCatching { InetAddress.getByName(ip) }.getOrNull() }
@@ -36,10 +51,12 @@ object JmNetworkModule {
         .writeTimeout(20, TimeUnit.SECONDS)
         .callTimeout(60, TimeUnit.SECONDS)
         .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
-        .dispatcher(okhttp3.Dispatcher().apply {
-            maxRequests = 16
-            maxRequestsPerHost = 8
-        })
+        .dispatcher(
+            okhttp3.Dispatcher().apply {
+                maxRequests = 16
+                maxRequestsPerHost = 8
+            },
+        )
         .cookieJar(cookieJar)
         .dns(jmDns)
         .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
@@ -63,6 +80,30 @@ object JmNetworkModule {
         .followRedirects(false)
         .followSslRedirects(false)
         .build()
+
+    /** Pin only an active JM sources2 hostname to its measured address; URL host/SNI remain unchanged. */
+    fun selectImageEndpoint(domain: String, ip: String): Boolean {
+        if (JmRouteManager.imageDomains.none { it.equals(domain, ignoreCase = true) }) return false
+        if (ip.isBlank()) return false
+        if (JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.keys.none {
+                it.domain.equals(domain, true) && it.ip.equals(ip.trim(), true)
+            }
+        ) {
+            return false
+        }
+        selectedImageEndpoint = DomainIp(domain, ip.trim())
+        return true
+    }
+
+    /** Forget the manual per-IP override and resume the configured JM DNS result. */
+    fun clearSelectedImageEndpoint() {
+        selectedImageEndpoint = null
+    }
+
+    /** The JM client has a dedicated pool; evict old sockets after changing a hostname's pinned IP. */
+    fun rebindImageEndpoint() {
+        runCatching { baseClient.connectionPool.evictAll() }
+    }
 
     /** /confirm is the only setup request; its cookies remain confined to [cookieJar]. */
     suspend fun ensureAgeCookie() {

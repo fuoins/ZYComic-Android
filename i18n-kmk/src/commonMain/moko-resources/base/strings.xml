@@ -261,5 +261,9 @@
     <string name="content_platform_filter_jm">禁漫向</string>
     <string name="startup_disable_manwa">不用漫蛙</string>
     <string name="startup_disable_jm">不用禁漫天堂</string>
-    <string name="startup_use_last_speed_test">默认使用上次测速结果</string>
+    <string name="startup_use_last_speed_test">默认使用上次图源测速结果</string>
+    <string name="startup_platform_settings_title">平台可用性</string>
+    <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
+    <string name="startup_platform_restart_toast">下次重启生效</string>
+    <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
 </resources>

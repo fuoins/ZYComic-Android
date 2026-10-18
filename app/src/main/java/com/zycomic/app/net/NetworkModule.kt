@@ -179,6 +179,9 @@ object NetworkModule {
     /** Create a one-address child client while retaining all transport and interceptor policy. */
     fun newProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient =
         client.newBuilder()
+            // Direct runtime traffic may deliberately remove SNI; endpoint probes must instead
+            // authenticate/route with the original URL hostname while pinning only the socket IP.
+            .sslSocketFactory(sniPreservingProbeSocketFactory, trustAllManager)
             .dns(object : Dns {
                 override fun lookup(requestedHost: String): List<InetAddress> =
                     if (requestedHost.equals(hostname, ignoreCase = true)) {
@@ -202,6 +205,7 @@ object NetworkModule {
         val builder = base.newBuilder()
         builder.interceptors().removeAll { it is ImageInterceptor }
         return builder
+            .sslSocketFactory(sniPreservingProbeSocketFactory, trustAllManager)
             .dns(object : Dns {
                 override fun lookup(requestedHost: String): List<InetAddress> =
                     if (requestedHost.equals(hostname, ignoreCase = true)) {
@@ -461,6 +465,14 @@ object NetworkModule {
         override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
     }
 
+    /** Per-IP probes connect to a pinned address but must retain the URL hostname for TLS SNI. */
+    private val sniPreservingProbeSocketFactory: SSLSocketFactory by lazy {
+        val delegate = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
+        }.socketFactory
+        SniRemovingSocketFactory(delegate, preserveHostname = true)
+    }
+
     private fun OkHttpClient.Builder.enableTrustAll(): OkHttpClient.Builder {
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
@@ -534,6 +546,7 @@ object NetworkModule {
      */
     private class SniRemovingSocketFactory(
         private val delegate: SSLSocketFactory,
+        private val preserveHostname: Boolean = false,
     ) : SSLSocketFactory() {
 
         override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
@@ -541,7 +554,7 @@ object NetworkModule {
 
         override fun createSocket(s: java.net.Socket?, host: String?, port: Int, autoClose: Boolean): java.net.Socket {
             val peerAddress = s?.inetAddress
-            val shouldOmitHostname = host != null &&
+            val shouldOmitHostname = !preserveHostname && host != null &&
                 DevConfig.getSniDomains().contains(host) &&
                 peerAddress != null &&
                 !NetworkModule.isInCloudflare(peerAddress)
@@ -577,6 +590,26 @@ object NetworkModule {
             val peerIp = socket.inetAddress?.hostAddress?.substringBefore('%')
             if (host == null) {
                 recordProbeSniDecision(socket, null, peerIp, false, false, "host_missing")
+                return
+            }
+            if (preserveHostname) {
+                // Observe client-side parameters only; this is not a wire ClientHello claim.
+                val before = runCatching { socket.sslParameters.serverNames?.size }.getOrNull()
+                var failure: String? = null
+                try {
+                    val parameters = socket.sslParameters
+                    parameters.serverNames = listOf(javax.net.ssl.SNIHostName(host))
+                    socket.sslParameters = parameters
+                } catch (error: Exception) {
+                    failure = error.javaClass.name
+                }
+                val after = runCatching { socket.sslParameters.serverNames?.size }.getOrNull()
+                recordProbeSniDecision(
+                    socket, host, peerIp, DevConfig.getSniDomains().contains(host),
+                    socket.inetAddress?.let(NetworkModule::isInCloudflare) == true,
+                    if (failure == null) "original_hostname_sni_requested" else "original_hostname_provider_default",
+                    before, after, after?.let { it == 0 }, failure,
+                )
                 return
             }
             val configuredDomainMatch = DevConfig.getSniDomains().contains(host)

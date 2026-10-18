@@ -23,7 +23,7 @@ class StartupPlatformPolicyTest {
     fun `resolve defaults to JM and substitutes a disabled platform`() {
         val defaults = State()
         val bothAvailable = StartupPlatformPolicy.transition(defaults, disableManwa = false)
-        val onlyManwa = StartupPlatformPolicy.transition(defaults, disableJm = true)
+        val onlyManwa = StartupPlatformPolicy.transition(bothAvailable, disableJm = true)
 
         assertEquals(ContentPlatform.JM, StartupPlatformPolicy.resolve(defaults, null))
         assertEquals(ContentPlatform.JM, StartupPlatformPolicy.resolve(defaults, ContentPlatform.MANWA))
@@ -33,16 +33,47 @@ class StartupPlatformPolicyTest {
     }
 
     @Test
-    fun `either disable switch takes priority and both platforms may remain enabled`() {
-        val jmDisabled = StartupPlatformPolicy.transition(State(), disableJm = true)
-        val manwaDisabled = StartupPlatformPolicy.transition(jmDisabled, disableManwa = true)
+    fun `a second disable that would leave no source is rejected without changing either switch`() {
+        val defaults = State()
+        val rejected = StartupPlatformPolicy.transition(defaults, disableJm = true)
+
+        assertFalse(StartupPlatformPolicy.canTransition(defaults, disableJm = true))
+        assertEquals(defaults, rejected)
+
+        val bothEnabled = StartupPlatformPolicy.transition(defaults, disableManwa = false)
+        val onlyManwa = StartupPlatformPolicy.transition(bothEnabled, disableJm = true)
+        val onlyJm = StartupPlatformPolicy.transition(bothEnabled, disableManwa = true)
+
+        assertTrue(StartupPlatformPolicy.canTransition(bothEnabled, disableJm = true))
+        assertEquals(State(disableManwa = false, disableJm = true, revision = 2), onlyManwa)
+        assertEquals(State(disableManwa = true, disableJm = false, revision = 2), onlyJm)
+        assertTrue(StartupPlatformPolicy.isEnabled(onlyManwa, ContentPlatform.MANWA))
+        assertFalse(StartupPlatformPolicy.isEnabled(onlyManwa, ContentPlatform.JM))
+        assertFalse(StartupPlatformPolicy.isEnabled(onlyJm, ContentPlatform.MANWA))
+        assertTrue(StartupPlatformPolicy.isEnabled(onlyJm, ContentPlatform.JM))
+    }
+
+    @Test
+    fun `both disable switches off means both sources are available`() {
         val bothEnabled = StartupPlatformPolicy.transition(State(), disableManwa = false)
+
+        assertFalse(bothEnabled.disableManwa)
+        assertFalse(bothEnabled.disableJm)
+        assertTrue(StartupPlatformPolicy.isEnabled(bothEnabled, ContentPlatform.MANWA))
+        assertTrue(StartupPlatformPolicy.isEnabled(bothEnabled, ContentPlatform.JM))
+    }
+
+    @Test
+    fun `disable changes preserve the other switch unless a source would be removed`() {
+        val bothEnabled = StartupPlatformPolicy.transition(State(), disableManwa = false)
+        val jmDisabled = StartupPlatformPolicy.transition(bothEnabled, disableJm = true)
+        val rejectedManwaDisable = StartupPlatformPolicy.transition(jmDisabled, disableManwa = true)
         val noMemory = StartupPlatformPolicy.transition(bothEnabled, useLastResult = false)
         val unchanged = StartupPlatformPolicy.transition(noMemory, useLastResult = false)
 
-        assertEquals(State(disableManwa = false, disableJm = true, revision = 1), jmDisabled)
-        assertEquals(State(disableManwa = true, disableJm = false, revision = 2), manwaDisabled)
         assertEquals(State(disableManwa = false, disableJm = false, revision = 1), bothEnabled)
+        assertEquals(State(disableManwa = false, disableJm = true, revision = 2), jmDisabled)
+        assertEquals(jmDisabled, rejectedManwaDisable)
         assertEquals(State(disableManwa = false, disableJm = false, useLastResult = false, revision = 2), noMemory)
         assertEquals(noMemory, unchanged)
     }

@@ -23,6 +23,9 @@ object StartupPlatformPolicy {
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+    private val _settingsState = MutableStateFlow(State())
+    /** Platform choices displayed in Settings; they apply to the live state after the next process start. */
+    val settingsState: StateFlow<State> = _settingsState.asStateFlow()
 
     @Volatile
     private var loaded = false
@@ -42,6 +45,7 @@ object StartupPlatformPolicy {
             useLastResult = preferences.getBoolean(KEY_USE_LAST_RESULT, true),
             revision = _state.value.revision,
         )
+        _settingsState.value = _state.value
         if (normalized.first != storedManwa || normalized.second != storedJm) {
             preferences.edit()
                 .putBoolean(KEY_DISABLE_MANWA, normalized.first)
@@ -51,17 +55,17 @@ object StartupPlatformPolicy {
         loaded = true
     }
 
-    fun setDisableManwa(disable: Boolean) {
-        update(disableManwa = disable)
-    }
+    /** Startup-wait controls apply immediately and become the next launch's saved configuration. */
+    fun setDisableManwa(disable: Boolean): Boolean = update(disableManwa = disable)
 
-    fun setDisableJm(disable: Boolean) {
-        update(disableJm = disable)
-    }
+    fun setDisableJm(disable: Boolean): Boolean = update(disableJm = disable)
 
-    fun setUseLastResult(use: Boolean) {
-        update(useLastResult = use)
-    }
+    /** Settings controls update only the saved configuration; the current process keeps its live policy. */
+    fun setSettingsDisableManwa(disable: Boolean): Boolean = updateSettings(disableManwa = disable)
+
+    fun setSettingsDisableJm(disable: Boolean): Boolean = updateSettings(disableJm = disable)
+
+    fun setUseLastResult(use: Boolean): Boolean = update(useLastResult = use)
 
     fun isEnabled(platform: ContentPlatform): Boolean = isEnabled(_state.value, platform)
 
@@ -84,17 +88,47 @@ object StartupPlatformPolicy {
         disableManwa: Boolean? = null,
         disableJm: Boolean? = null,
         useLastResult: Boolean? = null,
-    ) {
+    ): Boolean {
         check(loaded) { "StartupPlatformPolicy.load(context) must be called before setting platform preferences" }
         val previous = _state.value
         val next = transition(previous, disableManwa, disableJm, useLastResult)
-        if (next == previous) return
-        preferences.edit()
-            .putBoolean(KEY_DISABLE_MANWA, next.disableManwa)
-            .putBoolean(KEY_DISABLE_JM, next.disableJm)
-            .putBoolean(KEY_USE_LAST_RESULT, next.useLastResult)
-            .apply()
+        if (!canTransition(previous, disableManwa, disableJm)) return false
+        if (disableManwa == null && disableJm == null) {
+            val settingsNext = transition(_settingsState.value, useLastResult = useLastResult)
+            if (next == previous && settingsNext == _settingsState.value) return true
+            persist(settingsNext)
+            _state.value = next
+            _settingsState.value = settingsNext
+            return true
+        }
+        if (next == previous) return true
+        persist(next)
         _state.value = next
+        _settingsState.value = next
+        return true
+    }
+
+    @Synchronized
+    private fun updateSettings(
+        disableManwa: Boolean? = null,
+        disableJm: Boolean? = null,
+    ): Boolean {
+        check(loaded) { "StartupPlatformPolicy.load(context) must be called before setting platform preferences" }
+        val previous = _settingsState.value
+        val next = transition(previous, disableManwa, disableJm)
+        if (!canTransition(previous, disableManwa, disableJm)) return false
+        if (next == previous) return true
+        persist(next)
+        _settingsState.value = next
+        return true
+    }
+
+    private fun persist(state: State) {
+        preferences.edit()
+            .putBoolean(KEY_DISABLE_MANWA, state.disableManwa)
+            .putBoolean(KEY_DISABLE_JM, state.disableJm)
+            .putBoolean(KEY_USE_LAST_RESULT, state.useLastResult)
+            .apply()
     }
 
     /** Pure policy helpers, exposed for focused unit tests. */
@@ -106,14 +140,10 @@ object StartupPlatformPolicy {
     ): State {
         val manwa = disableManwa ?: state.disableManwa
         val jm = disableJm ?: state.disableJm
-        val normalized = when {
-            disableManwa == true -> true to false
-            disableJm == true -> false to true
-            else -> normalize(manwa, jm)
-        }
+        if (manwa && jm) return state
         val candidate = state.copy(
-            disableManwa = normalized.first,
-            disableJm = normalized.second,
+            disableManwa = manwa,
+            disableJm = jm,
             useLastResult = useLastResult ?: state.useLastResult,
         )
         return if (candidate.disableManwa == state.disableManwa &&
@@ -125,6 +155,12 @@ object StartupPlatformPolicy {
             candidate.copy(revision = state.revision + 1)
         }
     }
+
+    internal fun canTransition(
+        state: State,
+        disableManwa: Boolean? = null,
+        disableJm: Boolean? = null,
+    ): Boolean = !(disableManwa ?: state.disableManwa) || !(disableJm ?: state.disableJm)
 
     internal fun isEnabled(state: State, platform: ContentPlatform): Boolean = when (platform) {
         ContentPlatform.MANWA -> !state.disableManwa

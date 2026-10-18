@@ -541,9 +541,9 @@ class ReaderActivity : BaseActivity() {
                             JmReaderImageSourceList(
                                 maxHeight = dialogMaxHeight,
                                 testing = imgTesting,
-                                onSelect = { domain ->
+                                onSelect = { domain, ip ->
                                     showImgSourceDialog = false
-                                    switchImgSource(domain, "")
+                                    switchImgSource(domain, ip)
                                 },
                             )
                         } else {
@@ -789,7 +789,7 @@ class ReaderActivity : BaseActivity() {
     private fun JmReaderImageSourceList(
         maxHeight: androidx.compose.ui.unit.Dp,
         testing: Boolean,
-        onSelect: (String) -> Unit,
+        onSelect: (String, String) -> Unit,
     ) {
         val routeState by com.zycomic.app.net.JmRouteManager.state.collectAsState()
         val snapshot by com.zycomic.app.net.JmRouteManager.speedTestSnapshot.collectAsState()
@@ -814,7 +814,7 @@ class ReaderActivity : BaseActivity() {
             }
             item {
                 Text(
-                    "JM sources2 图源池；成功项按测速耗时排序",
+                    "JM sources2 图源池；成功项按测速耗时排序\n当前：${routeState.imageDomain} · ${com.zycomic.app.net.JmNetworkModule.selectedImageIp ?: "IP 自动"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -823,31 +823,75 @@ class ReaderActivity : BaseActivity() {
             if (domains.isEmpty()) {
                 item { Text("JM 当前没有可选图源", style = MaterialTheme.typography.bodySmall) }
             }
-            items(domains) { domain ->
-                val selected = domain.equals(routeState.imageDomain, ignoreCase = true)
-                val delay = com.zycomic.app.reader.JmReaderImageSourcePolicy.delayFor(domain, snapshot.imageDelaysMs)
-                Row(
-                    modifier = Modifier.fillMaxWidth()
-                        .clickable { onSelect(domain) }
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (selected) "● $domain" else "○ $domain",
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (selected) {
-                        Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+            val rankedEndpoints = com.zycomic.app.reader.JmReaderImageSourcePolicy.rankedEndpoints(
+                snapshot.imageIpDelaysMs,
+                snapshot.imageIpVerdicts.filterValues { it == com.zycomic.app.net.JmSpeedTester.ImgVerdict.OK }.keys,
+                routeState.imageDomains,
+            )
+            if (rankedEndpoints.isNotEmpty()) {
+                items(rankedEndpoints) { endpoint ->
+                    val selectedDomain = endpoint.domain.equals(routeState.imageDomain, ignoreCase = true)
+                    val selected = selectedDomain &&
+                        (
+                            com.zycomic.app.net.JmNetworkModule.selectedImageIp == null ||
+                                com.zycomic.app.net.JmNetworkModule.selectedImageIp.equals(endpoint.ip, ignoreCase = true)
+                            )
+                    val delay = com.zycomic.app.reader.JmReaderImageSourcePolicy.delayFor(endpoint, snapshot.imageIpDelaysMs)
+                    val verdict = snapshot.imageIpVerdicts.entries.firstOrNull {
+                        it.key.domain.equals(endpoint.domain, ignoreCase = true) && it.key.ip.equals(endpoint.ip, ignoreCase = true)
+                    }?.value
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { onSelect(endpoint.domain, endpoint.ip) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (selected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (selected) {
+                            Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Text(
+                            text = when {
+                                delay == null -> "未测"
+                                verdict == com.zycomic.app.net.JmSpeedTester.ImgVerdict.NO_IMAGE -> "无图片"
+                                delay == Long.MAX_VALUE -> "不可用"
+                                else -> "${delay}ms"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
-                    Text(
-                        text = when {
-                            delay == null -> "未测"
-                            delay == Long.MAX_VALUE -> "不可用"
-                            else -> "${delay}ms"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                }
+            } else {
+                items(domains) { domain ->
+                    val selected = domain.equals(routeState.imageDomain, ignoreCase = true)
+                    val delay = com.zycomic.app.reader.JmReaderImageSourcePolicy.delayFor(domain, snapshot.imageDelaysMs)
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { onSelect(domain, "") }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (selected) "● $domain" else "○ $domain",
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (selected) {
+                            Text("当前", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Text(
+                            text = when {
+                                delay == null -> "未测"
+                                delay == Long.MAX_VALUE -> "不可用"
+                                else -> "${delay}ms"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
         }
@@ -868,11 +912,22 @@ class ReaderActivity : BaseActivity() {
                 Toast.makeText(this, "JM 图源不在当前 sources2 候选池中", Toast.LENGTH_SHORT).show()
                 return
             }
+            if (ip.isBlank()) {
+                com.zycomic.app.net.JmNetworkModule.clearSelectedImageEndpoint()
+            } else if (!com.zycomic.app.net.JmNetworkModule.selectImageEndpoint(selectedDomain, ip)) {
+                Toast.makeText(this, "JM 图源 IP 不在当前 sources2 候选池中", Toast.LENGTH_SHORT).show()
+                return
+            }
             com.zycomic.app.net.JmRouteManager.selectImageDomain(selectedDomain)
-            val readerIntent = intent
-            finish()
-            startActivity(readerIntent)
-            Toast.makeText(this, "已切换 JM 图源: $selectedDomain", Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch(Dispatchers.IO) {
+                com.zycomic.app.net.JmNetworkModule.rebindImageEndpoint()
+                launch(Dispatchers.Main) {
+                    val readerIntent = intent
+                    finish()
+                    startActivity(readerIntent)
+                    Toast.makeText(this@ReaderActivity, "已切换 JM 图源: $selectedDomain${ip.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()}", Toast.LENGTH_SHORT).show()
+                }
+            }
             return
         }
         val rm = com.zycomic.app.net.RouteManager

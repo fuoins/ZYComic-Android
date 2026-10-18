@@ -43,8 +43,11 @@ import com.zycomic.app.net.ImageSourceDisplayPolicy
 import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTester
+import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.FilterChip
 import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun SettingsScreen() {
@@ -57,6 +60,9 @@ fun SettingsScreen() {
     var jmTesting by remember { mutableStateOf(false) }
     var jmTestError by remember { mutableStateOf<String?>(null) }
     val filterEnabled by vm.filterEnabled.collectAsState()
+    val platformSettings by StartupPlatformPolicy.settingsState.collectAsState()
+    val restartRequiredMessage = stringResource(KMR.strings.startup_platform_restart_toast)
+    val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     val allTags by vm.allTags.collectAsState()
     val addingBlacklist by vm.addingBlacklist.collectAsState()
     val blockedTags by vm.blockedTags.collectAsState()
@@ -123,6 +129,34 @@ fun SettingsScreen() {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
     ) {
         Text("设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+
+        SectionTitle(stringResource(KMR.strings.startup_platform_settings_title))
+        Text(
+            stringResource(KMR.strings.startup_platform_settings_summary),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(KMR.strings.startup_disable_manwa), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Switch(
+                checked = platformSettings.disableManwa,
+                onCheckedChange = { disable ->
+                    val accepted = StartupPlatformPolicy.setSettingsDisableManwa(disable)
+                    Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+                },
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(KMR.strings.startup_disable_jm), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Switch(
+                checked = platformSettings.disableJm,
+                onCheckedChange = { disable ->
+                    val accepted = StartupPlatformPolicy.setSettingsDisableJm(disable)
+                    Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+                },
+            )
+        }
 
         // 过滤屏蔽标签开关
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

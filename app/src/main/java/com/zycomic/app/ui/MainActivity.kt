@@ -515,6 +515,7 @@ fun AppContent(
             onClose = { closeDetail() },
             onOpenManga = openDetail,
             onSearchKeyword = { kw ->
+                if (bookId.startsWith("jm:")) searchProvider = SearchProvider.JM
                 searchKeyword = kw
                 detailStack.clear()
                 showSearch = true
@@ -668,10 +669,22 @@ private fun KomikkuSettingsDialog(
 @Composable
 private fun StartupPlatformSwitches() {
     val policy by StartupPlatformPolicy.state.collectAsState()
+    val context = LocalContext.current
+    val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     Column(modifier = Modifier.fillMaxWidth()) {
-        StartupSwitch(stringResource(KMR.strings.startup_disable_manwa), policy.disableManwa, StartupPlatformPolicy::setDisableManwa)
-        StartupSwitch(stringResource(KMR.strings.startup_disable_jm), policy.disableJm, StartupPlatformPolicy::setDisableJm)
-        StartupSwitch(stringResource(KMR.strings.startup_use_last_speed_test), policy.useLastResult, StartupPlatformPolicy::setUseLastResult)
+        StartupSwitch(stringResource(KMR.strings.startup_disable_manwa), policy.disableManwa) {
+            if (!StartupPlatformPolicy.setDisableManwa(it)) {
+                Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+        StartupSwitch(stringResource(KMR.strings.startup_disable_jm), policy.disableJm) {
+            if (!StartupPlatformPolicy.setDisableJm(it)) {
+                Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+        StartupSwitch(stringResource(KMR.strings.startup_use_last_speed_test), policy.useLastResult) {
+            StartupPlatformPolicy.setUseLastResult(it)
+        }
     }
 }
 

@@ -33,6 +33,12 @@ object JmRouteManager {
         val completedAtEpochMs: Long? = null,
         val remoteVersion: Int? = null,
         val configFingerprint: String? = null,
+        val imageConfigFingerprint: String? = null,
+        val imageNetworkPolicy: String? = null,
+        val imageResultsReused: Boolean = false,
+        val lineIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
+        val imageIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
+        val imageIpVerdicts: Map<DomainIp, JmSpeedTester.ImgVerdict> = emptyMap(),
     )
 
     data class LogEntry(
@@ -44,6 +50,7 @@ object JmRouteManager {
 
     private const val PREFS_NAME = "zycomic_jm_route"
     private const val KEY_SNAPSHOT = "speed_test_snapshot"
+    private const val KEY_IMAGE_SNAPSHOT = "image_speed_test_snapshot"
     private const val KEY_LOGS = "route_logs"
     private const val MAX_LOGS = 200
     private const val API_FAILURE_THRESHOLD = 3
@@ -65,6 +72,8 @@ object JmRouteManager {
     val state: StateFlow<State> = _state.asStateFlow()
     private val _speedTestSnapshot = MutableStateFlow(SpeedTestSnapshot())
     val speedTestSnapshot: StateFlow<SpeedTestSnapshot> = _speedTestSnapshot.asStateFlow()
+
+    @Volatile private var reusableImageSnapshot: SpeedTestSnapshot? = null
     private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
     val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
 
@@ -205,6 +214,7 @@ object JmRouteManager {
         )
         configRevision++
         _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null))
+        reusableImageSnapshot = decodeSnapshot(prefs.getString(KEY_IMAGE_SNAPSHOT, null))
         _logs.value = decodeLogs(prefs.getString(KEY_LOGS, null))
     }
 
@@ -256,6 +266,10 @@ object JmRouteManager {
             return false
         }
         _speedTestSnapshot.value = snapshot
+        if (isReusableImageSnapshotValid(snapshot)) {
+            reusableImageSnapshot = snapshot
+            prefs()?.edit()?.putString(KEY_IMAGE_SNAPSHOT, encodeSnapshot(snapshot))?.apply()
+        }
         persistSnapshot()
         if (_state.value.autoSelect) applyFastestLine()
         if (pinnedImageDomain == null) {
@@ -275,6 +289,48 @@ object JmRouteManager {
         if (!isSpeedTestSnapshotValid(snapshot)) return false
         return applySnapshot(snapshot, expectedPlatformRevision)
     }
+
+    /** API pools/versions do not invalidate otherwise identical image-host/IP results. */
+    fun currentImageConfigFingerprint(): String {
+        val text = buildString {
+            imageDomains.forEach { host ->
+                append(host.lowercase(Locale.ROOT)).append('=')
+                resolveIp(host).sorted().forEach { append(it).append(',') }
+                append('\n')
+            }
+        }
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    fun currentImageNetworkPolicy(): String =
+        "${DevConfig.isFollowSystemVpnEnabled()}|${NetworkModule.isSystemVpnActive()}"
+
+    fun reusableImageSnapshotOrNull(): SpeedTestSnapshot? =
+        reusableImageSnapshot?.takeIf(::isReusableImageSnapshotValid)
+
+    private fun isReusableImageSnapshotValid(snapshot: SpeedTestSnapshot): Boolean =
+        snapshot.imageIpDelaysMs.isNotEmpty() &&
+            snapshot.imageIpDelaysMs.keys == snapshot.imageIpVerdicts.keys &&
+            snapshot.imageIpDelaysMs.keys.all { endpoint -> imageDomains.any { it.equals(endpoint.domain, true) } } &&
+            snapshot.imageIpDelaysMs.all { (endpoint, delay) ->
+                delay >= 0L && when (snapshot.imageIpVerdicts[endpoint]) {
+                    JmSpeedTester.ImgVerdict.OK -> delay < Long.MAX_VALUE
+                    JmSpeedTester.ImgVerdict.NO_IMAGE, JmSpeedTester.ImgVerdict.UNREACHABLE -> delay == Long.MAX_VALUE
+                    null -> false
+                }
+            } &&
+            JmSpeedTestValidityPolicy.canReuseImages(
+                snapshot.imageConfigFingerprint,
+                currentImageConfigFingerprint(),
+                snapshot.imageNetworkPolicy,
+                currentImageNetworkPolicy(),
+                snapshot.imageDelaysMs,
+                imageDomains.map { it.lowercase(Locale.ROOT) }.toSet(),
+                snapshot.startedAtEpochMs,
+                snapshot.completedAtEpochMs,
+            )
 
     fun currentSpeedTestConfigRevision(): Long = configRevision
 
@@ -462,8 +518,21 @@ object JmRouteManager {
         put("completed", snapshot.completedAtEpochMs ?: JSONObject.NULL)
         put("version", snapshot.remoteVersion ?: JSONObject.NULL)
         put("configFingerprint", snapshot.configFingerprint ?: JSONObject.NULL)
+        put("imageConfigFingerprint", snapshot.imageConfigFingerprint ?: JSONObject.NULL)
+        put("imageNetworkPolicy", snapshot.imageNetworkPolicy ?: JSONObject.NULL)
         put("lines", JSONObject().apply { snapshot.lineDelaysMs.forEach { (host, delay) -> put(host, delay) } })
         put("images", JSONObject().apply { snapshot.imageDelaysMs.forEach { (host, delay) -> put(host, delay) } })
+        fun endpoints(delays: Map<DomainIp, Long>) = JSONArray().apply {
+            delays.forEach { (endpoint, delay) ->
+                put(
+                    JSONObject().put("host", endpoint.domain).put("ip", endpoint.ip).put("delay", delay).apply {
+                        snapshot.imageIpVerdicts[endpoint]?.let { put("verdict", it.name) }
+                    },
+                )
+            }
+        }
+        put("lineIps", endpoints(snapshot.lineIpDelaysMs))
+        put("imageIps", endpoints(snapshot.imageIpDelaysMs))
     }.toString()
 
     private fun decodeSnapshot(raw: String?): SpeedTestSnapshot = runCatching {
@@ -478,13 +547,31 @@ object JmRouteManager {
             }
             return result
         }
+        fun endpointDelays(key: String): Map<DomainIp, Long> {
+            val array = root.optJSONArray(key) ?: return emptyMap()
+            return (0 until array.length()).associate { index ->
+                val item = array.getJSONObject(index)
+                DomainIp(item.getString("host"), item.getString("ip")) to item.getLong("delay")
+            }
+        }
+        val imageIps = root.optJSONArray("imageIps")
+        val imageVerdicts = (0 until (imageIps?.length() ?: 0)).mapNotNull { index ->
+            val item = imageIps!!.getJSONObject(index)
+            val verdict = runCatching { JmSpeedTester.ImgVerdict.valueOf(item.getString("verdict")) }.getOrNull()
+            verdict?.let { DomainIp(item.getString("host"), item.getString("ip")) to it }
+        }.toMap()
         SpeedTestSnapshot(
             lineDelaysMs = delays("lines"),
             imageDelaysMs = delays("images"),
+            lineIpDelaysMs = endpointDelays("lineIps"),
+            imageIpDelaysMs = endpointDelays("imageIps"),
+            imageIpVerdicts = imageVerdicts,
             startedAtEpochMs = root.optLong("started").takeIf { it > 0 },
             completedAtEpochMs = root.optLong("completed").takeIf { it > 0 },
             remoteVersion = root.optInt("version", -1).takeIf { it >= 0 },
             configFingerprint = root.optString("configFingerprint").takeIf { it.isNotBlank() && it != "null" },
+            imageConfigFingerprint = root.optString("imageConfigFingerprint").takeIf { it.isNotBlank() && it != "null" },
+            imageNetworkPolicy = root.optString("imageNetworkPolicy").takeIf { it.isNotBlank() && it != "null" },
         )
     }.getOrDefault(SpeedTestSnapshot(remoteVersion = _state.value.remoteVersion))
 

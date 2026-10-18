@@ -2,6 +2,21 @@ package com.zycomic.app.net
 
 /** Pure equality gate shared by runtime reuse and JVM tests. */
 internal object JmSpeedTestValidityPolicy {
+    fun canReuseImages(
+        snapshotFingerprint: String?,
+        currentFingerprint: String,
+        snapshotNetworkPolicy: String?,
+        currentNetworkPolicy: String,
+        imageDelays: Map<String, Long>,
+        currentImages: Set<String>,
+        startedAtEpochMs: Long?,
+        completedAtEpochMs: Long?,
+    ): Boolean = snapshotFingerprint == currentFingerprint &&
+        snapshotNetworkPolicy == currentNetworkPolicy &&
+        currentImages.isNotEmpty() && imageDelays.keys == currentImages &&
+        imageDelays.values.all { it >= 0L } && startedAtEpochMs != null &&
+        completedAtEpochMs != null && completedAtEpochMs >= startedAtEpochMs
+
     fun isValid(
         snapshotVersion: Int?,
         currentVersion: Int?,
