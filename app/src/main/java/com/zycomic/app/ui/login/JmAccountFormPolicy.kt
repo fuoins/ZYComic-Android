@@ -36,7 +36,6 @@ internal object JmAccountFormPolicy {
         email: String,
         password: String,
         passwordConfirm: String,
-        gender: String,
     ): List<Pair<String, String>> {
         require(username.isNotBlank()) { "请输入用户名" }
         require(username.trim().length <= 15) { "用户名不能超过15个字符" }
@@ -44,13 +43,12 @@ internal object JmAccountFormPolicy {
         require(isSupportedEmail(normalizedEmail)) { "请输入有效的 Gmail 或 QQ 邮箱（不支持 + 别名）" }
         require(password.isNotBlank()) { "请输入密码" }
         require(password == passwordConfirm) { "两次输入的密码不一致" }
-        require(gender == "Male" || gender == "Female") { "请选择性别" }
         return listOf(
             "username" to username.trim(),
             "email" to normalizedEmail,
             "password" to password,
             "password_confirm" to passwordConfirm,
-            "gender" to gender,
+            "gender" to "Female",
         )
     }
 
@@ -58,12 +56,6 @@ internal object JmAccountFormPolicy {
         require(username.isNotBlank()) { "请输入用户名" }
         require(code.length == 6 && code.all { it in '0'..'9' }) { "请输入6位数字验证码" }
         return listOf("username" to username.trim(), "numcode" to code)
-    }
-
-    fun resendFields(username: String, password: String): List<Pair<String, String>> {
-        require(username.isNotBlank()) { "请输入用户名" }
-        require(password.isNotBlank()) { "请输入密码" }
-        return listOf("username" to username.trim(), "password" to password)
     }
 
     fun forgotFields(email: String): List<Pair<String, String>> {

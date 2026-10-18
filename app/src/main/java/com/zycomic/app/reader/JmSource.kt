@@ -57,7 +57,7 @@ object JmSource : HttpSource() {
         "美漫" to "meiman",
         "Cosplay" to "another_cosplay",
         "3D" to "3D",
-        "禁漫汉化组" to "禁漫漢化組",
+        "禁漫漢化組" to "禁漫漢化組",
     )
 
     /** Display label and the exact API value verified by the JM contract report. */
@@ -142,7 +142,7 @@ object JmSource : HttpSource() {
             when (mode) {
                 1 -> {
                     validateOrder(order)
-                    val normalizedCategory = category.trim()
+                    val normalizedCategory = category
                     if (normalizedCategory.isNotEmpty() && categoryOptions.none { it.second == normalizedCategory && it.second.isNotEmpty() }) {
                         throw IOException("JM 分类必须是已确认的 slug；不接受数字分类 ID 或未知值: $normalizedCategory")
                     }

@@ -323,11 +323,9 @@
     <string name="jm_change_password">修改禁漫密码</string>
     <string name="jm_email">注册邮箱</string>
     <string name="jm_confirm_password">确认密码</string>
-    <string name="jm_resend_password">注册密码（仅重发验证码时填写）</string>
     <string name="jm_activation_code">6 位邮箱验证码</string>
-    <string name="jm_resend_activation">重新发送激活邮件</string>
-    <string name="jm_gender_male">男性</string>
-    <string name="jm_gender_female">女性</string>
+    <string name="jm_resend_notice">恭喜你需要重新发送验证码了,直接使用新邮箱注册就好了,官方接口就是坏的.</string>
+    <string name="jm_registration_warning">禁漫本身的注册系统就是一坨💩,如果你要注册,请一次性的完成验证码填写的整套流程,如果你们没能完成,那么恭喜你,请再准备一个邮箱.</string>
     <string name="jm_registration_notice">用户名最多 15 个字符；邮箱仅支持 Gmail、QQ，不支持 + 别名。注册后请查收邮件并输入验证码激活。</string>
     <string name="jm_forgot_notice">服务端会将现有用户名和新密码发送到注册邮箱，不修改用户名。请用邮件中的用户名和新密码登录，登录后建议立即修改密码。邮件发送有 10 分钟冷却，请勿反复提交。</string>
     <string name="jm_back_to_login">返回用户名登录</string>

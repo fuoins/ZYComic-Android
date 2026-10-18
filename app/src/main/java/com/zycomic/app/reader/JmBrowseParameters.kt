@@ -19,8 +19,7 @@ internal object JmBrowseParameters {
     )
 
     fun confirmedPromoteCategory(slug: String): String? {
-        val value = slug.trim()
-        return value.takeIf { it in confirmedCategorySlugs }
+        return slug.takeIf { it in confirmedCategorySlugs }
     }
 
     fun hasComicPreview(type: String): Boolean = type == "promote" || type.contains("category_id")

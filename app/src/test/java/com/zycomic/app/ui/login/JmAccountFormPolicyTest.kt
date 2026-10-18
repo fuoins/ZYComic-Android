@@ -9,18 +9,18 @@ import org.junit.jupiter.api.Test
 
 class JmAccountFormPolicyTest {
     @Test
-    fun `registration sends five measured fields and accepts only supported non-plus email`() {
+    fun `registration always submits Female and accepts only supported non-plus email`() {
         val fields = JmAccountFormPolicy.registrationFields(
             username = "reader",
             email = "reader.name@gmail.com",
             password = "p4ssword",
             passwordConfirm = "p4ssword",
-            gender = "Female",
         )
         assertEquals(listOf("username", "email", "password", "password_confirm", "gender"), fields.map { it.first })
         assertEquals("reader.name@gmail.com", fields[1].second)
+        assertEquals("Female", fields.toMap()["gender"])
         assertThrows(IllegalArgumentException::class.java) {
-            JmAccountFormPolicy.registrationFields("reader", "reader+tag@gmail.com", "p4ssword", "p4ssword", "Female")
+            JmAccountFormPolicy.registrationFields("reader", "reader+tag@gmail.com", "p4ssword", "p4ssword")
         }
         assertThrows(IllegalArgumentException::class.java) {
             JmAccountFormPolicy.forgotFields("reader+tag@qq.com")
@@ -28,15 +28,16 @@ class JmAccountFormPolicyTest {
     }
 
     @Test
-    fun `activation requires six ASCII decimal digits and resend uses username plus password`() {
+    fun `activation sends only username and six ASCII decimal digits`() {
         assertEquals(listOf("username", "numcode"), JmAccountFormPolicy.activationFields("reader", "123456").map { it.first })
         assertThrows(IllegalArgumentException::class.java) {
             JmAccountFormPolicy.activationFields("reader", "١٢٣٤٥٦")
         }
-        assertEquals(
-            listOf("username" to "reader", "password" to "p4ssword"),
-            JmAccountFormPolicy.resendFields(" reader ", "p4ssword"),
-        )
+        listOf("", "12345", "1234567", "12345a").forEach { code ->
+            assertThrows(IllegalArgumentException::class.java) {
+                JmAccountFormPolicy.activationFields("reader", code)
+            }
+        }
         assertEquals(listOf("email" to "reader@qq.com"), JmAccountFormPolicy.forgotFields(" reader@qq.com "))
     }
 

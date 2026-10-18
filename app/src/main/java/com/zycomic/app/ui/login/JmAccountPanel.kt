@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -36,7 +37,6 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
     var confirmation by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    var gender by remember { mutableStateOf("Male") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -49,7 +49,7 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
         code = ""
         message = null
     }
-    fun submit(resend: Boolean = false) {
+    fun submit() {
         if (busy) return
         busy = true
         onBusyChanged(true)
@@ -57,33 +57,28 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
         failed = false
         scope.launch {
             try {
-                if (resend) {
-                    message = JmAccountApi.resendActivation(username, password)
-                    password = ""
-                } else {
-                    when (mode) {
-                        JmAccountMode.LOGIN -> {
-                            JmAccountLogin.login(username, password)
-                            password = ""
-                            onLoggedIn()
-                        }
-                        JmAccountMode.REGISTER -> {
-                            message = JmAccountApi.register(username, email, password, confirmation, gender)
-                            password = ""
-                            confirmation = ""
-                            mode = JmAccountMode.ACTIVATE
-                        }
-                        JmAccountMode.ACTIVATE -> {
-                            message = JmAccountApi.activate(username, code)
-                            password = ""
-                            code = ""
-                            mode = JmAccountMode.LOGIN
-                        }
-                        JmAccountMode.FORGOT -> {
-                            message = JmAccountApi.forgotPassword(email)
-                            password = ""
-                            mode = JmAccountMode.LOGIN
-                        }
+                when (mode) {
+                    JmAccountMode.LOGIN -> {
+                        JmAccountLogin.login(username, password)
+                        password = ""
+                        onLoggedIn()
+                    }
+                    JmAccountMode.REGISTER -> {
+                        message = JmAccountApi.register(username, email, password, confirmation)
+                        password = ""
+                        confirmation = ""
+                        mode = JmAccountMode.ACTIVATE
+                    }
+                    JmAccountMode.ACTIVATE -> {
+                        message = JmAccountApi.activate(username, code)
+                        password = ""
+                        code = ""
+                        mode = JmAccountMode.LOGIN
+                    }
+                    JmAccountMode.FORGOT -> {
+                        message = JmAccountApi.forgotPassword(email)
+                        password = ""
+                        mode = JmAccountMode.LOGIN
                     }
                 }
             } catch (error: CancellationException) {
@@ -115,22 +110,18 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
         if (mode == JmAccountMode.REGISTER || mode == JmAccountMode.FORGOT) {
             OutlinedTextField(value = email, onValueChange = { email = it }, enabled = !busy, label = { Text(stringResource(KMR.strings.jm_email)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
-        if (mode != JmAccountMode.FORGOT) {
-            OutlinedTextField(value = password, onValueChange = { password = it }, enabled = !busy, label = { Text(stringResource(if (mode == JmAccountMode.ACTIVATE) KMR.strings.jm_resend_password else KMR.strings.jm_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        if (mode == JmAccountMode.LOGIN || mode == JmAccountMode.REGISTER) {
+            OutlinedTextField(value = password, onValueChange = { password = it }, enabled = !busy, label = { Text(stringResource(KMR.strings.jm_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         }
         when (mode) {
             JmAccountMode.LOGIN -> Text(stringResource(KMR.strings.jm_password_login_notice), style = MaterialTheme.typography.bodySmall)
             JmAccountMode.REGISTER -> {
                 OutlinedTextField(value = confirmation, onValueChange = { confirmation = it }, enabled = !busy, label = { Text(stringResource(KMR.strings.jm_confirm_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Row {
-                    TextButton(onClick = { gender = "Male" }, enabled = !busy && gender != "Male") { Text(stringResource(KMR.strings.jm_gender_male)) }
-                    TextButton(onClick = { gender = "Female" }, enabled = !busy && gender != "Female") { Text(stringResource(KMR.strings.jm_gender_female)) }
-                }
                 Text(stringResource(KMR.strings.jm_registration_notice), style = MaterialTheme.typography.bodySmall)
             }
             JmAccountMode.ACTIVATE -> {
                 OutlinedTextField(value = code, onValueChange = { code = it }, enabled = !busy, label = { Text(stringResource(KMR.strings.jm_activation_code)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                TextButton(onClick = { submit(resend = true) }, enabled = !busy) { Text(stringResource(KMR.strings.jm_resend_activation)) }
+                Text(stringResource(KMR.strings.jm_resend_notice), color = Color.Red, style = MaterialTheme.typography.bodySmall)
             }
             JmAccountMode.FORGOT -> Text(stringResource(KMR.strings.jm_forgot_notice), style = MaterialTheme.typography.bodySmall)
         }
@@ -146,6 +137,9 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
             }
         } else {
             TextButton(onClick = { select(JmAccountMode.LOGIN) }, enabled = !busy) { Text(stringResource(KMR.strings.jm_back_to_login)) }
+        }
+        if (mode == JmAccountMode.LOGIN) {
+            Text(stringResource(KMR.strings.jm_registration_warning), color = Color.Red, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

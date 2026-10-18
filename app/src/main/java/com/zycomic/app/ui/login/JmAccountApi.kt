@@ -13,19 +13,15 @@ import java.io.IOException
 
 /** Account endpoints use only the isolated JM client and never persist submitted credentials. */
 internal object JmAccountApi {
-    suspend fun register(username: String, email: String, password: String, passwordConfirm: String, gender: String): String =
+    suspend fun register(username: String, email: String, password: String, passwordConfirm: String): String =
         postForm(
             "/register",
-            JmAccountFormPolicy.registrationFields(username, email, password, passwordConfirm, gender),
+            JmAccountFormPolicy.registrationFields(username, email, password, passwordConfirm),
             secrets = listOf(password, passwordConfirm),
         )
 
     suspend fun activate(username: String, code: String): String =
         postForm("/confirm", JmAccountFormPolicy.activationFields(username, code), secrets = listOf(code))
-
-    /** The measured resend contract is POST /confirm with username + password (not a separate path). */
-    suspend fun resendActivation(username: String, password: String): String =
-        postForm("/confirm", JmAccountFormPolicy.resendFields(username, password), secrets = listOf(password))
 
     /** This sends only the registered email; it does not rename the account or return credentials. */
     suspend fun forgotPassword(email: String): String =

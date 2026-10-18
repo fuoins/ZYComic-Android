@@ -10,6 +10,10 @@ class JmBrowseParametersTest {
         assertEquals("/categories/filter", route.path)
         assertEquals("禁漫漢化組", route.params["c"])
         assertEquals(null, JmBrowseParameters.confirmedPromoteCategory("禁漫汉化组"))
+        listOf(" 禁漫漢化組", "禁漫漢化組 ", "禁漫 汉化組", "998", "unknown").forEach { slug ->
+            assertEquals(null, JmBrowseParameters.confirmedPromoteCategory(slug))
+            assertEquals(null, JmBrowseParameters.promoteRoute("not_in_category_id", "998", slug, 1, 4).path)
+        }
     }
 
     @Test
