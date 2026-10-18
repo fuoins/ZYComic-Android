@@ -53,7 +53,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -623,7 +623,7 @@ private fun JmPromoteHomeContent(
                 TextButton(onClick = { vm.loadJmPromoteSections(retry = true) }) { Text("重试") }
             }
             sections.isEmpty() -> Text("暂无首页板块", modifier = Modifier.padding(20.dp))
-            else -> sections.forEach { section ->
+            else -> sections.filter { JmBrowsePolicy.isVisibleHomeSection(it.id, it.type, includeSerialization = true) }.forEach { section ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -683,51 +683,37 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+        modifier = Modifier.fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = if (isHome) 0.dp else 6.dp),
         verticalArrangement = Arrangement.spacedBy(if (isHome) 0.dp else 4.dp),
     ) {
         if (isHome) {
             val sections by vm.jmPromoteSections.collectAsState()
-            val accent = rememberContentPlatformAccent(ContentPlatform.JM)
             val choices = buildList {
                 add(JmHomeChoice("每周必看", mode == JmBrowsePolicy.MODE_WEEK) { vm.selectJmMode(JmBrowsePolicy.MODE_WEEK, page) })
                 add(JmHomeChoice("每周连载更新", mode == JmBrowsePolicy.MODE_SERIALIZATION) { vm.selectJmMode(JmBrowsePolicy.MODE_SERIALIZATION, page) })
-                sections.filterNot { it.id == "26" }.forEach { section ->
+                sections.filter { JmBrowsePolicy.isVisibleHomeSection(it.id, it.type) }.forEach { section ->
                     add(
                         JmHomeChoice(
                             label = section.title,
-                            selected = filters.promoteId == section.id && mode != JmBrowsePolicy.MODE_RECOMMENDATIONS,
+                            selected = JmBrowsePolicy.isSelectedHomeSection(mode, filters.promoteId, section.id),
                             onClick = { vm.openJmPromoteSection(section, page) },
                         ),
                     )
                 }
             }
-            choices.chunked((choices.size + 1) / 2).forEach { row ->
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().height(27.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    items(row.size) { index ->
-                        val choice = row[index]
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(accent.copy(alpha = if (choice.selected) 0.25f else 0.11f))
-                                .clickable(onClick = choice.onClick)
-                                .padding(horizontal = 9.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                choice.label,
-                                color = accent,
-                                fontSize = 11.sp,
-                                fontWeight = if (choice.selected) FontWeight.SemiBold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                choices.forEach { choice ->
+                    key(choice.label) {
+                        androidx.compose.material3.FilterChip(
+                            selected = choice.selected,
+                            onClick = choice.onClick,
+                            label = { Text(choice.label) },
+                        )
                     }
                 }
             }
@@ -781,7 +767,7 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                                 ?: if (filters.weekId.isBlank()) weekIssues.firstOrNull()?.title ?: "选择期数" else "选择期数",
                             options = weekIssues.map { it.title to it.id },
                             onSelected = { vm.updateJmFilters(page, weekId = it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(2.3f),
                         )
                         JmBrowseSelector(
                             title = "类型",
@@ -796,14 +782,14 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
             JmBrowsePolicy.MODE_SERIALIZATION -> {
                 val serializationTypes = listOf("全部" to "all", "日漫" to "manga", "韩漫" to "hanman")
                 val serializationDates = listOf("周一" to 1, "周二" to 2, "周三" to 3, "周四" to 4, "周五" to 5, "周六" to 6, "周日" to 7, "已完结" to 0)
-                FilterSection("类型") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     serializationTypes.forEach { (label, value) ->
-                        FilterChip(text = label, selected = filters.serializationType == value, onClick = { vm.updateJmFilters(page, serializationType = value) })
+                        JmChildCapsule(label, filters.serializationType == value) { vm.updateJmFilters(page, serializationType = value) }
                     }
                 }
-                FilterSection("更新日期") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     serializationDates.forEach { (label, value) ->
-                        FilterChip(text = label, selected = filters.serializationDate == value, onClick = { vm.updateJmFilters(page, serializationDate = value) })
+                        JmChildCapsule(label, filters.serializationDate == value) { vm.updateJmFilters(page, serializationDate = value) }
                     }
                 }
             }
@@ -822,6 +808,19 @@ private data class JmHomeChoice(
 private val JmWeekTypes = listOf("日漫" to "manga", "韩漫" to "hanman", "其他" to "another")
 
 @Composable
+private fun JmChildCapsule(label: String, selected: Boolean, onClick: () -> Unit) {
+    BrowseTabCapsule(
+        name = label,
+        platform = ContentPlatform.JM,
+        selected = selected,
+        horizontalPadding = 9.dp,
+        verticalPadding = 4.dp,
+        fontSize = 11.sp,
+        modifier = Modifier.clickable(onClick = onClick),
+    )
+}
+
+@Composable
 private fun JmBrowseSelector(
     title: String,
     selected: String,
@@ -831,9 +830,12 @@ private fun JmBrowseSelector(
 ) {
     var expanded by remember(title) { mutableStateOf(false) }
     Box(modifier = modifier) {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth(), enabled = options.isNotEmpty()) {
-            Text("$title：$selected", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        BrowseTabCapsule(
+            name = "$title：$selected",
+            platform = ContentPlatform.JM,
+            modifier = Modifier.fillMaxWidth().clickable(enabled = options.isNotEmpty()) { expanded = true },
+            horizontalPadding = 8.dp,
+        )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { (label, value) ->
                 DropdownMenuItem(

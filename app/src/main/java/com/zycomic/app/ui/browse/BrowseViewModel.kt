@@ -184,13 +184,14 @@ class BrowseViewModel {
             "/categories/filter" -> filters.copy(
                 mode = JmBrowsePolicy.MODE_CATEGORY,
                 query = "",
-                category = section.slug,
+                category = route.params.getValue("c"),
                 order = "mr",
                 promoteId = section.id,
                 promoteTitle = section.title,
             )
             else -> filters.copy(
-                mode = JmBrowsePolicy.MODE_UNAVAILABLE_SECTION,
+                mode = if (section.type.contains("category_id")) JmBrowsePolicy.MODE_CATEGORY else JmBrowsePolicy.MODE_UNAVAILABLE_SECTION,
+                category = section.slug,
                 query = "",
                 promoteId = section.id,
                 promoteTitle = section.title,
@@ -205,10 +206,12 @@ class BrowseViewModel {
         if (tabs[tab].id == JmBrowsePolicy.ALL_HOT_TAB_ID && mode != JmBrowsePolicy.MODE_CATEGORY) return
         val state = stateFor(tab)
         val current = state.jmFilters.value
-        if (current.mode == mode && current.query.isBlank()) return
+        if (current.mode == mode && current.query.isBlank() && current.promoteId.isBlank()) return
         state.jmFilters.value = current.copy(
             mode = mode,
             query = "",
+            promoteId = "",
+            promoteTitle = "",
             order = if (mode == JmBrowsePolicy.MODE_CATEGORY && current.order.isBlank()) "mr" else current.order,
             weekType = if (mode == JmBrowsePolicy.MODE_WEEK && current.weekType.isBlank()) "manga" else current.weekType,
         )
@@ -680,6 +683,11 @@ class BrowseViewModel {
         }
         try {
             var filters = JmBrowsePolicy.effectiveFilters(tabs[tab].id, ts.jmFilters.value)
+            if (filters.mode == JmBrowsePolicy.MODE_CATEGORY && filters.promoteId.isNotBlank()) {
+                check(com.zycomic.app.reader.JmBrowseParameters.confirmedPromoteCategory(filters.category) != null) {
+                    "JM 分类 slug 尚未确认：${filters.promoteTitle}；不接受数字分类 ID 或未知值，请重试"
+                }
+            }
             if (filters.mode == JmBrowsePolicy.MODE_WEEK && filters.weekId.isBlank()) {
                 val issues = JmSource.getWeekIssues()
                 if (reqId != ts.jmRequestId) return

@@ -9,6 +9,23 @@ import org.junit.jupiter.api.Test
 class JmBrowsePolicyTest {
 
     @Test
+    fun `home hides bookshelf novels and duplicate serialization entry`() {
+        assertFalse(JmBrowsePolicy.isVisibleHomeSection("1001", "library"))
+        assertFalse(JmBrowsePolicy.isVisibleHomeSection("1002", "novels"))
+        assertFalse(JmBrowsePolicy.isVisibleHomeSection("26", "promote"))
+        assertTrue(JmBrowsePolicy.isVisibleHomeSection("26", "promote", includeSerialization = true))
+        assertTrue(JmBrowsePolicy.isVisibleHomeSection("998", "not_in_category_id"))
+    }
+
+    @Test
+    fun `weekly selection never also highlights the previous primary section`() {
+        assertFalse(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_WEEK, "998", "998"))
+        assertFalse(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_SERIALIZATION, "998", "998"))
+        assertTrue(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_CATEGORY, "998", "998"))
+        assertFalse(JmBrowsePolicy.isSelectedHomeSection(JmBrowsePolicy.MODE_CATEGORY, "999", "998"))
+    }
+
+    @Test
     fun `all hot defaults to all categories and most liked order`() {
         assertEquals(
             JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, order = "tf", category = ""),

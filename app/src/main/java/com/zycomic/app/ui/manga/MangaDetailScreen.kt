@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -331,16 +332,23 @@ fun MangaDetailScreen(
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
-                                        .alpha(0.6f)
-                                        .clickable { onSearchKeyword(author) },
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .clickable { onSearchKeyword(author) }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                 ) {
                                     Icon(
                                         Icons.Outlined.PersonOutline,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                     )
                                     Spacer(Modifier.width(4.dp))
-                                    Text(author, style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        author,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    )
                                 }
                                 Spacer(Modifier.height(6.dp))
                             }
@@ -493,10 +501,9 @@ fun MangaDetailScreen(
 
                     // JM groups retain their authoritative namespace and each starts a new row.
                     if (vm.isJm) {
-                        JmTagGroup(stringResource(KMR.strings.jm_authors), d.jmAuthors, onSearchKeyword)
+                        JmTagGroup(stringResource(KMR.strings.jm_tags), d.tags.map { it.name }, onSearchKeyword)
                         JmTagGroup(stringResource(KMR.strings.jm_actors), d.jmActors, onSearchKeyword)
                         JmTagGroup(stringResource(KMR.strings.jm_works), d.jmWorks, onSearchKeyword)
-                        JmTagGroup(stringResource(KMR.strings.jm_tags), d.tags.map { it.name }, onSearchKeyword)
                     }
                     // Manwa tags keep their existing behavior.
                     if (!vm.isJm && d.tags.isNotEmpty()) {

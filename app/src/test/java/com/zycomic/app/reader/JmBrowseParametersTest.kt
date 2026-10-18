@@ -5,6 +5,23 @@ import org.junit.jupiter.api.Test
 
 class JmBrowseParametersTest {
     @Test
+    fun `translation group accepts only its evidence confirmed exact slug`() {
+        val route = JmBrowseParameters.promoteRoute("not_in_category_id", "998", "禁漫漢化組", 1, 4)
+        assertEquals("/categories/filter", route.path)
+        assertEquals("禁漫漢化組", route.params["c"])
+        assertEquals(null, JmBrowseParameters.confirmedPromoteCategory("禁漫汉化组"))
+    }
+
+    @Test
+    fun `numeric blank and unknown category slugs never generate a request route`() {
+        listOf("998", "5", "0", "unknown", "", "jm_hanhua", "禁漫汉化组").forEach { slug ->
+            val route = JmBrowseParameters.promoteRoute("not_in_category_id", "998", slug, 1, 4)
+            assertEquals(null, route.path)
+            assertEquals(emptyMap<String, String>(), route.params)
+        }
+    }
+
+    @Test
     fun `week filter starts at page one and never includes category order`() {
         assertEquals(
             mapOf("id" to "262", "type" to "manga", "page" to "1"),

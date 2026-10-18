@@ -28,6 +28,12 @@ internal object JmBrowsePolicy {
         val promoteTitle: String = "",
     )
 
+    fun isVisibleHomeSection(id: String, type: String, includeSerialization: Boolean = false): Boolean =
+        (includeSerialization || id != "26") && type !in setOf("library", "novels") && id !in setOf("1001", "1002")
+
+    fun isSelectedHomeSection(mode: Int, selectedId: String, sectionId: String): Boolean =
+        mode in setOf(MODE_CATEGORY, MODE_PROMOTE_LIST, MODE_UNAVAILABLE_SECTION) && selectedId == sectionId
+
     fun today(): Int = ((java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7) + 1
 
     fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID
