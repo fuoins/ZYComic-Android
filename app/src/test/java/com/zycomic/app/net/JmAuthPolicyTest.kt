@@ -15,7 +15,7 @@ class JmAuthPolicyTest {
         assertTrue(JmAuthPolicy.mayAttachJwt("/favorite", "GET", "api.test", listOf("api.test")))
         assertTrue(JmAuthPolicy.mayAttachJwt("/watch_list", "GET", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/forum", "GET", "api.test", listOf("api.test")))
-        assertFalse(JmAuthPolicy.mayAttachJwt("/watch_list", "POST", "api.test", listOf("api.test")))
+        assertTrue(JmAuthPolicy.mayAttachJwt("/watch_list", "POST", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/favorite", "GET", "redirect.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/watch_list/", "GET", "api.test", listOf("api.test")))
         assertTrue(JmAuthPolicy.mayAttachJwt("/chapter", "GET", "api.test", listOf("api.test")))
@@ -35,6 +35,17 @@ class JmAuthPolicyTest {
         assertFalse(JmAuthPolicy.mayAttachJwt("/daily_chk/extra", "POST", "api.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/daily", "GET", "redirect.test", listOf("api.test")))
         assertFalse(JmAuthPolicy.mayAttachJwt("/daily_chk", "POST", "redirect.test", listOf("api.test")))
+    }
+
+    @Test
+    fun `folder and history mutations authenticate only exact trusted API paths`() {
+        listOf("/favorite_folder", "/watch_list").forEach { path ->
+            assertTrue(JmAuthPolicy.mayAttachJwt(path, "POST", "api.test", listOf("api.test")))
+            assertFalse(JmAuthPolicy.mayAttachJwt(path, "POST", "redirect.test", listOf("api.test")))
+            assertFalse(JmAuthPolicy.mayAttachJwt("$path/", "POST", "api.test", listOf("api.test")))
+            assertFalse(JmAuthPolicy.mayAttachJwt(path, "DELETE", "api.test", listOf("api.test")))
+        }
+        assertFalse(JmAuthPolicy.mayAttachJwt("/favorite_folder", "GET", "api.test", listOf("api.test")))
     }
 
     @Test

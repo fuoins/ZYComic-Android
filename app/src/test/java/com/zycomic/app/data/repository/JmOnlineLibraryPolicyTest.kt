@@ -5,90 +5,184 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.IOException
 
 class JmOnlineLibraryPolicyTest {
     @Test
-    fun `all favorites are read-only GET requests with empty folder including ungrouped albums`() {
-        val byFavorites = JmOnlineLibraryPolicy.favoritesRequest(page = 1, order = "mr")
-        assertEquals("GET", byFavorites.method)
-        assertEquals("/favorite", byFavorites.path)
-        assertEquals(mapOf("folder_id" to "", "page" to "1", "o" to "mr"), byFavorites.queryParameters)
+    fun `favorites request includes requested folder order and page`() {
+        val request = JmOnlineLibraryPolicy.favoritesRequest(page = 1)
+        assertEquals("GET", request.method)
+        assertEquals("/favorite", request.path)
+        assertEquals(mapOf("folder_id" to "", "page" to "1", "o" to "mr"), request.queryParameters)
 
-        val byImages = JmOnlineLibraryPolicy.favoritesRequest(page = 3, order = "mp")
-        assertEquals("GET", byImages.method)
-        assertEquals(mapOf("folder_id" to "", "page" to "3", "o" to "mp"), byImages.queryParameters)
+        val folderRequest = JmOnlineLibraryPolicy.favoritesRequest(page = 3, order = "mp", folderId = "FID_7")
+        assertEquals(mapOf("folder_id" to "FID_7", "page" to "3", "o" to "mp"), folderRequest.queryParameters)
         assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoritesRequest(1, "unknown") }
+        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoritesRequest(0) }
     }
 
     @Test
-    fun `watch list is album-level GET without time or mutation parameters`() {
+    fun `favorite toggle supports comma separated IDs as multipart form field`() {
+        val request = JmOnlineLibraryPolicy.favoriteRequest("10,20,30")
+        assertEquals("POST", request.method)
+        assertEquals("/favorite", request.path)
+        assertEquals(mapOf("aid" to "10,20,30"), request.formParameters)
+        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoriteRequest("10,no") }
+    }
+
+    @Test
+    fun `favorite folder request fields match each documented operation exactly`() {
+        assertEquals(
+            mapOf("type" to "add", "folder_name" to "Reading", "folder_id" to "", "aid" to ""),
+            JmOnlineLibraryPolicy.favoriteFolderAddRequest("Reading").formParameters,
+        )
+        assertEquals(
+            mapOf("type" to "edit", "folder_id" to "FID_7", "folder_name" to "Later"),
+            JmOnlineLibraryPolicy.favoriteFolderEditRequest("FID_7", "Later").formParameters,
+        )
+        assertEquals(
+            mapOf("type" to "move", "folder_id" to "FID_7", "aid" to "10,20", "folder_name" to "Reading"),
+            JmOnlineLibraryPolicy.favoriteFolderMoveRequest("FID_7", "10,20", "Reading").formParameters,
+        )
+        assertEquals(
+            mapOf("type" to "del", "folder_id" to "FID_7"),
+            JmOnlineLibraryPolicy.favoriteFolderDeleteRequest("FID_7").formParameters,
+        )
+        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoriteFolderAddRequest(" ") }
+    }
+
+    @Test
+    fun `watch list reads pages and deletes by id using documented fields`() {
         val request = JmOnlineLibraryPolicy.historyRequest(page = 1)
         assertEquals("GET", request.method)
         assertEquals("/watch_list", request.path)
         assertEquals(mapOf("page" to "1"), request.queryParameters)
         assertEquals(20, JmOnlineLibraryPolicy.PAGE_SIZE)
+
+        val delete = JmOnlineLibraryPolicy.deleteHistoryRequest("1480008")
+        assertEquals("POST", delete.method)
+        assertEquals("/watch_list", delete.path)
+        assertEquals(mapOf("id" to "1480008"), delete.formParameters)
+        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.deleteHistoryRequest("bad") }
     }
 
     @Test
-    fun `list response failures are non-empty including code 200 API error messages`() {
-        val apiError = JmOnlineLibraryPolicy.listResponseError(
-            isSuccessful = true,
-            httpCode = 200,
-            apiErrorMessage = "账号需要重新登录",
+    fun `album lookup uses documented is favorite read endpoint`() {
+        val request = JmOnlineLibraryPolicy.albumRequest("1480008")
+        assertEquals("GET", request.method)
+        assertEquals("/album", request.path)
+        assertEquals(mapOf("id" to "1480008"), request.queryParameters)
+    }
+
+    @Test
+    fun `favorite response parses items and uppercase FID folder list`() {
+        val (page, folders) = JmOnlineLibraryPolicy.parseFavoritesResponse(
+            """{"list":[{"id":"10","name":"Title","author":"A","description":"","image":""}],"folder_list":[{"FID":"FID_7","UID":"22","name":"Reading"}],"total":1,"count":1}""",
         )
-        assertEquals("JM 列表请求失败：账号需要重新登录", apiError)
-        assertTrue(apiError!!.isNotBlank())
+        assertEquals(listOf(item("10", "Title").copy(author = "A")), page.items)
+        assertEquals(1, page.total)
+        assertEquals(listOf(JmFavoriteFolder("FID_7", "Reading")), folders)
+    }
 
-        val httpError = JmOnlineLibraryPolicy.listResponseError(
-            isSuccessful = false,
-            httpCode = 503,
-            apiErrorMessage = null,
+    @Test
+    fun `valid empty favorites and watch responses are distinct from malformed responses`() {
+        val (favorites, folders) = JmOnlineLibraryPolicy.parseFavoritesResponse(
+            """{"list":[],"folder_list":[],"total":0,"count":0}""",
         )
-        assertEquals("JM 列表请求失败（HTTP 503）", httpError)
-        assertTrue(httpError!!.isNotBlank())
+        assertTrue(favorites.items.isEmpty())
+        assertTrue(folders.isEmpty())
+        assertEquals(0, favorites.total)
+
+        val history = JmOnlineLibraryPolicy.parseHistoryResponse("""{"list":[],"total":0}""")
+        assertTrue(history.items.isEmpty())
+        assertEquals(0, history.total)
+
+        assertThrows(IOException::class.java) {
+            JmOnlineLibraryPolicy.parseFavoritesResponse("""{"list":[],"total":0}""")
+        }
+        assertThrows(IOException::class.java) {
+            JmOnlineLibraryPolicy.parseHistoryResponse("""{"list":[]}""")
+        }
+        assertThrows(IOException::class.java) {
+            JmOnlineLibraryPolicy.parseFavoritesResponse("not json")
+        }
     }
 
     @Test
-    fun `request pages are one-based`() {
-        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.favoritesRequest(0, "mr") }
-        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.historyRequest(0) }
-    }
-
-    @Test
-    fun `pagination stops on a repeated out of range last page`() {
-        val existingIds = (1..45).map(Int::toString)
-        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = existingIds, nextPageIds = listOf("41", "42", "43", "44", "45")))
-        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 50, existingItemIds = existingIds, nextPageIds = listOf("41", "42", "43", "44", "45")))
-    }
-
-    @Test
-    fun `history pagination stops when out of range repeats the first page`() {
-        val firstPageIds = (1..20).map(Int::toString)
-        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 40, existingItemIds = firstPageIds, nextPageIds = firstPageIds))
-    }
-
-    @Test
-    fun `pagination continues only when next page has new albums under total`() {
-        val existingIds = (1..20).map(Int::toString)
-        val nextPageIds = (21..40).map(Int::toString)
-        assertTrue(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = existingIds, nextPageIds = nextPageIds))
-        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 40, existingItemIds = existingIds, nextPageIds = nextPageIds))
-        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = existingIds, nextPageIds = emptyList()))
-    }
-
-    @Test
-    fun `history merges local and remote by album id preserving local metadata and remote-only items`() {
-        val local = listOf(item("10", "local title"), item("20", "local only"))
-        val remote = listOf(item("10", "remote title"), item("30", "server only"))
+    fun `write responses accept documented success and reject API failure or incomplete JSON`() {
+        assertEquals(
+            "add",
+            JmOnlineLibraryPolicy.parseFavoriteWriteResponse(
+                """{"status":"ok","msg":"added","type":"add"}""",
+            ).type,
+        )
+        assertEquals(
+            "ok",
+            JmOnlineLibraryPolicy.parseFavoriteFolderWriteResponse(
+                """{"status":"ok","msg":"folder edited"}""",
+            ).status,
+        )
+        assertEquals(
+            "1",
+            JmOnlineLibraryPolicy.parseDeleteHistoryResponse(
+                """{"status":1,"msg":"deleted"}""",
+            ).status,
+        )
 
         assertEquals(
-            listOf(item("10", "local title"), item("20", "local only"), item("30", "server only")),
-            JmOnlineLibraryPolicy.mergeHistory(local, remote),
+            "folder not empty",
+            assertThrows(IOException::class.java) {
+                JmOnlineLibraryPolicy.parseFavoriteFolderWriteResponse(
+                    """{"status":"fail","msg":"folder not empty","code":400}""",
+                )
+            }.message,
+        )
+        assertThrows(IOException::class.java) {
+            JmOnlineLibraryPolicy.parseFavoriteWriteResponse("""{"msg":"missing status"}""")
+        }
+        assertThrows(IOException::class.java) {
+            JmOnlineLibraryPolicy.parseDeleteHistoryResponse("""{"status":0,"msg":"failed"}""")
+        }
+    }
+
+    @Test
+    fun `HTTP and decrypted API failures are not mistaken for successful writes or empty data`() {
+        assertEquals(
+            "JM 写操作失败（HTTP 503）",
+            JmOnlineLibraryPolicy.writeResponseError(false, 503, null),
+        )
+        assertEquals(
+            "JM 写操作失败：session expired",
+            JmOnlineLibraryPolicy.writeResponseError(true, 200, "session expired"),
+        )
+        assertEquals(
+            "JM 列表请求失败：账号需要重新登录",
+            JmOnlineLibraryPolicy.listResponseError(true, 200, "账号需要重新登录"),
+        )
+        assertEquals(
+            "JM 列表请求失败（HTTP 503）",
+            JmOnlineLibraryPolicy.listResponseError(false, 503, null),
         )
     }
 
     @Test
-    fun `history request error is not represented as an empty list`() {
+    fun `pagination clamps favorites and stops on repeated watch page`() {
+        assertEquals(4, JmOnlineLibraryPolicy.favoritePageCount(73))
+        assertEquals(0, JmOnlineLibraryPolicy.favoritePageCount(0))
+        assertEquals(4, JmOnlineLibraryPolicy.clampFavoritePage(99, 73))
+        assertEquals(1, JmOnlineLibraryPolicy.clampFavoritePage(2, 0))
+        assertThrows(IllegalArgumentException::class.java) { JmOnlineLibraryPolicy.clampFavoritePage(0, 30) }
+
+        val firstPageIds = (1..20).map(Int::toString)
+        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 40, existingItemIds = firstPageIds, nextPageIds = firstPageIds))
+        val nextPageIds = (21..40).map(Int::toString)
+        assertTrue(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = firstPageIds, nextPageIds = nextPageIds))
+        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 40, existingItemIds = firstPageIds, nextPageIds = nextPageIds))
+        assertFalse(JmOnlineLibraryPolicy.hasMore(total = 45, existingItemIds = firstPageIds, nextPageIds = emptyList()))
+    }
+
+    @Test
+    fun `failed loading remains distinct from a valid empty response`() {
         assertEquals(
             JmOnlineLibraryContentState.ERROR,
             JmOnlineLibraryPolicy.contentState(hasItems = false, loading = false, error = "JM API error"),

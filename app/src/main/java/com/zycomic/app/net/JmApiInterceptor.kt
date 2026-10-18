@@ -25,6 +25,8 @@ class JmApiInterceptor internal constructor(
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
+        val session = original.tag(JmRequestSession::class.java)
+        session?.let(JmRequestSession::requireCurrent)
         val path = original.url.encodedPath
         val host = original.url.host
         val isImage = JmAuthPolicy.isImage(path)
@@ -37,14 +39,14 @@ class JmApiInterceptor internal constructor(
             .header("Referer", REFERER)
             .header("X-Requested-With", PACKAGE_NAME)
             .header("Sec-Fetch-Storage-Access", "active")
-        if (allowAuthentication && recordRouteHealth && JmAuthPolicy.mayAttachJwt(
+        if (allowAuthentication && (session != null || recordRouteHealth) && JmAuthPolicy.mayAttachJwt(
                 path,
                 original.method,
                 host,
                 JmRouteManager.lineHosts.mapNotNull { runCatching { java.net.URI(it).host }.getOrNull() },
             )
         ) {
-            JmAuthStore.token()?.let { builder.header("Authorization", "Bearer $it") }
+            (session?.capturedToken ?: JmAuthStore.token())?.let { builder.header("Authorization", "Bearer $it") }
         }
         val timestamp = (System.currentTimeMillis() / 1000L).toString()
         if (!isImage && !isUnsigned) {
@@ -64,7 +66,9 @@ class JmApiInterceptor internal constructor(
 
         val raw = response.body!!.string()
         if (!response.isSuccessful) {
-            if (response.code == 401) JmAuthStore.clear()
+            if (response.code == 401) {
+                if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
+            }
             if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
@@ -81,7 +85,9 @@ class JmApiInterceptor internal constructor(
             .take(256)
             .takeIf { it.isNotBlank() }
         if (apiCode != 200) {
-            if (apiCode == 401) JmAuthStore.clear()
+            if (apiCode == 401) {
+                if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
+            }
             if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
             throw IOException("JM API rejected request (code=$apiCode)${apiMessage?.let { ": $it" }.orEmpty()}")
         }

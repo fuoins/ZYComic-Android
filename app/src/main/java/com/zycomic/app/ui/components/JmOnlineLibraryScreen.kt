@@ -1,6 +1,9 @@
 package com.zycomic.app.ui.components
 
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,16 +17,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +44,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -44,27 +55,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
+import com.zycomic.app.data.repository.JmFavoriteFolder
+import com.zycomic.app.data.repository.JmOnlineLibraryContentState
 import com.zycomic.app.data.repository.JmOnlineLibraryItem
 import com.zycomic.app.data.repository.JmOnlineLibraryPolicy
 import com.zycomic.app.data.repository.JmOnlineLibraryRepository
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.platform.ContentPlatform
+import eu.kanade.presentation.components.TabbedDialog
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import tachiyomi.presentation.core.components.material.Scaffold
+import androidx.compose.foundation.lazy.grid.items as gridItems
 
-/** Account history is album-level only; no remote mutation or invented reading timestamps. */
+/** JM controls and requests live in the same account-keyed composition, separate from Manwa state. */
 @Composable
 fun JmOnlineLibraryScreen(
     history: Boolean,
     onRequireLogin: () -> Unit,
     onOpenManga: (String) -> Unit,
-    onTotalChanged: (Int?) -> Unit = {},
-    onLoadedCountChanged: (Int) -> Unit = {},
-    modifier: Modifier = Modifier,
+    onSelectPlatform: (ContentPlatform) -> Unit,
 ) {
     val loggedIn by JmAuthStore.loggedInFlow.collectAsState()
     val accountName by JmAuthStore.accountNameFlow.collectAsState()
-    key(loggedIn, accountName, history) {
-        JmOnlineLibraryContent(history, loggedIn, onRequireLogin, onOpenManga, onTotalChanged, onLoadedCountChanged, modifier)
+    val sessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
+    key(loggedIn, accountName, sessionRevision, history) {
+        JmOnlineLibraryContent(history, loggedIn, onRequireLogin, onOpenManga, onSelectPlatform)
     }
 }
 
@@ -74,203 +92,461 @@ private fun JmOnlineLibraryContent(
     loggedIn: Boolean,
     onRequireLogin: () -> Unit,
     onOpenManga: (String) -> Unit,
-    onTotalChanged: (Int?) -> Unit,
-    onLoadedCountChanged: (Int) -> Unit,
-    modifier: Modifier,
+    onSelectPlatform: (ContentPlatform) -> Unit,
 ) {
     var order by remember { mutableStateOf("mr") }
-    var remoteItems by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
-    var localItems by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
+    var folderId by remember { mutableStateOf("") }
+    var folders by remember { mutableStateOf<List<JmFavoriteFolder>>(emptyList()) }
+    var items by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
     var total by remember { mutableStateOf<Int?>(null) }
     var page by remember { mutableIntStateOf(0) }
-    var remoteLoading by remember { mutableStateOf(false) }
-    var localLoading by remember { mutableStateOf(history) }
+    var loading by remember { mutableStateOf(loggedIn) }
     var hasMore by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var localError by remember { mutableStateOf<String?>(null) }
+    var operationError by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     var refreshRequest by remember { mutableIntStateOf(0) }
+    var loadGeneration by remember { mutableIntStateOf(0) }
+    var query by remember { mutableStateOf<String?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var grid by remember { mutableStateOf(false) }
+    var showFilter by remember { mutableStateOf(false) }
+    var moveIds by remember { mutableStateOf<Set<String>?>(null) }
+    var favoriteIds by remember { mutableStateOf<Set<String>?>(null) }
+    var removeIds by remember { mutableStateOf<Set<String>?>(null) }
+    var editFolder by remember { mutableStateOf<JmFavoriteFolder?>(null) }
+    var newFolder by remember { mutableStateOf(false) }
+    var deleteFolder by remember { mutableStateOf<JmFavoriteFolder?>(null) }
+    var folderName by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val items = remember(history, localItems, remoteItems) {
-        if (history) JmOnlineLibraryPolicy.mergeHistory(localItems, remoteItems) else remoteItems
+    val gridState = rememberLazyGridState()
+    val visibleItems = remember(items, query) {
+        val text = query.orEmpty().trim()
+        if (text.isEmpty()) items else items.filter { it.name.contains(text, true) || it.author.contains(text, true) }
     }
-    val loading = remoteLoading || localLoading
-    val visibleError = listOfNotNull(error, localError).joinToString("\n").ifBlank { null }
 
-    suspend fun loadPage() {
-        if (remoteLoading || !hasMore || !loggedIn) return
-        remoteLoading = true
+    fun exitSelection() {
+        selectionMode = false
+        selected = emptySet()
+    }
+    fun refresh() {
+        if (!busy) {
+            exitSelection()
+            refreshRequest++
+        }
+    }
+    fun toggleSelection(id: String) {
+        if (!busy) selected = JmLibrarySelectionPolicy.toggle(selected, id)
+    }
+    fun mutate(action: suspend () -> Unit) {
+        if (busy || !loggedIn) return
+        busy = true
+        showFilter = false
+        operationError = null
+        scope.launch {
+            try {
+                action()
+                exitSelection()
+                refreshRequest++
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                operationError = failure.message ?: "JM 操作失败，请刷新列表核对后再试"
+                // A batch can partially succeed. Reload before allowing another toggle.
+                exitSelection()
+                refreshRequest++
+            } finally {
+                busy = false
+            }
+        }
+    }
+    fun openFolderPicker(ids: Set<String>, favorite: Boolean) {
+        if (busy || ids.isEmpty() || !loggedIn) return
+        busy = true
+        operationError = null
+        scope.launch {
+            try {
+                // folder_list is returned by /favorite, never by a made-up folder-list endpoint.
+                folders = JmOnlineLibraryRepository.favorites(1, "mr").folders
+                if (favorite) favoriteIds = ids else moveIds = ids
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                operationError = failure.message ?: "JM 收藏夹加载失败"
+            } finally {
+                busy = false
+            }
+        }
+    }
+    suspend fun loadPage(generation: Int) {
+        if (!hasMore || !loggedIn || generation != loadGeneration) return
+        loading = true
         error = null
         try {
             val requestedPage = page + 1
-            val result = if (history) JmOnlineLibraryRepository.history(requestedPage) else JmOnlineLibraryRepository.favorites(requestedPage, order)
-            val known = remoteItems.mapTo(mutableSetOf()) { it.id }
+            val result = if (history) JmOnlineLibraryRepository.history(requestedPage) else JmOnlineLibraryRepository.favorites(requestedPage, order, folderId)
+            if (generation != loadGeneration) return
+            val known = items.mapTo(mutableSetOf()) { it.id }
             hasMore = JmOnlineLibraryPolicy.hasMore(result.total, known, result.items.map { it.id })
-            val novel = result.items.filter { known.add(it.id) }
-            remoteItems = remoteItems + novel
+            items = items + result.items.filter { known.add(it.id) }
+            if (!history) folders = result.folders
             total = result.total
             page = requestedPage
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
+            if (generation != loadGeneration) return
             error = if (!JmAuthStore.isLoggedIn) "请重新登录 JM 账号" else failure.message ?: "JM 列表加载失败"
         } finally {
-            remoteLoading = false
+            if (generation == loadGeneration) loading = false
         }
     }
 
-    LaunchedEffect(history, refreshRequest) {
-        if (!history) {
-            localItems = emptyList()
-            localLoading = false
-            localError = null
-            return@LaunchedEffect
-        }
-        localLoading = true
-        localError = null
-        try {
-            localItems = JmOnlineLibraryRepository.localHistory()
-        } catch (failure: Exception) {
-            if (failure is CancellationException) throw failure
-            localError = failure.message ?: "本地 JM 阅读历史加载失败"
-        } finally {
-            localLoading = false
-        }
-    }
-
-    // A single coroutine serializes initial load and paging. Loading changes must not cancel their own request.
-    LaunchedEffect(loggedIn, order, refreshRequest) {
-        remoteItems = emptyList()
+    // Initial/login load, refresh and paging share a single coroutine. No local history merge.
+    LaunchedEffect(order, folderId, refreshRequest) {
+        val generation = ++loadGeneration
+        items = emptyList()
         total = null
         page = 0
         hasMore = true
         error = null
-        onTotalChanged(null)
         if (!loggedIn) return@LaunchedEffect
         listState.scrollToItem(0)
-        loadPage()
+        gridState.scrollToItem(0)
+        loadPage(generation)
         snapshotFlow {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            val loadedCount = if (history) JmOnlineLibraryPolicy.mergeHistory(localItems, remoteItems).size else remoteItems.size
-            Triple(last, loadedCount, error == null)
+            val last = if (grid && !history) gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 else listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            Triple(last, visibleItems.size, error == null && !busy)
         }.collect { (last, size, healthy) ->
-            if (healthy && size > 0 && last >= (size - 3).coerceAtLeast(0) && hasMore) loadPage()
+            if (healthy && query.isNullOrBlank() && size > 0 && last >= (size - 3).coerceAtLeast(0) && hasMore) loadPage(generation)
         }
     }
-    LaunchedEffect(total, items.size) {
-        onTotalChanged(total)
-        onLoadedCountChanged(items.size)
-    }
+    BackHandler(enabled = selectionMode) { exitSelection() }
 
-    if (!loggedIn) {
-        if (!history) {
-            Column(
-                modifier = modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("登录 JM 账号后查看收藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onRequireLogin) { Text("JM 登录") }
-            }
-            return
-        }
-    }
-
-    Column(modifier = modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End,
-        ) {
-            if (!history) {
-                Text("排序", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                Spacer(Modifier.width(4.dp))
-                TextButton(onClick = { order = if (order == "mr") "mp" else "mr" }, enabled = !loading) {
-                    Text(if (order == "mr") "最新" else "最多图片", maxLines = 1)
+    Scaffold(
+        topBar = { scrollBehavior ->
+            LibraryHistoryToolbar(
+                platform = ContentPlatform.JM,
+                onSelectPlatform = onSelectPlatform,
+                searchQuery = query,
+                onChangeSearchQuery = { query = it },
+                titleContent = {
+                    Column {
+                        Text(if (history) "历史" else "收藏", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (!history) total?.let { Text("${items.size}/$it", style = MaterialTheme.typography.bodyMedium) }
+                    }
+                },
+                searchSupported = true,
+                refreshSupported = true,
+                filterSupported = !history,
+                onRefresh = ::refresh,
+                onFilter = { showFilter = true },
+                onEnterSelection = { if (loggedIn && !busy) selectionMode = true },
+                selectionMode = selectionMode,
+                selectionCount = selected.size,
+                onExitSelection = ::exitSelection,
+                onSelectAll = { if (!busy) selected = JmLibrarySelectionPolicy.selectAll(visibleItems.map { it.id }) },
+                onInvertSelection = { if (!busy) selected = JmLibrarySelectionPolicy.invert(selected, visibleItems.map { it.id }) },
+                scrollBehavior = scrollBehavior,
+                history = history,
+            )
+        },
+        bottomBar = {
+            if (selectionMode) {
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    if (history) {
+                        TextButton(enabled = selected.isNotEmpty() && !busy, onClick = {
+                            val ids = selected
+                            mutate { JmOnlineLibraryRepository.ensureFavorites(ids) }
+                        }) { Text("全部收藏夹") }
+                        TextButton(enabled = selected.isNotEmpty() && !busy, onClick = { openFolderPicker(selected, true) }) { Text("其他收藏夹") }
+                    } else {
+                        TextButton(enabled = selected.isNotEmpty() && !busy, onClick = { openFolderPicker(selected, false) }) { Text("移动收藏夹") }
+                    }
+                    TextButton(enabled = selected.isNotEmpty() && !busy, onClick = { removeIds = selected }) { Text(if (history) "删除" else "取消收藏", color = MaterialTheme.colorScheme.error) }
                 }
             }
-            IconButton(onClick = { refreshRequest++ }, enabled = !loading) {
-                Icon(Icons.Outlined.Refresh, contentDescription = "刷新 JM${if (history) "历史" else "收藏"}")
-            }
-        }
-        if (history && !loggedIn) {
-            TextButton(onClick = onRequireLogin, modifier = Modifier.align(Alignment.End)) {
-                Text("登录 JM 同步账号观看记录")
-            }
-        }
-        val contentState = JmOnlineLibraryPolicy.contentState(
-            hasItems = items.isNotEmpty(),
-            loading = loading,
-            error = visibleError,
-        )
-        when {
-            history && !loggedIn && items.isEmpty() && !localLoading -> Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(localError ?: "登录 JM 账号后可同步账号观看历史", color = if (localError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onRequireLogin) { Text("JM 登录") }
-            }
-            contentState == com.zycomic.app.data.repository.JmOnlineLibraryContentState.LOADING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            contentState == com.zycomic.app.data.repository.JmOnlineLibraryContentState.ERROR -> Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(visibleError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { refreshRequest++ }) { Text("重试") }
-            }
-            contentState == com.zycomic.app.data.repository.JmOnlineLibraryContentState.EMPTY -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (history) "暂无 JM 阅读历史" else "暂无 JM 收藏", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                items(items, key = { "jm-${if (history) "history" else "favorite"}-${it.id}" }) { item ->
-                    JmLibraryRow(item, onClick = { onOpenManga("jm:${item.id}") })
+        },
+    ) { contentPadding ->
+        Column(Modifier.fillMaxSize().padding(contentPadding)) {
+            if (busy) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally).size(24.dp))
+            operationError?.let { message ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { operationError = null }) { Text("关闭") }
                 }
-                item(key = "jm-page-footer") {
-                    when {
-                        loading -> Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(22.dp))
+            }
+            if (!history && folderId.isNotEmpty()) {
+                TextButton(onClick = {
+                    if (!busy) {
+                        folderId = ""
+                        exitSelection()
+                    }
+                }) { Text("${folders.find { it.id == folderId }?.name.orEmpty()} · 返回全部") }
+            }
+            val state = JmOnlineLibraryPolicy.contentState(items.isNotEmpty(), loading, error)
+            when {
+                !loggedIn -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text("登录 JM 账号后查看${if (history) "网络观看历史" else "收藏"}")
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onRequireLogin) { Text("JM 登录") }
+                }
+                state == JmOnlineLibraryContentState.LOADING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                state == JmOnlineLibraryContentState.ERROR -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = ::refresh) { Text("重试") }
+                }
+                state == JmOnlineLibraryContentState.EMPTY || visibleItems.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (!query.isNullOrBlank()) {
+                            "没有搜索结果（仅搜索已加载内容）"
+                        } else if (history) {
+                            "暂无 JM 网络观看历史"
+                        } else {
+                            "暂无 JM 收藏"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                grid && !history -> LazyVerticalGrid(columns = GridCells.Fixed(3), state = gridState, modifier = Modifier.weight(1f)) {
+                    gridItems(visibleItems, key = { it.id }) { item ->
+                        JmLibraryCard(item, item.id in selected, selectionMode, onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") }, onLongClick = {
+                            selectionMode = true
+                            toggleSelection(item.id)
+                        })
+                    }
+                    item { JmPageFooter(loading, error, hasMore, items.size, ::refresh) }
+                }
+                else -> LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                    items(visibleItems, key = { it.id }) { item ->
+                        JmLibraryRow(
+                            item = item,
+                            selected = item.id in selected,
+                            selectionMode = selectionMode,
+                            onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") },
+                            onLongClick = {
+                                selectionMode = true
+                                toggleSelection(item.id)
+                            },
+                            actions = {
+                                if (history && !selectionMode) {
+                                    IconButton(enabled = !busy, onClick = { openFolderPicker(setOf(item.id), true) }) { Icon(Icons.Outlined.FavoriteBorder, contentDescription = "收藏") }
+                                    IconButton(enabled = !busy, onClick = { removeIds = setOf(item.id) }) { Icon(Icons.Outlined.Delete, contentDescription = "删除") }
+                                }
+                            },
+                        )
+                    }
+                    item { JmPageFooter(loading, error, hasMore, items.size, ::refresh) }
+                }
+            }
+        }
+    }
+
+    if (showFilter) {
+        TabbedDialog(
+            onDismissRequest = { showFilter = false },
+            tabTitles = persistentListOf("排序", "显示", "管理"),
+        ) { tab ->
+            LazyColumn(Modifier.fillMaxWidth().height(360.dp).padding(16.dp)) {
+                when (tab) {
+                    0 -> {
+                        item {
+                            TextButton(enabled = !busy, onClick = {
+                                order = "mr"
+                                exitSelection()
+                            }) { Text("${if (order == "mr") "✓ " else ""}收藏时间") }
                         }
-                        visibleError != null -> TextButton(onClick = { refreshRequest++ }) {
-                            Text(visibleError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        item {
+                            TextButton(enabled = !busy, onClick = {
+                                order = "mp"
+                                exitSelection()
+                            }) { Text("${if (order == "mp") "✓ " else ""}漫画更新时间") }
                         }
-                        !hasMore -> Text("已加载 ${items.size}${if (history) "" else total?.let { "/$it" }.orEmpty()} 条", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        item {
+                            TextButton(enabled = !busy, onClick = {
+                                folderId = ""
+                                exitSelection()
+                            }) { Text("${if (folderId.isEmpty()) "✓ " else ""}全部收藏夹") }
+                        }
+                        items(folders, key = { it.id }) { folder ->
+                            TextButton(enabled = !busy, onClick = {
+                                folderId = folder.id
+                                exitSelection()
+                            }) { Text("${if (folderId == folder.id) "✓ " else ""}${folder.name}") }
+                        }
+                    }
+                    1 -> {
+                        item { TextButton(onClick = { grid = false }) { Text("${if (!grid) "✓ " else ""}列表") } }
+                        item { TextButton(onClick = { grid = true }) { Text("${if (grid) "✓ " else ""}网格") } }
+                    }
+                    2 -> {
+                        item {
+                            TextButton(enabled = loggedIn && !busy, onClick = {
+                                folderName = ""
+                                newFolder = true
+                            }) { Text("添加收藏夹") }
+                        }
+                        items(folders, key = { it.id }) { folder ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(folder.name, modifier = Modifier.weight(1f))
+                                TextButton(enabled = !busy, onClick = {
+                                    editFolder = folder
+                                    folderName = folder.name
+                                }) { Text("改名") }
+                                TextButton(enabled = !busy, onClick = { deleteFolder = folder }) { Text("删除") }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+    val pendingFolderIds = moveIds ?: favoriteIds
+    if (pendingFolderIds != null) {
+        val adding = favoriteIds != null
+        AlertDialog(
+            onDismissRequest = {
+                moveIds = null
+                favoriteIds = null
+            },
+            title = { Text(if (adding) "添加到收藏夹" else "移动收藏夹") },
+            text = {
+                LazyColumn(Modifier.height(300.dp)) {
+                    if (adding) {
+                        item {
+                            TextButton(onClick = {
+                                favoriteIds = null
+                                mutate { JmOnlineLibraryRepository.ensureFavorites(pendingFolderIds) }
+                            }) { Text("全部收藏夹（不移动已有收藏）") }
+                        }
+                    }
+                    items(folders, key = { it.id }) { folder ->
+                        TextButton(onClick = {
+                            moveIds = null
+                            favoriteIds = null
+                            mutate {
+                                if (adding) JmOnlineLibraryRepository.ensureFavorites(pendingFolderIds, folder) else JmOnlineLibraryRepository.moveFavorites(pendingFolderIds, folder)
+                            }
+                        }) { Text(folder.name) }
+                    }
+                    if (folders.isEmpty()) item { Text("暂无其他收藏夹，可在收藏页的筛选 → 管理中添加") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    moveIds = null
+                    favoriteIds = null
+                }) { Text("取消") }
+            },
+        )
+    }
+    removeIds?.let { ids ->
+        AlertDialog(
+            onDismissRequest = { removeIds = null },
+            title = { Text(if (history) "删除网络观看记录" else "取消收藏") },
+            text = { Text("确定${if (history) "删除" else "取消收藏"}选中的 ${ids.size} 项？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removeIds = null
+                    mutate {
+                        if (history) JmOnlineLibraryRepository.deleteHistory(ids) else JmOnlineLibraryRepository.toggleFavorites(ids)
+                    }
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { removeIds = null }) { Text("取消") } },
+        )
+    }
+    if (newFolder || editFolder != null) {
+        AlertDialog(
+            onDismissRequest = {
+                newFolder = false
+                editFolder = null
+            },
+            title = { Text(if (newFolder) "添加收藏夹" else "重命名收藏夹") },
+            text = { OutlinedTextField(value = folderName, onValueChange = { folderName = it }, singleLine = true, label = { Text("收藏夹名称") }) },
+            confirmButton = {
+                TextButton(enabled = folderName.isNotBlank(), onClick = {
+                    val target = editFolder
+                    val name = folderName.trim()
+                    newFolder = false
+                    editFolder = null
+                    mutate { if (target == null) JmOnlineLibraryRepository.addFolder(name) else JmOnlineLibraryRepository.renameFolder(target, name) }
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    newFolder = false
+                    editFolder = null
+                }) { Text("取消") }
+            },
+        )
+    }
+    deleteFolder?.let { folder ->
+        AlertDialog(
+            onDismissRequest = { deleteFolder = null },
+            title = { Text("删除收藏夹") },
+            text = { Text("确定删除「${folder.name}」？非空收藏夹需先移走漫画，服务器不会直接删除。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteFolder = null
+                    mutate {
+                        JmOnlineLibraryRepository.deleteFolder(folder)
+                        if (folderId == folder.id) folderId = ""
+                    }
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { deleteFolder = null }) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
-private fun JmLibraryRow(item: JmOnlineLibraryItem, onClick: () -> Unit) {
+private fun JmPageFooter(loading: Boolean, error: String?, hasMore: Boolean, count: Int, refresh: () -> Unit) {
+    when {
+        loading -> Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp)) }
+        error != null -> TextButton(onClick = refresh) { Text(error, color = MaterialTheme.colorScheme.error) }
+        !hasMore -> Text("已加载 $count 条", modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun JmLibraryCover(item: JmOnlineLibraryItem, modifier: Modifier) {
     val imageUrl = item.image.ifBlank { "/media/albums/${item.id}_3x4.jpg" }.let { raw ->
         if (raw.startsWith("https://") || raw.startsWith("http://")) raw else "https://${JmRouteManager.activeImageDomain}/${raw.trimStart('/')}"
     }
+    SubcomposeAsyncImage(
+        model = imageUrl,
+        imageLoader = JmCoverImageLoader.get(LocalContext.current),
+        contentDescription = item.name,
+        modifier = modifier.aspectRatio(0.75f).clip(RoundedCornerShape(8.dp)),
+        loading = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } },
+        error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("封面") } },
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun JmLibraryRow(item: JmOnlineLibraryItem, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, actions: @Composable () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SubcomposeAsyncImage(
-            model = imageUrl,
-            imageLoader = JmCoverImageLoader.get(LocalContext.current),
-            contentDescription = item.name,
-            modifier = Modifier.width(68.dp).aspectRatio(0.75f).clip(RoundedCornerShape(8.dp)),
-            loading = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } },
-            error = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("封面") } },
-        )
-        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+        if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
+        JmLibraryCover(item, Modifier.width(60.dp))
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
-            if (item.author.isNotBlank()) {
-                Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
-            }
-            if (item.description.isNotBlank()) {
-                Text(item.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp))
-            }
+            if (item.author.isNotBlank()) Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            if (item.description.isNotBlank()) Text(item.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
+        actions()
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun JmLibraryCard(item: JmOnlineLibraryItem, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Column(Modifier.padding(6.dp).background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        JmLibraryCover(item, Modifier.fillMaxWidth())
+        if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
+        Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
     }
 }

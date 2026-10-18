@@ -84,6 +84,15 @@ fun HistoryScreen(
         }
     }
 
+    if (platform == ContentPlatform.JM) {
+        JmOnlineLibraryScreen(
+            history = true,
+            onRequireLogin = onRequireLogin,
+            onOpenManga = onOpenManga,
+            onSelectPlatform = selectPlatform,
+        )
+        return
+    }
     val user by vm.user.collectAsState()
     val history by vm.history.collectAsState()
     val filtered by vm.filteredHistory.collectAsState()
@@ -227,12 +236,6 @@ fun HistoryScreen(
         },
     ) { contentPadding ->
         when {
-            platform == ContentPlatform.JM -> JmOnlineLibraryScreen(
-                history = true,
-                onRequireLogin = onRequireLogin,
-                onOpenManga = onOpenManga,
-                modifier = Modifier.fillMaxSize().padding(contentPadding),
-            )
             // 未登录
             user == null -> EmptyScreen(
                 message = "请先登录",

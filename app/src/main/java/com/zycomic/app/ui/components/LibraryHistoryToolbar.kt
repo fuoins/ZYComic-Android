@@ -79,7 +79,7 @@ fun LibraryHistoryToolbar(
                 }
             }
             ToolbarSlot(
-                onClick = onEnterSelection.takeIf { platform == ContentPlatform.MANWA },
+                onClick = onEnterSelection,
                 description = "多选",
                 icon = Icons.Outlined.Checklist,
                 width = slotWidth,

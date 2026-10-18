@@ -87,14 +87,21 @@ fun LibraryScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val platform by vm.currentPlatform.collectAsState()
-    var jmTotal by remember { mutableStateOf<Int?>(null) }
-    var jmLoaded by remember { mutableStateOf(0) }
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
         if (StartupPlatformPolicy.checkSelection(context, selected)) {
             if (selected == ContentPlatform.JM) vm.exitSelection()
             ContentPlatformPrefs.save("library", selected)
             vm.selectPlatform(selected)
         }
+    }
+    if (platform == ContentPlatform.JM) {
+        JmOnlineLibraryScreen(
+            history = false,
+            onRequireLogin = onRequireLogin,
+            onOpenManga = onOpenManga,
+            onSelectPlatform = selectPlatform,
+        )
+        return
     }
     val user by vm.user.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()
@@ -167,7 +174,7 @@ fun LibraryScreen(
                     "${currentUser.favoriteCount}/$max"
                 }
             } else {
-                jmTotal?.let { "$jmLoaded/$it" }
+                null
             }
             LibraryHistoryToolbar(
                 platform = platform,
@@ -237,14 +244,6 @@ fun LibraryScreen(
         },
     ) { contentPadding ->
         when {
-            platform == ContentPlatform.JM -> JmOnlineLibraryScreen(
-                history = false,
-                onRequireLogin = onRequireLogin,
-                onOpenManga = onOpenManga,
-                onTotalChanged = { jmTotal = it },
-                onLoadedCountChanged = { jmLoaded = it },
-                modifier = Modifier.fillMaxSize().padding(contentPadding),
-            )
             user == null -> EmptyScreen(
                 message = "请先登录",
                 modifier = Modifier.padding(contentPadding),

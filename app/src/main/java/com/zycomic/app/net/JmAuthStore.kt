@@ -33,6 +33,10 @@ object JmAuthStore {
     private val _loggedInFlow = MutableStateFlow(false)
     val loggedInFlow: StateFlow<Boolean> = _loggedInFlow.asStateFlow()
 
+    private val _sessionRevisionFlow = MutableStateFlow(0L)
+    val sessionRevisionFlow: StateFlow<Long> = _sessionRevisionFlow.asStateFlow()
+    val sessionRevision: Long get() = _sessionRevisionFlow.value
+
     val isLoggedIn: Boolean
         get() = token() != null
 
@@ -71,6 +75,7 @@ object JmAuthStore {
         accountUid = uid
         _accountNameFlow.value = username
         _loggedInFlow.value = true
+        _sessionRevisionFlow.value++
     }
 
     @Synchronized
@@ -90,6 +95,7 @@ object JmAuthStore {
         accountUid = null
         _accountNameFlow.value = null
         _loggedInFlow.value = false
+        _sessionRevisionFlow.value++
     }
 
     private fun getOrCreateKey(): SecretKey {
