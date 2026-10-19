@@ -95,6 +95,7 @@ import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.reader.ReaderLauncher
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.ErrorView
@@ -117,10 +118,14 @@ fun MangaDetailScreen(
     onSearchKeyword: (String) -> Unit,
     onTagClick: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     // 必须带 bookId 作为 key：相关推荐/搜索结果的漫画点击后只会换 bookId，
     // 不带 key 时 remember 会复用上一本的 ViewModel（页面停留在旧漫画，表现为"点了不跳转"），
     // 下面所有收集 vm 事件的 LaunchedEffect 也必须以 vm 为 key，否则会连着旧实例的流。
-    val vm = remember(bookId) { MangaDetailViewModel(bookId) }
+    val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
+    val detailSession = if (bookId.startsWith("jm:")) jmSessionRevision else null
+    val vm = remember(bookId, detailSession) { MangaDetailViewModel(bookId, context.applicationContext) }
+    DisposableEffect(vm) { onDispose { vm.dispose() } }
     val detail by vm.detail.collectAsState()
     val loading by vm.loading.collectAsState()
     val error by vm.error.collectAsState()
@@ -146,7 +151,6 @@ fun MangaDetailScreen(
         detail?.tags.orEmpty().map { it.name }.filter { it.isNotBlank() }.distinct()
     }
 
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val jmImageLoader = if (vm.isJm) {
         com.zycomic.app.ui.components.JmCoverImageLoader.get(context)
@@ -732,15 +736,12 @@ fun MangaDetailScreen(
                     Spacer(Modifier.height(96.dp))
                 }
 
-                // 7. 顶部栏（叠加，半透明背景渐变）
-                val topBarAlpha = if (scrollState.value > 100) 1f else scrollState.value / 100f
+                // 7. 顶部栏始终透明；statusBarsPadding 保留状态栏安全区域。
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = topBarAlpha * 0.95f),
-                        )
+                        .background(Color.Transparent)
                         .statusBarsPadding(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

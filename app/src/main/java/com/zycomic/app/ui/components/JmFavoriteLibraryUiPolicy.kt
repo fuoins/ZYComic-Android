@@ -35,6 +35,12 @@ internal object JmFavoriteLibraryUiPolicy {
 
     fun normalizeGridColumns(value: Int): Int = value.coerceIn(0, MAX_GRID_COLUMNS)
 
+    /** Search is intentionally a local filter over the list already loaded by JM endpoints. */
+    fun matchesLocalSearch(query: String, name: String, author: String): Boolean {
+        val text = query.trim()
+        return text.isEmpty() || name.contains(text, ignoreCase = true) || author.contains(text, ignoreCase = true)
+    }
+
     /** A stored value of zero matches Manwa's automatic setting; JM's comfortable default is three. */
     fun gridColumns(configuredColumns: Int = 0): Int {
         val normalized = normalizeGridColumns(configuredColumns)

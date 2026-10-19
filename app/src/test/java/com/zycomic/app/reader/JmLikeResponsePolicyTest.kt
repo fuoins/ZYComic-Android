@@ -1,7 +1,6 @@
 package com.zycomic.app.reader
 
 import org.json.JSONObject
-import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -9,12 +8,8 @@ import java.io.IOException
 
 class JmLikeResponsePolicyTest {
     @Test
-    fun `numeric code 200 accepts every non error status just like Venera`() {
-        listOf("success", "ok", "fail", "", "unknown").forEach { status ->
-            assertDoesNotThrow { JmLikeResponsePolicy.requireSuccess(JSONObject().put("code", 200).put("status", status)) }
-        }
-        assertDoesNotThrow { JmLikeResponsePolicy.requireSuccess(JSONObject("{\"code\":200}")) }
-        assertDoesNotThrow { JmLikeResponsePolicy.requireSuccess(JSONObject("{\"code\":200,\"status\":null}")) }
+    fun `only numeric code 200 and explicit success status confirm a like`() {
+        JmLikeResponsePolicy.requireSuccess(JSONObject("{\"code\":200,\"status\":\"success\"}"))
     }
 
     @Test
@@ -26,8 +21,17 @@ class JmLikeResponsePolicyTest {
     }
 
     @Test
-    fun `success and ok never override missing malformed or rejected code`() {
-        listOf("success", "ok", "error", "").forEach { status ->
+    fun `unknown statuses fail even with code 200`() {
+        listOf("ok", "fail", "error", "", "unknown").forEach { status ->
+            assertThrows(IOException::class.java) {
+                JmLikeResponsePolicy.requireSuccess(JSONObject().put("code", 200).put("status", status))
+            }
+        }
+    }
+
+    @Test
+    fun `success never overrides missing malformed or rejected code`() {
+        listOf("success").forEach { status ->
             listOf<Any>(199, 201, 400, 401, 500, 200.5, "200", "bad", true, JSONObject.NULL).forEach { code ->
                 assertThrows(IOException::class.java) {
                     JmLikeResponsePolicy.requireSuccess(JSONObject().put("code", code).put("status", status))

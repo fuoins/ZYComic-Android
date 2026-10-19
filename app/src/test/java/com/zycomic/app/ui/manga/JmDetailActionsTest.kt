@@ -24,6 +24,30 @@ class JmDetailActionsTest {
     }
 
     @Test
+    fun `comment count stays in a fixed second line below its label`() {
+        val actions = projectFile("app/src/main/java/com/zycomic/app/ui/manga/JmDetailActions.kt")
+        val label = actions.indexOf("Text(stringResource(KMR.strings.jm_comments), maxLines = 1")
+        val count = actions.indexOf("jmCountForDisplay(commentCount)")
+        assertTrue(label >= 0 && count > label)
+        val commentCount = actions.substringAfter("jmCountForDisplay(commentCount)")
+            .substringBefore("JmDetailOverflow")
+
+        assertTrue(commentCount.contains("Modifier.height(20.dp)"))
+        assertTrue(commentCount.contains("softWrap = false"))
+        assertTrue(commentCount.contains("maxLines = 1"))
+        assertTrue(commentCount.contains("TextOverflow.Ellipsis"))
+    }
+
+    @Test
+    fun `detail operation bar stays transparent with status bar insets`() {
+        val screen = projectFile("app/src/main/java/com/zycomic/app/ui/manga/MangaDetailScreen.kt")
+        val bar = screen.substringAfter("// 7.").substringBefore("verticalAlignment = Alignment.CenterVertically")
+        assertTrue(bar.contains(".background(Color.Transparent)"))
+        assertTrue(bar.contains(".statusBarsPadding()"))
+        assertTrue(!bar.contains("topBarAlpha"))
+    }
+
+    @Test
     fun `short comment warning resource has the requested value`() {
         val resource = projectFile("i18n-kmk/src/commonMain/moko-resources/base/strings.xml")
         val value = Regex("<string name=\"jm_comment_short_warning\">([^<]*)</string>")

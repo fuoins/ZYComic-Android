@@ -9,4 +9,30 @@ internal object LibraryHistoryToolbarPolicy {
     } else {
         listOf(Action.SEARCH, Action.REFRESH, Action.FILTER)
     }
+
+    fun visibleActions(history: Boolean, searchExpanded: Boolean, jmPlatform: Boolean = false): List<Action> =
+        if (searchExpanded && jmPlatform) {
+            emptyList()
+        } else {
+            leadingActions(history).filterNot { searchExpanded && it == Action.SEARCH }
+        }
+
+    fun showPlatformSelector(searchExpanded: Boolean, jmPlatform: Boolean): Boolean =
+        !searchExpanded || !jmPlatform
+}
+
+/** Reject UI results captured for a different JM account or browse tab. */
+internal object BrowseScreenSessionPolicy {
+    fun acceptsResult(
+        startedRevision: Long,
+        currentRevision: Long,
+        startedTabKey: String?,
+        currentTabKey: String?,
+        startedOnJm: Boolean,
+        currentlyOnJm: Boolean,
+    ): Boolean =
+        startedRevision == currentRevision &&
+            startedTabKey != null &&
+            startedTabKey == currentTabKey &&
+            startedOnJm && currentlyOnJm
 }

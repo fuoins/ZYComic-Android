@@ -54,6 +54,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -115,6 +116,24 @@ fun ProfileScreen(
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
     val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
     var showJmMyComments by remember { mutableStateOf(false) }
+    var showJmCalendar by remember { mutableStateOf(false) }
+    var showJmAwards by remember { mutableStateOf(false) }
+    var jmSubscreenSessionRevision by remember { mutableStateOf<Long?>(null) }
+    val jmCheckInViewModel = remember(jmSessionRevision) { JmCheckInViewModel() }
+    DisposableEffect(jmCheckInViewModel) {
+        onDispose { jmCheckInViewModel.close() }
+    }
+    LaunchedEffect(jmSessionRevision) {
+        jmCheckInViewModel.cancelMakeup()
+        showJmCalendar = false
+        showJmAwards = false
+        jmSubscreenSessionRevision = null
+    }
+    fun closeCalendar() {
+        jmCheckInViewModel.cancelMakeup()
+        showJmCalendar = false
+        jmSubscreenSessionRevision = null
+    }
     LaunchedEffect(platform) {
         if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.isLoggedIn) {
             try {
@@ -132,6 +151,8 @@ fun ProfileScreen(
     var showAdDebug by remember { mutableStateOf<String?>(null) }
     var adProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     androidx.activity.compose.BackHandler(enabled = showPointLogs) { showPointLogs = false }
+    androidx.activity.compose.BackHandler(enabled = showJmCalendar) { closeCalendar() }
+    androidx.activity.compose.BackHandler(enabled = showJmAwards) { showJmAwards = false }
     androidx.activity.compose.BackHandler(enabled = showChangePwd) { showChangePwd = false }
     androidx.activity.compose.BackHandler(enabled = showRewardDialog) { showRewardDialog = false }
     androidx.activity.compose.BackHandler(enabled = showAdDebug != null) { showAdDebug = null }
@@ -143,6 +164,14 @@ fun ProfileScreen(
     var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    if (showJmCalendar && jmLoggedIn && jmSubscreenSessionRevision == jmSessionRevision && platform == ContentPlatform.JM) {
+        JmCalendarDetailScreen(jmCheckInViewModel, context, ::closeCalendar)
+        return
+    }
+    if (showJmAwards && jmLoggedIn && jmSubscreenSessionRevision == jmSessionRevision && platform == ContentPlatform.JM) {
+        JmAnnualAwardsScreen(jmCheckInViewModel) { showJmAwards = false }
+        return
+    }
     if (showJmMyComments && platform == ContentPlatform.JM) {
         JmMyCommentsScreen(
             onBack = { showJmMyComments = false },
@@ -263,6 +292,36 @@ fun ProfileScreen(
 
             // KMK --> JM preferences remain visible while signed out; network calls require login.
             if (platform == ContentPlatform.JM) {
+                item {
+                    TextPreferenceWidget(
+                        title = "JM 签到日历与补签",
+                        subtitle = "只读查看当月签到；补签需勾选并再次确认",
+                        icon = Icons.Outlined.Refresh,
+                        onPreferenceClick = {
+                            if (jmLoggedIn) {
+                                jmSubscreenSessionRevision = jmSessionRevision
+                                showJmCalendar = true
+                            } else {
+                                onRequireLogin()
+                            }
+                        },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = "JM 年度签到奖励",
+                        subtitle = "按年份浏览月度奖励图片，不会领取月奖",
+                        icon = Icons.Filled.Star,
+                        onPreferenceClick = {
+                            if (jmLoggedIn) {
+                                jmSubscreenSessionRevision = jmSessionRevision
+                                showJmAwards = true
+                            } else {
+                                onRequireLogin()
+                            }
+                        },
+                    )
+                }
                 item {
                     TextPreferenceWidget(
                         title = stringResource(KMR.strings.jm_my_comments_title),
@@ -838,33 +897,13 @@ private fun SignDayCell(day: SignDay, isToday: Boolean) {
             .padding(4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (day.isPlaceholder) {
-            Box(Modifier.size(32.dp))
-            return@Box
-        }
-        val bg = when {
-            isToday -> MaterialTheme.colorScheme.primary
-            day.isSigned -> MaterialTheme.colorScheme.primary
-            day.isMissed -> MaterialTheme.colorScheme.surfaceVariant
-            day.isFuture -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-            else -> MaterialTheme.colorScheme.surfaceVariant
-        }
-        val fg = if (isToday || day.isSigned) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(bg),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (day.isSigned) "✓" else (day.dayNum?.toString() ?: ""),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = fg,
-                )
-            }
-            if (isToday) Spacer(Modifier.height(3.dp).width(16.dp).background(MaterialTheme.colorScheme.primary))
-        }
+        SignCalendarDayCell(
+            dayNumber = day.dayNum,
+            isSigned = day.isSigned,
+            isMissed = day.isMissed,
+            isToday = isToday,
+            isFuture = day.isFuture,
+            isPlaceholder = day.isPlaceholder,
+        )
     }
 }

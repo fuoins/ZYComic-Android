@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.manga
 
+import android.content.Context
 import com.zycomic.app.data.dto.Chapter
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.JmComment
@@ -20,6 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -34,10 +36,11 @@ import uy.kohesive.injekt.api.get
 import tachiyomi.domain.history.repository.HistoryRepository as LocalHistoryRepository
 import tachiyomi.domain.manga.repository.MangaRepository as LocalMangaRepository
 
-class MangaDetailViewModel(private val bookId: String) {
+class MangaDetailViewModel(private val bookId: String, context: Context) {
 
     val isJm: Boolean = bookId.startsWith("jm:")
     private val contentId: String = bookId.removePrefix("jm:")
+    private val jmLikePreferences = context.applicationContext.getSharedPreferences("jm_liked_albums", Context.MODE_PRIVATE)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -66,6 +69,8 @@ class MangaDetailViewModel(private val bookId: String) {
     val jmCommentsHasMore = MutableStateFlow(true)
     private var jmCommentPage = 0
     private var jmStateRefreshRequired = false
+    private var jmLikeConfirmation: JmLikeConfirmation? = null
+    private var jmLikeOutcomeUnknownSessionRevision: Long? = null
     private var jmChapterProgress: List<JmChapterProgress> = emptyList()
     private var jmRecentChapterId: String? = null
     val jmAccountName = MutableStateFlow(JmAuthStore.accountName ?: if (JmAuthStore.token() != null) "已登录" else null)
@@ -122,7 +127,7 @@ class MangaDetailViewModel(private val bookId: String) {
             try {
                 if (isJm) {
                     val result = JmSource.getAlbum(contentId)
-                    _detail.value = result.manga
+                    _detail.value = applyJmLikeState(result.manga)
                     _chapterWarning.value = result.chapterWarning
                     syncJmChapterProgress()
                     loadJmComments()
@@ -367,52 +372,74 @@ class MangaDetailViewModel(private val bookId: String) {
         }
     }
 
+    fun dispose() {
+        scope.cancel()
+    }
+
     fun toggleJmLike() {
         if (!isJm) return
         if (!JmToggleActionPolicy.canStart(jmActionBusy.value, JmAuthStore.token() != null)) {
             if (JmAuthStore.token() == null) jmNeedLogin.value = true
             return
         }
+        val sessionRevision = JmAuthStore.sessionRevision
+        val accountAlbumKey = currentLikeAccountAlbumKey()
+        val current = _detail.value
+        val likeState = current?.let {
+            JmLikeStatePolicy.mergeAlbum(it.jmLiked, it.jmLikes, accountAlbumKey, likeConfirmation(accountAlbumKey))
+        }
+        if (likeState?.liked == true) {
+            scope.launch { _favSuccess.emit("已评价") }
+            return
+        }
+        if (JmLikeStatePolicy.outcomeUnknownForCurrentSession(sessionRevision, jmLikeOutcomeUnknownSessionRevision)) {
+            scope.launch { _favSuccess.emit("点赞结果不确定，为避免重复提交，请稍后刷新") }
+            return
+        }
         scope.launch {
             jmActionBusy.value = true
             try {
-                if (jmStateRefreshRequired) {
-                    if (refreshJmState() && _detail.value?.jmLiked != null) {
-                        jmStateRefreshRequired = false
-                    } else {
-                        _favSuccess.emit("点赞状态暂无法确认，请刷新后重试")
-                    }
+                if (JmAuthStore.token() == null || JmAuthStore.sessionRevision != sessionRevision) {
+                    if (JmAuthStore.token() == null) jmNeedLogin.value = true
                     return@launch
                 }
-                val before = _detail.value?.jmLiked
+                val beforeLikes = _detail.value?.let {
+                    JmLikeStatePolicy.mergeAlbum(it.jmLiked, it.jmLikes, accountAlbumKey, likeConfirmation(accountAlbumKey)).likes
+                }
                 try {
                     JmSource.toggleLike(contentId)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    jmStateRefreshRequired = true
-                    val refreshed = refreshJmState() && _detail.value?.jmLiked != null
-                    if (refreshed) jmStateRefreshRequired = false
+                    if (JmAuthStore.sessionRevision == sessionRevision && JmAuthStore.token() != null) {
+                        jmLikeOutcomeUnknownSessionRevision = sessionRevision
+                        refreshJmState()
+                    }
                     if (JmAuthStore.token() == null) jmNeedLogin.value = true
-                    _favSuccess.emit(if (refreshed) "点赞请求未确认，已刷新当前状态" else "点赞请求结果不确定，刷新状态失败；请勿重复操作")
+                    _favSuccess.emit("点赞结果不确定，为避免重复提交，请稍后刷新")
                     return@launch
                 }
-                // This is a confirmed write result, never an optimistic update before /like returns.
-                val confirmedLiked = JmToggleActionPolicy.likedAfterConfirmedSuccess(before)
-                if (confirmedLiked != null) {
-                    _detail.value = _detail.value?.copy(jmLiked = confirmedLiked)
+                if (JmAuthStore.sessionRevision == sessionRevision && JmAuthStore.token() != null) {
+                    // The endpoint is one-way; retain the confirmed heart and +1 over stale /album responses.
+                    val confirmation = JmLikeStatePolicy.confirmSuccess(checkNotNull(accountAlbumKey), beforeLikes)
+                    jmLikeConfirmation = confirmation
+                    jmLikePreferences.edit()
+                        .putBoolean(likedPreferenceKey(confirmation.accountAlbumKey), true)
+                        .apply {
+                            if (confirmation.likes == null) {
+                                remove(likesPreferenceKey(confirmation.accountAlbumKey))
+                            } else {
+                                putInt(likesPreferenceKey(confirmation.accountAlbumKey), confirmation.likes)
+                            }
+                        }
+                        .apply()
+                    jmLikeOutcomeUnknownSessionRevision = null
+                    _detail.value = _detail.value?.let(::applyJmLikeState)
+                    refreshJmState()
+                    _favSuccess.emit("已点赞")
+                } else {
+                    _favSuccess.emit("登录账号已切换，请刷新详情")
                 }
-                jmStateRefreshRequired = true
-                val refreshed = refreshJmState(confirmedLiked)
-                jmStateRefreshRequired = !refreshed || _detail.value?.jmLiked == null
-                val after = _detail.value?.jmLiked
-                _favSuccess.emit(
-                    if (before != null && after != null && after != before) {
-                        if (after) "已点赞" else "已取消点赞"
-                    } else {
-                        "点赞状态未能确认，请刷新"
-                    },
-                )
             } finally {
                 jmActionBusy.value = false
             }
@@ -448,12 +475,11 @@ class MangaDetailViewModel(private val bookId: String) {
         scope.launch { refreshJmState() }
     }
 
-    private suspend fun refreshJmState(confirmedLiked: Boolean? = null): Boolean {
+    private suspend fun refreshJmState(): Boolean {
         return try {
             val fresh = JmSource.getAlbum(contentId).manga
-            _detail.value = fresh.copy(
+            _detail.value = applyJmLikeState(fresh).copy(
                 chapterList = _detail.value?.chapterList ?: fresh.chapterList,
-                jmLiked = JmToggleActionPolicy.likedAfterRefresh(fresh.jmLiked, confirmedLiked),
             )
             if (JmAuthStore.token() == null && jmAccountName.value != null) {
                 jmAccountName.value = null
@@ -470,6 +496,34 @@ class MangaDetailViewModel(private val bookId: String) {
             false
         }
     }
+
+    private fun applyJmLikeState(manga: Manga): Manga {
+        val accountAlbumKey = currentLikeAccountAlbumKey()
+        val state = JmLikeStatePolicy.mergeAlbum(
+            albumLiked = manga.jmLiked,
+            albumLikes = manga.jmLikes,
+            currentAccountAlbumKey = accountAlbumKey,
+            confirmation = likeConfirmation(accountAlbumKey),
+        )
+        return manga.copy(jmLiked = state.liked, jmLikes = state.likes)
+    }
+
+    private fun currentLikeAccountAlbumKey(): String? {
+        val accountIdentity = JmAuthStore.uid() ?: JmAuthStore.accountName ?: JmAuthStore.token()
+        return if (JmAuthStore.token() == null) null else JmLikeStatePolicy.accountAlbumKey(accountIdentity, contentId)
+    }
+
+    private fun likeConfirmation(accountAlbumKey: String?): JmLikeConfirmation? {
+        if (accountAlbumKey == null) return null
+        jmLikeConfirmation?.takeIf { it.accountAlbumKey == accountAlbumKey }?.let { return it }
+        if (!jmLikePreferences.getBoolean(likedPreferenceKey(accountAlbumKey), false)) return null
+        val storedLikes = jmLikePreferences.getInt(likesPreferenceKey(accountAlbumKey), -1).takeIf { it >= 0 }
+        return JmLikeConfirmation(accountAlbumKey, storedLikes)
+    }
+
+    private fun likedPreferenceKey(accountAlbumKey: String) = "liked_$accountAlbumKey"
+
+    private fun likesPreferenceKey(accountAlbumKey: String) = "likes_$accountAlbumKey"
 
     /** 打开收藏夹选择：拉取分类列表。 */
     fun openFolderPicker() {

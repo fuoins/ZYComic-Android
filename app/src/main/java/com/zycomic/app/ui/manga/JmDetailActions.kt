@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -15,10 +16,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.PersonOutline
-import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -72,12 +73,23 @@ internal fun JmDetailActions(vm: MangaDetailViewModel, manga: Manga, onSaveCover
             }
             TextButton(onClick = vm::toggleJmLike, enabled = !busy, modifier = Modifier.weight(1f)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(if (manga.jmLiked == true) Icons.Default.ThumbUp else Icons.Outlined.ThumbUp, null)
+                    Icon(
+                        if (manga.jmLiked == true) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = null,
+                        tint = if (manga.jmLiked == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
                     Text(
-                        stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_count else KMR.strings.jm_like_count, jmCountForDisplay(manga.jmLikes)),
+                        stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_label else KMR.strings.jm_like_label),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        jmCountForDisplay(manga.jmLikes),
+                        modifier = Modifier.height(20.dp),
                         textAlign = TextAlign.Center,
-                        softWrap = true,
-                        maxLines = Int.MAX_VALUE,
+                        softWrap = false,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -87,11 +99,14 @@ internal fun JmDetailActions(vm: MangaDetailViewModel, manga: Manga, onSaveCover
             }, modifier = Modifier.weight(1f)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Default.ChatBubbleOutline, null)
+                    Text(stringResource(KMR.strings.jm_comments), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        stringResource(KMR.strings.jm_comment_count, jmCountForDisplay(commentCount)),
+                        jmCountForDisplay(commentCount),
+                        modifier = Modifier.height(20.dp),
                         textAlign = TextAlign.Center,
-                        softWrap = true,
-                        maxLines = Int.MAX_VALUE,
+                        softWrap = false,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

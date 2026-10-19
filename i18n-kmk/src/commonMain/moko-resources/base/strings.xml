@@ -374,4 +374,10 @@
     <string name="jm_auto_check_in_summary">已登录时进入禁漫我的页，每天自动尝试一次</string>
     <string name="jm_check_in_working">签到中…</string>
     <string name="jm_check_in_failed">签到失败，请稍后手动重试</string>
+    <string name="jm_random_album">随机盲盒</string>
+    <string name="jm_random_album_loading">加载中…</string>
+    <string name="jm_random_album_empty">连载更新暂无漫画，请稍后重试</string>
+    <string name="jm_random_album_failed">随机池加载失败，请重试</string>
+    <string name="jm_like_label">点赞</string>
+    <string name="jm_liked_label">已点赞</string>
 </resources>

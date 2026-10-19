@@ -55,7 +55,11 @@ fun LibraryHistoryToolbar(
             ToolbarSlot(onClick = null, width = slotWidth)
             ToolbarSlot(onClick = null, width = slotWidth)
         } else {
-            LibraryHistoryToolbarPolicy.leadingActions(history).forEach { action ->
+            LibraryHistoryToolbarPolicy.visibleActions(
+                history = history,
+                searchExpanded = searchQuery != null,
+                jmPlatform = platform == ContentPlatform.JM,
+            ).forEach { action ->
                 when (action) {
                     LibraryHistoryToolbarPolicy.Action.SEARCH -> ToolbarSlot(
                         onClick = if (searchSupported) ({ onChangeSearchQuery("") }) else null,
@@ -85,15 +89,17 @@ fun LibraryHistoryToolbar(
                 width = slotWidth,
             )
         }
-        Box(
-            modifier = Modifier.width(100.dp).height(48.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            ContentPlatformSelector(
-                selected = platform,
-                onSelect = onSelectPlatform,
-                compact = true,
-            )
+        if (LibraryHistoryToolbarPolicy.showPlatformSelector(searchQuery != null, platform == ContentPlatform.JM)) {
+            Box(
+                modifier = Modifier.width(100.dp).height(48.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ContentPlatformSelector(
+                    selected = platform,
+                    onSelect = onSelectPlatform,
+                    compact = true,
+                )
+            }
         }
     }
 

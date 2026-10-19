@@ -36,7 +36,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
@@ -55,7 +54,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -79,7 +77,6 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -87,12 +84,17 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.data.repository.JmFavoriteFolder
+import com.zycomic.app.data.repository.JmOnlineLibraryRepository
+import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.reader.JmSource
+import com.zycomic.app.ui.components.BrowseScreenSessionPolicy
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
+import com.zycomic.app.ui.components.JmLibrarySelectionPolicy
 import com.zycomic.app.ui.components.MangaGridSkeleton
 import com.zycomic.app.ui.search.SearchProvider
 import eu.kanade.presentation.components.AppBar
@@ -163,6 +165,15 @@ fun BrowseScreen(
     val displayMode by vm.displayMode.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
     val folders by vm.folders.collectAsState()
+    val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
+    var jmSelectionMode by remember { mutableStateOf(false) }
+    var jmSelectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var jmFolders by remember { mutableStateOf<List<JmFavoriteFolder>>(emptyList()) }
+    var jmPendingFolderIds by remember { mutableStateOf<Set<String>?>(null) }
+    var jmFavoriteBusy by remember { mutableStateOf(false) }
+    var jmFavoriteError by remember { mutableStateOf<String?>(null) }
+    var jmSelectionGeneration by remember { mutableStateOf(0L) }
+    var jmFavoriteOperationGeneration by remember { mutableStateOf(0L) }
     val orientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     androidx.compose.runtime.LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
 
@@ -171,13 +182,130 @@ fun BrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
     var showJmAlbumJumpDialog by remember { mutableStateOf(false) }
-    var jmAlbumIdInput by remember { mutableStateOf("") }
-    var jmAlbumIdError by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler(enabled = selectionMode) { vm.exitSelection() }
+    val jmCategoryActive = platform == ContentPlatform.JM
+    val activeSelectionMode = if (jmCategoryActive) jmSelectionMode else selectionMode
+    val activeSelectionCount = if (jmCategoryActive) jmSelectedIds.size else selectedIds.size
+
+    fun jmTabKey(index: Int): String? =
+        vm.tabs.getOrNull(index)
+            ?.takeIf { it.platformId == ContentPlatform.JM }
+            ?.let { "${it.platformId.id}_${it.id}" }
+
+    fun isCurrentJmContext(startedRevision: Long, startedTabKey: String?): Boolean {
+        val currentTabKey = jmTabKey(vm.mainTab.value)
+        return BrowseScreenSessionPolicy.acceptsResult(
+            startedRevision = startedRevision,
+            currentRevision = JmAuthStore.sessionRevision,
+            startedTabKey = startedTabKey,
+            currentTabKey = currentTabKey,
+            startedOnJm = startedTabKey != null,
+            currentlyOnJm = vm.currentPlatform.value == ContentPlatform.JM && currentTabKey != null,
+        )
+    }
+
+    androidx.activity.compose.BackHandler(enabled = activeSelectionMode) {
+        if (jmCategoryActive) {
+            if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                jmSelectionGeneration++
+                jmSelectionMode = false
+                jmSelectedIds = emptySet()
+            }
+        } else {
+            vm.exitSelection()
+        }
+    }
     androidx.activity.compose.BackHandler(enabled = showFilterDialog) { showFilterDialog = false }
     androidx.activity.compose.BackHandler(enabled = showFolderDialog) { showFolderDialog = false }
     androidx.activity.compose.BackHandler(enabled = showTagDialog) { showTagDialog = false }
     androidx.activity.compose.BackHandler(enabled = showManageSheet) { showManageSheet = false }
+
+    LaunchedEffect(mainTab, platform, jmSessionRevision) {
+        jmSelectionGeneration++
+        jmFavoriteOperationGeneration++
+        jmSelectionMode = false
+        jmSelectedIds = emptySet()
+        jmFolders = emptyList()
+        jmPendingFolderIds = null
+        jmFavoriteBusy = false
+        jmFavoriteError = null
+        showJmAlbumJumpDialog = false
+    }
+
+    fun exitJmSelection(
+        startedRevision: Long = jmSessionRevision,
+        startedTabKey: String? = jmTabKey(mainTab),
+    ) {
+        if (!isCurrentJmContext(startedRevision, startedTabKey)) return
+        jmSelectionGeneration++
+        jmSelectionMode = false
+        jmSelectedIds = emptySet()
+    }
+
+    fun openJmFolderPicker(ids: Set<String>) {
+        val startedRevision = jmSessionRevision
+        val startedTabKey = jmTabKey(mainTab)
+        if (ids.isEmpty() || jmFavoriteBusy || jmSelectedIds != ids || !isCurrentJmContext(startedRevision, startedTabKey)) return
+        val selectionGeneration = jmSelectionGeneration
+        val operationGeneration = ++jmFavoriteOperationGeneration
+        jmFavoriteBusy = true
+        jmFavoriteError = null
+        scope.launch {
+            try {
+                // Read folders from JM's /favorite response; never use Manwa's folder repository.
+                val loadedFolders = JmOnlineLibraryRepository.favorites(1, "mr").folders
+                if (isCurrentJmContext(startedRevision, startedTabKey) &&
+                    operationGeneration == jmFavoriteOperationGeneration &&
+                    selectionGeneration == jmSelectionGeneration && jmSelectedIds == ids
+                ) {
+                    jmFolders = loadedFolders
+                    jmPendingFolderIds = ids
+                }
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                if (isCurrentJmContext(startedRevision, startedTabKey) &&
+                    operationGeneration == jmFavoriteOperationGeneration && selectionGeneration == jmSelectionGeneration
+                ) {
+                    jmFavoriteError = failure.message ?: "JM 收藏夹加载失败"
+                }
+            } finally {
+                if (operationGeneration == jmFavoriteOperationGeneration && JmAuthStore.sessionRevision == startedRevision) {
+                    jmFavoriteBusy = false
+                }
+            }
+        }
+    }
+
+    fun addJmFavorites(ids: Set<String> = jmSelectedIds, folder: JmFavoriteFolder? = null) {
+        val startedRevision = jmSessionRevision
+        val startedTabKey = jmTabKey(mainTab)
+        if (ids.isEmpty() || ids != jmSelectedIds || jmFavoriteBusy || !isCurrentJmContext(startedRevision, startedTabKey)) return
+        val selectionGeneration = jmSelectionGeneration
+        val operationGeneration = ++jmFavoriteOperationGeneration
+        jmFavoriteBusy = true
+        jmFavoriteError = null
+        scope.launch {
+            try {
+                JmOnlineLibraryRepository.ensureFavorites(ids, folder)
+                if (isCurrentJmContext(startedRevision, startedTabKey) &&
+                    operationGeneration == jmFavoriteOperationGeneration &&
+                    selectionGeneration == jmSelectionGeneration && jmSelectedIds == ids
+                ) {
+                    exitJmSelection()
+                }
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                if (isCurrentJmContext(startedRevision, startedTabKey) &&
+                    operationGeneration == jmFavoriteOperationGeneration && selectionGeneration == jmSelectionGeneration
+                ) {
+                    jmFavoriteError = "JM 收藏可能部分成功，请刷新 JM 收藏列表核对后再试：${failure.message ?: "操作失败"}"
+                }
+            } finally {
+                if (operationGeneration == jmFavoriteOperationGeneration && JmAuthStore.sessionRevision == startedRevision) {
+                    jmFavoriteBusy = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(selectionMode) {
         if (selectionMode) vm.loadFolders()
@@ -185,19 +313,37 @@ fun BrowseScreen(
 
     Scaffold(
         topBar = {
-            if (selectionMode) {
+            if (activeSelectionMode) {
                 AppBar(
-                    titleContent = { Text("${selectedIds.size}") },
+                    titleContent = { Text(activeSelectionCount.toString()) },
                     actions = {
                         AppBarActions(
                             persistentListOf(
-                                AppBar.Action(title = "全选", icon = Icons.Outlined.SelectAll, onClick = { vm.selectAll() }),
-                                AppBar.Action(title = "反选", icon = Icons.Outlined.FlipToBack, onClick = { vm.invertSelection() }),
+                                AppBar.Action(title = "全选", icon = Icons.Outlined.SelectAll, onClick = {
+                                    if (jmCategoryActive) {
+                                        if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                                            jmSelectionGeneration++
+                                            jmSelectedIds = JmLibrarySelectionPolicy.selectAll(vm.mangasForTab(mainTab).value.map { it.id })
+                                        }
+                                    } else {
+                                        vm.selectAll()
+                                    }
+                                }),
+                                AppBar.Action(title = "反选", icon = Icons.Outlined.FlipToBack, onClick = {
+                                    if (jmCategoryActive) {
+                                        if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                                            jmSelectionGeneration++
+                                            jmSelectedIds = JmLibrarySelectionPolicy.invertLoaded(jmSelectedIds, vm.mangasForTab(mainTab).value.map { it.id })
+                                        }
+                                    } else {
+                                        vm.invertSelection()
+                                    }
+                                }),
                             ),
                         )
                     },
                     isActionMode = true,
-                    onCancelActionMode = { vm.exitSelection() },
+                    onCancelActionMode = { if (jmCategoryActive) exitJmSelection() else vm.exitSelection() },
                 )
             } else {
                 SearchToolbar(
@@ -218,8 +364,6 @@ fun BrowseScreen(
                         FilledTonalButton(
                             onClick = {
                                 if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
-                                    jmAlbumIdInput = ""
-                                    jmAlbumIdError = false
                                     showJmAlbumJumpDialog = true
                                 }
                             },
@@ -243,6 +387,13 @@ fun BrowseScreen(
                                         onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, null)
                                     }),
                                     AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
+                                    AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = {
+                                        if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                                            jmSelectionGeneration++
+                                            jmSelectedIds = emptySet()
+                                            jmSelectionMode = true
+                                        }
+                                    }),
                                 )
                             },
                         )
@@ -251,7 +402,7 @@ fun BrowseScreen(
             }
         },
         bottomBar = {
-            if (selectionMode) {
+            if (activeSelectionMode) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -260,18 +411,24 @@ fun BrowseScreen(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable {
-                                vm.addToAllFolders { ok, msg ->
-                                    if (ok) vm.exitSelection()
+                            .clickable(enabled = !jmFavoriteBusy) {
+                                if (jmCategoryActive) {
+                                    addJmFavorites()
+                                } else {
+                                    vm.addToAllFolders { ok, _ ->
+                                        if (ok) vm.exitSelection()
+                                    }
                                 }
                             }
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text("添加到全部收藏夹", color = MaterialTheme.colorScheme.primary) }
+                    ) { Text(if (jmCategoryActive) "添加到收藏" else "添加到全部收藏夹", color = MaterialTheme.colorScheme.primary) }
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable { showFolderDialog = true }
+                            .clickable(enabled = !jmFavoriteBusy) {
+                                if (jmCategoryActive) openJmFolderPicker(jmSelectedIds) else showFolderDialog = true
+                            }
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center,
                     ) { Text("添加到其他收藏夹", color = MaterialTheme.colorScheme.primary) }
@@ -288,6 +445,12 @@ fun BrowseScreen(
                     end = contentPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
                 ),
         ) {
+            jmFavoriteError?.let { message ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { jmFavoriteError = null }) { Text("关闭") }
+                }
+            }
             // 共用混合标签栏（选中 tab 后内嵌「重新筛选」）+ 平台颜色图例 + 管理
             val tabRowStateHolder = rememberSaveableStateHolder()
             tabRowStateHolder.SaveableStateProvider("category_tab_row_shared") {
@@ -384,14 +547,29 @@ fun BrowseScreen(
                     platform = platform,
                     displayMode = displayMode,
                     gridColumns = gridColumns,
-                    selectionMode = selectionMode,
-                    selectedIds = selectedIds,
+                    selectionMode = if (page == mainTab && vm.tabs.getOrNull(page)?.platformId == ContentPlatform.JM) jmSelectionMode else selectionMode,
+                    selectedIds = if (page == mainTab && vm.tabs.getOrNull(page)?.platformId == ContentPlatform.JM) jmSelectedIds else selectedIds,
                     onOpenManga = onOpenManga,
-                    onToggleSelect = { vm.toggleSelect(it) },
-                    onLongClick = {
-                        if (!selectionMode) {
+                    onToggleSelect = { id ->
+                        if (page == mainTab && isCurrentJmContext(jmSessionRevision, jmTabKey(page))) {
+                            jmSelectionGeneration++
+                            jmSelectedIds = JmLibrarySelectionPolicy.toggle(jmSelectedIds, id)
+                        } else {
+                            vm.toggleSelect(id)
+                        }
+                    },
+                    onLongClick = { id ->
+                        if (page == mainTab && isCurrentJmContext(jmSessionRevision, jmTabKey(page))) {
+                            if (!jmSelectionMode) {
+                                jmSelectionGeneration++
+                                jmSelectionMode = true
+                                jmSelectedIds = emptySet()
+                            }
+                            jmSelectionGeneration++
+                            jmSelectedIds = JmLibrarySelectionPolicy.toggle(jmSelectedIds, id)
+                        } else if (!selectionMode) {
                             vm.enterSelection()
-                            vm.toggleSelect(it)
+                            vm.toggleSelect(id)
                         }
                     },
                     bottomPadding = contentPadding.calculateBottomPadding(),
@@ -402,47 +580,9 @@ fun BrowseScreen(
     }
 
     if (showJmAlbumJumpDialog) {
-        AlertDialog(
-            onDismissRequest = { showJmAlbumJumpDialog = false },
-            title = { Text(stringResource(KMR.strings.jm_album_jump_title)) },
-            text = {
-                OutlinedTextField(
-                    value = jmAlbumIdInput,
-                    onValueChange = {
-                        jmAlbumIdInput = it
-                        jmAlbumIdError = false
-                    },
-                    label = { Text(stringResource(KMR.strings.jm_album_jump_id_label)) },
-                    singleLine = true,
-                    isError = jmAlbumIdError,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    supportingText = if (jmAlbumIdError) {
-                        { Text(stringResource(KMR.strings.jm_album_jump_invalid_id)) }
-                    } else {
-                        null
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val route = JmAlbumJumpPolicy.route(jmAlbumIdInput)
-                        if (route == null) {
-                            jmAlbumIdError = true
-                        } else if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
-                            showJmAlbumJumpDialog = false
-                            onOpenManga(route)
-                        }
-                    },
-                ) {
-                    Text(stringResource(KMR.strings.jm_album_jump_submit))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showJmAlbumJumpDialog = false }) {
-                    Text(stringResource(KMR.strings.jm_album_jump_cancel))
-                }
-            },
+        JmAlbumJumpDialog(
+            onDismiss = { showJmAlbumJumpDialog = false },
+            onOpenManga = onOpenManga,
         )
     }
 
@@ -474,7 +614,7 @@ fun BrowseScreen(
     }
 
     // 收藏夹选择弹窗
-    if (showFolderDialog) {
+    if (showFolderDialog && !jmCategoryActive) {
         FolderSelectDialog(
             folders = folders,
             selectedIds = selectedIds,
@@ -487,6 +627,35 @@ fun BrowseScreen(
                     }
                 }
             },
+        )
+    }
+
+    val pendingJmFolderIds = jmPendingFolderIds
+    if (pendingJmFolderIds != null && isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+        AlertDialog(
+            onDismissRequest = { jmPendingFolderIds = null },
+            title = { Text("添加到 JM 收藏夹") },
+            text = {
+                Column {
+                    if (jmFavoriteBusy) {
+                        CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally).size(24.dp))
+                    } else if (jmFolders.isEmpty()) {
+                        Text("暂无 JM 收藏夹；可先在 JM 收藏页的筛选 → 管理中添加")
+                    } else {
+                        jmFolders.forEach { folder ->
+                            TextButton(
+                                enabled = !jmFavoriteBusy,
+                                onClick = {
+                                    jmPendingFolderIds = null
+                                    addJmFavorites(pendingJmFolderIds, folder)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(folder.name) }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { jmPendingFolderIds = null }) { Text("取消") } },
         )
     }
 }
@@ -624,7 +793,7 @@ private fun BrowseTabContent(
                                         selected = selectionMode && m.id in selectedIds,
                                         selectionMode = selectionMode,
                                         onClick = {
-                                            if (selectionMode && tabPlatform == ContentPlatform.MANWA) {
+                                            if (selectionMode && (tabPlatform == ContentPlatform.MANWA || tabPlatform == ContentPlatform.JM)) {
                                                 onToggleSelect(m.id)
                                             } else {
                                                 onOpenManga(if (tabPlatform == ContentPlatform.JM) "jm:${m.id}" else m.id)

@@ -144,7 +144,7 @@ class BrowseViewModel {
         _jmPromoteSectionsError.value = null
         jmPromoteSectionsJob = scope.launch {
             try {
-                _jmPromoteSections.value = JmSource.getPromoteSections()
+                _jmPromoteSections.value = JmRandomAlbumRepository.sections(forceRefresh = retry)
                 jmPromoteSectionsLoaded = true
             } catch (e: CancellationException) {
                 throw e

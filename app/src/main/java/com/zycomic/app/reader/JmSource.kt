@@ -4,6 +4,7 @@ import com.zycomic.app.data.dto.JmComment
 import com.zycomic.app.net.JmApiInterceptor
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmNetworkModule
+import com.zycomic.app.net.JmRequestSession
 import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.PageAttemptScope
 import eu.kanade.tachiyomi.network.awaitSuccess
@@ -317,7 +318,8 @@ object JmSource : HttpSource() {
     }
 
     suspend fun toggleLike(albumId: String) {
-        val response = postJson("/like", mapOf("id" to albumId))
+        val session = JmRequestSession.capture() ?: throw IOException("请先登录 JM 账号")
+        val response = postJson("/like", mapOf("id" to albumId), session)
         JmLikeResponsePolicy.requireSuccess(response)
     }
 
@@ -462,14 +464,27 @@ object JmSource : HttpSource() {
         return JmRelatedMangaPolicy.cacheKey(JmRouteManager.baseUrl, routeConfiguration)
     }
 
-    private suspend fun postJson(path: String, params: Map<String, String>): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun postJson(path: String, params: Map<String, String>, session: JmRequestSession? = null): JSONObject = withContext(Dispatchers.IO) {
         val currentBase = JmRouteManager.baseUrl
         if (currentBase.isBlank()) throw IOException("JM 没有可用线路")
         JmNetworkModule.ensureAgeCookie()
-        val body = okhttp3.FormBody.Builder().apply { params.forEach { (key, value) -> add(key, value) } }.build()
+        val body = if (path == "/like") {
+            // The documented album-like contract is multipart and only sends id (not like_type).
+            okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                .apply { params.forEach { (key, value) -> addFormDataPart(key, value) } }.build()
+        } else {
+            okhttp3.FormBody.Builder().apply { params.forEach { (key, value) -> add(key, value) } }.build()
+        }
         val url = currentBase.toHttpUrl().newBuilder().addPathSegments(path.trimStart('/')).build()
-        val request = Request.Builder().url(url).post(body).headers(headers).build()
-        client.newCall(request).awaitSuccess().use { response ->
+        val request = Request.Builder().url(url).post(body).headers(headers)
+            .apply { session?.let { tag(JmRequestSession::class.java, it) } }.build()
+        val requestClient = if (session != null) {
+            client.newBuilder().cookieJar(session.snapshotCookieJar(client.cookieJar, url)).build()
+        } else {
+            client
+        }
+        requestClient.newCall(request).awaitSuccess().use { response ->
+            session?.let(JmRequestSession::requireCurrent)
             try {
                 JSONObject(response.body?.string().orEmpty())
             } catch (error: Exception) {

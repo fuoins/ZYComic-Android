@@ -167,8 +167,7 @@ private fun JmOnlineLibraryContent(
     var listLayoutToken by remember { mutableStateOf<JmLibraryLayoutToken?>(null) }
     val activeGrid = grid && !history
     val visibleItems = remember(items, query) {
-        val text = query.orEmpty().trim()
-        if (text.isEmpty()) items else items.filter { it.name.contains(text, true) || it.author.contains(text, true) }
+        items.filter { JmFavoriteLibraryUiPolicy.matchesLocalSearch(query.orEmpty(), it.name, it.author) }
     }
 
     fun exitSelection() {
@@ -305,6 +304,7 @@ private fun JmOnlineLibraryContent(
         if (activeGrid) gridState.scrollToItem(0) else listState.scrollToItem(0)
     }
     BackHandler(enabled = selectionMode) { exitSelection() }
+    BackHandler(enabled = query != null && !selectionMode) { query = null }
 
     Scaffold(
         topBar = { scrollBehavior ->
