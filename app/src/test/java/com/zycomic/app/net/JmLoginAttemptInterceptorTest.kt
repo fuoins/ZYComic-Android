@@ -31,6 +31,15 @@ class JmLoginAttemptInterceptorTest {
         assertFalse(JmAuthStore.isLoginCurrent(attempt))
     }
 
+    @Test
+    fun `credential refresh HTTP 401 preserves the active session attempt`() {
+        val attempt = JmAuthStore.beginLoginAttempt(preserveSessionOnUnauthorized = true)
+
+        unauthorizedClient().newCall(loginRequest(attempt)).execute().close()
+
+        assertTrue(JmAuthStore.isLoginCurrent(attempt))
+    }
+
     private fun unauthorizedClient(): OkHttpClient = OkHttpClient.Builder()
         .retryOnConnectionFailure(false)
         .addInterceptor(JmApiInterceptor(recordRouteHealth = false, allowAuthentication = false))

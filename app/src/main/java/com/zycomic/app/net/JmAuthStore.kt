@@ -5,21 +5,24 @@ import android.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** JM-only encrypted token storage. Credentials/passwords and the API's optional `s` are never stored. */
+/** JM-only encrypted token and explicitly opted-in password storage. The API's optional `s` is never stored. */
 object JmAuthStore {
     private const val PREFS = "jm_auth_secure"
     private const val TOKEN = "jwt_ciphertext"
     private const val ACCOUNT_NAME = "account_name"
     private const val ACCOUNT_UID = "account_uid"
     private const val PROFILE = "account_profile"
+    private const val REMEMBERED_CREDENTIALS = "remembered_credentials_ciphertext"
     private const val KEY_ALIAS = "zycomic_jm_jwt_v1"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    private val CREDENTIALS_AAD = "jm-remembered-password-v1".toByteArray(Charsets.UTF_8)
 
     @Volatile private var preferences: android.content.SharedPreferences? = null
 
@@ -48,11 +51,13 @@ object JmAuthStore {
     @Synchronized
     fun initialize(context: Context) {
         preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        accountName = if (token() != null) preferences?.getString(ACCOUNT_NAME, null) else null
-        accountUid = if (token() != null) preferences?.getString(ACCOUNT_UID, null) else null
-        _profileFlow.value = if (token() != null) JmAccountSnapshotPolicy.decode(preferences?.getString(PROFILE, null)) else null
+        val hasRestoredToken = token() != null
+        accountName = if (hasRestoredToken) preferences?.getString(ACCOUNT_NAME, null) else null
+        accountUid = if (hasRestoredToken) preferences?.getString(ACCOUNT_UID, null) else null
+        _profileFlow.value = if (hasRestoredToken) JmAccountSnapshotPolicy.decode(preferences?.getString(PROFILE, null)) else null
+        if (!hasRestoredToken) preferences?.edit()?.remove(REMEMBERED_CREDENTIALS)?.apply()
         _accountNameFlow.value = accountName
-        _loggedInFlow.value = token() != null
+        _loggedInFlow.value = hasRestoredToken
         loginAttempts.invalidate()
         _sessionRevisionFlow.value++
     }
@@ -77,8 +82,15 @@ object JmAuthStore {
 
     /** Begins a login request; later logins and session changes invalidate this attempt. */
     @Synchronized
-    fun beginLoginAttempt(): JmLoginAttempt {
-        return loginAttempts.begin(sessionRevision)
+    fun beginLoginAttempt(preserveSessionOnUnauthorized: Boolean = false): JmLoginAttempt =
+        loginAttempts.begin(sessionRevision, preserveSessionOnUnauthorized)
+
+    /** A refresh attempt may start only against the same session revision whose credentials it read. */
+    @Synchronized
+    fun beginLoginAttempt(preserveSessionOnUnauthorized: Boolean, expectedSessionRevision: Long): JmLoginAttempt? {
+        val revision = sessionRevision
+        if (!JmCredentialRefreshPolicy.isSameSession(expectedSessionRevision, revision)) return null
+        return loginAttempts.begin(revision, preserveSessionOnUnauthorized)
     }
 
     /** Save a validated login response only while it still belongs to the active session and attempt. */
@@ -89,11 +101,25 @@ object JmAuthStore {
         username: String,
         uid: String?,
         profile: JmAccountSnapshot,
+        rememberPassword: Boolean = false,
+        credentialUsername: String? = null,
+        credentialPassword: String? = null,
         commitCookies: () -> Unit = {},
     ): Boolean {
         return loginAttempts.runIfCurrent(attempt, sessionRevision) {
             require(token.isNotBlank())
-            saveValues(token, username, uid, profile)
+            val credentials = if (rememberPassword) {
+                require(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword, credentialUsername, credentialPassword))
+                encryptRememberedCredentials(
+                    username,
+                    uid,
+                    checkNotNull(credentialUsername),
+                    checkNotNull(credentialPassword),
+                )
+            } else {
+                null
+            }
+            saveValues(token, username, uid, profile, credentials)
             commitCookies()
         }
     }
@@ -110,7 +136,13 @@ object JmAuthStore {
         return true
     }
 
-    private fun saveValues(token: String, username: String, uid: String?, profile: JmAccountSnapshot?) {
+    private fun saveValues(
+        token: String,
+        username: String,
+        uid: String?,
+        profile: JmAccountSnapshot?,
+        credentialsCiphertext: String? = null,
+    ) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val packed = cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
@@ -120,6 +152,7 @@ object JmAuthStore {
             .putString(ACCOUNT_NAME, username)
             .apply { if (uid == null) remove(ACCOUNT_UID) else putString(ACCOUNT_UID, uid) }
         if (profile == null) editor.remove(PROFILE) else editor.putString(PROFILE, JmAccountSnapshotPolicy.encode(profile))
+        if (credentialsCiphertext == null) editor.remove(REMEMBERED_CREDENTIALS) else editor.putString(REMEMBERED_CREDENTIALS, credentialsCiphertext)
         editor.apply()
         accountName = username
         accountUid = uid
@@ -132,6 +165,28 @@ object JmAuthStore {
     @Synchronized
     fun uid(): String? = accountUid
 
+    /** Returns credentials only when they were explicitly saved for the currently authenticated account. */
+    @Synchronized
+    internal fun rememberedCredentialsForCurrentSession(): JmRememberedCredentials? {
+        if (token() == null) return null
+        val serialized = preferences?.getString(REMEMBERED_CREDENTIALS, null) ?: return null
+        return runCatching {
+            val payload = JSONObject(decryptString(serialized, CREDENTIALS_AAD))
+            val savedAccount = payload.optString("accountName").takeIf(String::isNotBlank)
+            val savedUid = payload.optString("accountUid").takeIf(String::isNotBlank)
+            val loginUsername = payload.optString("username").takeIf(String::isNotBlank)
+            val password = payload.optString("password").takeIf(String::isNotBlank)
+            if (!JmCredentialRefreshPolicy.belongsToAccount(savedAccount, savedUid, accountName, accountUid) || loginUsername == null || password == null) {
+                null
+            } else {
+                JmRememberedCredentials(loginUsername, password, accountName, accountUid, sessionRevision)
+            }
+        }.getOrElse {
+            preferences?.edit()?.remove(REMEMBERED_CREDENTIALS)?.apply()
+            null
+        }
+    }
+
     /** Keep the authenticated identity stable for one synchronous request. */
     @Synchronized
     fun <T> withAccount(uid: String, action: () -> T): T? {
@@ -141,7 +196,7 @@ object JmAuthStore {
 
     @Synchronized
     fun clear() {
-        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.remove(ACCOUNT_UID)?.remove(PROFILE)?.apply()
+        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.remove(ACCOUNT_UID)?.remove(PROFILE)?.remove(REMEMBERED_CREDENTIALS)?.apply()
         accountName = null
         accountUid = null
         loginAttempts.invalidate()
@@ -167,4 +222,40 @@ object JmAuthStore {
         )
         return generator.generateKey()
     }
+
+    private fun encryptRememberedCredentials(account: String, uid: String?, username: String, password: String): String {
+        val payload = JSONObject()
+            .put("accountName", account)
+            .put("accountUid", uid ?: "")
+            .put("username", username)
+            .put("password", password)
+            .toString()
+        return encryptString(payload, CREDENTIALS_AAD)
+    }
+
+    private fun encryptString(value: String, aad: ByteArray): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        cipher.updateAAD(aad)
+        val packed = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(packed, Base64.NO_WRAP)
+    }
+
+    private fun decryptString(value: String, aad: ByteArray): String {
+        val packed = Base64.decode(value, Base64.NO_WRAP)
+        require(packed.size > 12) { "Invalid encrypted JM credential" }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+        cipher.updateAAD(aad)
+        return cipher.doFinal(packed.copyOfRange(12, packed.size)).toString(Charsets.UTF_8)
+    }
 }
+
+/** Password-bearing object intentionally does not expose credentials in its toString(). */
+internal class JmRememberedCredentials(
+    val username: String,
+    val password: String,
+    val accountName: String?,
+    val accountUid: String?,
+    val sessionRevision: Long,
+)

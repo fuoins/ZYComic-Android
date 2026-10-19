@@ -186,6 +186,7 @@ fun MangaDetailScreen(
     var showCoverPreview by remember(bookId) { mutableStateOf(false) }
     var showAddBlacklistDialog by remember(bookId) { mutableStateOf(false) }
     var authorsExpanded by rememberSaveable(bookId) { mutableStateOf(false) }
+    var titleExpanded by rememberSaveable(bookId) { mutableStateOf(false) }
     /** 屏蔽二次确认：服务端接口是 toggle，必须让用户知道重复点击会变成取消屏蔽 */
     var showBlockConfirm by remember(bookId) { mutableStateOf(false) }
     /** 屏蔽请求进行中：连点会真的连着 toggle 两次（等于没变化），所以期间屏蔽入口点击 */
@@ -331,9 +332,9 @@ fun MangaDetailScreen(
                             Text(
                                 text = d.name,
                                 style = MaterialTheme.typography.titleLarge,
-                                maxLines = 3,
+                                maxLines = detailTitleMaxLines(titleExpanded),
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = if (vm.isJm) Modifier else Modifier.clickable { onSearchKeyword(d.name) },
+                                modifier = Modifier.clickable { onSearchKeyword(d.name) },
                             )
                             Spacer(Modifier.height(8.dp))
                             val authors = (if (vm.isJm) d.jmAuthors else emptyList())
@@ -341,10 +342,13 @@ fun MangaDetailScreen(
                                 .map(String::trim)
                                 .filter(String::isNotBlank)
                                 .distinct()
-                            if (authors.isNotEmpty()) {
-                                val visibleAuthors = detailAuthorsForDisplay(authors, authorsExpanded)
+                            val visibleAuthors = detailAuthorsForDisplay(authors, authorsExpanded)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.weight(1f),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
@@ -372,25 +376,33 @@ fun MangaDetailScreen(
                                         }
                                     }
                                 }
-                                if (authors.size > 1) {
-                                    Text(
-                                        stringResource(if (authorsExpanded) KMR.strings.detail_authors_collapse else KMR.strings.detail_authors_expand),
-                                        modifier = Modifier
-                                            .clickable { authorsExpanded = !authorsExpanded }
-                                            .padding(top = 4.dp, bottom = 2.dp),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                                if (shouldShowJmAuthorNote(vm.isJm, authorsExpanded)) {
-                                    Text(
-                                        stringResource(KMR.strings.jm_author_note),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    stringResource(if (titleExpanded) KMR.strings.detail_title_collapse else KMR.strings.detail_title_expand),
+                                    modifier = Modifier
+                                        .clickable { titleExpanded = !titleExpanded }
+                                        .padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
                             }
+                            if (authors.size > 1) {
+                                Text(
+                                    stringResource(if (authorsExpanded) KMR.strings.detail_authors_collapse else KMR.strings.detail_authors_expand),
+                                    modifier = Modifier
+                                        .clickable { authorsExpanded = !authorsExpanded }
+                                        .padding(top = 4.dp, bottom = 2.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            if (shouldShowJmAuthorNote(vm.isJm, authorsExpanded)) {
+                                Text(
+                                    stringResource(KMR.strings.jm_author_note),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
                             if (vm.isJm) {
                                 Text(
                                     stringResource(KMR.strings.jm_album_id, d.id),

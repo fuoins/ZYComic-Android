@@ -72,11 +72,17 @@ internal fun JmDetailActions(vm: MangaDetailViewModel, manga: Manga, onSaveCover
                 }
             }
             TextButton(onClick = vm::toggleJmLike, enabled = !busy, modifier = Modifier.weight(1f)) {
+                val likeState = jmLikeVisualState(liked = manga.jmLiked == true, enabled = !busy)
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(
-                        if (manga.jmLiked == true) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                        if (likeState.liked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                         contentDescription = null,
-                        tint = if (manga.jmLiked == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        tint = when {
+                            likeState.liked && likeState.enabled -> MaterialTheme.colorScheme.primary
+                            likeState.liked -> MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+                            likeState.enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                        },
                     )
                     Text(
                         stringResource(if (manga.jmLiked == true) KMR.strings.jm_liked_label else KMR.strings.jm_like_label),

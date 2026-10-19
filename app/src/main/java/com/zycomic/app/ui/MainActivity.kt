@@ -553,7 +553,7 @@ fun AppContent(
             onClose = { closeDetail() },
             onOpenManga = openDetail,
             onSearchKeyword = { kw ->
-                searchProvider = if (bookId.startsWith("jm:")) SearchProvider.JM else SearchProvider.MANWA
+                searchProvider = null
                 searchKeyword = kw
                 detailStack.clear()
                 showSearch = true

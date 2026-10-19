@@ -63,7 +63,9 @@ class JmApiInterceptor internal constructor(
             if (response.code == 401) {
                 when {
                     session != null -> JmRequestSession.clearIfCurrent(session)
-                    loginAttempt != null -> JmAuthStore.clearIfCurrent(loginAttempt)
+                    loginAttempt != null -> {
+                        if (!loginAttempt.preserveSessionOnUnauthorized) JmAuthStore.clearIfCurrent(loginAttempt)
+                    }
                     else -> JmAuthStore.clear()
                 }
             }
@@ -84,7 +86,9 @@ class JmApiInterceptor internal constructor(
             if (apiCode == 401) {
                 when {
                     session != null -> JmRequestSession.clearIfCurrent(session)
-                    loginAttempt != null -> JmAuthStore.clearIfCurrent(loginAttempt)
+                    loginAttempt != null -> {
+                        if (!loginAttempt.preserveSessionOnUnauthorized) JmAuthStore.clearIfCurrent(loginAttempt)
+                    }
                     else -> JmAuthStore.clear()
                 }
             }

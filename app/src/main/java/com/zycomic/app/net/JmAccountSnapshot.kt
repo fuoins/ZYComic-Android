@@ -47,7 +47,11 @@ data class JmAccountSnapshot(
 }
 
 /** Opaque token capturing the login attempt and account session it is allowed to update. */
-data class JmLoginAttempt(val generation: Long, val sessionRevision: Long)
+data class JmLoginAttempt(
+    val generation: Long,
+    val sessionRevision: Long,
+    val preserveSessionOnUnauthorized: Boolean = false,
+)
 
 /** Pure persistence and identity rules shared by the auth store and its offline tests. */
 internal object JmAccountSnapshotPolicy {
@@ -70,9 +74,9 @@ internal object JmAccountSnapshotPolicy {
 internal class JmLoginAttemptPolicy {
     private var generation = 0L
 
-    fun begin(sessionRevision: Long): JmLoginAttempt {
+    fun begin(sessionRevision: Long, preserveSessionOnUnauthorized: Boolean = false): JmLoginAttempt {
         generation++
-        return JmLoginAttempt(generation, sessionRevision)
+        return JmLoginAttempt(generation, sessionRevision, preserveSessionOnUnauthorized)
     }
 
     fun invalidate() {
@@ -86,6 +90,38 @@ internal class JmLoginAttemptPolicy {
         if (!isCurrent(attempt, sessionRevision)) return false
         action()
         return true
+    }
+}
+
+/** Pure policy for opt-in credential persistence and account/revision isolation. */
+internal object JmCredentialRefreshPolicy {
+    fun shouldStorePassword(rememberPassword: Boolean, username: String?, password: String?): Boolean =
+        rememberPassword && !username.isNullOrBlank() && !password.isNullOrBlank()
+
+    fun belongsToAccount(
+        savedAccountName: String?,
+        savedUid: String?,
+        currentAccountName: String?,
+        currentUid: String?,
+    ): Boolean = savedAccountName == currentAccountName && savedUid == currentUid
+
+    fun isSameSession(expectedRevision: Long, currentRevision: Long): Boolean = expectedRevision == currentRevision
+}
+
+/** Process-local guard preventing overlapping explicit credential refreshes. */
+internal class JmRefreshGate {
+    private var active = false
+
+    @Synchronized
+    fun tryStart(): Boolean {
+        if (active) return false
+        active = true
+        return true
+    }
+
+    @Synchronized
+    fun finish() {
+        active = false
     }
 }
 

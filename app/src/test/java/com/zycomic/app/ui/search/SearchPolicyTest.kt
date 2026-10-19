@@ -26,20 +26,20 @@ class SearchPolicyTest {
     }
 
     @Test
-    fun `explicit detail source wins over ordinary saved choice when enabled`() {
+    fun `detail query without an explicit provider uses the current saved Search choice`() {
         assertEquals(
-            SearchProvider.JM,
+            SearchProvider.MANWA,
             initialSearchProvider(
-                explicitProvider = SearchProvider.JM,
+                explicitProvider = null,
                 rememberedProvider = SearchProvider.MANWA,
                 manwaEnabled = true,
                 jmEnabled = true,
             ),
         )
         assertEquals(
-            SearchProvider.MANWA,
+            SearchProvider.JM,
             initialSearchProvider(
-                explicitProvider = SearchProvider.MANWA,
+                explicitProvider = null,
                 rememberedProvider = SearchProvider.JM,
                 manwaEnabled = true,
                 jmEnabled = true,

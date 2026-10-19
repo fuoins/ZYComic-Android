@@ -80,4 +80,40 @@ class JmAccountSnapshotTest {
         policy.invalidate()
         assertFalse(policy.isCurrent(second, sessionRevision = 7))
     }
+
+    @Test
+    fun `remembered password requires explicit opt in and nonblank credentials`() {
+        assertFalse(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword = false, username = "alice", password = "secret"))
+        assertFalse(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword = true, username = "alice", password = " "))
+        assertTrue(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword = true, username = "alice", password = "secret"))
+    }
+
+    @Test
+    fun `remembered credentials are account and session revision bound`() {
+        assertTrue(JmCredentialRefreshPolicy.belongsToAccount("alice", "123", "alice", "123"))
+        assertFalse(JmCredentialRefreshPolicy.belongsToAccount("alice", "123", "bob", "456"))
+        assertFalse(JmCredentialRefreshPolicy.belongsToAccount("alice", "123", "alice", null))
+        assertTrue(JmCredentialRefreshPolicy.isSameSession(12, 12))
+        assertFalse(JmCredentialRefreshPolicy.isSameSession(12, 13))
+    }
+
+    @Test
+    fun `only one explicit credential refresh can run at a time`() {
+        val gate = JmRefreshGate()
+        assertTrue(gate.tryStart())
+        assertFalse(gate.tryStart())
+        gate.finish()
+        assertTrue(gate.tryStart())
+        gate.finish()
+    }
+
+    @Test
+    fun `refresh attempt records that unauthorized response must preserve current session`() {
+        val policy = JmLoginAttemptPolicy()
+        val refreshAttempt = policy.begin(sessionRevision = 9, preserveSessionOnUnauthorized = true)
+
+        assertTrue(refreshAttempt.preserveSessionOnUnauthorized)
+        assertTrue(policy.isCurrent(refreshAttempt, sessionRevision = 9))
+        assertFalse(policy.isCurrent(refreshAttempt, sessionRevision = 10))
+    }
 }

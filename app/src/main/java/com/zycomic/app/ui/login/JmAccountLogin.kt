@@ -5,6 +5,7 @@ import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmLoginAttempt
 import com.zycomic.app.net.JmLoginCookieJar
 import com.zycomic.app.net.JmNetworkModule
+import com.zycomic.app.net.JmRefreshGate
 import com.zycomic.app.net.JmRouteManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -17,10 +18,49 @@ import java.io.IOException
 
 /** Login transport uses only the isolated JM client, cookie jar, JWT store, and configured JM route. */
 internal object JmAccountLogin {
-    suspend fun login(username: String, password: String) {
+    private val refreshGate = JmRefreshGate()
+
+    suspend fun login(username: String, password: String, rememberPassword: Boolean = false) {
+        loginInternal(username, password, rememberPassword, preserveSessionOnUnauthorized = false)
+    }
+
+    /** Explicitly re-authenticates the active JM account using only its opt-in encrypted credentials. */
+    suspend fun refreshSavedAccountCredentials() {
+        if (!refreshGate.tryStart()) throw IOException("禁漫账号正在刷新，请稍后重试")
+        try {
+            val credentials = JmAuthStore.rememberedCredentialsForCurrentSession()
+                ?: throw IOException("此禁漫账号未保存密码，请重新登录并勾选“记住密码”后再刷新")
+            loginInternal(
+                credentials.username,
+                credentials.password,
+                rememberPassword = true,
+                preserveSessionOnUnauthorized = true,
+                expectedSessionRevision = credentials.sessionRevision,
+                expectedAccountName = credentials.accountName,
+                expectedAccountUid = credentials.accountUid,
+            )
+        } finally {
+            refreshGate.finish()
+        }
+    }
+
+    private suspend fun loginInternal(
+        username: String,
+        password: String,
+        rememberPassword: Boolean,
+        preserveSessionOnUnauthorized: Boolean,
+        expectedSessionRevision: Long? = null,
+        expectedAccountName: String? = null,
+        expectedAccountUid: String? = null,
+    ) {
         require(username.isNotBlank()) { "请输入禁漫账号" }
         require(password.isNotBlank()) { "请输入密码" }
-        val attempt = JmAuthStore.beginLoginAttempt()
+        val attempt = if (expectedSessionRevision == null) {
+            JmAuthStore.beginLoginAttempt(preserveSessionOnUnauthorized)
+        } else {
+            JmAuthStore.beginLoginAttempt(preserveSessionOnUnauthorized, expectedSessionRevision)
+                ?: throw IOException("JM 登录状态已变化，请重新发起刷新")
+        }
 
         JmNetworkModule.ensureAgeCookie()
         val baseUrl = JmRouteManager.baseUrl.trimEnd('/')
@@ -59,9 +99,24 @@ internal object JmAccountLogin {
                     }
                     val displayName = member.optString("username").ifBlank { username.trim() }
                     val uid = member.optString("uid").takeIf { it.isNotBlank() && it.all(Char::isDigit) }
+                    if (expectedAccountUid != null && uid != expectedAccountUid) {
+                        throw IOException("禁漫登录响应与当前账号不一致，旧登录状态已保留")
+                    }
+                    if (expectedAccountUid == null && expectedAccountName != null && displayName != expectedAccountName) {
+                        throw IOException("禁漫登录响应与当前账号不一致，旧登录状态已保留")
+                    }
                     val snapshot = JmAccountSnapshot.fromJson(member)
                     currentCoroutineContext().ensureActive()
-                    val saved = JmAuthStore.saveLogin(attempt, token, displayName, uid, snapshot) {
+                    val saved = JmAuthStore.saveLogin(
+                        attempt = attempt,
+                        token = token,
+                        username = displayName,
+                        uid = uid,
+                        profile = snapshot,
+                        rememberPassword = rememberPassword,
+                        credentialUsername = username.trim(),
+                        credentialPassword = password,
+                    ) {
                         isolatedCookieJar.replayBufferedCookies()
                     }
                     if (!saved) {

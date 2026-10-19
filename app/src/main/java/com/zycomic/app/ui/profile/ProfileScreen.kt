@@ -71,8 +71,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -88,6 +86,7 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.ui.login.JmAccountLogin
 import com.zycomic.app.ui.login.JmPasswordChangeDialog
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
@@ -125,7 +124,23 @@ fun ProfileScreen(
     val manwaRefreshSuccess = stringResource(KMR.strings.manwa_profile_refresh_verified)
     val manwaRefreshUnknown = stringResource(KMR.strings.manwa_session_unknown)
     val manwaSessionExpired = stringResource(KMR.strings.manwa_session_expired)
-    val jmRefreshUnavailableReason = stringResource(KMR.strings.jm_profile_refresh_unavailable_reason)
+    val jmRefreshSuccess = stringResource(KMR.strings.jm_profile_refresh_success)
+    val jmRefreshFailed = stringResource(KMR.strings.jm_profile_refresh_failed)
+    var jmRefreshing by remember { mutableStateOf(false) }
+    suspend fun refreshJm() {
+        if (jmRefreshing) return
+        jmRefreshing = true
+        try {
+            JmAccountLogin.refreshSavedAccountCredentials()
+            Toast.makeText(context, jmRefreshSuccess, Toast.LENGTH_SHORT).show()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Toast.makeText(context, error.message ?: jmRefreshFailed, Toast.LENGTH_LONG).show()
+        } finally {
+            jmRefreshing = false
+        }
+    }
     // A restored profile stays visible while its first verification is pending, including the
     // first frame before LaunchedEffect starts. Each account/platform owns its own UI state.
     var manwaRefreshing by remember(platform, user?.uid) {
@@ -280,25 +295,26 @@ fun ProfileScreen(
             item {
                 LogoHeader {
                     TextButton(
-                        enabled = platform == ContentPlatform.MANWA && user != null && !manwaRefreshing,
-                        modifier = Modifier.semantics {
-                            if (platform == ContentPlatform.JM) contentDescription = jmRefreshUnavailableReason
+                        enabled = when (platform) {
+                            ContentPlatform.MANWA -> user != null && !manwaRefreshing
+                            ContentPlatform.JM -> jmLoggedIn && !jmRefreshing
                         },
                         onClick = {
-                            if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
+                            when (platform) {
+                                ContentPlatform.MANWA -> if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
+                                ContentPlatform.JM -> if (!jmRefreshing) scope.launch { refreshJm() }
+                            }
                         },
                     ) {
-                        if (platform == ContentPlatform.MANWA && manwaRefreshing) {
+                        if ((platform == ContentPlatform.MANWA && manwaRefreshing) ||
+                            (platform == ContentPlatform.JM && jmRefreshing)
+                        ) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
                             Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(
-                                if (platform == ContentPlatform.JM) KMR.strings.jm_profile_refresh_unavailable else KMR.strings.profile_refresh,
-                            ),
-                        )
+                        Text(stringResource(KMR.strings.profile_refresh))
                     }
                 }
             }
@@ -511,8 +527,6 @@ fun ProfileScreen(
                     )
                 }
             }
-
-            item { HorizontalDivider() }
 
             // ---- 设置入口 ----
             if (platform == ContentPlatform.MANWA) {
