@@ -10,13 +10,14 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.io.IOException
+import java.net.ConnectException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class JmEndpointTransportRegressionTest {
     @Test
     fun `DNS and failure attribution stay pinned when selected endpoint changes during request`() {
-        val server = server(503)
+        val server = server(200)
         val selected = AtomicReference(DomainIp("race.local", "127.0.0.1"))
         val endpointReads = AtomicInteger()
         val failure = AtomicReference<DomainIp>()
@@ -31,6 +32,7 @@ class JmEndpointTransportRegressionTest {
         )
         val client = OkHttpClient.Builder()
             .dns(dns)
+            .retryOnConnectionFailure(false)
             .addInterceptor(
                 JmEndpointTransportInterceptor(
                     prepareApiRoute = { selected.set(DomainIp(it, "127.0.0.2")) },
@@ -43,10 +45,12 @@ class JmEndpointTransportRegressionTest {
                     apiHasMeasurements = { true },
                 ),
             )
+            .addNetworkInterceptor { throw ConnectException("offline-test connection failure") }
             .build()
         try {
-            client.newCall(Request.Builder().url("http://race.local:${server.port}/").build())
-                .execute().use { assertEquals(503, it.code) }
+            assertThrows(ConnectException::class.java) {
+                client.newCall(Request.Builder().url("http://race.local:${server.port}/").build()).execute().close()
+            }
             assertEquals(1, endpointReads.get(), "DNS must not re-read the endpoint after the request pin")
             assertEquals(DomainIp("race.local", "127.0.0.1"), failure.get())
         } finally {

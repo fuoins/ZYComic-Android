@@ -83,7 +83,7 @@ class ReusableImageSpeedTestPolicyTest {
     }
 
     @Test
-    fun `forced full test and changed network identity never reuse prior image results`() {
+    fun `reuse eligibility follows config updates rather than network identity`() {
         val current = SpeedTestRunKey(
             platformRevision = 1,
             manwaConfigRevision = 2,
@@ -93,8 +93,18 @@ class ReusableImageSpeedTestPolicyTest {
         val previousNetwork = current.copy(networkIdentity = "wifi-network-a")
 
         assertFalse(SpeedTestRunPolicy.canReuseImages(true, true, current, current, current))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, previousNetwork, current, previousNetwork))
+        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, previousNetwork, current, previousNetwork))
         assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, current, current, null))
+        assertFalse(
+            SpeedTestRunPolicy.canReuseImages(
+                true,
+                false,
+                current,
+                current,
+                current,
+                remoteConfigUpdated = true,
+            ),
+        )
     }
 
     @Test

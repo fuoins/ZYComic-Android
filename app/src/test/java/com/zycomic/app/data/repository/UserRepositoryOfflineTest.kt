@@ -37,7 +37,7 @@ class UserRepositoryOfflineTest {
         NetworkModule.init(context)
         UserRepository.init(context)
         UserRepository.setApiForTesting(api.proxy())
-        RouteManager.applyBaseLists(listOf("https://example.test"), emptyList())
+        RouteManager.applyBaseLists(listOf("https://example.test"), listOf("images.example.test"))
 
         try {
             val prefs = context.getSharedPreferences("zycomic_user", Context.MODE_PRIVATE)

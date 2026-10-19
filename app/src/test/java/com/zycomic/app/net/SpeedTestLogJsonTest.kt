@@ -96,6 +96,11 @@ class SpeedTestLogJsonTest {
                 androidRelease = "15",
             ),
             isComplete = true,
+            lineMeasuredAtEpochMs = mapOf(line to 1_800_000_000_100L),
+            imageMeasuredAtEpochMs = mapOf(
+                imageOk to 1_800_000_000_200L,
+                imageFailed to 1_800_000_000_300L,
+            ),
         )
 
         val json = SpeedTestLogJson.encode(snapshot, "1.0.5")

@@ -65,8 +65,8 @@ class JmImageEndpointSelectionPolicyTest {
     }
 
     @Test
-    fun `removed manual endpoint is not silently replaced by another IP`() {
-        assertNull(select(manual = slow, measurements = mapOf(fast to 10L)))
+    fun `removed manual endpoint falls back to fastest automatic candidate`() {
+        assertEquals(fast, select(manual = slow, measurements = mapOf(fast to 10L)))
     }
 
     @Test
