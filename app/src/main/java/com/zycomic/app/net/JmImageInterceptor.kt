@@ -45,7 +45,11 @@ class JmImageInterceptor internal constructor(
         }
         val networkUrl = original.url.newBuilder().removeAllQueryParameters(SCRAMBLE_QUERY).build()
         val scope = original.tag(PageAttemptScope::class.java)
-        if (scope != null && !scope.isCurrent) throw IOException("图片加载已取消")
+        fun isCancelled() = chain.call().isCanceled() || scope?.isCurrent == false
+        fun requireActive() {
+            if (isCancelled()) throw IOException("图片加载已取消")
+        }
+        requireActive()
         val configuredCandidates = imageCandidates()
         val candidates = if (path.startsWith("/media/albums/")) {
             JmRelatedMangaPolicy.imageHostsForAlbum(original.url.host, configuredCandidates)
@@ -55,8 +59,8 @@ class JmImageInterceptor internal constructor(
         var lastError: IOException? = null
         var lastStatus: Int? = null
         for (host in candidates) {
+            requireActive()
             if (scope != null) {
-                if (!scope.isCurrent) throw IOException("图片加载已取消")
                 if (scope.page.endpointsAttemptedInRound.get() >= PageAttemptScope.MAX_ENDPOINTS_PER_ROUND) break
                 // JM transport owns DNS/IP selection; the retry identity is the hostname route.
                 if (!scope.recordEndpointAttempt(DomainIp(host, ""))) continue
@@ -74,13 +78,20 @@ class JmImageInterceptor internal constructor(
             scope?.endpointRequestStarted((scope.page.endpointsAttemptedInRound.get() - 1).coerceAtLeast(0), PageAttemptScope.MAX_ENDPOINTS_PER_ROUND)
             try {
                 prepareImageRoute(host)
+                requireActive()
                 val response = chain.proceed(request)
+                if (isCancelled()) {
+                    response.close()
+                    requireActive()
+                }
                 val isImage = response.header("Content-Type")?.substringBefore(';')
                     ?.startsWith("image/", ignoreCase = true) == true
                 if (response.isSuccessful && isImage) {
                     return try {
+                        val restored = restoreScrambledImage(response, scramble, scope)
+                        requireActive()
                         recordImageSuccess(host)
-                        restoreScrambledImage(response, scramble, scope)
+                        restored
                     } catch (error: IOException) {
                         response.close()
                         throw error
@@ -88,9 +99,11 @@ class JmImageInterceptor internal constructor(
                 }
                 lastStatus = response.code
                 response.close()
+                requireActive()
                 recordImageFailure(host, "JM 图床 HTTP $lastStatus")
             } catch (error: IOException) {
-                if (scope != null && !scope.isCurrent) throw error
+                // Coil cover requests have no PageAttemptScope; Call cancellation is authoritative.
+                if (isCancelled()) throw error
                 lastError = error
                 recordImageFailure(host, error.message ?: error.javaClass.simpleName)
             } finally {

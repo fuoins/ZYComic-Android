@@ -19,6 +19,12 @@ internal class JmEndpointTransportInterceptor(
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
+        val scope = request.tag(PageAttemptScope::class.java)
+        fun isCancelled() = chain.call().isCanceled() || scope?.isCurrent == false
+        fun requireActive() {
+            if (isCancelled()) throw IOException("JM request cancelled")
+        }
+        requireActive()
         val host = request.url.host
         val isImage = request.url.encodedPath.startsWith("/media/")
         val endpoint = if (isImage) imageEndpoint(host) else apiEndpoint(host)
@@ -28,7 +34,12 @@ internal class JmEndpointTransportInterceptor(
         )
         try {
             if (isImage) prepareImageRoute(host) else prepareApiRoute(host)
+            requireActive()
             val response = chain.proceed(request)
+            if (isCancelled()) {
+                response.close()
+                requireActive()
+            }
             val requestPin = JmEndpointRequestContext.current(host, isImage)
             val actualEndpoint = requestPin?.endpoint ?: endpoint
             if (response.isSuccessful && requestPin?.bootstrapAllowed == true && actualEndpoint != null) {
@@ -44,6 +55,8 @@ internal class JmEndpointTransportInterceptor(
             }
             return response
         } catch (error: IOException) {
+            // Cancellation is not evidence that the pinned IP is unhealthy (including stale pages).
+            if (isCancelled()) throw error
             val actualEndpoint = JmEndpointRequestContext.current(host, isImage)?.endpoint ?: endpoint
             if (actualEndpoint != null) {
                 if (isImage) {

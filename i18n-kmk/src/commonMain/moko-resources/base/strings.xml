@@ -323,6 +323,7 @@
     <string name="jm_back">返回</string>
     <string name="jm_comment_placeholder">写下你的评论</string>
     <string name="jm_comment_send">发表</string>
+    <string name="jm_comment_short_warning">评论字数太少可能被检测导致发送失败</string>
     <string name="jm_load_more">加载更多</string>
     <string name="jm_retry">重试</string>
     <string name="jm_no_comments">暂无评论</string>

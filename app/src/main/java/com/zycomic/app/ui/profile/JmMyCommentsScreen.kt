@@ -303,7 +303,10 @@ private fun JmMyCommentItem(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (comment.mangaName.isNotBlank()) {
+                if (
+                    comment.mangaName.isNotBlank() &&
+                    !comment.mangaName.trim().matches(Regex("(?i)(?:JM\\s*#?\\s*)?${Regex.escape(comment.mangaId)}"))
+                ) {
                     Text(comment.mangaName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {

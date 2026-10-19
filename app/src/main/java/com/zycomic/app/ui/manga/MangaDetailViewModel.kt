@@ -377,7 +377,7 @@ class MangaDetailViewModel(private val bookId: String) {
             jmActionBusy.value = true
             try {
                 if (jmStateRefreshRequired) {
-                    if (refreshJmState()) {
+                    if (refreshJmState() && _detail.value?.jmLiked != null) {
                         jmStateRefreshRequired = false
                     } else {
                         _favSuccess.emit("点赞状态暂无法确认，请刷新后重试")
@@ -391,18 +391,23 @@ class MangaDetailViewModel(private val bookId: String) {
                     throw e
                 } catch (e: Exception) {
                     jmStateRefreshRequired = true
-                    val refreshed = refreshJmState()
+                    val refreshed = refreshJmState() && _detail.value?.jmLiked != null
                     if (refreshed) jmStateRefreshRequired = false
                     if (JmAuthStore.token() == null) jmNeedLogin.value = true
                     _favSuccess.emit(if (refreshed) "点赞请求未确认，已刷新当前状态" else "点赞请求结果不确定，刷新状态失败；请勿重复操作")
                     return@launch
                 }
+                // This is a confirmed write result, never an optimistic update before /like returns.
+                val confirmedLiked = JmToggleActionPolicy.likedAfterConfirmedSuccess(before)
+                if (confirmedLiked != null) {
+                    _detail.value = _detail.value?.copy(jmLiked = confirmedLiked)
+                }
                 jmStateRefreshRequired = true
-                val refreshed = refreshJmState()
-                jmStateRefreshRequired = !refreshed
+                val refreshed = refreshJmState(confirmedLiked)
+                jmStateRefreshRequired = !refreshed || _detail.value?.jmLiked == null
                 val after = _detail.value?.jmLiked
                 _favSuccess.emit(
-                    if (refreshed && before != null && after != null && after != before) {
+                    if (before != null && after != null && after != before) {
                         if (after) "已点赞" else "已取消点赞"
                     } else {
                         "点赞状态未能确认，请刷新"
@@ -443,10 +448,13 @@ class MangaDetailViewModel(private val bookId: String) {
         scope.launch { refreshJmState() }
     }
 
-    private suspend fun refreshJmState(): Boolean {
+    private suspend fun refreshJmState(confirmedLiked: Boolean? = null): Boolean {
         return try {
             val fresh = JmSource.getAlbum(contentId).manga
-            _detail.value = fresh.copy(chapterList = _detail.value?.chapterList ?: fresh.chapterList)
+            _detail.value = fresh.copy(
+                chapterList = _detail.value?.chapterList ?: fresh.chapterList,
+                jmLiked = JmToggleActionPolicy.likedAfterRefresh(fresh.jmLiked, confirmedLiked),
+            )
             if (JmAuthStore.token() == null && jmAccountName.value != null) {
                 jmAccountName.value = null
                 jmNeedLogin.value = true

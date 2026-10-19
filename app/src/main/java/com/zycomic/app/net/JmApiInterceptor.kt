@@ -57,7 +57,7 @@ class JmApiInterceptor internal constructor(
         val response = try {
             chain.proceed(request)
         } catch (error: IOException) {
-            if (recordRouteHealth && !isImage && !isUnsigned) {
+            if (!chain.call().isCanceled() && recordRouteHealth && !isImage && !isUnsigned) {
                 JmRouteManager.recordApiFailure(host, error.javaClass.simpleName)
             }
             throw error

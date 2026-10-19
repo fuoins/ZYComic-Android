@@ -318,9 +318,7 @@ object JmSource : HttpSource() {
 
     suspend fun toggleLike(albumId: String) {
         val response = postJson("/like", mapOf("id" to albumId))
-        if (response.optString("status") != "success" && response.optString("status") != "ok") {
-            throw IOException(response.optString("msg").ifBlank { "JM 点赞操作失败" })
-        }
+        JmLikeResponsePolicy.requireSuccess(response)
     }
 
     suspend fun getComments(albumId: String, page: Int): JmCommentPage {

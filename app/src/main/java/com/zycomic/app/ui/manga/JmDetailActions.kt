@@ -215,7 +215,15 @@ private fun JmCommentsDialog(vm: MangaDetailViewModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = { vm.postJmComment(draft) { draft = "" } }, enabled = account != null && draft.isNotBlank() && !busy) { Text(stringResource(KMR.strings.jm_comment_send)) }
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = { vm.postJmComment(draft) { draft = "" } }, enabled = account != null && draft.isNotBlank() && !busy) { Text(stringResource(KMR.strings.jm_comment_send)) }
+                Text(
+                    stringResource(KMR.strings.jm_comment_short_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
+                )
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(KMR.strings.jm_close)) } },
     )
