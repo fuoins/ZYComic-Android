@@ -65,6 +65,7 @@ import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.JmOnlineLibraryScreen
+import com.zycomic.app.ui.components.LibraryHistoryTitle
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -184,13 +185,7 @@ fun LibraryScreen(
                 onChangeSearchQuery = vm::updateSearchQuery,
                 titleContent = {
                     Column {
-                        Text(
-                            text = "收藏",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        LibraryHistoryTitle("收藏")
                         subtitle?.let {
                             Text(
                                 text = it,

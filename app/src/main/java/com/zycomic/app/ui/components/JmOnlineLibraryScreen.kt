@@ -386,7 +386,7 @@ private fun JmOnlineLibraryContent(
                 onChangeSearchQuery = { query = it },
                 titleContent = {
                     Column {
-                        Text(if (history) "历史" else "收藏", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        LibraryHistoryTitle(if (history) "历史" else "收藏")
                         if (!history) total?.let { Text("${items.size}/$it", style = MaterialTheme.typography.bodyMedium) }
                     }
                 },

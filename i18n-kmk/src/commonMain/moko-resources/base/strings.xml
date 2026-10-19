@@ -385,6 +385,9 @@
     <string name="manwa_session_unknown">登录状态未验证（缓存资料），请刷新重试</string>
     <string name="manwa_session_expired">登录已失效，请重新登录</string>
     <string name="manwa_profile_refresh_verified">已刷新并验证登录状态</string>
+    <string name="profile_refresh">刷新</string>
+    <string name="jm_profile_refresh_unavailable">刷新（暂不支持）</string>
+    <string name="jm_profile_refresh_unavailable_reason">JM 暂无已确认的免密码资料刷新接口；等级、经验、金币与收藏数仍为上次登录快照。</string>
     <!-- JM calendar, annual artwork and explicitly confirmed monthly makeup -->
     <string name="jm_calendar_title">JM签到日历</string>
     <string name="jm_calendar_summary">只读查看当月签到；补签请使用“JM补签破解”</string>

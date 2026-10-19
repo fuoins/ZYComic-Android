@@ -30,7 +30,11 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.EditCalendar
+import androidx.compose.material.icons.outlined.EventAvailable
+import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
@@ -67,6 +71,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -119,6 +125,39 @@ fun ProfileScreen(
     val manwaRefreshSuccess = stringResource(KMR.strings.manwa_profile_refresh_verified)
     val manwaRefreshUnknown = stringResource(KMR.strings.manwa_session_unknown)
     val manwaSessionExpired = stringResource(KMR.strings.manwa_session_expired)
+    val jmRefreshUnavailableReason = stringResource(KMR.strings.jm_profile_refresh_unavailable_reason)
+    // A restored profile stays visible while its first verification is pending, including the
+    // first frame before LaunchedEffect starts. Each account/platform owns its own UI state.
+    var manwaRefreshing by remember(platform, user?.uid) {
+        mutableStateOf(platform == ContentPlatform.MANWA && user != null)
+    }
+    suspend fun refreshManwa(showResult: Boolean) {
+        manwaRefreshing = true
+        try {
+            UserRepository.refreshUserInfo()
+            if (showResult) {
+                val message = when (UserRepository.sessionStatusFlow.value) {
+                    ManwaSessionStatus.VERIFIED -> manwaRefreshSuccess
+                    ManwaSessionStatus.EXPIRED -> manwaSessionExpired
+                    else -> manwaRefreshUnknown
+                }
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (showResult) {
+                val message = if (UserRepository.sessionStatusFlow.value == ManwaSessionStatus.EXPIRED) {
+                    manwaSessionExpired
+                } else {
+                    manwaRefreshUnknown
+                }
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        } finally {
+            manwaRefreshing = false
+        }
+    }
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
     val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
@@ -148,15 +187,12 @@ fun ProfileScreen(
         showJmMakeup = false
         jmSubscreenSessionRevision = null
     }
-    LaunchedEffect(platform) {
+    LaunchedEffect(platform, user?.uid) {
         if (platform != ContentPlatform.JM) closeMakeup()
-        if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.userFlow.value != null) {
-            try {
-                UserRepository.refreshUserInfo()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-            }
+        if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && user != null) {
+            refreshManwa(showResult = false)
+        } else {
+            manwaRefreshing = false
         }
     }
     var showPointLogs by remember { mutableStateOf(false) }
@@ -241,7 +277,31 @@ fun ProfileScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { contentPadding ->
         ScrollbarLazyColumn(contentPadding = contentPadding) {
-            item { LogoHeader() }
+            item {
+                LogoHeader {
+                    TextButton(
+                        enabled = platform == ContentPlatform.MANWA && user != null && !manwaRefreshing,
+                        modifier = Modifier.semantics {
+                            if (platform == ContentPlatform.JM) contentDescription = jmRefreshUnavailableReason
+                        },
+                        onClick = {
+                            if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
+                        },
+                    ) {
+                        if (platform == ContentPlatform.MANWA && manwaRefreshing) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(
+                                if (platform == ContentPlatform.JM) KMR.strings.jm_profile_refresh_unavailable else KMR.strings.profile_refresh,
+                            ),
+                        )
+                    }
+                }
+            }
 
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -319,7 +379,7 @@ fun ProfileScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            if (manwaSessionStatus != ManwaSessionStatus.VERIFIED) {
+                            if (ManwaProfileUiPolicy.showUnverifiedWarning(manwaSessionStatus, manwaRefreshing)) {
                                 Text(
                                     manwaRefreshUnknown,
                                     style = MaterialTheme.typography.bodySmall,
@@ -337,7 +397,7 @@ fun ProfileScreen(
                     TextPreferenceWidget(
                         title = stringResource(KMR.strings.jm_calendar_title),
                         subtitle = stringResource(KMR.strings.jm_calendar_summary),
-                        icon = Icons.Outlined.Refresh,
+                        icon = Icons.Outlined.CalendarMonth,
                         onPreferenceClick = {
                             if (jmLoggedIn) {
                                 jmSubscreenSessionRevision = jmSessionRevision
@@ -352,7 +412,7 @@ fun ProfileScreen(
                     TextPreferenceWidget(
                         title = stringResource(KMR.strings.jm_makeup_title),
                         subtitle = stringResource(KMR.strings.jm_makeup_description),
-                        icon = Icons.Outlined.Refresh,
+                        icon = Icons.Outlined.EditCalendar,
                         onPreferenceClick = {
                             if (jmLoggedIn) {
                                 jmSubscreenSessionRevision = jmSessionRevision
@@ -389,6 +449,7 @@ fun ProfileScreen(
                     SwitchPreferenceWidget(
                         title = stringResource(KMR.strings.jm_auto_check_in),
                         subtitle = stringResource(KMR.strings.jm_auto_check_in_summary),
+                        icon = Icons.Outlined.EventRepeat,
                         checked = jmAutoCheckIn,
                         onCheckedChanged = { enabled ->
                             JmCheckInRepository.setAutoEnabled(context, enabled)
@@ -400,7 +461,7 @@ fun ProfileScreen(
                     TextPreferenceWidget(
                         title = stringResource(if (jmCheckingIn) KMR.strings.jm_check_in_working else KMR.strings.jm_manual_check_in),
                         subtitle = jmCheckInMessage,
-                        icon = Icons.Outlined.Refresh,
+                        icon = Icons.Outlined.EventAvailable,
                         onPreferenceClick = {
                             if (!jmLoggedIn) {
                                 onRequireLogin()
@@ -449,51 +510,6 @@ fun ProfileScreen(
                         onPreferenceClick = { if (!rewarding) showRewardDialog = true },
                     )
                 }
-                item {
-                    val ctx = LocalContext.current
-                    TextPreferenceWidget(
-                        title = "刷新",
-                        icon = Icons.Outlined.Refresh,
-                        onPreferenceClick = {
-                            scope.launch {
-                                try {
-                                    UserRepository.refreshUserInfo()
-                                    val message = when (UserRepository.sessionStatusFlow.value) {
-                                        ManwaSessionStatus.VERIFIED -> manwaRefreshSuccess
-                                        ManwaSessionStatus.EXPIRED -> manwaSessionExpired
-                                        else -> manwaRefreshUnknown
-                                    }
-                                    Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
-                                } catch (e: CancellationException) {
-                                    throw e
-                                } catch (_: Exception) {
-                                    val message = if (UserRepository.sessionStatusFlow.value == ManwaSessionStatus.EXPIRED) {
-                                        manwaSessionExpired
-                                    } else {
-                                        manwaRefreshUnknown
-                                    }
-                                    Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                    )
-                }
-                item {
-                    TextPreferenceWidget(
-                        title = "修改密码",
-                        icon = Icons.Outlined.Lock,
-                        onPreferenceClick = { showChangePwd = true },
-                    )
-                }
-                item {
-                    TextPreferenceWidget(
-                        title = "退出登录",
-                        icon = Icons.Outlined.Logout,
-                        onPreferenceClick = {
-                            scope.launch { UserRepository.logout() }
-                        },
-                    )
-                }
             }
 
             item { HorizontalDivider() }
@@ -523,7 +539,25 @@ fun ProfileScreen(
                 }
             }
 
-            item { HorizontalDivider() }
+            // Account actions follow all feature rows; no bottom account divider.
+            if (platform == ContentPlatform.MANWA && user != null) {
+                item {
+                    TextPreferenceWidget(
+                        title = "修改密码",
+                        icon = Icons.Outlined.Lock,
+                        onPreferenceClick = { showChangePwd = true },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = "退出登录",
+                        icon = Icons.Outlined.Logout,
+                        onPreferenceClick = {
+                            scope.launch { UserRepository.logout() }
+                        },
+                    )
+                }
+            }
         }
     }
 
