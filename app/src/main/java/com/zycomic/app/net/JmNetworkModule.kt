@@ -124,6 +124,7 @@ object JmNetworkModule {
             .addInterceptor(JmApiInterceptor())
             .addInterceptor(JmImageInterceptor())
             .addInterceptor(JmEndpointTransportInterceptor())
+            .addNetworkInterceptor(JmApiResponseInterceptor())
             .build()
     }
 

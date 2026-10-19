@@ -18,5 +18,5 @@ object JmAuthPolicy {
     private fun isUserEdit(path: String): Boolean = USER_EDIT_PATH.matches(path)
 
     private val USER_EDIT_PATH = Regex("/useredit/[0-9]+")
-    private val USER_LIST_GET_PATHS = setOf("/favorite", "/watch_list")
+    private val USER_LIST_GET_PATHS = setOf("/favorite", "/watch_list", "/forum")
 }
