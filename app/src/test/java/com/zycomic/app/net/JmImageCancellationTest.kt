@@ -228,33 +228,33 @@ class JmImageCancellationTest {
     }
 
     @Test
-    fun `genuine connection failure still records IP and host then falls back`() {
+    fun `genuine connection failure records transport failure without trying another source`() {
         val health = Health()
         val visited = mutableListOf<String>()
         val client = client(health) { chain ->
             visited += chain.request().url.host
-            if (chain.request().url.host == FIRST) throw IOException("connection reset")
+            if (chain.request().url.host == FIRST) throw java.net.SocketException("connection reset")
             response(chain)
         }
-        client.newCall(request()).execute().use { assertEquals("GIF89a", it.body!!.string()) }
-        assertEquals(listOf(FIRST, SECOND), visited)
+        assertThrows(IOException::class.java) { client.newCall(request()).execute().close() }
+        assertEquals(listOf(FIRST), visited)
         assertEquals(listOf(DomainIp(FIRST, "192.0.2.1")), health.endpointFailures)
-        assertEquals(listOf(FIRST), health.hostFailures)
-        assertEquals(listOf(SECOND), health.hostSuccesses)
+        assertTrue(health.hostFailures.isEmpty())
+        assertTrue(health.hostSuccesses.isEmpty())
     }
 
     @Test
-    fun `genuine HTTP failure still records IP and host then falls back`() {
+    fun `genuine HTTP failure does not trigger a different source within one request`() {
         val health = Health()
         val visited = mutableListOf<String>()
         val client = client(health) { chain ->
             visited += chain.request().url.host
-            response(chain, code = if (chain.request().url.host == FIRST) 503 else 200)
+            response(chain, code = 503)
         }
-        client.newCall(request()).execute().use { assertTrue(it.isSuccessful) }
-        assertEquals(listOf(FIRST, SECOND), visited)
-        assertEquals(listOf(DomainIp(FIRST, "192.0.2.1")), health.endpointFailures)
-        assertEquals(listOf(FIRST), health.hostFailures)
+        assertThrows(IOException::class.java) { client.newCall(request()).execute().close() }
+        assertEquals(listOf(FIRST), visited)
+        assertTrue(health.endpointFailures.isEmpty())
+        assertTrue(health.hostFailures.isEmpty())
     }
 
     @Test
@@ -264,9 +264,9 @@ class JmImageCancellationTest {
             if (chain.request().url.host == FIRST) throw IOException("Canceled")
             response(chain)
         }
-        client.newCall(request()).execute().close()
-        assertEquals(listOf(FIRST), health.hostFailures)
-        assertEquals(listOf(DomainIp(FIRST, "192.0.2.1")), health.endpointFailures)
+        assertThrows(IOException::class.java) { client.newCall(request()).execute().close() }
+        assertTrue(health.hostFailures.isEmpty())
+        assertTrue(health.endpointFailures.isEmpty())
     }
 
     private class Health {
@@ -302,21 +302,25 @@ class JmImageCancellationTest {
         before: Interceptor? = null,
         prepare: (String) -> Unit = {},
         terminal: Interceptor,
-    ): OkHttpClient = OkHttpClient.Builder()
-        .retryOnConnectionFailure(false)
-        .apply { if (before != null) addInterceptor(before) }
-        .addInterceptor(JmApiInterceptor(recordRouteHealth = true, allowAuthentication = false))
-        .addInterceptor(
-            JmImageInterceptor(
-                imageCandidates = { listOf(FIRST, SECOND).filterNot { it in health.hostFailures } },
-                prepareImageRoute = prepare,
-                recordImageFailure = { host, _ -> health.hostFailures += host },
-                recordImageSuccess = { health.hostSuccesses += it },
-            ),
-        )
-        .addInterceptor(transport(health, measured))
-        .addInterceptor(terminal)
-        .build()
+    ): OkHttpClient {
+        val candidates = listOf(FIRST, SECOND)
+        return OkHttpClient.Builder()
+            .retryOnConnectionFailure(false)
+            .apply { if (before != null) addInterceptor(before) }
+            .addInterceptor(JmApiInterceptor(recordRouteHealth = true, allowAuthentication = false))
+            .addInterceptor(
+                JmImageInterceptor(
+                    imageCandidates = { candidates.filterNot { it in health.hostFailures } },
+                    prepareImageRoute = prepare,
+                    recordImageFailure = { host, _ -> health.hostFailures += host },
+                    recordImageSuccess = { health.hostSuccesses += it },
+                    activeImageDomain = { candidates.first() },
+                ),
+            )
+            .addInterceptor(transport(health, measured))
+            .addInterceptor(terminal)
+            .build()
+    }
 
     private fun request(album: String = "old-cover") = Request.Builder()
         .url("https://$FIRST/media/albums/$album.jpg")

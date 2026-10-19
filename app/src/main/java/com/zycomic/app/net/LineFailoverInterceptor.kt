@@ -6,13 +6,21 @@ import java.io.IOException
 
 class LineFailoverInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val revision = RouteManager.configRevision
+        val endpoint = DomainIp(
+            request.url.host,
+            RouteManager.lineIpFor(request.url.host) ?: RouteManager.resolveIp(request.url.host).firstOrNull().orEmpty(),
+        )
         return try {
-            val resp = chain.proceed(chain.request())
-            RouteManager.recordApiSuccess()
-            resp
-        } catch (e: IOException) {
-            RouteManager.recordApiFailure()
-            throw e
+            val response = chain.proceed(request)
+            RouteManager.recordApiSuccess(endpoint, revision)
+            response
+        } catch (error: IOException) {
+            if (!chain.call().isCanceled()) {
+                RouteManager.recordApiConnectionFailure(request.method, error, endpoint, revision)
+            }
+            throw error
         }
     }
 }

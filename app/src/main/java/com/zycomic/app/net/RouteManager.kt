@@ -39,15 +39,27 @@ object RouteManager {
         val networkPath: SpeedTestNetworkPath? = null,
         val isComplete: Boolean = false,
         val configFingerprint: String? = null,
+        val lineUntestedEndpoints: Set<DomainIp> = emptySet(),
+        val imageUntestedEndpoints: Set<DomainIp> = emptySet(),
+        val lineMeasuredAtEpochMs: Map<DomainIp, Long> = emptyMap(),
+        val imageMeasuredAtEpochMs: Map<DomainIp, Long> = emptyMap(),
     ) {
         val canExport: Boolean
             get() = isComplete &&
+                lineUntestedEndpoints.isEmpty() &&
+                imageUntestedEndpoints.isEmpty() &&
                 startedAtEpochMs != null &&
                 completedAtEpochMs != null &&
                 networkPath != null &&
                 lineDiagnostics.keys == lineDelays.keys &&
                 imageDiagnostics.keys == imgDelays.keys &&
+                lineMeasuredAtEpochMs.keys == lineDelays.keys &&
+                imageMeasuredAtEpochMs.keys == imgDelays.keys &&
                 imgVerdicts.keys == imgDelays.keys &&
+                lineMeasuredAtEpochMs.values.all { it > 0L && it <= (completedAtEpochMs ?: 0L) } &&
+                imageMeasuredAtEpochMs.values.all { it > 0L && it <= (completedAtEpochMs ?: 0L) } &&
+                lineDelays.keys.all { it.domain.isNotBlank() && it.ip.isNotBlank() } &&
+                imgDelays.keys.all { it.domain.isNotBlank() && it.ip.isNotBlank() } &&
                 lineDelays.all { (endpoint, delay) -> lineDiagnostics[endpoint]?.success == (delay < Long.MAX_VALUE) } &&
                 imgDelays.all { (endpoint, delay) ->
                     imageDiagnostics[endpoint]?.success == (delay < Long.MAX_VALUE) &&
@@ -79,6 +91,7 @@ object RouteManager {
     val reusableImageSpeedTestSnapshot: StateFlow<ReusableImageSpeedTestSnapshot?> = _reusableImageSpeedTestSnapshot.asStateFlow()
     private const val REUSABLE_IMAGE_SNAPSHOT_KEY = "reusable_image_speed_test_snapshot"
     private const val COMPLETED_SPEED_TEST_SNAPSHOT_KEY = "completed_speed_test_snapshot_v1"
+    private const val VERSION_SPEED_TEST_HISTORY_KEY = "version_speed_test_history_v1"
 
     // Candidate routes and image sources are populated only from validated remote configuration.
     @Volatile var lineHosts: List<String> = emptyList()
@@ -252,6 +265,10 @@ object RouteManager {
         invalidateCompletedSnapshot: Boolean = false,
         expectedPlatformRevision: Long? = null,
         imageCacheNetworkIdentity: String? = null,
+        lineUntestedEndpoints: Set<DomainIp> = emptySet(),
+        imageUntestedEndpoints: Set<DomainIp> = emptySet(),
+        lineMeasuredAtEpochMs: Map<DomainIp, Long> = emptyMap(),
+        imageMeasuredAtEpochMs: Map<DomainIp, Long> = emptyMap(),
     ): Boolean {
         if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return false
         if (expectedConfigRevision == null && expectedPlatformRevision == null && img.isNotEmpty() &&
@@ -272,6 +289,8 @@ object RouteManager {
                 startedAtEpochMs == null || completedAtEpochMs == null || networkPath == null ||
                     lineDiagnostics.keys != line.keys ||
                     imageDiagnostics.keys != img.keys ||
+                    lineUntestedEndpoints.isNotEmpty() ||
+                    imageUntestedEndpoints.isNotEmpty() ||
                     imgVerdicts.keys != img.keys ||
                     line.any { (endpoint, delay) -> lineDiagnostics[endpoint]?.success != (delay < Long.MAX_VALUE) } ||
                     img.any { (endpoint, delay) ->
@@ -296,6 +315,28 @@ object RouteManager {
             val values = img.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
             if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
         }.toMap()
+        val previousHistory = if (!completeSnapshot && (lineUntestedEndpoints.isNotEmpty() || imageUntestedEndpoints.isNotEmpty())) {
+            speedTestHistoryForVersion(remoteVersion)
+        } else {
+            null
+        }
+        val measurementTime = completedAtEpochMs ?: System.currentTimeMillis()
+        val lineMeasuredAt = line.keys.mapNotNull { endpoint ->
+            val measuredAt = lineMeasuredAtEpochMs[endpoint] ?: if (endpoint in lineUntestedEndpoints) {
+                previousHistory?.lineMeasuredAtEpochMs?.get(endpoint)
+            } else {
+                measurementTime
+            }
+            measuredAt?.let { endpoint to it }
+        }.toMap(LinkedHashMap())
+        val imageMeasuredAt = img.keys.mapNotNull { endpoint ->
+            val measuredAt = imageMeasuredAtEpochMs[endpoint] ?: if (endpoint in imageUntestedEndpoints) {
+                previousHistory?.imageMeasuredAtEpochMs?.get(endpoint)
+            } else {
+                measurementTime
+            }
+            measuredAt?.let { endpoint to it }
+        }.toMap(LinkedHashMap())
         val snapshot = SpeedTestSnapshot(
             lineDelays = line.toMap(),
             imgDelays = img.toMap(),
@@ -308,8 +349,24 @@ object RouteManager {
             networkPath = networkPath.takeIf { completeSnapshot },
             isComplete = completeSnapshot,
             configFingerprint = currentSpeedTestConfigFingerprint().takeIf { completeSnapshot },
+            lineUntestedEndpoints = lineUntestedEndpoints.toSet(),
+            imageUntestedEndpoints = imageUntestedEndpoints.toSet(),
+            lineMeasuredAtEpochMs = lineMeasuredAt,
+            imageMeasuredAtEpochMs = imageMeasuredAt,
         )
         _speedTestSnapshot.value = snapshot
+        if (completeSnapshot || lineUntestedEndpoints.isNotEmpty() || imageUntestedEndpoints.isNotEmpty()) {
+            persistVersionSpeedTestHistory(
+                remoteVersion = remoteVersion,
+                line = line,
+                img = img,
+                imgVerdicts = imgVerdicts,
+                lineUntestedEndpoints = lineUntestedEndpoints,
+                imageUntestedEndpoints = imageUntestedEndpoints,
+                lineMeasuredAtEpochMs = lineMeasuredAt,
+                imageMeasuredAtEpochMs = imageMeasuredAt,
+            )
+        }
         if (completeSnapshot) {
             _completedSpeedTestSnapshot.value = snapshot
             persistReusableImageSpeedTestSnapshot(snapshot, imageCacheNetworkIdentity)
@@ -318,6 +375,161 @@ object RouteManager {
             _completedSpeedTestSnapshot.value = SpeedTestSnapshot()
         }
         return true
+    }
+
+    /** Read version-only history; migrate the legacy complete snapshot on first use. */
+    @Synchronized
+    fun speedTestHistoryForVersion(version: Int?): SpeedTestSnapshot? {
+        val prefs = runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+        }.getOrNull() ?: return null
+        val rawHistory = prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)
+        val decoded = if (rawHistory != null) {
+            runCatching { decodeVersionSpeedTestHistory(rawHistory) }.getOrNull()
+        } else {
+            runCatching {
+                prefs.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)?.let(::decodeCompletedSpeedTestSnapshot)
+            }.getOrNull()?.let { completed ->
+                val completedAt = completed.completedAtEpochMs ?: return@let completed
+                completed.copy(
+                    lineMeasuredAtEpochMs = completed.lineDelays.keys.associateWith { completedAt },
+                    imageMeasuredAtEpochMs = completed.imgDelays.keys.associateWith { completedAt },
+                ).also(::persistVersionSpeedTestHistorySnapshot)
+            }
+        } ?: return null
+        if (!SpeedTestHistoryPolicy.isVersionCompatible(decoded.remoteVersion, version) ||
+            decoded.lineDelays.keys.any { it.domain.isBlank() || it.ip.isBlank() } || decoded.imgDelays.keys.any { it.domain.isBlank() || it.ip.isBlank() } ||
+            decoded.lineMeasuredAtEpochMs.values.any { it <= 0L } || decoded.imageMeasuredAtEpochMs.values.any { it <= 0L } ||
+            decoded.lineDelays.values.any { it < 0L } ||
+            decoded.imgDelays.values.any { it < 0L } || decoded.imgDelays.keys != decoded.imgVerdicts.keys ||
+            decoded.imgDelays.any { (endpoint, delay) ->
+                (delay < Long.MAX_VALUE) != (decoded.imgVerdicts[endpoint] == SpeedTester.ImgVerdict.OK)
+            }
+        ) {
+            return null
+        }
+        return decoded
+    }
+
+    private fun persistVersionSpeedTestHistory(
+        remoteVersion: Int?,
+        line: Map<DomainIp, Long>,
+        img: Map<DomainIp, Long>,
+        imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
+        lineUntestedEndpoints: Set<DomainIp>,
+        imageUntestedEndpoints: Set<DomainIp>,
+        lineMeasuredAtEpochMs: Map<DomainIp, Long>,
+        imageMeasuredAtEpochMs: Map<DomainIp, Long>,
+    ) {
+        val prefs = runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        val previous = runCatching {
+            prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)?.let(::decodeVersionSpeedTestHistory)
+        }.getOrNull()?.takeIf { it.remoteVersion == remoteVersion }
+            ?: if (prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null) == null) {
+                runCatching {
+                    prefs.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)?.let(::decodeCompletedSpeedTestSnapshot)
+                }.getOrNull()?.takeIf { it.remoteVersion == remoteVersion }
+            } else {
+                null
+            }
+        val freshLines = line.filterKeys { it !in lineUntestedEndpoints }
+        val freshImages = img.filterKeys { it !in imageUntestedEndpoints }
+        val rankedLines = SpeedTestHistoryPolicy.rankAfterRun(previous?.lineDelays.orEmpty(), freshLines)
+        val rankedImages = SpeedTestHistoryPolicy.rankAfterRun(previous?.imgDelays.orEmpty(), freshImages)
+        val rankedLineTimes = rankedLines.keys.mapNotNull { endpoint ->
+            (if (endpoint in freshLines) lineMeasuredAtEpochMs[endpoint] else previous?.lineMeasuredAtEpochMs?.get(endpoint))
+                ?.let { endpoint to it }
+        }.toMap(LinkedHashMap())
+        val rankedImageTimes = rankedImages.keys.mapNotNull { endpoint ->
+            (if (endpoint in freshImages) imageMeasuredAtEpochMs[endpoint] else previous?.imageMeasuredAtEpochMs?.get(endpoint))
+                ?.let { endpoint to it }
+        }.toMap(LinkedHashMap())
+        val rankedVerdicts = buildMap {
+            rankedImages.keys.forEach { endpoint ->
+                (if (endpoint in freshImages) imgVerdicts[endpoint] else previous?.imgVerdicts?.get(endpoint))?.let { put(endpoint, it) }
+            }
+        }
+        persistVersionSpeedTestHistorySnapshot(
+            SpeedTestSnapshot(
+                lineDelays = rankedLines,
+                imgDelays = rankedImages,
+                imgVerdicts = rankedVerdicts,
+                remoteVersion = remoteVersion,
+                lineMeasuredAtEpochMs = rankedLineTimes,
+                imageMeasuredAtEpochMs = rankedImageTimes,
+            ),
+        )
+    }
+
+    private fun persistVersionSpeedTestHistorySnapshot(snapshot: SpeedTestSnapshot) {
+        val json = org.json.JSONObject().apply {
+            put("formatVersion", 1)
+            put("remoteVersion", snapshot.remoteVersion ?: org.json.JSONObject.NULL)
+            fun endpoints(
+                delays: Map<DomainIp, Long>,
+                measuredAt: Map<DomainIp, Long>,
+                verdicts: Map<DomainIp, SpeedTester.ImgVerdict>? = null,
+            ) =
+                org.json.JSONArray().apply {
+                    delays.forEach { (endpoint, delay) ->
+                        put(
+                            org.json.JSONObject().apply {
+                                put("domain", endpoint.domain)
+                                put("ip", endpoint.ip)
+                                put("delay", delay)
+                                measuredAt[endpoint]?.let { put("measuredAtEpochMs", it) }
+                                verdicts?.get(endpoint)?.let { put("verdict", it.name) }
+                            },
+                        )
+                    }
+                }
+            put("lines", endpoints(snapshot.lineDelays, snapshot.lineMeasuredAtEpochMs))
+            put("images", endpoints(snapshot.imgDelays, snapshot.imageMeasuredAtEpochMs, snapshot.imgVerdicts))
+        }.toString()
+        runCatching {
+            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+                ?.edit()?.putString(VERSION_SPEED_TEST_HISTORY_KEY, json)?.apply()
+        }
+    }
+
+    private fun decodeVersionSpeedTestHistory(raw: String): SpeedTestSnapshot {
+        val json = org.json.JSONObject(raw)
+        require(json.optInt("formatVersion", -1) == 1)
+        val version = json.opt("remoteVersion").takeUnless { it == null || it == org.json.JSONObject.NULL }
+            ?.let { (it as Number).toInt() }
+        fun readEndpoints(key: String, image: Boolean): Triple<Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>, Map<DomainIp, Long>> {
+            val delays = LinkedHashMap<DomainIp, Long>()
+            val verdicts = LinkedHashMap<DomainIp, SpeedTester.ImgVerdict>()
+            val measuredAt = LinkedHashMap<DomainIp, Long>()
+            val array = json.getJSONArray(key)
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                val endpoint = DomainIp(item.getString("domain"), item.getString("ip"))
+                val delay = item.getLong("delay")
+                require(endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L && delays.put(endpoint, delay) == null)
+                if (item.has("measuredAtEpochMs")) {
+                    val timestamp = item.getLong("measuredAtEpochMs")
+                    require(timestamp > 0L)
+                    measuredAt[endpoint] = timestamp
+                }
+                if (image) verdicts[endpoint] = SpeedTester.ImgVerdict.valueOf(item.getString("verdict"))
+            }
+            return Triple(delays, verdicts, measuredAt)
+        }
+        val (lines, _, lineTimes) = readEndpoints("lines", false)
+        val (images, verdicts, imageTimes) = readEndpoints("images", true)
+        require(images.keys == verdicts.keys)
+        require(images.all { (endpoint, delay) -> (delay < Long.MAX_VALUE) == (verdicts[endpoint] == SpeedTester.ImgVerdict.OK) })
+        return SpeedTestSnapshot(
+            lineDelays = lines,
+            imgDelays = images,
+            imgVerdicts = verdicts,
+            remoteVersion = version,
+            lineMeasuredAtEpochMs = lineTimes,
+            imageMeasuredAtEpochMs = imageTimes,
+        )
     }
 
     /** Load a completed image-only snapshot and discard it if the active configuration changed. */
@@ -508,6 +720,8 @@ object RouteManager {
             networkPath = cached.networkPath,
             completeSnapshot = false,
             expectedPlatformRevision = platformRevision,
+            lineMeasuredAtEpochMs = cached.lineMeasuredAtEpochMs,
+            imageMeasuredAtEpochMs = cached.imageMeasuredAtEpochMs,
         )
         if (!accepted || platformRevision != StartupPlatformPolicy.state.value.revision ||
             !StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) || currentRevision != configRevision
@@ -577,21 +791,33 @@ object RouteManager {
                     put("release", path.androidRelease ?: org.json.JSONObject.NULL)
                 },
             )
-            fun endpoints(delays: Map<DomainIp, Long>, verdicts: Map<DomainIp, SpeedTester.ImgVerdict>? = null) =
+            fun endpoints(
+                delays: Map<DomainIp, Long>,
+                measuredAt: Map<DomainIp, Long>,
+                verdicts: Map<DomainIp, SpeedTester.ImgVerdict>? = null,
+            ) =
                 org.json.JSONArray().apply {
-                    delays.forEach { (endpoint, delay) ->
+                    delays.entries.sortedWith(
+                        compareBy<Map.Entry<DomainIp, Long>>(
+                            { it.value >= Long.MAX_VALUE },
+                            { it.value },
+                            { it.key.domain.lowercase(java.util.Locale.ROOT) },
+                            { it.key.ip },
+                        ),
+                    ).forEach { (endpoint, delay) ->
                         put(
                             org.json.JSONObject().apply {
                                 put("domain", endpoint.domain)
                                 put("ip", endpoint.ip)
                                 put("delay", delay)
+                                measuredAt[endpoint]?.let { put("measuredAtEpochMs", it) }
                                 verdicts?.get(endpoint)?.let { put("verdict", it.name) }
                             },
                         )
                     }
                 }
-            put("lines", endpoints(snapshot.lineDelays))
-            put("images", endpoints(snapshot.imgDelays, snapshot.imgVerdicts))
+            put("lines", endpoints(snapshot.lineDelays, snapshot.lineMeasuredAtEpochMs))
+            put("images", endpoints(snapshot.imgDelays, snapshot.imageMeasuredAtEpochMs, snapshot.imgVerdicts))
         }.toString()
         runCatching {
             DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
@@ -613,31 +839,38 @@ object RouteManager {
             androidApiLevel = pathJson.opt("api").takeUnless { it == null || it == org.json.JSONObject.NULL }?.let { (it as Number).toInt() },
             androidRelease = pathJson.optString("release").takeIf(String::isNotBlank),
         )
-        fun readEndpoints(key: String, isImage: Boolean): Pair<Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>> {
+        val completedAt = json.getLong("completed")
+        fun readEndpoints(key: String, isImage: Boolean): Triple<Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>, Map<DomainIp, Long>> {
             val delays = LinkedHashMap<DomainIp, Long>()
             val verdicts = LinkedHashMap<DomainIp, SpeedTester.ImgVerdict>()
+            val measuredAt = LinkedHashMap<DomainIp, Long>()
             val array = json.getJSONArray(key)
             for (i in 0 until array.length()) {
                 val item = array.getJSONObject(i)
                 val endpoint = DomainIp(item.getString("domain"), item.getString("ip"))
                 val delay = item.getLong("delay")
-                require(delay >= 0L && delays.put(endpoint, delay) == null)
+                require(endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L && delays.put(endpoint, delay) == null)
+                val timestamp = if (item.has("measuredAtEpochMs")) item.getLong("measuredAtEpochMs") else completedAt
+                require(timestamp > 0L && timestamp <= completedAt)
+                measuredAt[endpoint] = timestamp
                 if (isImage) verdicts[endpoint] = SpeedTester.ImgVerdict.valueOf(item.getString("verdict"))
             }
-            return delays to verdicts
+            return Triple(delays, verdicts, measuredAt)
         }
-        val (lines, _) = readEndpoints("lines", false)
-        val (images, verdicts) = readEndpoints("images", true)
+        val (lines, _, lineTimes) = readEndpoints("lines", false)
+        val (images, verdicts, imageTimes) = readEndpoints("images", true)
         return SpeedTestSnapshot(
             lineDelays = lines,
             imgDelays = images,
             imgVerdicts = verdicts,
             remoteVersion = version,
             startedAtEpochMs = json.getLong("started"),
-            completedAtEpochMs = json.getLong("completed"),
+            completedAtEpochMs = completedAt,
             networkPath = path,
             isComplete = false,
             configFingerprint = fingerprint,
+            lineMeasuredAtEpochMs = lineTimes,
+            imageMeasuredAtEpochMs = imageTimes,
         ).also {
             require(fingerprint.isNotBlank())
             require(it.startedAtEpochMs != null && it.completedAtEpochMs != null && it.completedAtEpochMs >= it.startedAtEpochMs)
@@ -972,7 +1205,7 @@ object RouteManager {
 
     /** Fastest reachable image domain/IP combination from the most recent run. */
     val fastestImgEndpoint: DomainIp?
-        get() = rankedSuccessfulImgEndpoints().firstOrNull()
+        get() = rankedSuccessfulImgEndpoints().firstOrNull { it !in _speedTestSnapshot.value.imageUntestedEndpoints }
 
     /** 从逐 IP 测速结果派生最快图源域名，无数据返回 null。 */
     val fastestImgDomain: String?
@@ -1000,6 +1233,28 @@ object RouteManager {
      */
     @Volatile var pinnedImgDomain: String? = null
         private set
+
+    @Volatile private var runtimeRecoveryImgDomain: String? = null
+
+    @Synchronized
+    fun advanceRuntimeImageSourceAfterRecovery(
+        expectedSource: String,
+        expectedConfigRevision: Long,
+        expectedPlatformRevision: Long,
+    ): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
+            configRevision != expectedConfigRevision ||
+            StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
+            !(imgRewriteTarget ?: imgHost).equals(expectedSource, true) ||
+            !useFastestImgForAll || !pinnedImgDomain.isNullOrBlank() || imgDomains.size < 2
+        ) {
+            return false
+        }
+        val current = runtimeRecoveryImgDomain ?: imgRewriteTarget ?: imgDomains.getOrNull(imgIndex)
+        val currentIndex = imgDomains.indexOfFirst { it.equals(current, true) }.takeIf { it >= 0 } ?: imgIndex
+        runtimeRecoveryImgDomain = imgDomains[(currentIndex + 1) % imgDomains.size]
+        return true
+    }
 
     /** Compose-only invalidation for display consumers that read the volatile pin fields. */
     var imgPinDisplayRevision: Int by mutableStateOf(0)
@@ -1044,6 +1299,7 @@ object RouteManager {
         if (!useFastestImgForAll || imgOverrideActive || !pinnedImgDomain.isNullOrBlank()) return false
         val index = imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
         if (index < 0) return false
+        runtimeRecoveryImgDomain = null
         if (pinnedImgDomain.isNullOrBlank()) setImgHost(index)
         return true
     }
@@ -1053,6 +1309,7 @@ object RouteManager {
     fun clearPinnedImgDomain() {
         pinnedImgDomain = null
         pinnedImgIp = null
+        runtimeRecoveryImgDomain = null
         imgOverrideActive = false
         persistPinnedImgDomain(null, null)
         notifyImgPinDisplayChanged()
@@ -1111,6 +1368,7 @@ object RouteManager {
             imgDomains = imgDomains,
             useFastestImgForAll = useFastestImgForAll,
             derivedFastest = fastestImgDomain,
+            runtimeRecovery = runtimeRecoveryImgDomain,
         )
 
     // ---- 图域探活样本路径（真实封面相对路径，测速用）----
@@ -1241,26 +1499,97 @@ object RouteManager {
     var consecutiveFailures: Int = 0
         private set
 
+    @Volatile private var apiRecoveryInFlight = false
+
+    @Volatile private var apiRecoveryNextAllowedAt = 0L
+    private var apiFailureEndpoint: DomainIp? = null
+    private var apiFailureRevision: Long? = null
+
     @Synchronized
-    fun recordApiFailure() {
-        if (++consecutiveFailures >= 3 && autoSelectEnabled && !lineOverrideActive) {
+    fun recordApiConnectionFailure(
+        method: String,
+        error: java.io.IOException,
+        requestEndpoint: DomainIp,
+        requestRevision: Long,
+    ) {
+        if (!isCurrentApiRequest(requestEndpoint, requestRevision)) return
+        if (!RuntimeRecoveryPolicy.mayRecoverApi(method, error)) return
+        if (apiFailureEndpoint != requestEndpoint || apiFailureRevision != requestRevision) {
             consecutiveFailures = 0
-            failover()
+            apiFailureEndpoint = requestEndpoint
+            apiFailureRevision = requestRevision
         }
-    }
-
-    fun recordApiSuccess() {
+        if (++consecutiveFailures < 3 || !autoSelectEnabled || lineOverrideActive) return
         consecutiveFailures = 0
+        val now = System.nanoTime() / 1_000_000L
+        if (apiRecoveryInFlight || now < apiRecoveryNextAllowedAt) return
+        val failedDomain = lineHost
+        val failedIp = lineIpFor(failedDomain) ?: resolveIp(failedDomain).firstOrNull().orEmpty()
+        val expectedRevision = configRevision
+        val expectedPlatformRevision = StartupPlatformPolicy.state.value.revision
+        apiRecoveryInFlight = true
+        CoroutineScope(Dispatchers.IO).launch {
+            var switched = false
+            try {
+                val endpoint = lastLineIpDelays.entries
+                    .asSequence()
+                    .filter { (endpoint, delay) ->
+                        delay < Long.MAX_VALUE &&
+                            !(endpoint.domain.equals(failedDomain, true) && endpoint.ip.equals(failedIp, true))
+                    }
+                    .sortedBy { it.value }
+                    .map { it.key }
+                    .firstOrNull()
+                if (endpoint != null && NetworkModule.validateApiEndpoint(endpoint) &&
+                    switchToValidatedApiEndpoint(endpoint, failedDomain, failedIp, expectedRevision, expectedPlatformRevision)
+                ) {
+                    NetworkModule.rebuildApi("API connection recovery")
+                    NetworkModule.cookieJar.syncToAllLines()
+                    switched = true
+                }
+            } finally {
+                synchronized(this@RouteManager) {
+                    apiRecoveryInFlight = false
+                    apiRecoveryNextAllowedAt = System.nanoTime() / 1_000_000L + if (switched) 30_000L else 10_000L
+                }
+            }
+        }
     }
 
     @Synchronized
-    private fun failover() {
-        selectNextLine()
-        CoroutineScope(Dispatchers.IO).launch {
-            // 只清 API 侧：自动换线（连续 3 次 API 失败）不能 cancelAll 掉正在下载的图片
-            NetworkModule.rebuildApi("自动换线")
-            NetworkModule.cookieJar.syncToAllLines()
+    private fun switchToValidatedApiEndpoint(
+        endpoint: DomainIp,
+        expectedDomain: String,
+        expectedIp: String,
+        expectedRevision: Long,
+        expectedPlatformRevision: Long,
+    ): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
+            StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
+            configRevision != expectedRevision || !autoSelectEnabled || lineOverrideActive ||
+            !lineHost.equals(expectedDomain, true) ||
+            !(lineIpFor(expectedDomain) ?: resolveIp(expectedDomain).firstOrNull().orEmpty()).equals(expectedIp, true)
+        ) {
+            return false
         }
+        val index = lineIndexForDomain(endpoint.domain)
+        if (index < 0) return false
+        lineIndex = index
+        selectedLineIp = endpoint.ip
+        selectedLineDomain = hostFromLine(lineHosts[index])
+        persistLineEndpoint(null, null)
+        publishLineSelection()
+        return true
+    }
+
+    private fun isCurrentApiRequest(endpoint: DomainIp, revision: Long): Boolean =
+        StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) && revision == configRevision &&
+            endpoint.domain.equals(lineHost, true) &&
+            endpoint.ip.equals(lineIpFor(lineHost) ?: resolveIp(lineHost).firstOrNull().orEmpty(), true)
+
+    @Synchronized
+    fun recordApiSuccess(requestEndpoint: DomainIp, requestRevision: Long) {
+        if (isCurrentApiRequest(requestEndpoint, requestRevision)) consecutiveFailures = 0
     }
 
     /** Set the DNS/IP rules from the active remote configuration. */
@@ -1358,6 +1687,7 @@ object RouteManager {
     /** Remove speed rows for endpoints that may have been removed by the latest configuration. */
     @Synchronized
     fun clearSpeedTestResults() {
+        runtimeRecoveryImgDomain = null
         lastLineDelays = emptyMap()
         lastImgDelays = emptyMap()
         lastLineIpDelays = emptyMap()

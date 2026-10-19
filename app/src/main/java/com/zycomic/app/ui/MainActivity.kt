@@ -734,8 +734,19 @@ private fun StartupPlatformSwitches() {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        StartupSwitch(stringResource(KMR.strings.startup_use_last_speed_test), policy.useLastResult) {
+        StartupSwitch(
+            stringResource(KMR.strings.startup_use_last_speed_test),
+            policy.useLastResult,
+            accentOverride = MaterialTheme.colorScheme.primary,
+        ) {
             StartupPlatformPolicy.setUseLastResult(it)
+        }
+        StartupSwitch(
+            stringResource(KMR.strings.startup_use_last_line_speed_test),
+            policy.useLastLineResult,
+            accentOverride = MaterialTheme.colorScheme.primary,
+        ) {
+            StartupPlatformPolicy.setUseLastLineResult(it)
         }
     }
 }
@@ -745,9 +756,11 @@ private fun StartupSwitch(
     title: String,
     checked: Boolean,
     platform: ContentPlatform? = null,
+    accentOverride: Color? = null,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    val accent = if (platform == null) null else rememberContentPlatformAccent(platform)
+    val platformAccent = if (platform == null) null else rememberContentPlatformAccent(platform)
+    val accent = accentOverride ?: platformAccent
     Surface(
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
         shape = RoundedCornerShape(14.dp),

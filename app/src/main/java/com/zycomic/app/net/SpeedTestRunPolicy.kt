@@ -1,6 +1,6 @@
 package com.zycomic.app.net
 
-/** Process-local identity: persisted results can only bypass image probes, never startup lines. */
+/** Process-local generation identity. This is distinct from persisted history eligibility. */
 internal data class SpeedTestRunKey(
     val platformRevision: Long,
     val manwaConfigRevision: Long,
@@ -16,6 +16,15 @@ internal object SpeedTestRunPolicy {
         platformOnly: Boolean,
     ): Boolean = !forceFresh && !platformOnly && completed == current
 
+    /** Each tester validates its history's configuration version, not the current endpoint pool. */
+    fun canFastTest(
+        requested: Boolean,
+        forceFresh: Boolean,
+        remoteConfigUpdated: Boolean = false,
+    ): Boolean = requested && !forceFresh && !remoteConfigUpdated
+
+    // Retain the existing call contract for callers/tests outside the coordinator.
+    @Suppress("UNUSED_PARAMETER")
     fun canReuseImages(
         requested: Boolean,
         forceFresh: Boolean,
@@ -23,11 +32,5 @@ internal object SpeedTestRunPolicy {
         current: SpeedTestRunKey,
         completed: SpeedTestRunKey?,
         remoteConfigUpdated: Boolean = false,
-    ): Boolean = requested && !forceFresh && !remoteConfigUpdated && initial == current &&
-        (completed == null || sameConfigurationAndNetwork(completed, current))
-
-    private fun sameConfigurationAndNetwork(previous: SpeedTestRunKey, current: SpeedTestRunKey): Boolean =
-        previous.manwaConfigRevision == current.manwaConfigRevision &&
-            previous.jmConfigRevision == current.jmConfigRevision &&
-            previous.networkIdentity == current.networkIdentity
+    ): Boolean = canFastTest(requested, forceFresh, remoteConfigUpdated)
 }

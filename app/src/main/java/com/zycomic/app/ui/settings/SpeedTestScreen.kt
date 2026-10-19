@@ -78,6 +78,7 @@ fun SpeedTestScreen(
         }
     }
     val fullSnapshot by RouteManager.completedSpeedTestSnapshot.collectAsState()
+    val currentSpeedSnapshot by RouteManager.speedTestSnapshot.collectAsState()
     val speedTesterRunning by SpeedTester.isRunningFlow.collectAsState()
     val autoSelecting by vm.autoSelecting.collectAsState()
     val testing by vm.testing.collectAsState()
@@ -130,15 +131,24 @@ fun SpeedTestScreen(
         }
     }
 
-    // 每个域名/IP独立排序；不可用端点沉底并保留在测速日志中。
-    val lineOrder = remember(lineDelays) {
-        lineDelays.entries.sortedWith(compareBy({ it.value.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
+    // 快测将刚重测的前五项按fresh延迟排序；其余端点保持上轮排名和样本，并明确标记为未测。
+    val lineOrder = remember(lineDelays, currentSpeedSnapshot.lineUntestedEndpoints) {
+        val untested = currentSpeedSnapshot.lineUntestedEndpoints
+        val fresh = lineDelays.entries.filter { it.key !in untested }
+            .sortedWith(compareBy({ it.value.takeIf { ms -> ms < Long.MAX_VALUE } ?: Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
+        fresh + lineDelays.entries.filter { it.key in untested }
     }
-    val imgOrder = remember(imgDelays, imgVerdicts) {
-        imgDelays.entries.sortedWith(compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
+    val imgOrder = remember(imgDelays, imgVerdicts, currentSpeedSnapshot.imageUntestedEndpoints) {
+        val untested = currentSpeedSnapshot.imageUntestedEndpoints
+        val fresh = imgDelays.entries.filter { it.key !in untested }
+            .sortedWith(compareBy({ if (imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK) it.value else Long.MAX_VALUE }, { it.key.domain }, { it.key.ip }))
+        fresh + imgDelays.entries.filter { it.key in untested }
     }
-    val successfulImgEndpoints = remember(imgOrder, imgVerdicts) {
-        imgOrder.filter { it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK }.map { it.key }
+    val successfulImgEndpoints = remember(imgOrder, imgVerdicts, currentSpeedSnapshot.imageUntestedEndpoints) {
+        imgOrder.filter {
+            it.key !in currentSpeedSnapshot.imageUntestedEndpoints &&
+                it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK
+        }.map { it.key }
     }
     val serverRecommendedImgDomain = ReaderRepository.currentRecommendedImgDomain
     val serverFallbackImgDomain = ReaderRepository.currentImgDomains.firstOrNull()
@@ -177,7 +187,11 @@ fun SpeedTestScreen(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
-            if (speedTestActive || (speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.reusedImages > 0)) {
+            if (speedTestActive || (
+                    speedTestProgress.phase == SpeedTester.Phase.COMPLETE &&
+                        (speedTestProgress.reusedImages > 0 || speedTestProgress.reusedLines > 0 || speedTestProgress.fullRetestRecommended)
+                    )
+            ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     configRetest?.let {
                         Text(
@@ -188,6 +202,17 @@ fun SpeedTestScreen(
                         )
                     }
                     Text(platformProgress ?: vm.speedTestProgressMessage(speedTestProgress), style = MaterialTheme.typography.bodyMedium)
+                    if (speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.fullRetestRecommended) {
+                        Text(
+                            "快测前五项全部失败（${listOfNotNull(
+                                "线路".takeIf { speedTestProgress.lineTopFiveAllFailed },
+                                "图源".takeIf { speedTestProgress.imageTopFiveAllFailed },
+                            ).joinToString("、")}），未沿用旧延迟。请点“完整重新测速”重新测试全部候选。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
                     val jmProgress = jmTestProgress
                     if (jmProgress != null && jmProgress.total > 0) {
                         LinearProgressIndicator(
@@ -245,6 +270,8 @@ fun SpeedTestScreen(
                         host = SpeedTestUiTextPolicy.endpointLabel(endpoint.domain, endpoint.ip),
                         delay = entry.value,
                         isSelected = index == currentLineIdx && endpoint.ip == currentLineIp,
+                        isUntested = endpoint in currentSpeedSnapshot.lineUntestedEndpoints,
+                        measuredAtEpochMs = currentSpeedSnapshot.lineMeasuredAtEpochMs[endpoint],
                         onClick = { if (index >= 0) vm.selectLine(index, endpoint.ip) },
                     )
                 }
@@ -260,6 +287,8 @@ fun SpeedTestScreen(
                         host = SpeedTestUiTextPolicy.endpointLabel(endpoint.domain, endpoint.ip),
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
+                        isUntested = endpoint in currentSpeedSnapshot.imageUntestedEndpoints,
+                        measuredAtEpochMs = currentSpeedSnapshot.imageMeasuredAtEpochMs[endpoint],
                         isSelected = currentImageSource.matchesEndpoint(endpoint),
                         selectionLabel = currentImageSource.kind.label.takeIf { currentImageSource.matchesEndpoint(endpoint) },
                         onClick = { if (index >= 0) vm.selectImgHost(index, endpoint.ip) },
@@ -320,7 +349,7 @@ fun SpeedTestScreen(
                             enabled = !speedTestActive,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(if (speedTestActive) "测速中..." else "重新测速")
+                            Text(if (speedTestActive) "测速中..." else "完整重新测速")
                         }
                     }
                 }
@@ -337,24 +366,39 @@ private fun SpeedRow(
     isSelected: Boolean,
     verdict: SpeedTester.ImgVerdict? = null,
     selectionLabel: String? = null,
+    isUntested: Boolean = false,
+    measuredAtEpochMs: Long? = null,
     onClick: () -> Unit,
 ) {
+    val measuredAt = remember(measuredAtEpochMs) {
+        measuredAtEpochMs?.takeIf { it > 0L }?.let {
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.MEDIUM)
+                .format(java.util.Date(it))
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth()
             .clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                text = "${index + 1}. $host",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = if (isUntested) "本轮未测 · 上次 ${measuredAt ?: "时间未知"}" else "测于 ${measuredAt ?: "时间未知"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Text(
-            text = "${index + 1}. $host",
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(end = 8.dp),
-        )
-        Text(
-            text = "HTTP:${formatDelay(delay, verdict)}",
+            text = "HTTP:${formatDelay(delay, verdict)}${if (isUntested) "（本轮未测）" else ""}",
             style = MaterialTheme.typography.bodySmall,
             color = when {
+                isUntested -> MaterialTheme.colorScheme.onSurfaceVariant
                 verdict == SpeedTester.ImgVerdict.OK && (delay ?: 0) < 300 -> MaterialTheme.colorScheme.primary
                 verdict != null && verdict != SpeedTester.ImgVerdict.OK -> MaterialTheme.colorScheme.error
                 delay == null -> MaterialTheme.colorScheme.onSurfaceVariant

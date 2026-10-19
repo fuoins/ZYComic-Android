@@ -132,24 +132,27 @@ class JmImageReceiveProgressTest {
     }
 
     @Test
-    fun `body read failure still falls back within the existing endpoint budget`() {
+    fun `body connection failure stays on the active source for coordinated recovery`() {
         ImageAttemptCoordinator().use { coordinator ->
             val page = ReaderPage(0, imageUrl = IMAGE_URL)
             val failedBody = ChunkedBody(IMAGE, onRead = { offset ->
-                if (offset > 0) throw IOException("body connection reset")
+                if (offset > 0) throw java.net.SocketException("body connection reset")
             })
             val goodBody = ChunkedBody(IMAGE)
             val failures = mutableListOf<String>()
+            val visited = mutableListOf<String>()
             val client = client(listOf("first.example", "second.example"), failures = failures) { host ->
+                visited += host
                 if (host == "first.example") failedBody else goodBody
             }
-            load(client, scope(page, coordinator)).use { assertArrayEquals(IMAGE, it.body!!.bytes()) }
-            assertEquals(listOf("first.example"), failures)
-            assertEquals(2, page.endpointsAttemptedInRound.get())
+            assertThrows(IOException::class.java) { load(client, scope(page, coordinator)) }
+            assertEquals(listOf("first.example"), visited)
+            assertTrue(failures.isEmpty())
+            assertEquals(1, page.endpointsAttemptedInRound.get())
             assertEquals(1, page.automaticRetryRound.get())
-            assertEquals(ReaderPageLoadStatus.Receiving(100), page.loadStatus)
+            assertEquals(ReaderPageLoadStatus.Receiving(100 * CHUNK_SIZE / IMAGE.size), page.loadStatus)
             assertTrue(failedBody.closed)
-            assertTrue(goodBody.closed)
+            assertFalse(goodBody.closed)
         }
     }
 
@@ -191,6 +194,7 @@ class JmImageReceiveProgressTest {
                 prepareImageRoute = {},
                 recordImageSuccess = {},
                 recordImageFailure = { host, _ -> failures += host },
+                activeImageDomain = { hosts.first() },
             ),
         )
         .addInterceptor { chain ->

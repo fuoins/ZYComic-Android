@@ -65,6 +65,7 @@ internal class HttpPageLoader(
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
     private val activeWorkerJobs = ConcurrentHashMap<ReaderPage, Job>()
+    private val pendingRuntimeRecoveryRetries = ConcurrentHashMap<ReaderPage, Int>()
     private val pendingDisposition = ConcurrentHashMap<ReaderPage, ImageCancelReason>()
     private val terminalErrors = ConcurrentHashMap<ReaderPage, Throwable>()
     private val decodeFailures = ConcurrentHashMap<String, AtomicInteger>()
@@ -499,6 +500,46 @@ internal class HttpPageLoader(
         enqueue(page, priorityFor(page))
     }
 
+    override fun retryAfterRuntimeRecovery(page: ReaderPage, expectedGeneration: Int) {
+        if (isRecycled || !schedulingEnabled || page !in visiblePages || !page.readerVisible ||
+            page.generation.get() != expectedGeneration
+        ) {
+            return
+        }
+        pendingRuntimeRecoveryRetries[page] = expectedGeneration
+        finishPendingRuntimeRecoveryRetry(page)
+    }
+
+    private fun finishPendingRuntimeRecoveryRetry(page: ReaderPage) {
+        val expectedGeneration = pendingRuntimeRecoveryRetries[page] ?: return
+        if (isRecycled || !schedulingEnabled || page !in visiblePages || !page.readerVisible ||
+            page.generation.get() != expectedGeneration
+        ) {
+            pendingRuntimeRecoveryRetries.remove(page, expectedGeneration)
+            return
+        }
+        if (page.activeAttempt.get() != null || page.status !is Page.State.Error ||
+            !pendingRuntimeRecoveryRetries.remove(page, expectedGeneration)
+        ) {
+            return
+        }
+
+        page.imageUrl?.let {
+            chapterCache.remove(it)
+            ImageCacheManager.remove(it)
+        }
+        page.attemptedImageEndpoints.clear()
+        page.endpointsAttemptedInRound.set(0)
+        page.automaticRetryRound.set(1)
+        page.automaticRetryExhausted = false
+        page.stream = null
+        page.slow = false
+        page.progress = 0
+        page.loadStatus = ReaderPageLoadStatus.Queued
+        page.status = Page.State.Queue
+        enqueue(page, priorityFor(page))
+    }
+
     override fun invalidatePage(page: ReaderPage): Boolean {
         val imageUrl = page.imageUrl ?: return false
         successfullyCachedPages.remove(page)
@@ -703,7 +744,8 @@ internal class HttpPageLoader(
                 deferRetry = true
             } else {
                 val remainingEndpoints = remainingUntriedEndpoints(page)
-                if (attempt?.retryAfterFailure(remainingEndpoints.isNotEmpty()) == true) {
+                val waitingForUnifiedRecovery = attempt?.canRace == true && page.readerVisible
+                if (!waitingForUnifiedRecovery && attempt?.retryAfterFailure(remainingEndpoints.isNotEmpty()) == true) {
                     page.automaticRetryExhausted = false
                     page.status = Page.State.Queue
                     page.loadStatus = ReaderPageLoadStatus.Queued
@@ -738,6 +780,7 @@ internal class HttpPageLoader(
                     }
                 }
             }
+            finishPendingRuntimeRecoveryRetry(page)
             if (deferRetry && page in currentWindow && !isRecycled) {
                 runCatching {
                     coordinator.watchdog.schedule({

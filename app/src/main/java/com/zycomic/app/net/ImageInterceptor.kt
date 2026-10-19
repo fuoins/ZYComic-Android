@@ -96,11 +96,31 @@ class ImageInterceptor : Interceptor {
             sequentialCandidates(imgReq, originalUrl, endpoints, scope)
         }
         val success = outcomes.filterIsInstance<Outcome.Success>().firstOrNull()
-        if (success != null) return buildResponse(original, success.responseFile, success.mimeType)
+        val recoverySource = imgTarget ?: imgReq.url.host
+        if (success != null) {
+            if (scope == null) {
+                RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = false)
+            }
+            return buildResponse(original, success.responseFile, success.mimeType)
+        }
 
         val failure = outcomes.lastOrNull()
+        val transportFailure = outcomes.isNotEmpty() && outcomes.all {
+            it is Outcome.Fail.Io && RuntimeRecoveryPolicy.isTransportFailure(it.error)
+        }
+        if (transportFailure && scope == null) {
+            RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = true)
+        } else if (transportFailure && scope?.canRace == true && scope.page.readerVisible) {
+            RuntimeImageRecovery.visibleReaderTransportFailure(
+                RuntimeRecoveryPolicy.Platform.MANWA,
+                recoverySource,
+                originalUrl,
+            ) {
+                RuntimeImageRecovery.retryVisiblePageAfterAttempt(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, scope)
+            }
+        }
         return when (failure) {
-            is Outcome.Fail.Http -> errorResponse(original, failure.code)
+            is Outcome.Fail.Http -> errorResponse(original, failure.code, failure.retryAfter)
             is Outcome.Fail.Io -> throw failure.error
             is Outcome.Fail.Decrypt -> throw ImageDecryptFailedException()
             is Outcome.Fail.Cancelled -> {
@@ -123,10 +143,13 @@ class ImageInterceptor : Interceptor {
         } else {
             (PageAttemptScope.MAX_ENDPOINTS_PER_ROUND - scope.page.endpointsAttemptedInRound.get()).coerceAtLeast(0)
         }
-        val limit = minOf(if (scope?.canRace == true) MAX_ENDPOINT_ATTEMPTS else 1, roundCapacity)
+        val limit = minOf(if (scope == null) MAX_ENDPOINT_ATTEMPTS else 1, roundCapacity)
         if (limit == 0) return emptyList()
         val tried = scope?.page?.attemptedImageEndpoints?.mapTo(HashSet()) { it.normalizedForComparison() }.orEmpty()
-        for (candidate in RouteManager.imageRetryEndpoints(requestedDomain, tried)) {
+        val activeDomainEndpoints = RouteManager.imageRetryEndpoints(requestedDomain, tried)
+            .filter { it == null || it.domain.equals(requestedDomain, ignoreCase = true) }
+            .ifEmpty { listOf(null) }
+        for (candidate in activeDomainEndpoints) {
             val endpoint = candidate ?: NetworkModule.resolveProbeIps(requestedDomain)
                 .firstOrNull()?.let { DomainIp(requestedDomain, it) }
             if (endpoint != null && endpoint.normalizedForComparison() !in tried &&
@@ -217,6 +240,7 @@ class ImageInterceptor : Interceptor {
             }
             outcomes += result
             if (result is Outcome.Success) return outcomes
+            if (result is Outcome.Fail.Http && result.code == 429) return outcomes
             if (scope?.isCurrent == false) return outcomes
         }
         return outcomes
@@ -240,7 +264,9 @@ class ImageInterceptor : Interceptor {
         fun launchOtherCandidates() {
             if (primaryFinished.get() || !scope.isCurrent || !scope.canRace ||
                 !raceStarted.compareAndSet(false, true)
-            ) return
+            ) {
+                return
+            }
 
             var openedRace = false
             for (index in 1 until minOf(endpoints.size, MAX_ENDPOINT_ATTEMPTS)) {
@@ -294,6 +320,7 @@ class ImageInterceptor : Interceptor {
             }
             outcomes += primary
             if (primary is Outcome.Success) return outcomes
+            if (primary is Outcome.Fail.Http && primary.code == 429) return outcomes
             if (!scope.isCurrent) return outcomes
             if (primary is Outcome.Fail.Cancelled && !raceStarted.get()) return outcomes
 
@@ -318,6 +345,7 @@ class ImageInterceptor : Interceptor {
                 val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
                 outcomes += result
                 if (result is Outcome.Success) return outcomes
+                if (result is Outcome.Fail.Http && result.code == 429) return outcomes
             }
             scope.endRace()
 
@@ -331,6 +359,7 @@ class ImageInterceptor : Interceptor {
                 }
                 outcomes += result
                 if (result is Outcome.Success || result is Outcome.Fail.Cancelled || !scope.isCurrent) return outcomes
+                if (result is Outcome.Fail.Http && result.code == 429) return outcomes
             }
             return outcomes
         } finally {
@@ -430,7 +459,7 @@ class ImageInterceptor : Interceptor {
                 if (!response.isSuccessful) {
                     scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
                     networkStartedAt = 0L
-                    return Outcome.Fail.Http(response.code)
+                    return Outcome.Fail.Http(response.code, response.header("Retry-After"))
                 }
                 val body = response.body ?: return Outcome.Fail.Invalid
                 val contentLength = body.contentLength()
@@ -520,7 +549,7 @@ class ImageInterceptor : Interceptor {
                 is ConnectException, is java.net.UnknownHostException -> ImgEndpointFailure.DEAD
                 else -> ImgEndpointFailure.TRANSIENT
             }
-            RouteManager.markImgEndpointFailed(endpoint, kind)
+            if (RuntimeRecoveryPolicy.isTransportFailure(io)) RouteManager.markImgEndpointFailed(endpoint, kind)
             return Outcome.Fail.Io(io)
         } catch (e: Exception) {
             if (networkStartedAt != 0L) {
@@ -675,12 +704,13 @@ class ImageInterceptor : Interceptor {
             .build()
     }
 
-    private fun errorResponse(request: Request, code: Int): Response =
+    private fun errorResponse(request: Request, code: Int, retryAfter: String? = null): Response =
         Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
             .code(code)
             .message("img fail")
+            .apply { if (code == 429 && !retryAfter.isNullOrBlank()) header("Retry-After", retryAfter) }
             .body(ByteArray(0).toResponseBody(null))
             .build()
 
@@ -691,7 +721,7 @@ class ImageInterceptor : Interceptor {
     private sealed interface Outcome {
         data class Success(val responseFile: File, val mimeType: MediaType, val endpoint: DomainIp, val attemptId: Int) : Outcome
         sealed interface Fail : Outcome {
-            data class Http(val code: Int) : Fail
+            data class Http(val code: Int, val retryAfter: String? = null) : Fail
             data class Io(val error: IOException) : Fail
             data object Decrypt : Fail
             data object Invalid : Fail

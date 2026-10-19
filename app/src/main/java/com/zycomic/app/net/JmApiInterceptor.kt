@@ -54,14 +54,7 @@ class JmApiInterceptor internal constructor(
                 .header("tokenparam", "$timestamp,$APP_VERSION")
         }
         val request = builder.build()
-        val response = try {
-            chain.proceed(request)
-        } catch (error: IOException) {
-            if (!chain.call().isCanceled() && recordRouteHealth && !isImage && !isUnsigned) {
-                JmRouteManager.recordApiFailure(host, error.javaClass.simpleName)
-            }
-            throw error
-        }
+        val response = chain.proceed(request)
         if (isImage || isUnsigned || response.body == null) return response
 
         val raw = response.body!!.string()
@@ -69,16 +62,12 @@ class JmApiInterceptor internal constructor(
             if (response.code == 401) {
                 if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
             }
-            if (recordRouteHealth && (response.code == 408 || response.code == 429 || response.code >= 500)) {
-                JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
-            }
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
 
         val envelope = try {
             JSONObject(raw)
         } catch (error: Exception) {
-            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
             throw IOException("JM API envelope is not JSON", error)
         }
         val apiCode = envelope.optInt("code", -1)
@@ -90,7 +79,6 @@ class JmApiInterceptor internal constructor(
             if (apiCode == 401) {
                 if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
             }
-            if (recordRouteHealth && apiCode >= 500) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
             throw IOException("JM API rejected request (code=$apiCode)${apiMessage?.let { ": $it" }.orEmpty()}")
         }
 
@@ -113,7 +101,6 @@ class JmApiInterceptor internal constructor(
                 .body(plaintext.toResponseBody(response.body?.contentType()))
                 .build()
         } catch (error: Exception) {
-            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM 响应解密/解析失败")
             if (error is IOException) throw error
             throw IOException("JM API response could not be decoded", error)
         }

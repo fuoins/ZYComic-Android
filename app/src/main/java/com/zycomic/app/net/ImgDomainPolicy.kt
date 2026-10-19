@@ -28,11 +28,15 @@ object ImgDomainPolicy {
         imgDomains: List<String>,
         useFastestImgForAll: Boolean,
         derivedFastest: String?,
+        runtimeRecovery: String? = null,
     ): String? {
         val trimmed = pinned?.trim()
         if (!trimmed.isNullOrEmpty()) {
             // 大小写不敏感匹配，但返回列表里的原始写法：URL 与缓存键要和其它地方保持一致
             imgDomains.firstOrNull { it.equals(trimmed, ignoreCase = true) }?.let { return it }
+        }
+        runtimeRecovery?.let { recovery ->
+            imgDomains.firstOrNull { it.equals(recovery, ignoreCase = true) }?.let { return it }
         }
         return if (useFastestImgForAll) derivedFastest else null
     }

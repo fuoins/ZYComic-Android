@@ -39,8 +39,9 @@ object JmSpeedTester {
     private val dnsResolver = JmProbeDnsResolver()
     val isRunning: Boolean get() = running.get()
 
-    /** API always runs fresh; only an exact-match JM image snapshot may be reused. */
+    /** Optionally retest the five best historical endpoints independently for API lines and images. */
     suspend fun run(
+        reuseLines: Boolean = false,
         reuseImages: Boolean = false,
         isCurrent: () -> Boolean = { true },
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
@@ -59,6 +60,52 @@ object JmSpeedTester {
                     val imageNetworkPolicy = JmRouteManager.currentImageNetworkPolicy()
                     val linesToTest = JmRouteManager.lineHosts.toList()
                     val imagesToTest = JmRouteManager.imageDomains.toList()
+                    val prior = JmRouteManager.speedTestSnapshot.value
+                    val priorVersionMatches = prior.remoteVersion == JmRouteManager.state.value.remoteVersion &&
+                        prior.completedAtEpochMs != null && prior.completedAtEpochMs > 0L
+                    val priorLineDelays = if (priorVersionMatches) {
+                        (prior.lineIpDelaysMs + prior.untestedLineIpDelaysMs).filter { (endpoint, delay) ->
+                            endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L
+                        }
+                    } else {
+                        emptyMap()
+                    }
+                    val priorImageVerdicts = prior.imageIpVerdicts + prior.untestedImageIpVerdicts
+                    val priorImageDelays = if (priorVersionMatches) {
+                        (prior.imageIpDelaysMs + prior.untestedImageIpDelaysMs).filter { (endpoint, delay) ->
+                            val verdict = priorImageVerdicts[endpoint]
+                            endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L &&
+                                when (verdict) {
+                                    ImgVerdict.OK -> delay < Long.MAX_VALUE
+                                    ImgVerdict.NO_IMAGE, ImgVerdict.UNREACHABLE -> delay == Long.MAX_VALUE
+                                    null -> false
+                                }
+                        }
+                    } else {
+                        emptyMap()
+                    }
+                    val rankedPriorLineDelays = JmSpeedTestQuickProbePolicy.rankPriorDelays(
+                        prior.lineIpDelaysMs,
+                        prior.untestedLineIpDelaysMs,
+                    )
+                    val rankedPriorImageDelays = JmSpeedTestQuickProbePolicy.rankPriorDelays(
+                        prior.imageIpDelaysMs,
+                        prior.untestedImageIpDelaysMs,
+                    )
+                    val lineQuickEndpoints = JmSpeedTestQuickProbePolicy.selectPriorEndpoints(
+                        priorVersion = prior.remoteVersion,
+                        currentVersion = JmRouteManager.state.value.remoteVersion,
+                        priorCompletedAtEpochMs = prior.completedAtEpochMs,
+                        delays = rankedPriorLineDelays,
+                    )
+                    val imageQuickEndpoints = JmSpeedTestQuickProbePolicy.selectPriorEndpoints(
+                        priorVersion = prior.remoteVersion,
+                        currentVersion = JmRouteManager.state.value.remoteVersion,
+                        priorCompletedAtEpochMs = prior.completedAtEpochMs,
+                        delays = rankedPriorImageDelays,
+                    )
+                    val quickLines = reuseLines && lineQuickEndpoints.isNotEmpty()
+                    val quickImages = reuseImages && imageQuickEndpoints.isNotEmpty()
                     fun stillCurrent(): Boolean =
                         isCurrent() && StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
                             StartupPlatformPolicy.state.value.revision == platformRevision &&
@@ -103,28 +150,35 @@ object JmSpeedTester {
                     val probeClient = JmNetworkModule.newProbeClient()
                     val lineClient = probeClient.newBuilder().addInterceptor(JmApiInterceptor(recordRouteHealth = false)).build()
                     try {
-                        phase(JmSpeedTestProgress.Phase.PREPARING_LINES, linesToTest.size)
-                        val resolvedLines = runner.run(
-                            linesToTest,
-                            probe = { url ->
-                                val host = URI(url).host
-                                DomainIpProbePolicy.endpoints(host, resolveProbeIps(host)).map {
-                                    LineTarget(it, url.trimEnd('/') + JmSpeedProbeProtocol.LINE_PATH)
-                                }
-                            },
-                            onStarted = { url -> publish { it.copy(endpoint = url, endpointSuccessful = null, endpointElapsedMs = null) } },
-                            onResult = { url, targets ->
-                                publish {
-                                    it.copy(
-                                        completed = it.completed + 1,
-                                        endpoint = url,
-                                        endpointSuccessful = targets.isNotEmpty(),
-                                        successful = it.successful + if (targets.isNotEmpty()) 1 else 0,
-                                        failed = it.failed + if (targets.isEmpty()) 1 else 0,
-                                    )
-                                }
-                            },
-                        ).flatMap { it.second }.distinctBy { it.endpoint }
+                        val resolvedLines = if (quickLines) {
+                            lineQuickEndpoints.map { endpoint ->
+                                val configuredUrl = linesToTest.firstOrNull { runCatching { URI(it).host.equals(endpoint.domain, true) }.getOrDefault(false) }
+                                LineTarget(endpoint, "${(configuredUrl ?: "https://${endpoint.domain}").trimEnd('/')}${JmSpeedProbeProtocol.LINE_PATH}")
+                            }
+                        } else {
+                            phase(JmSpeedTestProgress.Phase.PREPARING_LINES, linesToTest.size)
+                            runner.run(
+                                linesToTest,
+                                probe = { url ->
+                                    val host = URI(url).host
+                                    DomainIpProbePolicy.endpoints(host, resolveProbeIps(host)).map {
+                                        LineTarget(it, url.trimEnd('/') + JmSpeedProbeProtocol.LINE_PATH)
+                                    }
+                                },
+                                onStarted = { url -> publish { it.copy(endpoint = url, endpointSuccessful = null, endpointElapsedMs = null) } },
+                                onResult = { url, targets ->
+                                    publish {
+                                        it.copy(
+                                            completed = it.completed + 1,
+                                            endpoint = url,
+                                            endpointSuccessful = targets.isNotEmpty(),
+                                            successful = it.successful + if (targets.isNotEmpty()) 1 else 0,
+                                            failed = it.failed + if (targets.isEmpty()) 1 else 0,
+                                        )
+                                    }
+                                },
+                            ).flatMap { it.second }.distinctBy { it.endpoint }
+                        }
                         phase(JmSpeedTestProgress.Phase.TESTING_LINES, resolvedLines.size)
                         val lineResults = runner.run(
                             resolvedLines,
@@ -141,84 +195,105 @@ object JmSpeedTester {
                                 }
                             },
                         )
-                        val lineIpDelays = lineResults.associate { it.first.endpoint to it.second.delayMs }
+                        val freshLineIpDelays = lineResults.associate { it.first.endpoint to it.second.delayMs }
+                        val testedLineEndpoints = freshLineIpDelays.keys
+                        val untestedLineIpDelays = if (quickLines) priorLineDelays.filterKeys { it !in testedLineEndpoints } else emptyMap()
+                        val lineIpDelays = JmSpeedTestQuickProbePolicy.rankPriorDelays(freshLineIpDelays, emptyMap())
+                        val lineIpTestedAt = lineIpDelays.keys.associateWith { System.currentTimeMillis() }
+                        val untestedLineIpTestedAt = JmSpeedTestQuickProbePolicy.mergeTestedAt(
+                            if (quickLines) prior.lineIpTestedAtEpochMs + prior.untestedLineIpTestedAtEpochMs else emptyMap(),
+                            emptyMap(),
+                            testedLineEndpoints,
+                            lineIpDelays.keys,
+                        ).filterKeys { it in untestedLineIpDelays }
                         val lineDelays = linesToTest.associate { url ->
                             val host = URI(url).host.lowercase(Locale.ROOT)
-                            host to (lineIpDelays.filterKeys { it.domain.equals(host, true) }.values.minOrNull() ?: Long.MAX_VALUE)
+                            host to (freshLineIpDelays.filterKeys { it.domain.equals(host, true) }.values.minOrNull() ?: Long.MAX_VALUE)
                         }
 
-                        phase(JmSpeedTestProgress.Phase.PREPARING_IMAGES, imagesToTest.size)
-                        val imageEndpoints = runner.run(
-                            imagesToTest,
-                            probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain, image = true)) },
-                            onStarted = { domain -> publish { it.copy(endpoint = domain, endpointSuccessful = null, endpointElapsedMs = null) } },
-                            onResult = { domain, endpoints ->
-                                publish {
-                                    it.copy(
-                                        completed = it.completed + 1,
-                                        endpoint = domain,
-                                        endpointSuccessful = endpoints.isNotEmpty(),
-                                        successful = it.successful + if (endpoints.isNotEmpty()) 1 else 0,
-                                        failed = it.failed + if (endpoints.isEmpty()) 1 else 0,
-                                    )
-                                }
-                            },
-                        ).flatMap { it.second }.distinct()
-                        val reusableImages = if (reuseImages) {
-                            JmRouteManager.reusableImageSnapshotOrNull()?.takeIf {
-                                stillCurrent() && it.imageIpDelaysMs.keys == imageEndpoints.toSet() &&
-                                    it.imageConfigFingerprint == imageConfigFingerprint && it.imageNetworkPolicy == imageNetworkPolicy
-                            }
+                        val imageEndpoints = if (quickImages) {
+                            imageQuickEndpoints
                         } else {
-                            null
-                        }
-                        val imageIpDelays: Map<DomainIp, Long>
-                        val imageIpVerdicts: Map<DomainIp, ImgVerdict>
-                        if (reusableImages != null && stillCurrent()) {
-                            phase(JmSpeedTestProgress.Phase.REUSING_IMAGES, imageEndpoints.size)
-                            imageIpDelays = reusableImages.imageIpDelaysMs
-                            imageIpVerdicts = reusableImages.imageIpVerdicts
-                            imageIpDelays.forEach { (endpoint, ms) ->
-                                endpointDone(endpoint, ProbeResult(ms, 0, imageIpVerdicts[endpoint]))
-                            }
-                        } else {
-                            phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageEndpoints.size)
-                            val imageResults = runner.run(
-                                imageEndpoints,
-                                probe = { endpoint ->
-                                    measureAtIp(
-                                        probeClient,
-                                        endpoint,
-                                        "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}",
-                                        true,
-                                        ::stillCurrent,
-                                    )
-                                },
-                                onStarted = ::endpointStarted,
-                                onResult = { endpoint, result ->
-                                    if (stillCurrent()) {
-                                        JmRouteManager.record(
-                                            "speed_image_ip",
-                                            "${endpoint.domain} [${endpoint.ip}]",
-                                            "JM 图源 ${result.verdict}; ${result.elapsedMs}ms",
+                            phase(JmSpeedTestProgress.Phase.PREPARING_IMAGES, imagesToTest.size)
+                            runner.run(
+                                imagesToTest,
+                                probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain, image = true)) },
+                                onStarted = { domain -> publish { it.copy(endpoint = domain, endpointSuccessful = null, endpointElapsedMs = null) } },
+                                onResult = { domain, endpoints ->
+                                    publish {
+                                        it.copy(
+                                            completed = it.completed + 1,
+                                            endpoint = domain,
+                                            endpointSuccessful = endpoints.isNotEmpty(),
+                                            successful = it.successful + if (endpoints.isNotEmpty()) 1 else 0,
+                                            failed = it.failed + if (endpoints.isEmpty()) 1 else 0,
                                         )
-                                        endpointDone(endpoint, result)
                                     }
                                 },
-                            )
-                            imageIpDelays = imageResults.associate { it.first to it.second.delayMs }
-                            imageIpVerdicts = imageResults.associate { it.first to (it.second.verdict ?: ImgVerdict.UNREACHABLE) }
+                            ).flatMap { it.second }.distinct()
                         }
+                        phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageEndpoints.size)
+                        val imageResults = runner.run(
+                            imageEndpoints,
+                            probe = { endpoint ->
+                                measureAtIp(
+                                    probeClient,
+                                    endpoint,
+                                    "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}",
+                                    true,
+                                    ::stillCurrent,
+                                )
+                            },
+                            onStarted = ::endpointStarted,
+                            onResult = { endpoint, result ->
+                                if (stillCurrent()) {
+                                    JmRouteManager.record(
+                                        "speed_image_ip",
+                                        "${endpoint.domain} [${endpoint.ip}]",
+                                        "JM 图源 ${result.verdict}; ${result.elapsedMs}ms",
+                                    )
+                                    endpointDone(endpoint, result)
+                                }
+                            },
+                        )
+                        val freshImageIpDelays = imageResults.associate { it.first to it.second.delayMs }
+                        val freshImageIpVerdicts = imageResults.associate { it.first to (it.second.verdict ?: ImgVerdict.UNREACHABLE) }
+                        val testedImageEndpoints = freshImageIpDelays.keys
+                        val untestedImageIpDelays = if (quickImages) priorImageDelays.filterKeys { it !in testedImageEndpoints } else emptyMap()
+                        val untestedImageIpVerdicts = priorImageVerdicts.filterKeys { it in untestedImageIpDelays }
+                        val imageIpDelays = JmSpeedTestQuickProbePolicy.rankPriorDelays(freshImageIpDelays, emptyMap())
+                        val imageIpVerdicts = freshImageIpVerdicts
+                        val imageIpTestedAt = JmSpeedTestQuickProbePolicy.mergeTestedAt(
+                            emptyMap(),
+                            imageIpDelays.keys.associateWith { System.currentTimeMillis() },
+                            testedImageEndpoints,
+                            imageIpDelays.keys,
+                        )
+                        val untestedImageIpTestedAt = JmSpeedTestQuickProbePolicy.mergeTestedAt(
+                            if (quickImages) prior.imageIpTestedAtEpochMs + prior.untestedImageIpTestedAtEpochMs else emptyMap(),
+                            emptyMap(),
+                            testedImageEndpoints,
+                        ).filterKeys { it in untestedImageIpDelays }
                         val imageDelays = imagesToTest.associate { domain ->
-                            domain.lowercase(Locale.ROOT) to (imageIpDelays.filterKeys { it.domain.equals(domain, true) }.values.minOrNull() ?: Long.MAX_VALUE)
+                            domain.lowercase(Locale.ROOT) to (freshImageIpDelays.filterKeys { it.domain.equals(domain, true) }.values.minOrNull() ?: Long.MAX_VALUE)
                         }
                         val snapshot = JmRouteManager.SpeedTestSnapshot(
                             lineDelaysMs = lineDelays, imageDelaysMs = imageDelays,
                             lineIpDelaysMs = lineIpDelays, imageIpDelaysMs = imageIpDelays, imageIpVerdicts = imageIpVerdicts,
+                            lineIpTestedAtEpochMs = lineIpTestedAt, imageIpTestedAtEpochMs = imageIpTestedAt,
+                            untestedLineIpDelaysMs = untestedLineIpDelays,
+                            untestedImageIpDelaysMs = untestedImageIpDelays,
+                            untestedImageIpVerdicts = untestedImageIpVerdicts,
+                            untestedLineIpTestedAtEpochMs = untestedLineIpTestedAt,
+                            untestedImageIpTestedAtEpochMs = untestedImageIpTestedAt,
+                            testedLineEndpoints = testedLineEndpoints, testedImageEndpoints = testedImageEndpoints,
+                            lineQuickTest = quickLines, imageQuickTest = quickImages,
+                            lineQuickTestAllFailed = quickLines && freshLineIpDelays.isNotEmpty() && freshLineIpDelays.values.none { it < Long.MAX_VALUE },
+                            imageQuickTestAllFailed = quickImages && freshImageIpDelays.isNotEmpty() && freshImageIpDelays.values.none { it < Long.MAX_VALUE },
                             startedAtEpochMs = started, completedAtEpochMs = System.currentTimeMillis(),
                             remoteVersion = JmRouteManager.state.value.remoteVersion,
                             configFingerprint = configFingerprint, imageConfigFingerprint = imageConfigFingerprint,
-                            imageNetworkPolicy = imageNetworkPolicy, imageResultsReused = reusableImages != null,
+                            imageNetworkPolicy = imageNetworkPolicy, imageResultsReused = false,
                         )
                         if (stillCurrent()) {
                             JmRouteManager.recordSpeedTest(snapshot, platformRevision)

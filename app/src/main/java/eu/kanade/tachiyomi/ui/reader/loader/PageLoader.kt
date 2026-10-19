@@ -208,6 +208,9 @@ abstract class PageLoader {
      */
     open fun retryPage(page: ReaderPage) {}
 
+    /** Requeues a still-visible page after a coordinated runtime source switch, without a manual retry. */
+    open fun retryAfterRuntimeRecovery(page: ReaderPage, expectedGeneration: Int) {}
+
     /**
      * Recycles this loader. Implementations must override this method to clean up any active
      * resources.

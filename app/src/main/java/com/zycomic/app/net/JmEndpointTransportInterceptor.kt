@@ -16,6 +16,7 @@ internal class JmEndpointTransportInterceptor(
     private val imageHasMeasurements: (String) -> Boolean = { JmRouteManager.hasEndpointMeasurements(it, image = true) },
     private val apiSuccess: (DomainIp) -> Unit = JmRouteManager::rememberLineEndpoint,
     private val imageSuccess: (DomainIp) -> Unit = JmRouteManager::rememberImageEndpoint,
+    private val apiResponse: (DomainIp) -> Unit = JmRouteManager::recordApiTransportResponse,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -42,26 +43,21 @@ internal class JmEndpointTransportInterceptor(
             }
             val requestPin = JmEndpointRequestContext.current(host, isImage)
             val actualEndpoint = requestPin?.endpoint ?: endpoint
+            if (!isImage && actualEndpoint != null) runCatching { apiResponse(actualEndpoint) }
             if (response.isSuccessful && requestPin?.bootstrapAllowed == true && actualEndpoint != null) {
                 runCatching { if (isImage) imageSuccess(actualEndpoint) else apiSuccess(actualEndpoint) }
-            }
-            val transientHttpFailure = response.code == 408 || response.code == 429 || response.code >= 500
-            if (transientHttpFailure && actualEndpoint != null) {
-                if (isImage) {
-                    imageFailure(actualEndpoint, "JM 图源 HTTP ${response.code}")
-                } else if (request.url.encodedPath != "/confirm") {
-                    apiFailure(actualEndpoint, "JM API HTTP ${response.code}")
-                }
             }
             return response
         } catch (error: IOException) {
             // Cancellation is not evidence that the pinned IP is unhealthy (including stale pages).
             if (isCancelled()) throw error
             val actualEndpoint = JmEndpointRequestContext.current(host, isImage)?.endpoint ?: endpoint
-            if (actualEndpoint != null) {
+            if (actualEndpoint != null && RuntimeRecoveryPolicy.isConnectionFailure(error)) {
                 if (isImage) {
                     imageFailure(actualEndpoint, error.javaClass.simpleName)
-                } else if (request.url.encodedPath != "/confirm") {
+                } else if (request.url.encodedPath != "/confirm" &&
+                    RuntimeRecoveryPolicy.mayRecoverApi(request.method, error)
+                ) {
                     apiFailure(actualEndpoint, error.javaClass.simpleName)
                 }
             }

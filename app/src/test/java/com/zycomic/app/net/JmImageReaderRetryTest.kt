@@ -41,7 +41,7 @@ class JmImageReaderRetryTest {
     }
 
     @Test
-    fun `502 advances existing page round and next untried JM host succeeds`() {
+    fun `502 does not independently advance the shared JM source pool`() {
         ImageAttemptCoordinator().use { coordinator ->
             val page = ReaderPage(0, imageUrl = IMAGE_URL)
             val hosts = (1..4).map { "image$it.example" }
@@ -51,27 +51,22 @@ class JmImageReaderRetryTest {
                 assertEquals(null, request.url.queryParameter("_jm_scramble"))
                 assertTrue(request.tag(PageAttemptScope::class.java) != null)
                 visited += request.url.host
-                if (request.url.host == hosts.last()) 200 else 502
+                502
             }
             val first = scope(page, coordinator)
             val error = assertThrows(IOException::class.java) { load(client, first) }
             assertTrue(error.message.orEmpty().contains("HTTP 502"))
-            assertEquals(3, page.endpointsAttemptedInRound.get())
-            assertEquals(hosts.take(3), visited)
-            assertTrue(first.retryAfterFailure(remaining(hosts, page)))
-            assertEquals(2, page.automaticRetryRound.get())
-            assertEquals(0, page.endpointsAttemptedInRound.get())
-            load(client, scope(page, coordinator))
-            assertEquals(hosts, visited)
-            assertEquals(hosts.take(3), failures.map { it.first })
-            assertTrue(failures.all { "HTTP 502" in it.second })
-            assertEquals(4, page.attemptedImageEndpoints.size)
+            assertEquals(1, page.endpointsAttemptedInRound.get())
+            assertEquals(listOf(hosts.first()), visited)
+            assertFalse(first.retryAfterFailure(false))
+            assertEquals(1, page.automaticRetryRound.get())
+            assertTrue(failures.isEmpty())
             assertFalse(first.hasActiveEndpointRequest)
         }
     }
 
     @Test
-    fun `persistent transient HTTP errors stop after three existing rounds without repeating endpoints`() {
+    fun `transient HTTP errors do not rotate across JM domains in one reader worker`() {
         for (status in listOf(502, 503, 504)) {
             ImageAttemptCoordinator().use { coordinator ->
                 val page = ReaderPage(0, imageUrl = IMAGE_URL)
@@ -82,22 +77,17 @@ class JmImageReaderRetryTest {
                     visited += request.url.host
                     status
                 }
-                for (round in 1..PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS) {
-                    val attempt = scope(page, coordinator)
-                    assertThrows(IOException::class.java) { load(client, attempt) }
-                    assertEquals(round * PageAttemptScope.MAX_ENDPOINTS_PER_ROUND, visited.size)
-                    assertEquals(round < PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS, attempt.retryAfterFailure(remaining(hosts, page)))
-                }
-                assertEquals(3, page.automaticRetryRound.get())
-                assertEquals(9, visited.distinct().size)
-                assertEquals(9, failures.size)
-                assertTrue(remaining(hosts, page))
+                val attempt = scope(page, coordinator)
+                assertThrows(IOException::class.java) { load(client, attempt) }
+                assertEquals(listOf(hosts.first()), visited)
+                assertFalse(attempt.retryAfterFailure(false))
+                assertTrue(failures.isEmpty())
             }
         }
     }
 
     @Test
-    fun `exhausted small JM pool does not enqueue an infinite retry`() {
+    fun `small JM pool does not rotate an active reader request to another host`() {
         ImageAttemptCoordinator().use { coordinator ->
             val page = ReaderPage(0, imageUrl = IMAGE_URL)
             val hosts = listOf("first.example", "second.example")
@@ -105,24 +95,26 @@ class JmImageReaderRetryTest {
             val client = client(hosts, failures) { 502 }
             val attempt = scope(page, coordinator)
             assertThrows(IOException::class.java) { load(client, attempt) }
-            assertEquals(2, page.endpointsAttemptedInRound.get())
-            assertFalse(attempt.retryAfterFailure(remaining(hosts, page)))
+            assertEquals(1, page.endpointsAttemptedInRound.get())
+            assertFalse(attempt.retryAfterFailure(false))
             assertEquals(1, page.automaticRetryRound.get())
         }
     }
 
     @Test
-    fun `transport failure is recorded and continues through the same page strategy`() {
+    fun `transport failure does not independently rotate the JM source pool`() {
         ImageAttemptCoordinator().use { coordinator ->
             val page = ReaderPage(0, imageUrl = IMAGE_URL)
             val failures = mutableListOf<Pair<String, String>>()
+            val visited = mutableListOf<String>()
             val client = client(listOf("first.example", "second.example"), failures) { request ->
-                if (request.url.host == "first.example") throw IOException("connection reset")
-                200
+                visited += request.url.host
+                throw java.net.SocketException("connection reset")
             }
-            load(client, scope(page, coordinator))
-            assertEquals(listOf("first.example" to "connection reset"), failures)
-            assertEquals(2, page.endpointsAttemptedInRound.get())
+            assertThrows(IOException::class.java) { load(client, scope(page, coordinator)) }
+            assertEquals(listOf("first.example"), visited)
+            assertTrue(failures.isEmpty())
+            assertEquals(1, page.endpointsAttemptedInRound.get())
         }
     }
 
@@ -147,14 +139,19 @@ class JmImageReaderRetryTest {
     }
 
     @Test
-    fun `unscoped cover keeps its existing fallback without a reader budget`() {
+    fun `unscoped cover does not scan JM domains within one request`() {
         val hosts = (1..4).map { "image$it.example" }
         val failures = mutableListOf<Pair<String, String>>()
-        val client = client(hosts, failures) { if (it.url.host == hosts.last()) 200 else 502 }
-        client.newCall(Request.Builder().url("https://${hosts.first()}/media/albums/123_3x4.jpg").build()).execute().use {
-            assertTrue(it.isSuccessful)
+        val visited = mutableListOf<String>()
+        val client = client(hosts, failures) { request ->
+            visited += request.url.host
+            502
         }
-        assertEquals(3, failures.size)
+        assertThrows(IOException::class.java) {
+            client.newCall(Request.Builder().url("https://${hosts.first()}/media/albums/123_3x4.jpg").build()).execute().close()
+        }
+        assertEquals(listOf(hosts.first()), visited)
+        assertTrue(failures.isEmpty())
     }
 
     private fun scope(page: ReaderPage, coordinator: ImageAttemptCoordinator) =
@@ -181,6 +178,7 @@ class JmImageReaderRetryTest {
                 prepareImageRoute = {},
                 recordImageSuccess = {},
                 recordImageFailure = { host, reason -> failures += host to reason },
+                activeImageDomain = { hosts.first() },
             ),
         )
         .addInterceptor { chain ->

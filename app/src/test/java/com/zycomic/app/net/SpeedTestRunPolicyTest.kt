@@ -8,9 +8,9 @@ class SpeedTestRunPolicyTest {
     private val key = SpeedTestRunKey(1, 2, 3, "wifi-1|direct")
 
     @Test
-    fun `a new process always probes lines even when image reuse is enabled`() {
+    fun `new process measures candidates rather than directly using old latency`() {
         assertFalse(SpeedTestRunPolicy.canSkip(null, key, false, false))
-        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null))
+        assertTrue(SpeedTestRunPolicy.canFastTest(true, false))
     }
 
     @Test
@@ -21,45 +21,54 @@ class SpeedTestRunPolicyTest {
     }
 
     @Test
-    fun `real network changes cannot be hidden by recent success or image reuse`() {
+    fun `network change starts a run without disqualifying version-matched history`() {
         val changed = key.copy(networkIdentity = "wifi-2|direct")
         assertFalse(SpeedTestRunPolicy.canSkip(key, changed, false, false))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, changed, changed, key))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, changed, null))
+        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, changed, changed, key))
+        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, key, changed, null))
     }
 
     @Test
-    fun `platform and config changes start a new round`() {
+    fun `platform and config revisions still invalidate in-process completed generation`() {
         assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(platformRevision = 2), false, false))
         assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(manwaConfigRevision = 4), false, false))
         assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(jmConfigRevision = 5), false, false))
     }
 
     @Test
-    fun `manual retest and disabled reuse never reuse images`() {
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, true, key, key, key))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(false, false, key, key, key))
-    }
-
-    @Test
-    fun `applied remote config requires fresh images but not a duplicate completed run`() {
-        assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, key, remoteConfigUpdated = true))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
-    }
-
-    @Test
-    fun `ordinary caller after a config change also requires fresh images on both platforms`() {
-        for (changed in listOf(key.copy(manwaConfigRevision = 4), key.copy(jmConfigRevision = 5))) {
-            assertFalse(SpeedTestRunPolicy.canSkip(key, changed, false, false))
-            assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, changed, changed, key))
-            assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, changed, null))
+    fun `line only image only both and neither are independent`() {
+        for (line in listOf(false, true)) {
+            for (image in listOf(false, true)) {
+                val lineFast = SpeedTestRunPolicy.canFastTest(line, false)
+                val imageFast = SpeedTestRunPolicy.canFastTest(image, false)
+                if (line) assertTrue(lineFast) else assertFalse(lineFast)
+                if (image) assertTrue(imageFast) else assertFalse(imageFast)
+            }
         }
     }
 
     @Test
-    fun `unchanged remote config preserves completed-run and image reuse behavior`() {
+    fun `manual full retest overrides either remembered-result preference`() {
+        assertFalse(SpeedTestRunPolicy.canFastTest(true, true))
+        assertFalse(SpeedTestRunPolicy.canFastTest(false, false))
+        assertFalse(SpeedTestRunPolicy.canReuseImages(true, true, key, key, key))
+    }
+
+    @Test
+    fun `actual remote config update forces full test without duplicate completed run`() {
         assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
-        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, key, key, key))
+        assertFalse(SpeedTestRunPolicy.canFastTest(true, false, remoteConfigUpdated = true))
+        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
+    }
+
+    @Test
+    fun `new config disables old top five for every line and image toggle combination`() {
+        for (line in listOf(false, true)) {
+            for (image in listOf(false, true)) {
+                assertFalse(SpeedTestRunPolicy.canFastTest(line, false, remoteConfigUpdated = true))
+                assertFalse(SpeedTestRunPolicy.canFastTest(image, false, remoteConfigUpdated = true))
+                assertFalse(SpeedTestRunPolicy.canReuseImages(image, false, key, key, key, remoteConfigUpdated = true))
+            }
+        }
     }
 }

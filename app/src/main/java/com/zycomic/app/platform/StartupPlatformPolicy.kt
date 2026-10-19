@@ -11,7 +11,10 @@ object StartupPlatformPolicy {
     data class State(
         val disableManwa: Boolean = true,
         val disableJm: Boolean = false,
+        /** Re-test the previous image-source top five when the config version matches. */
         val useLastResult: Boolean = true,
+        /** Independently re-test the previous line top five when the config version matches. */
+        val useLastLineResult: Boolean = true,
         /** Increments whenever any preference value changes; also invalidates stale network-test results. */
         val revision: Long = 0,
     )
@@ -22,6 +25,7 @@ object StartupPlatformPolicy {
     private const val KEY_ENABLED_MANWA = "enabled_manwa"
     private const val KEY_ENABLED_JM = "enabled_jm"
     private const val KEY_USE_LAST_RESULT = "use_last_result"
+    private const val KEY_USE_LAST_LINE_RESULT = "use_last_line_result"
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -49,6 +53,7 @@ object StartupPlatformPolicy {
             disableManwa = normalized.first,
             disableJm = normalized.second,
             useLastResult = preferences.getBoolean(KEY_USE_LAST_RESULT, true),
+            useLastLineResult = preferences.getBoolean(KEY_USE_LAST_LINE_RESULT, true),
             revision = _state.value.revision,
         )
         _settingsState.value = _state.value
@@ -67,6 +72,9 @@ object StartupPlatformPolicy {
     fun setSettingsJmEnabled(enabled: Boolean): Boolean = updateSettings(disableJm = !enabled)
 
     fun setUseLastResult(use: Boolean): Boolean = update(useLastResult = use)
+
+    /** Controls reuse of the last line configuration version, independently from image-source results. */
+    fun setUseLastLineResult(use: Boolean): Boolean = update(useLastLineResult = use)
 
     fun isEnabled(platform: ContentPlatform): Boolean = isEnabled(_state.value, platform)
 
@@ -90,13 +98,18 @@ object StartupPlatformPolicy {
         disableManwa: Boolean? = null,
         disableJm: Boolean? = null,
         useLastResult: Boolean? = null,
+        useLastLineResult: Boolean? = null,
     ): Boolean {
         check(loaded) { "StartupPlatformPolicy.load(context) must be called before setting platform preferences" }
         val previous = _state.value
-        val next = transition(previous, disableManwa, disableJm, useLastResult)
+        val next = transition(previous, disableManwa, disableJm, useLastResult, useLastLineResult)
         if (!canTransition(previous, disableManwa, disableJm)) return false
         if (disableManwa == null && disableJm == null) {
-            val settingsNext = transition(_settingsState.value, useLastResult = useLastResult)
+            val settingsNext = transition(
+                _settingsState.value,
+                useLastResult = useLastResult,
+                useLastLineResult = useLastLineResult,
+            )
             if (next == previous && settingsNext == _settingsState.value) return true
             persist(settingsNext)
             _state.value = next
@@ -132,6 +145,7 @@ object StartupPlatformPolicy {
             .putBoolean(KEY_DISABLE_MANWA, state.disableManwa)
             .putBoolean(KEY_DISABLE_JM, state.disableJm)
             .putBoolean(KEY_USE_LAST_RESULT, state.useLastResult)
+            .putBoolean(KEY_USE_LAST_LINE_RESULT, state.useLastLineResult)
             .apply()
     }
 
@@ -141,6 +155,7 @@ object StartupPlatformPolicy {
         disableManwa: Boolean? = null,
         disableJm: Boolean? = null,
         useLastResult: Boolean? = null,
+        useLastLineResult: Boolean? = null,
     ): State {
         val manwa = disableManwa ?: state.disableManwa
         val jm = disableJm ?: state.disableJm
@@ -149,10 +164,12 @@ object StartupPlatformPolicy {
             disableManwa = manwa,
             disableJm = jm,
             useLastResult = useLastResult ?: state.useLastResult,
+            useLastLineResult = useLastLineResult ?: state.useLastLineResult,
         )
         return if (candidate.disableManwa == state.disableManwa &&
             candidate.disableJm == state.disableJm &&
-            candidate.useLastResult == state.useLastResult
+            candidate.useLastResult == state.useLastResult &&
+            candidate.useLastLineResult == state.useLastLineResult
         ) {
             state
         } else {

@@ -25,6 +25,7 @@ class JmImageInterceptor internal constructor(
     private val prepareImageRoute: (String) -> Unit = JmNetworkModule::prepareImageRoute,
     private val recordImageSuccess: (String) -> Unit = JmRouteManager::recordImageSuccess,
     private val recordImageFailure: (String, String) -> Unit = JmRouteManager::recordImageFailure,
+    private val activeImageDomain: () -> String = { JmRouteManager.activeImageDomain },
 ) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -51,11 +52,11 @@ class JmImageInterceptor internal constructor(
         }
         requireActive()
         val configuredCandidates = imageCandidates()
-        val candidates = if (path.startsWith("/media/albums/")) {
-            JmRelatedMangaPolicy.imageHostsForAlbum(original.url.host, configuredCandidates)
-        } else {
-            configuredCandidates
-        }
+        // A request never rotates independently from the shared platform selection.
+        val activeCandidate = activeImageDomain().takeIf { it.isNotBlank() }
+            ?: configuredCandidates.firstOrNull()
+            ?: original.url.host
+        val candidates = listOf(activeCandidate)
         var lastError: IOException? = null
         var lastStatus: Int? = null
         for (host in candidates) {
@@ -84,6 +85,10 @@ class JmImageInterceptor internal constructor(
                     response.close()
                     requireActive()
                 }
+                if (response.code == 429) {
+                    // Preserve the server's Retry-After (and body); do not immediately try another host.
+                    return response.newBuilder().request(original).build()
+                }
                 val isImage = response.header("Content-Type")?.substringBefore(';')
                     ?.startsWith("image/", ignoreCase = true) == true
                 if (response.isSuccessful && isImage) {
@@ -91,6 +96,9 @@ class JmImageInterceptor internal constructor(
                         val restored = restoreScrambledImage(response, scramble, scope)
                         requireActive()
                         recordImageSuccess(host)
+                        if (scope == null) {
+                            RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, host, original.url.toString(), failed = false)
+                        }
                         restored
                     } catch (error: IOException) {
                         response.close()
@@ -100,15 +108,32 @@ class JmImageInterceptor internal constructor(
                 lastStatus = response.code
                 response.close()
                 requireActive()
-                recordImageFailure(host, "JM 图床 HTTP $lastStatus")
             } catch (error: IOException) {
                 // Coil cover requests have no PageAttemptScope; Call cancellation is authoritative.
                 if (isCancelled()) throw error
                 lastError = error
-                recordImageFailure(host, error.message ?: error.javaClass.simpleName)
+                // Per-host and per-endpoint ranking is updated only after the shared recovery
+                // window observes repeated failures; a single reader worker cannot rotate the pool.
             } finally {
                 scope?.endpointRequestFinished()
                 scope?.addNetworkTime(System.nanoTime() - startedAt)
+            }
+        }
+        if (lastError != null && RuntimeRecoveryPolicy.isConnectionFailure(lastError!!)) {
+            if (scope == null) {
+                RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, JmRouteManager.activeImageDomain, original.url.toString(), failed = true)
+            } else if (scope.canRace && scope.page.readerVisible) {
+                RuntimeImageRecovery.visibleReaderTransportFailure(
+                    RuntimeRecoveryPolicy.Platform.JM,
+                    activeCandidate,
+                    original.url.toString(),
+                ) {
+                    RuntimeImageRecovery.retryVisiblePageAfterAttempt(
+                        RuntimeRecoveryPolicy.Platform.JM,
+                        activeCandidate,
+                        scope,
+                    )
+                }
             }
         }
         throw lastError ?: IOException("JM image request failed${lastStatus?.let { " (HTTP $it)" } ?: ""}")

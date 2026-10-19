@@ -192,6 +192,50 @@ object NetworkModule {
             .connectionPool(ConnectionPool(1, 1, TimeUnit.SECONDS))
             .build()
 
+    private val apiProbeRetryAfter = RuntimeRetryAfterPolicy()
+
+    /** Validate a previously measured API endpoint using a safe GET before any atomic route switch. */
+    suspend fun validateApiEndpoint(endpoint: DomainIp): Boolean = withContext(Dispatchers.IO) {
+        if (apiProbeRetryAfter.isBlocked(endpoint)) return@withContext false
+        runCatching {
+            val base = newLineProbeClient()
+            val client = newProbeClientForIp(base, endpoint.domain, endpoint.ip).newBuilder()
+                .apply {
+                    interceptors().removeAll { it is LineFailoverInterceptor }
+                    retryOnConnectionFailure(false)
+                    followRedirects(false)
+                    followSslRedirects(false)
+                    callTimeout(5, TimeUnit.SECONDS)
+                }
+                .build()
+            try {
+                val baseUrl = RouteManager.lineHosts.firstOrNull {
+                    runCatching { java.net.URI(it).host.equals(endpoint.domain, true) }.getOrDefault(false)
+                } ?: "https://${endpoint.domain}"
+                val request = okhttp3.Request.Builder().url(baseUrl.trimEnd('/') + "/api/classes/index").get().build()
+                client.newCall(request).execute().use { response ->
+                    if (response.code == 429) apiProbeRetryAfter.record(endpoint, response.header("Retry-After"))
+                    if (!response.isSuccessful) return@use false
+                    val text = response.body?.string()?.trim().orEmpty()
+                    val value = runCatching { org.json.JSONTokener(text).nextValue() }.getOrNull()
+                    value is org.json.JSONObject || value is org.json.JSONArray
+                }
+            } finally {
+                client.connectionPool.evictAll()
+                base.connectionPool.evictAll()
+            }
+        }.getOrDefault(false)
+    }
+
+    suspend fun validateCurrentApi(): Boolean {
+        val host = RouteManager.lineHost
+        if (host.isBlank()) return false
+        val ip = RouteManager.lineIpFor(host) ?: RouteManager.resolveIp(host).firstOrNull()
+            ?: runCatching { Dns.SYSTEM.lookup(host).firstOrNull()?.hostAddress }.getOrNull()
+            ?: return false
+        return validateApiEndpoint(DomainIp(host, ip))
+    }
+
     /**
      * Create an isolated runtime image client for one measured domain/IP endpoint.
      * The outer ImageInterceptor owns retries, so this client removes that interceptor,

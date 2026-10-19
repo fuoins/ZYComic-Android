@@ -62,8 +62,6 @@ class SettingsViewModel {
     val autoSelecting = MutableStateFlow(false)
     /** 当前测速阶段与按真实解析端点统计的进度。 */
     val speedTestProgress = MutableStateFlow(SpeedTester.Progress())
-    /** 用户请求复用图源旧结果后的阶段提示。 */
-    val imageReuseNotice = MutableStateFlow<String?>(null)
 
     fun speedTestProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {
         SpeedTester.Phase.PREPARING_LINES -> "正在解析线路域名和 IP…"
@@ -81,8 +79,10 @@ class SettingsViewModel {
             "正在测试图源 IP：${progress.completed}/${progress.total}（可用 ${progress.successful}，连不上 ${progress.failed}，无图 ${progress.noImage}）"
         }
         SpeedTester.Phase.APPLYING_RESULTS -> "端点检测完成，正在更新排名并应用可自动切换的结果…"
-        SpeedTester.Phase.COMPLETE -> if (progress.reusedImages > 0) {
-            "图源结果来源：本次新测 ${progress.freshImages} 项，复用上次 ${progress.reusedImages} 项；混合结果不可导出为完整诊断日志"
+        SpeedTester.Phase.COMPLETE -> if (progress.fullRetestRecommended) {
+            "前五快测全部失败，本轮不再扩测；请在测速表中选择完整重新测速"
+        } else if (progress.reusedImages > 0) {
+            "图源本次新测 ${progress.freshImages} 项，另 ${progress.reusedImages} 项保留历史排名（本轮未测）；可手动完整重测"
         } else {
             "测速完成；自动模式应用最快结果，临时手动选择保持不变"
         }
@@ -125,20 +125,6 @@ class SettingsViewModel {
         scope.launch {
             SpeedTester.progress.collect { progress ->
                 speedTestProgress.value = progress
-                if (imageReuseNotice.value != null) {
-                    imageReuseNotice.value = when (progress.phase) {
-                        SpeedTester.Phase.PREPARING_LINES,
-                        SpeedTester.Phase.TESTING_LINES,
-                        SpeedTester.Phase.APPLYING_LINE,
-                        -> "等待线路测速完成后使用上次图源结果"
-                        SpeedTester.Phase.FETCHING_SAMPLE,
-                        SpeedTester.Phase.PREPARING_IMAGES,
-                        -> "线路测速完成，正在准备使用上次图源结果"
-                        SpeedTester.Phase.TESTING_IMAGES ->
-                            "图源测速进行中：已启动的端点继续测速；未启动端点优先复用匹配的上次结果"
-                        else -> imageReuseNotice.value
-                    }
-                }
             }
         }
         scope.launch {
@@ -444,11 +430,9 @@ class SettingsViewModel {
 
     /** 设置页"重新测速"按钮：测速后自动选最快、重建网络并 Toast。 */
     fun runSpeedTest(
-        keepImageReuseNotice: Boolean = false,
         onlyPlatform: com.zycomic.app.platform.ContentPlatform? = null,
     ) {
         scope.launch {
-            if (!keepImageReuseNotice) imageReuseNotice.value = null
             testing.value = true
             speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.PREPARING_LINES)
             lineDelays.value = emptyMap()
@@ -475,39 +459,7 @@ class SettingsViewModel {
                     speedTestProgress.value = SpeedTester.Progress(SpeedTester.Phase.SKIPPED)
                 }
                 testing.value = false
-                imageReuseNotice.value = null
             }
-        }
-    }
-
-    /** Re-run line probes and reuse eligible image results, or update the active test's upcoming image phase. */
-    fun usePreviousImageResults() {
-        val snapshot = RouteManager.reusableImageSpeedTestSnapshotOrNull()
-        if (snapshot == null || !SpeedTester.requestPreviousImageResults()) {
-            imageReuseNotice.value = null
-            toast.value = "暂无当前网络配置下有效的上次图源测速结果"
-            return
-        }
-        val phase = speedTestProgress.value.phase
-        val preparingTest = (testing.value || autoSelecting.value) && phase !in setOf(
-            SpeedTester.Phase.COMPLETE,
-            SpeedTester.Phase.FAILED,
-            SpeedTester.Phase.SKIPPED,
-        )
-        // MainActivity begins its launch test from LaunchedEffect; a splash-page tap can arrive
-        // just before autoSelecting flips true, so treat the not-yet-completed startup test as active.
-        val active = SpeedTester.isRunning || preparingTest || !autoTestDone
-        if (!active) {
-            imageReuseNotice.value = "本轮线路测速后将使用上次图源结果"
-            runSpeedTest(keepImageReuseNotice = true)
-            return
-        }
-        imageReuseNotice.value = when (phase) {
-            SpeedTester.Phase.PREPARING_LINES,
-            SpeedTester.Phase.TESTING_LINES,
-            SpeedTester.Phase.APPLYING_LINE,
-            -> "等待线路测速完成后使用上次图源结果"
-            else -> "图源测速进行中：已启动的端点继续测速；未启动端点优先复用匹配的上次结果"
         }
     }
 

@@ -78,6 +78,18 @@ class PlatformSpeedTestCoordinatorProgressTest {
 
         assertTrue(message.contains("12/12"))
         assertTrue(message.contains("可用 8、失败 2、无图 2"))
-        assertTrue(message.contains("新测 10、复用 2"))
+        assertTrue(message.contains("新测 10、保留历史 2（本轮未测）"))
+    }
+
+    @Test
+    fun `all failed top five recommends explicit full retest rather than expanding`() {
+        val message = PlatformSpeedTestCoordinator.manwaProgressMessage(
+            SpeedTester.Progress(
+                phase = SpeedTester.Phase.COMPLETE,
+                fullRetestRecommended = true,
+            ),
+        )
+        assertTrue(message.contains("本轮不再扩测"))
+        assertTrue(message.contains("完整重新测速"))
     }
 }

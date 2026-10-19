@@ -44,6 +44,7 @@ object JmNetworkModule {
     private val cookieJar = JmCookieJar()
     private val confirmMutex = Mutex()
     private val confirmedHosts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val apiProbeRetryAfter = RuntimeRetryAfterPolicy()
 
     val selectedImageIp: String?
         get() = currentImageEndpoint()?.ip
@@ -161,6 +162,46 @@ object JmNetworkModule {
         .followRedirects(false)
         .followSslRedirects(false)
         .build()
+
+    /** Read-only health check pinned to exactly one measured API endpoint, retaining HTTPS SNI. */
+    fun validateApiEndpoint(endpoint: DomainIp): Boolean {
+        if (apiProbeRetryAfter.isBlocked(endpoint)) return false
+        val previous = JmEndpointRequestContext.install(
+            JmEndpointRequestContext.Pin(endpoint.domain, image = false, endpoint = endpoint, bootstrapAllowed = false),
+        )
+        val probeClient = newProbeClient().newBuilder()
+            .addInterceptor(JmApiInterceptor(recordRouteHealth = false))
+            .build()
+        return try {
+            val baseUrl = JmRouteManager.configuredLineUrl(endpoint.domain) ?: "https://${endpoint.domain}"
+            val request = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}${JmSpeedProbeProtocol.LINE_PATH}")
+                .header("User-Agent", JmApiInterceptor.USER_AGENT)
+                .header("Origin", JmApiInterceptor.ORIGIN)
+                .header("Referer", JmApiInterceptor.REFERER)
+                .header("X-Requested-With", JmApiInterceptor.PACKAGE_NAME)
+                .get()
+                .build()
+            probeClient.newCall(request).execute().use { response ->
+                if (response.code == 429) apiProbeRetryAfter.record(endpoint, response.header("Retry-After"))
+                response.isSuccessful && response.body?.string()?.let(JmSpeedProbeProtocol::isValidDecryptedJson) == true
+            }
+        } catch (_: Exception) {
+            // HTTP, envelope, decryption, and payload errors are failed checks, never retry signals.
+            false
+        } finally {
+            probeClient.dispatcher.cancelAll()
+            probeClient.connectionPool.evictAll()
+            probeClient.dispatcher.executorService.shutdown()
+            JmEndpointRequestContext.restore(previous)
+        }
+    }
+
+    /** Safe GET health check used before automatic image recovery; never mutates account state. */
+    suspend fun validateCurrentApi(): Boolean = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val endpoint = JmRouteManager.currentLineEndpoint() ?: return@withContext false
+        validateApiEndpoint(endpoint)
+    }
 
     /** Persist one successful sources2 endpoint through the route manager. */
     fun selectImageEndpoint(domain: String, ip: String): Boolean = JmRouteManager.selectImageEndpoint(domain, ip)

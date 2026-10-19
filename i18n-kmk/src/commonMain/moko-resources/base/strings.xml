@@ -264,6 +264,7 @@
     <string name="startup_enable_manwa">开启漫蛙</string>
     <string name="startup_enable_jm">开启禁漫天堂</string>
     <string name="startup_use_last_speed_test">默认使用上次图源测速结果</string>
+    <string name="startup_use_last_line_speed_test">默认使用上次线路测速结果</string>
     <string name="startup_platform_settings_title">平台可用性</string>
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">重启软件生效</string>

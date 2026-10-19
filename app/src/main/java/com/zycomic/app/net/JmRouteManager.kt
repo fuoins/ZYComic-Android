@@ -39,6 +39,19 @@ object JmRouteManager {
         val lineIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
         val imageIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
         val imageIpVerdicts: Map<DomainIp, JmSpeedTester.ImgVerdict> = emptyMap(),
+        val lineIpTestedAtEpochMs: Map<DomainIp, Long> = emptyMap(),
+        val imageIpTestedAtEpochMs: Map<DomainIp, Long> = emptyMap(),
+        val untestedLineIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
+        val untestedImageIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
+        val untestedImageIpVerdicts: Map<DomainIp, JmSpeedTester.ImgVerdict> = emptyMap(),
+        val untestedLineIpTestedAtEpochMs: Map<DomainIp, Long> = emptyMap(),
+        val untestedImageIpTestedAtEpochMs: Map<DomainIp, Long> = emptyMap(),
+        val testedLineEndpoints: Set<DomainIp> = emptySet(),
+        val testedImageEndpoints: Set<DomainIp> = emptySet(),
+        val lineQuickTest: Boolean = false,
+        val imageQuickTest: Boolean = false,
+        val lineQuickTestAllFailed: Boolean = false,
+        val imageQuickTestAllFailed: Boolean = false,
     )
 
     data class LogEntry(
@@ -94,6 +107,19 @@ object JmRouteManager {
     @Volatile private var lastImageEndpoint: DomainIp? = null
     private val failedLineEndpoints = ConcurrentHashMap.newKeySet<DomainIp>()
     private val failedImageEndpoints = ConcurrentHashMap.newKeySet<DomainIp>()
+    private val imageTransportFailures = ConcurrentHashMap<DomainIp, Int>()
+    private val apiEndpointRecovery = JmApiEndpointRecovery<ApiRecoveryGuard>()
+
+    private data class ApiRecoveryGuard(
+        val host: String,
+        val current: DomainIp,
+        val candidate: DomainIp,
+        val configRevision: Long,
+        val platformRevision: Long,
+        val lineIndex: Int,
+        val manualEndpoint: DomainIp?,
+        val snapshot: SpeedTestSnapshot,
+    )
 
     @Volatile private var configRevision: Long = 0L
 
@@ -116,6 +142,9 @@ object JmRouteManager {
     val isAutoSelectEnabled: Boolean get() = _state.value.autoSelect
     val isUsingFallbackLines: Boolean get() = _state.value.usingFallbackLines
     val sniDomains: Set<String> get() = jmSniDomains
+
+    /** Returns the configured API base URL for a measured line while preserving its authority and path. */
+    fun configuredLineUrl(domain: String): String? = _state.value.lines.firstOrNull { hostFromUrl(it).equals(domain, true) }
 
     fun setSniDomains(domains: Set<String>) {
         jmSniDomains = domains.map { it.lowercase(Locale.ROOT) }.toSet()
@@ -220,11 +249,9 @@ object JmRouteManager {
         lineHealth.clear()
         imageHealth.clear()
         consecutiveFailures = 0
+        apiEndpointRecovery.clearFailures()
         configRevision++
-        val updatedFingerprint = currentSpeedTestConfigFingerprint()
-        if (_speedTestSnapshot.value.configFingerprint != updatedFingerprint ||
-            !isSpeedTestSnapshotValid(_speedTestSnapshot.value)
-        ) {
+        if (!SpeedTestHistoryPolicy.isVersionCompatible(_speedTestSnapshot.value.remoteVersion, version)) {
             _speedTestSnapshot.value = SpeedTestSnapshot(remoteVersion = version)
         }
         failedLineEndpoints.clear()
@@ -269,6 +296,7 @@ object JmRouteManager {
             usingFallbackLines = prefs.getBoolean("using_fallback", current.usingFallbackLines),
             remoteVersion = prefs.getInt("remote_version", -1).takeIf { it >= 0 },
         )
+        apiEndpointRecovery.clearFailures()
         configRevision++
         _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null))
         reusableImageSnapshot = decodeSnapshot(prefs.getString(KEY_IMAGE_SNAPSHOT, null))
@@ -309,6 +337,7 @@ object JmRouteManager {
         val host = hostFromUrl(current.lines[safe])
         _state.value = current.copy(lineIndex = safe, autoSelect = false)
         manualLineEndpoint = currentLineEndpoint(host)
+        apiEndpointRecovery.clearFailures()
         prefs()?.edit()
             ?.putBoolean("auto_select", false)
             ?.putString("selected_line", host)
@@ -358,6 +387,7 @@ object JmRouteManager {
         if (index < 0) return false
         manualLineEndpoint = endpoint
         _state.value = _state.value.copy(lineIndex = index, autoSelect = false)
+        apiEndpointRecovery.clearFailures()
         prefs()?.edit()?.putBoolean("auto_select", false)?.putString("selected_line", host)
             ?.also {
                 persistEndpoint(it, "manual_line_endpoint", endpoint)
@@ -395,6 +425,7 @@ object JmRouteManager {
     fun setAutoSelectEnabled(enabled: Boolean) {
         val current = _state.value
         _state.value = current.copy(autoSelect = enabled)
+        apiEndpointRecovery.clearFailures()
         prefs()?.edit()?.putBoolean("auto_select", enabled)?.apply()
         if (enabled) {
             manualLineEndpoint = null
@@ -439,6 +470,30 @@ object JmRouteManager {
         record("image", resolved, if (selected == null) "恢复 JM 图床自动选择" else "手动选择 JM 图床${currentImageEndpoint(resolved)?.let { " · ${it.ip}" }.orEmpty()}")
     }
 
+    /** Advance only an automatic JM image route; a persisted manual domain is never overridden. */
+    @Synchronized
+    fun advanceRuntimeImageDomainAfterRecovery(
+        expectedSource: String,
+        expectedConfigRevision: Long,
+        expectedPlatformRevision: Long,
+    ): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+            StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
+            currentSpeedTestConfigRevision() != expectedConfigRevision ||
+            !_state.value.imageDomain.equals(expectedSource, true)
+        ) {
+            return false
+        }
+        if (pinnedImageDomain != null || imageDomains.size < 2) return false
+        val current = _state.value.imageDomain
+        val index = imageDomains.indexOfFirst { it.equals(current, true) }.takeIf { it >= 0 } ?: 0
+        val next = imageDomains[(index + 1) % imageDomains.size]
+        _state.value = _state.value.copy(imageDomain = next)
+        publishEndpointSelection()
+        record("image_recovery", next, "连续图像传输失败后切换 JM 自动图源")
+        return true
+    }
+
     @Synchronized
     fun applySnapshot(snapshot: SpeedTestSnapshot, expectedPlatformRevision: Long? = null): Boolean {
         if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
@@ -448,6 +503,7 @@ object JmRouteManager {
             return false
         }
         _speedTestSnapshot.value = snapshot
+        apiEndpointRecovery.clearFailures()
         failedLineEndpoints.clear()
         snapshot.lineIpDelaysMs.filterValues { it >= Long.MAX_VALUE }.keys.forEach { failedLineEndpoints += it.normalizedForComparison() }
         failedImageEndpoints.clear()
@@ -643,6 +699,7 @@ object JmRouteManager {
     fun recordApiSuccess(host: String = lineHost) {
         consecutiveFailures = 0
         lineHealth.remove(host.lowercase(Locale.ROOT))
+        apiEndpointRecovery.clearFailures()
         currentLineEndpoint(host)?.let { endpoint ->
             failedLineEndpoints.remove(endpoint.normalizedForComparison())
             lastLineEndpoint = endpoint
@@ -651,35 +708,108 @@ object JmRouteManager {
         record("api", host, "JM API 请求成功")
     }
 
+    /** Any HTTP response proves connectivity, even when the server returns an auth/WAF/rate-limit status. */
     @Synchronized
+    fun recordApiTransportResponse(endpoint: DomainIp) {
+        apiEndpointRecovery.recordResponse(endpoint)
+    }
+
     fun recordApiEndpointFailure(endpoint: DomainIp, detail: String) {
-        failedLineEndpoints += endpoint.normalizedForComparison()
+        val thresholdReached = synchronized(this) {
+            val reached = apiEndpointRecovery.recordConnectionFailure(endpoint)
+            val failures = apiEndpointRecovery.failureCount(endpoint)
+            record("api_transport", endpoint.domain, "$detail；${endpoint.ip} 连接失败 $failures/$API_FAILURE_THRESHOLD")
+            reached
+        }
+        if (!thresholdReached) return
+
+        apiEndpointRecovery.tryRecover(
+            capture = { synchronized(this) { captureApiRecovery(endpoint) } },
+            validate = JmNetworkModule::validateApiEndpoint,
+            commit = { candidate -> commitApiRecovery(candidate.state) },
+        )
+    }
+
+    private fun captureApiRecovery(failed: DomainIp): JmApiEndpointRecovery.Candidate<ApiRecoveryGuard>? {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) || !apiEndpointRecovery.hasFailureThreshold(failed)) return null
+        val current = _state.value
+        val host = hostFromUrl(current.lines.getOrNull(current.lineIndex) ?: return null)
+        if (!current.autoSelect || !host.equals(failed.domain, true) || !host.equals(lineHost, true)) return null
+        val actual = currentLineEndpoint(host) ?: return null
+        if (actual.normalizedForComparison() != failed.normalizedForComparison()) return null
+        // Never override a manual endpoint pin. Only explicitly tested successful rows are eligible.
+        val manual = manualLineEndpoint
+        if (manual != null) return null
+        val snapshot = _speedTestSnapshot.value
+        val tested = snapshot.testedLineEndpoints.mapTo(HashSet()) { it.normalizedForComparison() }
+        val configuredHosts = current.lines.mapTo(HashSet()) { hostFromUrl(it).lowercase(Locale.ROOT) }
+        val candidate = snapshot.lineIpDelaysMs.entries
+            .asSequence()
+            .filter { (endpoint, delay) ->
+                endpoint.domain.lowercase(Locale.ROOT) in configuredHosts && delay in 0 until Long.MAX_VALUE &&
+                    endpoint.normalizedForComparison() in tested &&
+                    endpoint.normalizedForComparison() != actual.normalizedForComparison() &&
+                    !isFailed(endpoint, failedLineEndpoints)
+            }
+            .minWithOrNull(compareBy<Map.Entry<DomainIp, Long>>({ it.value }, { it.key.ip.lowercase(Locale.ROOT) }))
+            ?.key ?: return null
+        val guard = ApiRecoveryGuard(
+            host = host,
+            current = actual,
+            candidate = candidate,
+            configRevision = configRevision,
+            platformRevision = StartupPlatformPolicy.state.value.revision,
+            lineIndex = current.lineIndex,
+            manualEndpoint = manual,
+            snapshot = snapshot,
+        )
+        return JmApiEndpointRecovery.Candidate(candidate, guard)
+    }
+
+    private fun commitApiRecovery(guard: ApiRecoveryGuard): Boolean = synchronized(this) {
+        val current = _state.value
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+            StartupPlatformPolicy.state.value.revision != guard.platformRevision ||
+            configRevision != guard.configRevision || current.lineIndex != guard.lineIndex ||
+            !current.autoSelect || manualLineEndpoint != guard.manualEndpoint || manualLineEndpoint != null ||
+            !apiEndpointRecovery.hasFailureThreshold(guard.current) ||
+            !hostFromUrl(current.lines.getOrNull(current.lineIndex).orEmpty()).equals(guard.host, true) ||
+            !guard.host.equals(lineHost, true) || _speedTestSnapshot.value != guard.snapshot ||
+            currentLineEndpoint(guard.host)?.normalizedForComparison() != guard.current.normalizedForComparison()
+        ) {
+            return@synchronized false
+        }
+        val stillTestedAndSuccessful = guard.snapshot.lineIpDelaysMs[guard.candidate]?.let { it in 0 until Long.MAX_VALUE } == true &&
+            guard.snapshot.testedLineEndpoints.any { it.normalizedForComparison() == guard.candidate.normalizedForComparison() } &&
+            !isFailed(guard.candidate, failedLineEndpoints)
+        if (!stillTestedAndSuccessful) return@synchronized false
+        val candidateLineIndex = current.lines.indexOfFirst { hostFromUrl(it).equals(guard.candidate.domain, true) }
+        if (candidateLineIndex < 0) return@synchronized false
+
+        failedLineEndpoints += guard.current.normalizedForComparison()
+        apiEndpointRecovery.clearFailures()
+        lastLineEndpoint = guard.candidate
+        _state.value = current.copy(lineIndex = candidateLineIndex)
         persistSnapshot()
-        if (manualLineEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison()) {
-            manualLineEndpoint = null
-            prefs()?.edit()?.remove("manual_line_endpoint_domain")?.remove("manual_line_endpoint_ip")?.apply()
-        }
-        val next = currentLineEndpoint(endpoint.domain)
-        if (next != null) {
-            lastLineEndpoint = next
-            prefs()?.edit()?.also { persistEndpoint(it, "selected_line_endpoint", next) }?.apply()
-        } else {
-            lastLineEndpoint = null
-            prefs()?.edit()?.remove("selected_line_endpoint_domain")?.remove("selected_line_endpoint_ip")?.apply()
-        }
-        record("api_ip_failover", endpoint.domain, "$detail；${endpoint.ip} -> ${next?.ip ?: "无已测速成功备选"}")
+        prefs()?.edit()?.putString("selected_line", hostFromUrl(current.lines[candidateLineIndex]))
+            ?.also { persistEndpoint(it, "selected_line_endpoint", guard.candidate) }?.apply()
+        JmNetworkModule.rebindApiEndpoint()
         publishEndpointSelection()
-        JmNetworkModule.evictIdleEndpointPools()
+        record("api_ip_failover", guard.host, "${guard.current.ip} 连接失败后只读验证成功，切换至 ${guard.candidate.domain} [${guard.candidate.ip}]")
+        true
     }
 
     @Synchronized
     fun recordImageEndpointFailure(endpoint: DomainIp, detail: String) {
-        failedImageEndpoints += endpoint.normalizedForComparison()
-        persistSnapshot()
-        if (manualImageEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison()) {
-            manualImageEndpoint = null
-            prefs()?.edit()?.remove("manual_image_endpoint_domain")?.remove("manual_image_endpoint_ip")?.apply()
+        val key = endpoint.normalizedForComparison()
+        val failures = imageTransportFailures.merge(key, 1, Int::plus) ?: 1
+        if (failures < API_FAILURE_THRESHOLD) {
+            record("image_transport", endpoint.domain, "$detail；${endpoint.ip} 连接失败 $failures/$API_FAILURE_THRESHOLD")
+            return
         }
+        imageTransportFailures.remove(key)
+        failedImageEndpoints += key
+        persistSnapshot()
         val next = currentImageEndpoint(endpoint.domain)
         if (next != null) {
             lastImageEndpoint = next
@@ -907,17 +1037,36 @@ object JmRouteManager {
         put("imageNetworkPolicy", snapshot.imageNetworkPolicy ?: JSONObject.NULL)
         put("lines", JSONObject().apply { snapshot.lineDelaysMs.forEach { (host, delay) -> put(host, delay) } })
         put("images", JSONObject().apply { snapshot.imageDelaysMs.forEach { (host, delay) -> put(host, delay) } })
-        fun endpoints(delays: Map<DomainIp, Long>) = JSONArray().apply {
+        fun endpoints(
+            delays: Map<DomainIp, Long>,
+            testedAt: Map<DomainIp, Long>,
+            verdicts: Map<DomainIp, JmSpeedTester.ImgVerdict> = emptyMap(),
+        ) = JSONArray().apply {
             delays.forEach { (endpoint, delay) ->
                 put(
                     JSONObject().put("host", endpoint.domain).put("ip", endpoint.ip).put("delay", delay).apply {
-                        snapshot.imageIpVerdicts[endpoint]?.let { put("verdict", it.name) }
+                        verdicts[endpoint]?.let { put("verdict", it.name) }
+                        testedAt[endpoint]?.let { put("testedAt", it) }
                     },
                 )
             }
         }
-        put("lineIps", endpoints(snapshot.lineIpDelaysMs))
-        put("imageIps", endpoints(snapshot.imageIpDelaysMs))
+        put("lineIps", endpoints(snapshot.lineIpDelaysMs, snapshot.lineIpTestedAtEpochMs))
+        put("imageIps", endpoints(snapshot.imageIpDelaysMs, snapshot.imageIpTestedAtEpochMs, snapshot.imageIpVerdicts))
+        put("untestedLineIps", endpoints(snapshot.untestedLineIpDelaysMs, snapshot.untestedLineIpTestedAtEpochMs))
+        put(
+            "untestedImageIps",
+            endpoints(snapshot.untestedImageIpDelaysMs, snapshot.untestedImageIpTestedAtEpochMs, snapshot.untestedImageIpVerdicts),
+        )
+        fun tested(endpoints: Set<DomainIp>) = JSONArray().apply {
+            endpoints.forEach { put(JSONObject().put("host", it.domain).put("ip", it.ip)) }
+        }
+        put("testedLineIps", tested(snapshot.testedLineEndpoints))
+        put("testedImageIps", tested(snapshot.testedImageEndpoints))
+        put("lineQuickTest", snapshot.lineQuickTest)
+        put("imageQuickTest", snapshot.imageQuickTest)
+        put("lineQuickTestAllFailed", snapshot.lineQuickTestAllFailed)
+        put("imageQuickTestAllFailed", snapshot.imageQuickTestAllFailed)
     }.toString()
 
     private fun decodeSnapshot(raw: String?): SpeedTestSnapshot = runCatching {
@@ -939,20 +1088,58 @@ object JmRouteManager {
                 DomainIp(item.getString("host"), item.getString("ip")) to item.getLong("delay")
             }
         }
+        fun endpointTimes(key: String, fallback: Long?): Map<DomainIp, Long> {
+            val array = root.optJSONArray(key) ?: return emptyMap()
+            return (0 until array.length()).mapNotNull { index ->
+                val item = array.getJSONObject(index)
+                val time = item.optLong("testedAt", fallback ?: 0L).takeIf { it > 0L } ?: return@mapNotNull null
+                DomainIp(item.getString("host"), item.getString("ip")) to time
+            }.toMap()
+        }
+        fun testedEndpoints(key: String): Set<DomainIp> {
+            val array = root.optJSONArray(key) ?: return emptySet()
+            return (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                runCatching { DomainIp(item.getString("host"), item.getString("ip")) }.getOrNull()
+            }.toSet()
+        }
+        val completedAt = root.optLong("completed").takeIf { it > 0 }
         val imageIps = root.optJSONArray("imageIps")
         val imageVerdicts = (0 until (imageIps?.length() ?: 0)).mapNotNull { index ->
             val item = imageIps!!.getJSONObject(index)
             val verdict = runCatching { JmSpeedTester.ImgVerdict.valueOf(item.getString("verdict")) }.getOrNull()
             verdict?.let { DomainIp(item.getString("host"), item.getString("ip")) to it }
         }.toMap()
+        fun endpointVerdicts(key: String): Map<DomainIp, JmSpeedTester.ImgVerdict> {
+            val array = root.optJSONArray(key) ?: return emptyMap()
+            return (0 until array.length()).mapNotNull { index ->
+                val item = array.getJSONObject(index)
+                val verdict = runCatching { JmSpeedTester.ImgVerdict.valueOf(item.getString("verdict")) }.getOrNull()
+                verdict?.let { DomainIp(item.getString("host"), item.getString("ip")) to it }
+            }.toMap()
+        }
+        val untestedImageVerdicts = endpointVerdicts("untestedImageIps")
         SpeedTestSnapshot(
             lineDelaysMs = delays("lines"),
             imageDelaysMs = delays("images"),
             lineIpDelaysMs = endpointDelays("lineIps"),
             imageIpDelaysMs = endpointDelays("imageIps"),
             imageIpVerdicts = imageVerdicts,
+            lineIpTestedAtEpochMs = endpointTimes("lineIps", completedAt),
+            imageIpTestedAtEpochMs = endpointTimes("imageIps", completedAt),
+            untestedLineIpDelaysMs = endpointDelays("untestedLineIps"),
+            untestedImageIpDelaysMs = endpointDelays("untestedImageIps"),
+            untestedImageIpVerdicts = untestedImageVerdicts,
+            untestedLineIpTestedAtEpochMs = endpointTimes("untestedLineIps", completedAt),
+            untestedImageIpTestedAtEpochMs = endpointTimes("untestedImageIps", completedAt),
+            testedLineEndpoints = testedEndpoints("testedLineIps"),
+            testedImageEndpoints = testedEndpoints("testedImageIps"),
+            lineQuickTest = root.optBoolean("lineQuickTest"),
+            imageQuickTest = root.optBoolean("imageQuickTest"),
+            lineQuickTestAllFailed = root.optBoolean("lineQuickTestAllFailed"),
+            imageQuickTestAllFailed = root.optBoolean("imageQuickTestAllFailed"),
             startedAtEpochMs = root.optLong("started").takeIf { it > 0 },
-            completedAtEpochMs = root.optLong("completed").takeIf { it > 0 },
+            completedAtEpochMs = completedAt,
             remoteVersion = root.optInt("version", -1).takeIf { it >= 0 },
             configFingerprint = root.optString("configFingerprint").takeIf { it.isNotBlank() && it != "null" },
             imageConfigFingerprint = root.optString("imageConfigFingerprint").takeIf { it.isNotBlank() && it != "null" },

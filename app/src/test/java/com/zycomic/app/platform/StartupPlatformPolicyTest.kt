@@ -20,12 +20,13 @@ class StartupPlatformPolicyTest {
     }
 
     @Test
-    fun `defaults disable Manwa and reuse the last speed test`() {
+    fun `defaults disable Manwa and reuse the last line and image results`() {
         val state = State()
 
         assertTrue(state.disableManwa)
         assertFalse(state.disableJm)
         assertTrue(state.useLastResult)
+        assertTrue(state.useLastLineResult)
         assertEquals(0L, state.revision)
         assertFalse(StartupPlatformPolicy.isEnabled(state, ContentPlatform.MANWA))
         assertTrue(StartupPlatformPolicy.isEnabled(state, ContentPlatform.JM))
@@ -95,6 +96,24 @@ class StartupPlatformPolicyTest {
         val state = State(disableManwa = false, useLastResult = false)
         assertEquals(ContentPlatform.MANWA, StartupPlatformPolicy.resolve(state, ContentPlatform.MANWA))
         assertEquals(ContentPlatform.JM, StartupPlatformPolicy.resolve(state, ContentPlatform.JM))
+    }
+
+    @Test
+    fun `line configuration and image source reuse preferences are independent`() {
+        val defaults = State()
+        val lineReuseOff = StartupPlatformPolicy.transition(defaults, useLastLineResult = false)
+        val imageReuseOff = StartupPlatformPolicy.transition(defaults, useLastResult = false)
+        val bothReuseOff = StartupPlatformPolicy.transition(lineReuseOff, useLastResult = false)
+
+        assertFalse(lineReuseOff.useLastLineResult)
+        assertTrue(lineReuseOff.useLastResult)
+        assertEquals(1L, lineReuseOff.revision)
+        assertTrue(imageReuseOff.useLastLineResult)
+        assertFalse(imageReuseOff.useLastResult)
+        assertEquals(1L, imageReuseOff.revision)
+        assertFalse(bothReuseOff.useLastLineResult)
+        assertFalse(bothReuseOff.useLastResult)
+        assertEquals(2L, bothReuseOff.revision)
     }
 
     @Test

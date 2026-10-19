@@ -25,9 +25,10 @@ data class PlatformSpeedTestReport(
             "tested" -> "本次新测"
             else -> "测速未完成"
         }}${when (imageStatus) {
-            "mixed" -> "（图源含匹配的旧结果）"
+            "mixed" -> "（图源含本轮未测的历史结果）"
+            "quick" -> "（图源前五快测，其余为未测历史结果）"
             "reused" -> "（图源复用上次结果）"
             else -> ""
-        }}；线路（${if (manualLine) "手动" else "自动"}）；图源（${if (manualImage) "手动" else "自动"}）；$reason"
+        }}${if (lineStatus == "quick") "（线路前五快测，其余为未测历史结果）" else ""}；线路（${if (manualLine) "手动" else "自动"}）；图源（${if (manualImage) "手动" else "自动"}）；$reason"
     }
 }
