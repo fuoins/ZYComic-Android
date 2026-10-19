@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.manga.repository.MangaRepository
 import uy.kohesive.injekt.Injekt
@@ -19,7 +20,7 @@ import tachiyomi.domain.manga.model.Manga as DomainManga
  * 阅读器启动器：把漫画/章节插入 komikku 数据库，然后以 Activity 方式启动 [ReaderActivity]。
  *
  * 阅读器本身通过 mangaId/chapterId 从数据库加载，因此启动前必须先落库。
- * 每次启动前先删除该 manga 的旧章节，避免重复插入导致 getChapterByUrlAndMangaId 返回多行。
+ * JM 通过章节 URL 复用数据库行，避免删除章节时级联清除阅读历史；Manwa 沿用删除重插。
  */
 object ReaderLauncher {
 
@@ -73,25 +74,67 @@ object ReaderLauncher {
             )
             val insertedManga = mangaRepository.insertNetworkManga(listOf(domainManga)).first()
 
-            // 2. 先删除该 manga 的旧章节（避免重复插入导致查询返回多行）
+            // 2. 读取已有章节；JM 后续按 URL 更新已有行，Manwa 仍删除后重插。
             val oldChapters = chapterRepository.getChapterByMangaId(insertedManga.id)
-            if (oldChapters.isNotEmpty()) {
+            val jmExistingIdsByUrl = if (isJm) oldChapters.associate { it.url to it.id } else emptyMap()
+            val jmSavedProgress = if (isJm) {
+                oldChapters.mapNotNull { chapter ->
+                    JmChapterProgressPolicy.chapterIdFromUrl(chapter.url)?.let { chapterId ->
+                        chapterId to JmSavedChapterProgress(chapter.read, chapter.lastPageRead)
+                    }
+                }.toMap()
+            } else {
+                emptyMap()
+            }
+            if (!isJm && oldChapters.isNotEmpty()) {
                 chapterRepository.removeChaptersWithIds(oldChapters.map { it.id })
             }
 
-            // 3. 构造章节列表并插入
+            // 3. JM 更新已有章节的元数据/进度并仅插入新章节；Manwa 全量重插。
             val domainChapters = mangaDto.chapterList.map { ch ->
+                val savedProgress = jmSavedProgress[ch.id]
+                val jmProgress = if (isJm) {
+                    JmChapterProgressPolicy.preserveProgress(ch.readed == 1, savedProgress)
+                } else {
+                    null
+                }
                 DomainChapter.create().copy(
+                    id = if (isJm) {
+                        JmChapterProgressPolicy.existingChapterId("/chapter/${ch.id}", jmExistingIdsByUrl) ?: -1
+                    } else {
+                        -1
+                    },
                     mangaId = insertedManga.id,
                     url = "/chapter/${ch.id}",
                     name = ch.name,
                     dateUpload = if (isJm) 0L else ManwaSource.parseAddtime(ch.addtime),
                     sourceOrder = ch.sort.toLong(),
                     chapterNumber = ch.sort.toDouble(),
-                    read = ch.readed == 1,
+                    read = jmProgress?.read ?: (ch.readed == 1),
+                    lastPageRead = jmProgress?.lastPageRead ?: 0,
                 )
             }
-            chapterRepository.addAll(domainChapters)
+            if (isJm) {
+                val updates = domainChapters.mapNotNull { chapter ->
+                    chapter.takeIf { it.id >= 0 }?.let {
+                        ChapterUpdate(
+                            id = it.id,
+                            url = it.url,
+                            name = it.name,
+                            dateUpload = it.dateUpload,
+                            sourceOrder = it.sourceOrder,
+                            chapterNumber = it.chapterNumber,
+                            read = it.read,
+                            lastPageRead = it.lastPageRead,
+                        )
+                    }
+                }
+                val newChapters = domainChapters.filter { it.id < 0 }
+                chapterRepository.updateAll(updates)
+                if (newChapters.isNotEmpty()) chapterRepository.addAll(newChapters)
+            } else {
+                chapterRepository.addAll(domainChapters)
+            }
 
             // 4. 找到目标章节的数据库 id
             val targetUrl = "/chapter/$chapterId"

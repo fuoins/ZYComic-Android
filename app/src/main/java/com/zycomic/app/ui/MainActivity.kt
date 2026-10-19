@@ -463,6 +463,8 @@ fun AppContent(
                     3 -> ProfileScreen(
                         onRequireLogin = { openLogin(null) },
                         onNavigateToTab = { bottomTab = it },
+                        onOpenManga = openDetail,
+                        isDetailOpen = detailStack.isNotEmpty(),
                         onOpenTagBlock = openTagBlock,
                         onOpenBookBlock = openBookBlock,
                         onBlockGayTags = blockGayTags,

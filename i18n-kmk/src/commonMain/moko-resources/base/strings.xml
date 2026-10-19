@@ -304,6 +304,11 @@
     <string name="jm_cancel">取消</string>
     <string name="jm_login_hint">禁漫账号与漫蛙账号独立。登录后可收藏、点赞及发表评论。</string>
     <string name="jm_comments">评论</string>
+    <string name="jm_my_comments_title">我的评论（留言记录）</string>
+    <string name="jm_comments_login_required">JM 登录已失效或尚未登录，请登录后查看留言记录。</string>
+    <string name="jm_comments_uid_missing">当前 JM 登录资料缺少有效用户 ID。为避免读取错误账号，请退出 JM 账号后重新登录。</string>
+    <string name="jm_comments_empty">暂无留言记录</string>
+    <string name="jm_back">返回</string>
     <string name="jm_comment_placeholder">写下你的评论</string>
     <string name="jm_comment_send">发表</string>
     <string name="jm_load_more">加载更多</string>

@@ -96,6 +96,8 @@ import java.time.LocalDate
 fun ProfileScreen(
     onRequireLogin: () -> Unit,
     onNavigateToTab: (Int) -> Unit,
+    onOpenManga: (String) -> Unit = {},
+    isDetailOpen: Boolean = false,
     onOpenTagBlock: () -> Unit,
     onOpenBookBlock: () -> Unit,
     onBlockGayTags: () -> Unit,
@@ -112,6 +114,7 @@ fun ProfileScreen(
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
     val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
+    var showJmMyComments by remember { mutableStateOf(false) }
     LaunchedEffect(platform) {
         if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.isLoggedIn) {
             try {
@@ -139,6 +142,16 @@ fun ProfileScreen(
     var adErr by remember { mutableStateOf<String?>(null) }
     var rewarding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    if (showJmMyComments && platform == ContentPlatform.JM) {
+        JmMyCommentsScreen(
+            onBack = { showJmMyComments = false },
+            onRequireLogin = onRequireLogin,
+            onOpenManga = onOpenManga,
+            isDetailOpen = isDetailOpen,
+        )
+        return
+    }
 
     // KMK --> JM check-in runs only while this profile is entered, never as a background worker.
     var jmAutoCheckIn by remember(context) { mutableStateOf(JmCheckInRepository.isAutoEnabled(context)) }
@@ -250,6 +263,13 @@ fun ProfileScreen(
 
             // KMK --> JM preferences remain visible while signed out; network calls require login.
             if (platform == ContentPlatform.JM) {
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(KMR.strings.jm_my_comments_title),
+                        icon = Icons.Outlined.Info,
+                        onPreferenceClick = { showJmMyComments = true },
+                    )
+                }
                 item {
                     SwitchPreferenceWidget(
                         title = stringResource(KMR.strings.jm_auto_check_in),

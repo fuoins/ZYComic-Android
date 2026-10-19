@@ -83,9 +83,16 @@ internal object JmResponseParser {
             val start = raw.indexOf('>')
             val end = raw.lastIndexOf('<')
             val content = if (start >= 0 && end > start) raw.substring(start + 1, end) else raw
+            val album = item.optJSONObject("album") ?: item.optJSONObject("manhua")
+            val mangaId = sequenceOf(item.text("aid"), item.text("album_id"), item.text("book_id"), album?.text("id").orEmpty())
+                .firstOrNull { validId(it) }.orEmpty()
+            val mangaName = sequenceOf(item.text("album_name"), item.text("book_name"), item.text("manga_name"), item.text("name"), album?.text("name").orEmpty())
+                .firstOrNull(String::isNotBlank).orEmpty()
             com.zycomic.app.data.dto.JmComment(
                 id = id,
                 parentId = item.text("parent_CID"),
+                mangaId = mangaId,
+                mangaName = mangaName,
                 username = item.text("username"),
                 avatarUrl = item.text("photo"),
                 time = item.text("addtime"),

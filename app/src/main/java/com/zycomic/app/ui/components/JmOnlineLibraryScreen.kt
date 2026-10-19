@@ -7,12 +7,15 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,7 +25,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -30,6 +35,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.repository.JmFavoriteFolder
+import com.zycomic.app.data.repository.JmHistoryDisplayPolicy
 import com.zycomic.app.data.repository.JmOnlineLibraryContentState
 import com.zycomic.app.data.repository.JmOnlineLibraryItem
 import com.zycomic.app.data.repository.JmOnlineLibraryPolicy
@@ -96,12 +104,13 @@ private fun JmOnlineLibraryContent(
     onOpenManga: (String) -> Unit,
     onSelectPlatform: (ContentPlatform) -> Unit,
 ) {
-    var order by remember { mutableStateOf("mr") }
+    var order by remember { mutableStateOf(JmFavoriteLibraryUiPolicy.DEFAULT_SORT_ORDER) }
     var folderId by remember { mutableStateOf("") }
     var folders by remember { mutableStateOf<List<JmFavoriteFolder>>(emptyList()) }
     var items by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
     var total by remember { mutableStateOf<Int?>(null) }
     var page by remember { mutableIntStateOf(0) }
+    var historyLoadedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var loading by remember { mutableStateOf(loggedIn) }
     var hasMore by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -112,7 +121,21 @@ private fun JmOnlineLibraryContent(
     var query by remember { mutableStateOf<String?>(null) }
     var selectionMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var grid by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val jmDisplayPreferences = remember(context) {
+        context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
+    }
+    var displayMode by remember(jmDisplayPreferences) {
+        mutableIntStateOf(
+            JmFavoriteLibraryUiPolicy.normalizeDisplayMode(
+                jmDisplayPreferences.getInt(
+                    JmFavoriteLibraryUiPolicy.DISPLAY_MODE_PREFERENCE_KEY,
+                    JmFavoriteLibraryUiPolicy.DEFAULT_DISPLAY_MODE,
+                ),
+            ),
+        )
+    }
+    val grid = JmFavoriteLibraryUiPolicy.isGrid(displayMode)
     var showFilter by remember { mutableStateOf(false) }
     var moveIds by remember { mutableStateOf<Set<String>?>(null) }
     var favoriteIds by remember { mutableStateOf<Set<String>?>(null) }
@@ -143,6 +166,10 @@ private fun JmOnlineLibraryContent(
     }
     fun toggleSelection(id: String) {
         if (!busy) selected = JmLibrarySelectionPolicy.toggle(selected, id)
+    }
+    fun updateDisplayMode(mode: Int) {
+        displayMode = JmFavoriteLibraryUiPolicy.normalizeDisplayMode(mode)
+        jmDisplayPreferences.edit().putInt(JmFavoriteLibraryUiPolicy.DISPLAY_MODE_PREFERENCE_KEY, displayMode).apply()
     }
     fun mutate(action: suspend () -> Unit) {
         if (busy || !loggedIn) return
@@ -187,15 +214,27 @@ private fun JmOnlineLibraryContent(
         loading = true
         error = null
         try {
-            val requestedPage = page + 1
-            val result = if (history) JmOnlineLibraryRepository.history(requestedPage) else JmOnlineLibraryRepository.favorites(requestedPage, order, folderId)
-            if (generation != loadGeneration) return
-            val known = items.mapTo(mutableSetOf()) { it.id }
-            hasMore = JmOnlineLibraryPolicy.hasMore(result.total, known, result.items.map { it.id })
-            items = items + result.items.filter { known.add(it.id) }
-            if (!history) folders = result.folders
-            total = result.total
-            page = requestedPage
+            if (history) {
+                val result = JmHistoryDisplayPolicy.loadVisiblePage(page, historyLoadedIds) { requestedPage ->
+                    JmOnlineLibraryRepository.history(requestedPage)
+                }
+                if (generation != loadGeneration) return
+                items = items + result.items
+                historyLoadedIds = result.loadedIds
+                hasMore = result.hasMore
+                total = result.total
+                page = result.lastPage
+            } else {
+                val requestedPage = page + 1
+                val result = JmOnlineLibraryRepository.favorites(requestedPage, order, folderId)
+                if (generation != loadGeneration) return
+                val known = items.mapTo(mutableSetOf()) { it.id }
+                hasMore = JmOnlineLibraryPolicy.hasMore(result.total, known, result.items.map { it.id })
+                items = items + result.items.filter { known.add(it.id) }
+                folders = result.folders
+                total = result.total
+                page = requestedPage
+            }
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             if (generation != loadGeneration) return
@@ -211,6 +250,7 @@ private fun JmOnlineLibraryContent(
         items = emptyList()
         total = null
         page = 0
+        historyLoadedIds = emptySet()
         hasMore = true
         error = null
         if (!loggedIn) return@LaunchedEffect
@@ -331,7 +371,7 @@ private fun JmOnlineLibraryContent(
                     )
                 }
                 activeGrid -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                    columns = GridCells.Fixed(JmFavoriteLibraryUiPolicy.gridColumns(displayMode)),
                     state = gridState,
                     modifier = Modifier.weight(1f).onGloballyPositioned {
                         val token = JmLibraryLayoutToken(loadGeneration, activeGrid)
@@ -339,7 +379,7 @@ private fun JmOnlineLibraryContent(
                     },
                 ) {
                     gridItems(visibleItems, key = { it.id }) { item ->
-                        JmLibraryCard(item, item.id in selected, selectionMode, onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") }, onLongClick = {
+                        JmLibraryCard(item, displayMode, item.id in selected, selectionMode, onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") }, onLongClick = {
                             selectionMode = true
                             toggleSelection(item.id)
                         })
@@ -356,6 +396,7 @@ private fun JmOnlineLibraryContent(
                     items(visibleItems, key = { it.id }) { item ->
                         JmLibraryRow(
                             item = item,
+                            displayMode = if (history) 5 else displayMode,
                             selected = item.id in selected,
                             selectionMode = selectionMode,
                             onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") },
@@ -380,49 +421,62 @@ private fun JmOnlineLibraryContent(
     if (showFilter) {
         TabbedDialog(
             onDismissRequest = { showFilter = false },
-            tabTitles = persistentListOf("排序", "显示", "管理"),
+            tabTitles = persistentListOf("筛选", "排序", "显示", "管理"),
         ) { tab ->
-            LazyColumn(Modifier.fillMaxWidth().height(360.dp).padding(16.dp)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 16.dp),
+            ) {
                 when (tab) {
                     0 -> {
-                        item {
-                            TextButton(enabled = !busy, onClick = {
-                                order = "mr"
+                        JmSingleChoiceChipRow(
+                            title = "收藏夹",
+                            options = listOf("" to "全部收藏夹") + folders.map { it.id to it.name },
+                            selected = folderId,
+                            enabled = !busy,
+                            onSelect = {
+                                folderId = it
                                 exitSelection()
-                            }) { Text("${if (order == "mr") "✓ " else ""}收藏时间") }
-                        }
-                        item {
-                            TextButton(enabled = !busy, onClick = {
-                                order = "mp"
-                                exitSelection()
-                            }) { Text("${if (order == "mp") "✓ " else ""}漫画更新时间") }
-                        }
-                        item {
-                            TextButton(enabled = !busy, onClick = {
-                                folderId = ""
-                                exitSelection()
-                            }) { Text("${if (folderId.isEmpty()) "✓ " else ""}全部收藏夹") }
-                        }
-                        items(folders, key = { it.id }) { folder ->
-                            TextButton(enabled = !busy, onClick = {
-                                folderId = folder.id
-                                exitSelection()
-                            }) { Text("${if (folderId == folder.id) "✓ " else ""}${folder.name}") }
-                        }
+                            },
+                        )
                     }
                     1 -> {
-                        item { TextButton(onClick = { grid = false }) { Text("${if (!grid) "✓ " else ""}列表") } }
-                        item { TextButton(onClick = { grid = true }) { Text("${if (grid) "✓ " else ""}网格") } }
+                        JmSingleChoiceChipRow(
+                            title = "排序",
+                            options = JmFavoriteLibraryUiPolicy.sortModes.map { it.order to it.label },
+                            selected = order,
+                            enabled = !busy,
+                            onSelect = {
+                                order = it
+                                exitSelection()
+                            },
+                        )
                     }
                     2 -> {
-                        item {
-                            TextButton(enabled = loggedIn && !busy, onClick = {
+                        JmSingleChoiceChipRow(
+                            title = "显示模式",
+                            options = JmFavoriteLibraryUiPolicy.displayModes.map { it.value to it.label },
+                            selected = displayMode,
+                            onSelect = ::updateDisplayMode,
+                        )
+                    }
+                    3 -> {
+                        TextButton(
+                            enabled = loggedIn && !busy,
+                            onClick = {
                                 folderName = ""
                                 newFolder = true
-                            }) { Text("添加收藏夹") }
-                        }
-                        items(folders, key = { it.id }) { folder ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            },
+                        ) { Text("添加收藏夹") }
+                        folders.forEach { folder ->
+                            HorizontalDivider()
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Text(folder.name, modifier = Modifier.weight(1f))
                                 TextButton(enabled = !busy, onClick = {
                                     editFolder = folder
@@ -561,19 +615,61 @@ private fun JmLibraryCover(item: JmOnlineLibraryItem, modifier: Modifier) {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> JmSingleChoiceChipRow(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    enabled: Boolean = true,
+    onSelect: (T) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEach { (value, label) ->
+                FilterChip(
+                    selected = selected == value,
+                    onClick = { onSelect(value) },
+                    enabled = enabled,
+                    label = { Text(label) },
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun JmLibraryRow(item: JmOnlineLibraryItem, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, actions: @Composable () -> Unit) {
+private fun JmLibraryRow(
+    item: JmOnlineLibraryItem,
+    displayMode: Int,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    actions: @Composable () -> Unit,
+) {
+    val coverWidth = when (displayMode) {
+        3 -> 40.dp
+        4 -> 52.dp
+        else -> 60.dp
+    }
     Row(
         modifier = Modifier.fillMaxWidth().background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
-        JmLibraryCover(item, Modifier.width(60.dp))
+        JmLibraryCover(item, Modifier.width(coverWidth))
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
-            if (item.author.isNotBlank()) Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            if (item.description.isNotBlank()) Text(item.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            if (displayMode >= 4 && item.author.isNotBlank()) Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            if (displayMode >= 5 && item.description.isNotBlank()) Text(item.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         actions()
     }
@@ -581,10 +677,10 @@ private fun JmLibraryRow(item: JmOnlineLibraryItem, selected: Boolean, selection
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun JmLibraryCard(item: JmOnlineLibraryItem, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun JmLibraryCard(item: JmOnlineLibraryItem, displayMode: Int, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     Column(Modifier.padding(6.dp).background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         JmLibraryCover(item, Modifier.fillMaxWidth())
         if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
-        Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+        if (displayMode != 2) Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
     }
 }

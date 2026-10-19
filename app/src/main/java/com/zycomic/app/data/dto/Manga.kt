@@ -71,6 +71,8 @@ data class Manga(
 data class JmComment(
     val id: String = "",
     val parentId: String = "",
+    val mangaId: String = "",
+    val mangaName: String = "",
     val username: String = "",
     val avatarUrl: String = "",
     val time: String = "",

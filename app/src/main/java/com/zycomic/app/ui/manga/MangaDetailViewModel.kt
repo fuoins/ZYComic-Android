@@ -12,6 +12,8 @@ import com.zycomic.app.data.repository.NotLoggedInException
 import com.zycomic.app.data.repository.TagRepository
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.JmAuthStore
+import com.zycomic.app.reader.JmChapterProgress
+import com.zycomic.app.reader.JmChapterProgressPolicy
 import com.zycomic.app.reader.JmSource
 import com.zycomic.app.reader.ManwaSource
 import kotlinx.coroutines.CancellationException
@@ -29,6 +31,7 @@ import kotlinx.coroutines.withContext
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import tachiyomi.domain.history.repository.HistoryRepository as LocalHistoryRepository
 import tachiyomi.domain.manga.repository.MangaRepository as LocalMangaRepository
 
 class MangaDetailViewModel(private val bookId: String) {
@@ -63,6 +66,8 @@ class MangaDetailViewModel(private val bookId: String) {
     val jmCommentsHasMore = MutableStateFlow(true)
     private var jmCommentPage = 0
     private var jmStateRefreshRequired = false
+    private var jmChapterProgress: List<JmChapterProgress> = emptyList()
+    private var jmRecentChapterId: String? = null
     val jmAccountName = MutableStateFlow(JmAuthStore.accountName ?: if (JmAuthStore.token() != null) "已登录" else null)
     val jmLoginBusy = MutableStateFlow(false)
     val jmLoginError = MutableStateFlow<String?>(null)
@@ -119,6 +124,7 @@ class MangaDetailViewModel(private val bookId: String) {
                     val result = JmSource.getAlbum(contentId)
                     _detail.value = result.manga
                     _chapterWarning.value = result.chapterWarning
+                    syncJmChapterProgress()
                     loadJmComments()
                 } else {
                     _detail.value = MangaRepository.getDetail(bookId)
@@ -148,6 +154,10 @@ class MangaDetailViewModel(private val bookId: String) {
     /** Merge local reader read status into the existing detail without reloading other fields. */
     fun syncChapterReadStatus() {
         if (_detail.value == null) return
+        if (isJm) {
+            scope.launch { syncJmChapterProgress() }
+            return
+        }
         scope.launch {
             val readChapterUrls = try {
                 withContext(Dispatchers.IO) {
@@ -177,6 +187,50 @@ class MangaDetailViewModel(private val bookId: String) {
             if (updatedChapters != currentDetail.chapterList) {
                 _detail.value = currentDetail.copy(chapterList = updatedChapters)
             }
+        }
+    }
+
+    /** Restore JM progress from the existing chapter and history tables; no new persistence is introduced. */
+    private suspend fun syncJmChapterProgress() {
+        val localState = try {
+            withContext(Dispatchers.IO) {
+                val localManga = Injekt.get<LocalMangaRepository>()
+                    .getMangaByUrlAndSourceId("/album/$contentId", JmSource.id)
+                    ?: return@withContext null
+                val chapters = Injekt.get<ChapterRepository>().getChapterByMangaId(localManga.id)
+                val historyByChapterId = Injekt.get<LocalHistoryRepository>()
+                    .getHistoryByMangaId(localManga.id)
+                    .mapNotNull { history -> history.readAt?.time?.let { history.chapterId to it } }
+                    .toMap()
+                chapters to historyByChapterId
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return
+        } ?: return
+
+        val (localChapters, historyByChapterId) = localState
+        val progress = localChapters.mapNotNull { chapter ->
+            JmChapterProgressPolicy.chapterIdFromUrl(chapter.url)?.let { chapterId ->
+                JmChapterProgress(
+                    chapterId = chapterId,
+                    read = chapter.read,
+                    lastPageRead = chapter.lastPageRead,
+                    lastReadAt = historyByChapterId[chapter.id],
+                )
+            }
+        }
+        jmChapterProgress = progress
+        jmRecentChapterId = JmChapterProgressPolicy.recentChapterId(progress)
+
+        val currentDetail = _detail.value ?: return
+        val progressByChapterId = progress.associateBy { it.chapterId }
+        val updatedChapters = currentDetail.chapterList.map { chapter ->
+            if (progressByChapterId[chapter.id]?.read == true) chapter.copy(readed = 1) else chapter
+        }
+        if (updatedChapters != currentDetail.chapterList) {
+            _detail.value = currentDetail.copy(chapterList = updatedChapters)
         }
     }
 
@@ -535,15 +589,16 @@ class MangaDetailViewModel(private val bookId: String) {
         return if (chapterAsc.value) list.sortedBy { it.sort } else list.sortedByDescending { it.sort }
     }
 
-    /**
-     * 继续阅读章节 ID（字符串）。
-     * 规则：detail.start 非空且不为 "0" 时直接用（上次阅读章节）；
-     * 否则返回第一章（服务端降序返回，第一章在列表末尾）。
-     */
+    /** Continue from local JM history first; Manwa keeps its existing server-start behavior. */
     fun defaultChapterId(): String {
         val list = _detail.value?.chapterList ?: return ""
         val d = _detail.value!!
-        if (d.start.isNotBlank() && d.start != "0" && (!isJm || list.any { it.id == d.start })) return d.start
+        if (isJm) return JmChapterProgressPolicy.resumeChapterId(list, jmRecentChapterId, d.start)
+        if (d.start.isNotBlank() && d.start != "0") return d.start
         return list.minByOrNull { it.sort }?.id ?: list.firstOrNull()?.id ?: ""
     }
+
+    /** Resume the saved page for a partially-read JM chapter. */
+    fun resumePage(chapterId: String): Int =
+        if (isJm) JmChapterProgressPolicy.pageForChapter(chapterId, jmChapterProgress) else 0
 }

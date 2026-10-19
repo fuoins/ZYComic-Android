@@ -155,7 +155,7 @@ fun MangaDetailScreen(
     }
 
     /** 通过 komikku 原生阅读器打开指定章节。chapterId 为字符串数字。 */
-    fun openReader(chapterId: String) {
+    fun openReader(chapterId: String, page: Int = 0) {
         val d = detail ?: return
         if (chapterId.isBlank() || (vm.isJm && d.chapterList.none { it.id == chapterId })) {
             Toast.makeText(context, "没有有效的可读章节，请重试加载详情", Toast.LENGTH_LONG).show()
@@ -167,6 +167,7 @@ fun MangaDetailScreen(
                     context,
                     d,
                     chapterId,
+                    page = page,
                     sourceId = if (vm.isJm) com.zycomic.app.reader.JmSource.id else com.zycomic.app.reader.ManwaSource.id,
                 )
             } catch (e: Exception) {
@@ -765,7 +766,10 @@ fun MangaDetailScreen(
         // 9. FAB 继续阅读
         if (detail != null && !loading && error == null && (!vm.isJm || detail!!.chapterList.isNotEmpty())) {
             FloatingActionButton(
-                onClick = { openReader(vm.defaultChapterId()) },
+                onClick = {
+                    val chapterId = vm.defaultChapterId()
+                    openReader(chapterId, vm.resumePage(chapterId))
+                },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
