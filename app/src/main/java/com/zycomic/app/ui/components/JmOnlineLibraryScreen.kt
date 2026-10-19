@@ -54,6 +54,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -70,8 +71,13 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.repository.JmFavoriteFolder
 import com.zycomic.app.data.repository.JmHistoryDisplayPolicy
+import com.zycomic.app.data.repository.JmOnlineLibraryCache
+import com.zycomic.app.data.repository.JmOnlineLibraryCacheEntry
+import com.zycomic.app.data.repository.JmOnlineLibraryCacheKey
+import com.zycomic.app.data.repository.JmOnlineLibraryCachePolicy
 import com.zycomic.app.data.repository.JmOnlineLibraryContentState
 import com.zycomic.app.data.repository.JmOnlineLibraryItem
+import com.zycomic.app.data.repository.JmOnlineLibraryListType
 import com.zycomic.app.data.repository.JmOnlineLibraryPolicy
 import com.zycomic.app.data.repository.JmOnlineLibraryRepository
 import com.zycomic.app.net.JmAuthStore
@@ -99,7 +105,15 @@ fun JmOnlineLibraryScreen(
     val accountName by JmAuthStore.accountNameFlow.collectAsState()
     val sessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
     key(loggedIn, accountName, sessionRevision, history) {
-        JmOnlineLibraryContent(history, loggedIn, onRequireLogin, onOpenManga, onSelectPlatform)
+        JmOnlineLibraryContent(
+            history,
+            loggedIn,
+            accountName.orEmpty(),
+            sessionRevision,
+            onRequireLogin,
+            onOpenManga,
+            onSelectPlatform,
+        )
     }
 }
 
@@ -107,24 +121,41 @@ fun JmOnlineLibraryScreen(
 private fun JmOnlineLibraryContent(
     history: Boolean,
     loggedIn: Boolean,
+    identity: String,
+    sessionRevision: Long,
     onRequireLogin: () -> Unit,
     onOpenManga: (String) -> Unit,
     onSelectPlatform: (ContentPlatform) -> Unit,
 ) {
     var order by remember { mutableStateOf(JmFavoriteLibraryUiPolicy.DEFAULT_SORT_ORDER) }
     var folderId by remember { mutableStateOf("") }
-    var folders by remember { mutableStateOf<List<JmFavoriteFolder>>(emptyList()) }
-    var items by remember { mutableStateOf<List<JmOnlineLibraryItem>>(emptyList()) }
-    var total by remember { mutableStateOf<Int?>(null) }
-    var page by remember { mutableIntStateOf(0) }
-    var historyLoadedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var loading by remember { mutableStateOf(loggedIn) }
-    var hasMore by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val cacheKey = JmOnlineLibraryCacheKey(
+        sessionRevision = sessionRevision,
+        identity = identity,
+        listType = if (history) JmOnlineLibraryListType.HISTORY else JmOnlineLibraryListType.FAVORITES,
+        folderId = folderId,
+        sortOrder = order,
+    )
+    val currentCacheKey by rememberUpdatedState(cacheKey)
+    val cachedEntry = remember(cacheKey, loggedIn) {
+        if (loggedIn) JmOnlineLibraryCache.get(cacheKey) else null
+    }
+    var folders by remember(cacheKey) { mutableStateOf(cachedEntry?.folders.orEmpty()) }
+    var items by remember(cacheKey) { mutableStateOf(cachedEntry?.items.orEmpty()) }
+    var total by remember(cacheKey) { mutableStateOf(cachedEntry?.total) }
+    var page by remember(cacheKey) { mutableIntStateOf(cachedEntry?.page ?: 0) }
+    var historyLoadedIds by remember(cacheKey) { mutableStateOf(cachedEntry?.historyLoadedIds.orEmpty()) }
+    var loadState by remember(cacheKey, loggedIn) {
+        mutableStateOf(JmOnlineLibraryLoadState(cachedEntry, loading = loggedIn))
+    }
+    var hasMore by remember(cacheKey) { mutableStateOf(cachedEntry?.hasMore ?: true) }
+    val loading = loadState.loading
+    val error = loadState.error
     var operationError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var refreshRequest by remember { mutableIntStateOf(0) }
     var loadGeneration by remember { mutableIntStateOf(0) }
+    var pageRequestInFlight by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf<String?>(null) }
     var selectionMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -229,53 +260,90 @@ private fun JmOnlineLibraryContent(
             }
         }
     }
-    suspend fun loadPage(generation: Int) {
-        if (!JmOnlineLibraryPolicy.shouldRequestPage(loggedIn, hasMore, generation == loadGeneration)) return
-        loading = true
-        error = null
+    suspend fun loadPage(generation: Int, requestKey: JmOnlineLibraryCacheKey, replaceFirstPage: Boolean = false) {
+        if (
+            pageRequestInFlight ||
+            !JmOnlineLibraryPolicy.shouldRequestPage(
+                loggedIn,
+                hasMore || replaceFirstPage,
+                generation == loadGeneration,
+            )
+        ) {
+            return
+        }
+        pageRequestInFlight = true
+        loadState = loadState.beginLoad()
         try {
             if (history) {
-                val result = JmHistoryDisplayPolicy.loadVisiblePage(page, historyLoadedIds) { requestedPage ->
+                val result = JmHistoryDisplayPolicy.loadVisiblePage(
+                    if (replaceFirstPage) 0 else page,
+                    if (replaceFirstPage) emptySet() else historyLoadedIds,
+                ) { requestedPage ->
                     JmOnlineLibraryRepository.history(requestedPage)
                 }
-                if (generation != loadGeneration) return
-                items = items + result.items
+                if (generation != loadGeneration || requestKey != currentCacheKey) return
+                items = if (replaceFirstPage) {
+                    result.items
+                } else {
+                    JmOnlineLibraryCachePolicy.appendPage(items, result.items)
+                }
                 historyLoadedIds = result.loadedIds
                 hasMore = result.hasMore
                 total = result.total
                 page = result.lastPage
+                val entry = JmOnlineLibraryCacheEntry(
+                    items,
+                    result.total,
+                    emptyList(),
+                    result.lastPage,
+                    result.hasMore,
+                    result.loadedIds,
+                )
+                JmOnlineLibraryCache.put(requestKey, entry)
+                loadState = loadState.complete(entry)
             } else {
-                val requestedPage = page + 1
-                val result = JmOnlineLibraryRepository.favorites(requestedPage, order, folderId)
-                if (generation != loadGeneration) return
-                val known = items.mapTo(mutableSetOf()) { it.id }
-                hasMore = JmOnlineLibraryPolicy.hasMore(result.total, known, result.items.map { it.id })
-                items = items + result.items.filter { known.add(it.id) }
+                val requestedPage = if (replaceFirstPage) 1 else page + 1
+                val result = JmOnlineLibraryRepository.favorites(
+                    requestedPage,
+                    requestKey.sortOrder,
+                    requestKey.folderId,
+                )
+                if (generation != loadGeneration || requestKey != currentCacheKey) return
+                val nextItems = if (replaceFirstPage) {
+                    JmOnlineLibraryCachePolicy.replaceFirstPage(result)
+                } else {
+                    JmOnlineLibraryCachePolicy.appendPage(items, result.items)
+                }
+                val existingIds = if (replaceFirstPage) emptyList() else items.map { it.id }
+                hasMore = JmOnlineLibraryPolicy.hasMore(result.total, existingIds, result.items.map { it.id })
+                items = nextItems
                 folders = result.folders
                 total = result.total
                 page = requestedPage
+                val entry = JmOnlineLibraryCacheEntry(nextItems, result.total, result.folders, requestedPage, hasMore)
+                JmOnlineLibraryCache.put(requestKey, entry)
+                loadState = loadState.complete(entry)
             }
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
-            if (generation != loadGeneration) return
-            error = if (!JmAuthStore.isLoggedIn) "请重新登录 JM 账号" else failure.message ?: "JM 列表加载失败"
+            if (generation != loadGeneration || requestKey != currentCacheKey) return
+            loadState = loadState.fail(
+                if (!JmAuthStore.isLoggedIn) "请重新登录 JM 账号" else failure.message ?: "JM 列表加载失败",
+            )
         } finally {
-            if (generation == loadGeneration) loading = false
+            if (generation == loadGeneration && requestKey == currentCacheKey) loadState = loadState.stopLoading()
+            if (generation == loadGeneration) pageRequestInFlight = false
         }
     }
 
-    // Initial/login load, refresh and paging share a single coroutine. No local history merge.
-    LaunchedEffect(order, folderId, refreshRequest) {
+    // Favorites and online history hydrate from process memory then revalidate from their remote endpoints.
+    LaunchedEffect(cacheKey, refreshRequest, loggedIn) {
         val generation = ++loadGeneration
-        items = emptyList()
-        total = null
-        page = 0
-        historyLoadedIds = emptySet()
-        hasMore = true
-        error = null
+        pageRequestInFlight = false
+        JmOnlineLibraryCache.activateSession(sessionRevision, identity, loggedIn)
         if (!loggedIn) return@LaunchedEffect
-        // Request first: loading, error and empty UI do not compose a lazy list.
-        loadPage(generation)
+        // A cached page remains visible while this request replaces its first page in the background.
+        loadPage(generation, cacheKey, replaceFirstPage = true)
         snapshotFlow {
             val expectedLayout = JmLibraryLayoutToken(generation, grid && !history)
             val last = if (listLayoutToken != expectedLayout) {
@@ -285,9 +353,11 @@ private fun JmOnlineLibraryContent(
             } else {
                 listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             }
-            Triple(last, visibleItems.size, error == null && !busy)
+            Triple(last, visibleItems.size, loadState.error == null && !busy && !loadState.loading)
         }.collect { (last, size, healthy) ->
-            if (healthy && query.isNullOrBlank() && size > 0 && last >= (size - 3).coerceAtLeast(0) && hasMore) loadPage(generation)
+            if (healthy && query.isNullOrBlank() && size > 0 && last >= (size - 3).coerceAtLeast(0) && hasMore) {
+                loadPage(generation, cacheKey)
+            }
         }
     }
     // Scroll independently of loading, and only after the active lazy container has actually laid out.
@@ -296,8 +366,8 @@ private fun JmOnlineLibraryContent(
         snapshotFlow {
             JmOnlineLibraryPolicy.shouldScrollToTop(
                 hasVisibleItems = visibleItems.isNotEmpty(),
-                loading = loading,
-                hasError = error != null,
+                loading = loadState.loading,
+                hasError = loadState.error != null,
                 listLaidOut = listLayoutToken == expectedLayout,
             )
         }.first { it }

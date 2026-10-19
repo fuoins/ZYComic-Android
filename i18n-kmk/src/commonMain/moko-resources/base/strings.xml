@@ -380,4 +380,9 @@
     <string name="jm_random_album_failed">随机池加载失败，请重试</string>
     <string name="jm_like_label">点赞</string>
     <string name="jm_liked_label">已点赞</string>
+    <string name="jm_account_stats">LV %1$s / 经验 %2$s/%3$s / 金币 %4$s / 收藏 %5$s/%6$s</string>
+    <string name="jm_account_snapshot_notice">等级、经验、金币与收藏数为上次登录快照；重新登录可更新，缺失项显示 —。</string>
+    <string name="manwa_session_unknown">登录状态未验证（缓存资料），请刷新重试</string>
+    <string name="manwa_session_expired">登录已失效，请重新登录</string>
+    <string name="manwa_profile_refresh_verified">已刷新并验证登录状态</string>
 </resources>

@@ -17,6 +17,7 @@ object JmAuthStore {
     private const val TOKEN = "jwt_ciphertext"
     private const val ACCOUNT_NAME = "account_name"
     private const val ACCOUNT_UID = "account_uid"
+    private const val PROFILE = "account_profile"
     private const val KEY_ALIAS = "zycomic_jm_jwt_v1"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
@@ -26,6 +27,7 @@ object JmAuthStore {
         private set
 
     @Volatile private var accountUid: String? = null
+    private val loginAttempts = JmLoginAttemptPolicy()
 
     private val _accountNameFlow = MutableStateFlow<String?>(null)
     val accountNameFlow: StateFlow<String?> = _accountNameFlow.asStateFlow()
@@ -37,15 +39,22 @@ object JmAuthStore {
     val sessionRevisionFlow: StateFlow<Long> = _sessionRevisionFlow.asStateFlow()
     val sessionRevision: Long get() = _sessionRevisionFlow.value
 
+    private val _profileFlow = MutableStateFlow<JmAccountSnapshot?>(null)
+    val profileFlow: StateFlow<JmAccountSnapshot?> = _profileFlow.asStateFlow()
+
     val isLoggedIn: Boolean
         get() = token() != null
 
+    @Synchronized
     fun initialize(context: Context) {
         preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         accountName = if (token() != null) preferences?.getString(ACCOUNT_NAME, null) else null
         accountUid = if (token() != null) preferences?.getString(ACCOUNT_UID, null) else null
+        _profileFlow.value = if (token() != null) JmAccountSnapshotPolicy.decode(preferences?.getString(PROFILE, null)) else null
         _accountNameFlow.value = accountName
         _loggedInFlow.value = token() != null
+        loginAttempts.invalidate()
+        _sessionRevisionFlow.value++
     }
 
     @Synchronized
@@ -62,17 +71,59 @@ object JmAuthStore {
     @Synchronized
     fun save(token: String, username: String, uid: String? = null) {
         require(token.isNotBlank())
+        val profile = JmAccountSnapshotPolicy.forAccount(_profileFlow.value, accountName, accountUid, username, uid)
+        saveValues(token, username, uid, profile)
+    }
+
+    /** Begins a login request; later logins and session changes invalidate this attempt. */
+    @Synchronized
+    fun beginLoginAttempt(): JmLoginAttempt {
+        return loginAttempts.begin(sessionRevision)
+    }
+
+    /** Save a validated login response only while it still belongs to the active session and attempt. */
+    @Synchronized
+    fun saveLogin(
+        attempt: JmLoginAttempt,
+        token: String,
+        username: String,
+        uid: String?,
+        profile: JmAccountSnapshot,
+        commitCookies: () -> Unit = {},
+    ): Boolean {
+        return loginAttempts.runIfCurrent(attempt, sessionRevision) {
+            require(token.isNotBlank())
+            saveValues(token, username, uid, profile)
+            commitCookies()
+        }
+    }
+
+    /** Whether a tagged login request still belongs to the active attempt and account revision. */
+    @Synchronized
+    fun isLoginCurrent(attempt: JmLoginAttempt): Boolean = loginAttempts.isCurrent(attempt, sessionRevision)
+
+    /** A login-request 401 may clear state only while that request's attempt is still current. */
+    @Synchronized
+    fun clearIfCurrent(attempt: JmLoginAttempt): Boolean {
+        if (!loginAttempts.isCurrent(attempt, sessionRevision)) return false
+        clear()
+        return true
+    }
+
+    private fun saveValues(token: String, username: String, uid: String?, profile: JmAccountSnapshot?) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val packed = cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        checkNotNull(preferences) { "JM auth store has not been initialized" }
+        val editor = checkNotNull(preferences) { "JM auth store has not been initialized" }
             .edit()
             .putString(TOKEN, Base64.encodeToString(packed, Base64.NO_WRAP))
             .putString(ACCOUNT_NAME, username)
             .apply { if (uid == null) remove(ACCOUNT_UID) else putString(ACCOUNT_UID, uid) }
-            .apply()
+        if (profile == null) editor.remove(PROFILE) else editor.putString(PROFILE, JmAccountSnapshotPolicy.encode(profile))
+        editor.apply()
         accountName = username
         accountUid = uid
+        _profileFlow.value = profile
         _accountNameFlow.value = username
         _loggedInFlow.value = true
         _sessionRevisionFlow.value++
@@ -90,9 +141,11 @@ object JmAuthStore {
 
     @Synchronized
     fun clear() {
-        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.remove(ACCOUNT_UID)?.apply()
+        preferences?.edit()?.remove(TOKEN)?.remove(ACCOUNT_NAME)?.remove(ACCOUNT_UID)?.remove(PROFILE)?.apply()
         accountName = null
         accountUid = null
+        loginAttempts.invalidate()
+        _profileFlow.value = null
         _accountNameFlow.value = null
         _loggedInFlow.value = false
         _sessionRevisionFlow.value++

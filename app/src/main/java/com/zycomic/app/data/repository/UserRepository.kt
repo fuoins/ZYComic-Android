@@ -7,30 +7,44 @@ import com.zycomic.app.data.dto.PointLog
 import com.zycomic.app.data.dto.User
 import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.dto.WelfareRequest
+import com.zycomic.app.net.ApiService
 import com.zycomic.app.net.NetworkModule
 import com.zycomic.app.net.RouteManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
+import retrofit2.HttpException
 import tachiyomi.core.common.util.system.logcat
 import java.io.IOException
 
 /**
  * 用户仓库：全局登录状态源。
  *
- * - [userFlow] 是全局唯一的登录状态流，所有 ViewModel 收集它。
- * - 登录 / 登出 / 启动校验时都会更新 [userFlow]。
+ * - [userFlow] 是缓存/当前用户资料流；本地缓存本身不证明服务端会话有效。
+ * - [sessionStatusFlow] 独立表示 Manwa 会话是否已验证。
  * - cookie 由 [NetworkModule.cookieJar] 全局维护。
  * - 用户信息本地持久化到 SharedPreferences，启动时先读本地显示登录，后台再刷新。
  */
 object UserRepository {
 
-    private val api get() = NetworkModule.api
+    @Volatile private var apiOverrideForTests: ApiService? = null
+
+    private val api get() = apiOverrideForTests ?: NetworkModule.api
+
+    /** Allows offline repository tests to exercise this object against a fake API. */
+    internal fun setApiForTesting(api: ApiService?) {
+        apiOverrideForTests = api
+    }
 
     private lateinit var prefs: SharedPreferences
     private lateinit var appCtx: Context
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+    private val sessionVerification = ManwaSessionVerificationPolicy()
 
     private const val KEY_USER_INFO = "user_info_json"
 
@@ -45,8 +59,16 @@ object UserRepository {
     /** 当前登录用户，未登录为 null。所有 ViewModel 收集此流。 */
     val userFlow: StateFlow<User?> = _userFlow.asStateFlow()
 
-    /** 当前是否已登录（同步读取） */
+    private val _sessionStatusFlow = MutableStateFlow(ManwaSessionStatus.UNKNOWN)
+
+    /** Authentication confidence is independent of the possibly cached [userFlow] profile. */
+    val sessionStatusFlow: StateFlow<ManwaSessionStatus> = _sessionStatusFlow.asStateFlow()
+
+    /** Whether a cached/current profile is available, regardless of remote verification state. */
     val isLoggedIn: Boolean get() = _userFlow.value != null
+
+    /** Whether the current session was explicitly verified by the server. */
+    val isSessionVerified: Boolean get() = _sessionStatusFlow.value == ManwaSessionStatus.VERIFIED
 
     // ==================== 本地持久化 ====================
 
@@ -80,8 +102,11 @@ object UserRepository {
      */
     fun restoreLoginFromLocal(): Boolean {
         val local = loadUserInfoLocal()
-        if (local != null && local.uid.isNotEmpty() && local.uid != "0") {
-            _userFlow.value = local
+        if (local != null && ManwaSessionVerificationPolicy.isValidIdentity(local.uid)) {
+            sessionVerification.restore(local.uid) {
+                _userFlow.value = local
+                _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+            }
             return true
         }
         return false
@@ -93,23 +118,49 @@ object UserRepository {
      * 登录：先调 /account/login，成功后再调 /users/info 获取完整用户信息，更新 userFlow 并持久化。
      */
     suspend fun login(username: String, password: String, captcha: String = ""): User {
-        val loginResp = api.login(LoginRequest(username, password, captcha))
-        if (loginResp.code != 1) throw IOException(loginResp.msg.ifEmpty { "登录失败" })
+        val loginGeneration = sessionVerification.beginLogin {
+            _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+        }
+        val loginResp = try {
+            api.login(LoginRequest(username, password, captcha))
+        } catch (e: CancellationException) {
+            sessionVerification.cancelLogin(loginGeneration) { _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN }
+            throw e
+        } catch (e: Exception) {
+            sessionVerification.cancelLogin(loginGeneration) { _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN }
+            throw e
+        }
+        if (loginResp.code != 1) {
+            sessionVerification.cancelLogin(loginGeneration) { _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN }
+            throw IOException(loginResp.msg.ifEmpty { "登录失败" })
+        }
 
         // 登录后手动写入 uid cookie（服务端可能不自动设置，后续请求必须携带）
         val loginUid = loginResp.data?.uid?.takeIf { it.isNotEmpty() && it != "0" }
-        if (loginUid != null) {
-            NetworkModule.cookieJar.add("uid", loginUid, RouteManager.lineHost)
-        }
+        val refreshGeneration = sessionVerification.establishLogin(loginGeneration, loginUid) {
+            if (loginUid != null) NetworkModule.cookieJar.add("uid", loginUid, RouteManager.lineHost)
+            _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+        } ?: throw CancellationException("Manwa login was superseded by a newer session")
 
         // 登录成功后拉取完整用户信息
         val info = getUserInfo()
-        // 再次确保 uid cookie 存在（用 getUserInfo 返回的 uid）
-        if (info.uid.isNotEmpty() && info.uid != "0") {
-            NetworkModule.cookieJar.add("uid", info.uid, RouteManager.lineHost)
+        if (!ManwaSessionVerificationPolicy.isValidIdentity(info.uid) ||
+            (loginUid != null && loginUid != info.uid)
+        ) {
+            throw IOException("登录后无法验证账号信息")
         }
-        _userFlow.value = info
-        saveUserInfoLocal(info)
+        // 再次确保 uid cookie 存在（用 getUserInfo 返回的 uid）
+        val ticket = sessionVerification.beginRefresh {}
+        if (ticket.generation != refreshGeneration || ticket.accountIdentity != loginUid) {
+            throw CancellationException("Manwa login was superseded by a newer session")
+        }
+        val committed = sessionVerification.commitVerified(ticket, info.uid) {
+            NetworkModule.cookieJar.add("uid", info.uid, RouteManager.lineHost)
+            _userFlow.value = info
+            saveUserInfoLocal(info)
+            _sessionStatusFlow.value = ManwaSessionStatus.VERIFIED
+        }
+        if (!committed) throw CancellationException("Manwa login was superseded by a newer session")
         return info
     }
 
@@ -119,6 +170,8 @@ object UserRepository {
     suspend fun register(username: String, password: String, email: String, authCode: String): String {
         val resp = try {
             api.register(com.zycomic.app.data.dto.RegisterRequest(username, password, email, authCode))
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             return "注册成功，请登录"
         }
@@ -132,64 +185,97 @@ object UserRepository {
     }
 
     suspend fun emailLogin(email: String, authToken: String): User {
-        val resp = api.forgetPwd(com.zycomic.app.data.dto.ForgetPwdRequest(email, authToken))
-        if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "登录失败" })
-        resp.data?.uid?.takeIf { it.isNotEmpty() && it != "0" }?.let {
-            NetworkModule.cookieJar.add("uid", it, RouteManager.lineHost)
+        val loginGeneration = sessionVerification.beginLogin {
+            _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
         }
+        val resp = try {
+            api.forgetPwd(com.zycomic.app.data.dto.ForgetPwdRequest(email, authToken))
+        } catch (e: CancellationException) {
+            sessionVerification.cancelLogin(loginGeneration) { _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN }
+            throw e
+        } catch (e: Exception) {
+            sessionVerification.cancelLogin(loginGeneration) { _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN }
+            throw e
+        }
+        if (resp.code != 1) {
+            sessionVerification.cancelLogin(loginGeneration) { _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN }
+            throw IOException(resp.msg.ifEmpty { "登录失败" })
+        }
+        val loginUid = resp.data?.uid?.takeIf { it.isNotEmpty() && it != "0" }
+        val refreshGeneration = sessionVerification.establishLogin(loginGeneration, loginUid) {
+            if (loginUid != null) NetworkModule.cookieJar.add("uid", loginUid, RouteManager.lineHost)
+            _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+        } ?: throw CancellationException("Manwa login was superseded by a newer session")
         val info = getUserInfo()
-        _userFlow.value = info
-        saveUserInfoLocal(info)
+        if (!ManwaSessionVerificationPolicy.isValidIdentity(info.uid) ||
+            (loginUid != null && loginUid != info.uid)
+        ) {
+            throw IOException("登录后无法验证账号信息")
+        }
+        val ticket = sessionVerification.beginRefresh {}
+        if (ticket.generation != refreshGeneration || ticket.accountIdentity != loginUid) {
+            throw CancellationException("Manwa login was superseded by a newer session")
+        }
+        val committed = sessionVerification.commitVerified(ticket, info.uid) {
+            NetworkModule.cookieJar.add("uid", info.uid, RouteManager.lineHost)
+            _userFlow.value = info
+            saveUserInfoLocal(info)
+            _sessionStatusFlow.value = ManwaSessionStatus.VERIFIED
+        }
+        if (!committed) throw CancellationException("Manwa login was superseded by a newer session")
         return info
     }
 
     suspend fun changePassword(newPassword: String) {
-        val resp = api.editUser(kotlinx.serialization.json.buildJsonObject {
-            put("password", kotlinx.serialization.json.JsonPrimitive(newPassword))
-        })
+        val transitionGeneration = sessionVerification.beginLocalTransition {
+            _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+        }
+        val resp = api.editUser(
+            kotlinx.serialization.json.buildJsonObject {
+                put("password", kotlinx.serialization.json.JsonPrimitive(newPassword))
+            },
+        )
         if (resp.code != 1) throw IOException(resp.msg.ifEmpty { "修改密码失败" })
-        NetworkModule.cookieJar.clear()
-        clearUserInfoLocal()
-        _userFlow.value = null
+        sessionVerification.finishLocalTransition(transitionGeneration) {
+            NetworkModule.cookieJar.clear()
+            clearUserInfoLocal()
+            _userFlow.value = null
+            _sessionStatusFlow.value = ManwaSessionStatus.SIGNED_OUT
+        }
     }
 
     suspend fun getCaptcha(): ByteArray = api.getCaptcha().bytes()
 
-    /**
-     * 登出：先调用服务端登出 API，再清除全局 cookie 和本地用户信息，userFlow 置 null。
-     * 即使登出 API 调用失败也会清 cookie（本地登出）。
-     */
+    /** Clear local credentials first, then attempt remote sign-out without blocking local logout. */
     suspend fun logout() {
+        sessionVerification.beginLocalTransition {
+            NetworkModule.cookieJar.clear()
+            clearUserInfoLocal()
+            _userFlow.value = null
+            _sessionStatusFlow.value = ManwaSessionStatus.SIGNED_OUT
+        }
+        // The synchronized generation transition above fences earlier refreshes. There are no
+        // local writes after the request, so its result cannot erase or downgrade a newer login.
         try {
             api.logout()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // 登出 API 失败不阻塞本地登出
         }
-        NetworkModule.cookieJar.clear()
-        clearUserInfoLocal()
-        _userFlow.value = null
     }
 
     /**
-     * 启动时后台校验登录态：调 /users/info 刷新用户信息。
-     * - 成功 → 更新 userFlow 并持久化
-     * - 服务端明确返回 uid 无效（空或 "0"）→ 调用 logout() 登出并清除 cookie 和本地缓存
-     * - 网络异常 → 不清除 cookie 和本地缓存，保留登录态下次启动再试
-     *   （避免首次连接超时/线路抖动导致有效 cookie 被误清除）
-     * 调用前应先调用 [restoreLoginFromLocal] 让 UI 立即显示登录状态。
+     * Refresh /users/info. Only an explicit HTTP 401 expires the local session. All business,
+     * transport, and parsing failures remain unknown and preserve cached profile and cookies.
      */
     suspend fun verifyLogin() {
         try {
-            val info = getUserInfo()
-            if (info.uid.isEmpty() || info.uid == "0") {
-                // 服务端明确返回 uid 无效，视为未登录
-                logout()
-                return
-            }
-            _userFlow.value = info
-            saveUserInfoLocal(info)
+            refreshUserInfo()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
-            // 网络异常：保留 cookie 和本地登录态，下次启动再试
+            // Startup verification is best-effort; UNKNOWN is visible and cached data is retained.
         }
     }
 
@@ -202,11 +288,58 @@ object UserRepository {
         return resp.data ?: throw IOException("用户信息为空")
     }
 
-    /** 刷新当前用户信息到 userFlow 并持久化。 */
+    /** Refresh the cached profile and verify the current Manwa session. */
     suspend fun refreshUserInfo() {
-        val info = getUserInfo()
-        _userFlow.value = info
-        saveUserInfoLocal(info)
+        val ticket = sessionVerification.beginRefresh {
+            _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+        }
+        try {
+            val resp = api.userInfo()
+            if (!ManwaSessionVerificationPolicy.hasSuccessfulProfileResponse(resp.code, resp.data != null)) {
+                throw IOException(resp.msg.ifEmpty { "获取用户信息失败" })
+            }
+            val info = resp.data ?: throw IOException("用户信息为空")
+            if (!ManwaSessionVerificationPolicy.isValidIdentity(info.uid)) {
+                throw IOException("无法验证 Manwa 账号信息")
+            }
+            if (ticket.accountIdentity != null && ticket.accountIdentity != info.uid) {
+                val current = sessionVerification.markUnknown(ticket) {
+                    _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+                }
+                if (!current) throw CancellationException("Manwa refresh was superseded by a newer session")
+                throw IOException("Manwa 账号在刷新期间发生变化")
+            }
+            val committed = sessionVerification.commitVerified(ticket, info.uid) {
+                _userFlow.value = info
+                saveUserInfoLocal(info)
+                _sessionStatusFlow.value = ManwaSessionStatus.VERIFIED
+            }
+            if (!committed) throw CancellationException("Manwa refresh was superseded by a newer session")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HttpException) {
+            if (ManwaSessionVerificationPolicy.isExplicitUnauthorized(e.code())) {
+                val expired = sessionVerification.expire(ticket) {
+                    NetworkModule.cookieJar.clear()
+                    clearUserInfoLocal()
+                    _userFlow.value = null
+                    _sessionStatusFlow.value = ManwaSessionStatus.EXPIRED
+                }
+                if (expired) return
+                throw CancellationException("Manwa refresh was superseded by a newer session")
+            }
+            val current = sessionVerification.markUnknown(ticket) {
+                _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+            }
+            if (!current) throw CancellationException("Manwa refresh was superseded by a newer session")
+            throw e
+        } catch (e: Exception) {
+            val current = sessionVerification.markUnknown(ticket) {
+                _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
+            }
+            if (!current) throw CancellationException("Manwa refresh was superseded by a newer session")
+            throw e
+        }
     }
 
     // ==================== 签到 / 福利 / 积分 ====================

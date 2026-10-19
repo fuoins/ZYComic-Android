@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.SignDay
 import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.JmCheckInRepository
+import com.zycomic.app.data.repository.ManwaSessionStatus
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.net.JmNetworkModule
@@ -112,6 +113,12 @@ fun ProfileScreen(
         }
     }
     val user by UserRepository.userFlow.collectAsState()
+    val manwaSessionStatus by UserRepository.sessionStatusFlow.collectAsState()
+    val jmProfile by JmAuthStore.profileFlow.collectAsState()
+    val jmSnapshotNotice = stringResource(KMR.strings.jm_account_snapshot_notice)
+    val manwaRefreshSuccess = stringResource(KMR.strings.manwa_profile_refresh_verified)
+    val manwaRefreshUnknown = stringResource(KMR.strings.manwa_session_unknown)
+    val manwaSessionExpired = stringResource(KMR.strings.manwa_session_expired)
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
     val jmLoggedIn by JmAuthStore.loggedInFlow.collectAsState()
     val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
@@ -135,7 +142,7 @@ fun ProfileScreen(
         jmSubscreenSessionRevision = null
     }
     LaunchedEffect(platform) {
-        if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.isLoggedIn) {
+        if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.userFlow.value != null) {
             try {
                 UserRepository.refreshUserInfo()
             } catch (e: CancellationException) {
@@ -244,15 +251,29 @@ fun ProfileScreen(
             item {
                 if (platform == ContentPlatform.JM) {
                     TextPreferenceWidget(
-                        title = stringResource(KMR.strings.jm_account_title),
-                        subtitle = if (jmLoggedIn) "已登录：${jmAccount ?: "禁漫账号"}" else stringResource(KMR.strings.jm_account_signed_out),
+                        title = jmAccount.takeIf { jmLoggedIn } ?: stringResource(KMR.strings.jm_account_title),
+                        subtitle = if (jmLoggedIn) {
+                            stringResource(
+                                KMR.strings.jm_account_stats,
+                                jmProfile?.level ?: "—",
+                                jmProfile?.exp ?: "—",
+                                jmProfile?.nextLevelExp ?: "—",
+                                jmProfile?.coin ?: "—",
+                                jmProfile?.albumFavorites ?: "—",
+                                jmProfile?.albumFavoritesMax ?: "—",
+                            )
+                        } else {
+                            stringResource(KMR.strings.jm_account_signed_out)
+                        },
                         icon = if (!jmLoggedIn) Icons.Outlined.Login else Icons.Outlined.Info,
-                        onPreferenceClick = { if (!jmLoggedIn) onRequireLogin() },
+                        onPreferenceClick = {
+                            if (!jmLoggedIn) onRequireLogin() else Toast.makeText(context, jmSnapshotNotice, Toast.LENGTH_LONG).show()
+                        },
                     )
                 } else if (user == null) {
                     TextPreferenceWidget(
                         title = "点击登录",
-                        subtitle = "登录后可使用收藏、评论等功能",
+                        subtitle = if (manwaSessionStatus == ManwaSessionStatus.EXPIRED) manwaSessionExpired else "登录后可使用收藏、评论等功能",
                         icon = Icons.Outlined.Login,
                         onPreferenceClick = onRequireLogin,
                     )
@@ -285,6 +306,13 @@ fun ProfileScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (manwaSessionStatus != ManwaSessionStatus.VERIFIED) {
+                                Text(
+                                    manwaRefreshUnknown,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -402,10 +430,21 @@ fun ProfileScreen(
                             scope.launch {
                                 try {
                                     UserRepository.refreshUserInfo()
-                                    android.widget.Toast.makeText(ctx, "已刷新", android.widget.Toast.LENGTH_SHORT).show()
+                                    val message = when (UserRepository.sessionStatusFlow.value) {
+                                        ManwaSessionStatus.VERIFIED -> manwaRefreshSuccess
+                                        ManwaSessionStatus.EXPIRED -> manwaSessionExpired
+                                        else -> manwaRefreshUnknown
+                                    }
+                                    Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (_: Exception) {
+                                    val message = if (UserRepository.sessionStatusFlow.value == ManwaSessionStatus.EXPIRED) {
+                                        manwaSessionExpired
+                                    } else {
+                                        manwaRefreshUnknown
+                                    }
+                                    Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },

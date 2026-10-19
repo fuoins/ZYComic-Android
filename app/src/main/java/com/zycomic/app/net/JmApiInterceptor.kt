@@ -26,6 +26,7 @@ class JmApiInterceptor internal constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val session = original.tag(JmRequestSession::class.java)
+        val loginAttempt = original.tag(JmLoginAttempt::class.java)
         session?.let(JmRequestSession::requireCurrent)
         val path = original.url.encodedPath
         val host = original.url.host
@@ -60,7 +61,11 @@ class JmApiInterceptor internal constructor(
         val raw = response.body!!.string()
         if (!response.isSuccessful) {
             if (response.code == 401) {
-                if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
+                when {
+                    session != null -> JmRequestSession.clearIfCurrent(session)
+                    loginAttempt != null -> JmAuthStore.clearIfCurrent(loginAttempt)
+                    else -> JmAuthStore.clear()
+                }
             }
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
@@ -77,7 +82,11 @@ class JmApiInterceptor internal constructor(
             .takeIf { it.isNotBlank() }
         if (apiCode != 200) {
             if (apiCode == 401) {
-                if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
+                when {
+                    session != null -> JmRequestSession.clearIfCurrent(session)
+                    loginAttempt != null -> JmAuthStore.clearIfCurrent(loginAttempt)
+                    else -> JmAuthStore.clear()
+                }
             }
             throw IOException("JM API rejected request (code=$apiCode)${apiMessage?.let { ": $it" }.orEmpty()}")
         }
