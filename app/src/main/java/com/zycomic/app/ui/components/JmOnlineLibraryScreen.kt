@@ -78,6 +78,7 @@ import com.zycomic.app.data.repository.JmOnlineLibraryCachePolicy
 import com.zycomic.app.data.repository.JmOnlineLibraryContentState
 import com.zycomic.app.data.repository.JmOnlineLibraryItem
 import com.zycomic.app.data.repository.JmOnlineLibraryListType
+import com.zycomic.app.data.repository.JmOnlineLibraryLoadState
 import com.zycomic.app.data.repository.JmOnlineLibraryPolicy
 import com.zycomic.app.data.repository.JmOnlineLibraryRepository
 import com.zycomic.app.net.JmAuthStore
