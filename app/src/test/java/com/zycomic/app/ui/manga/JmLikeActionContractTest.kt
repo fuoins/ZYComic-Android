@@ -12,7 +12,7 @@ class JmLikeActionContractTest {
     private fun source(path: String): String {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.isDirectory(it.resolve("app/src/main/java/com/zycomic/app/ui/manga")) }
-        return Files.readString(root.resolve("app/src/main/java/com/zycomic/app/$path"))
+        return root.resolve("app/src/main/java/com/zycomic/app/$path").toFile().readText()
     }
 
     private fun likeAction(): String = source("ui/manga/MangaDetailViewModel.kt")

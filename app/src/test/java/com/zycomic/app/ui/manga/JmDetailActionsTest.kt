@@ -10,7 +10,7 @@ class JmDetailActionsTest {
     private fun projectFile(path: String): String {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.isDirectory(it.resolve("app/src/main/java/com/zycomic/app/ui/manga")) }
-        return Files.readString(root.resolve(path))
+        return root.resolve(path).toFile().readText()
     }
 
     @Test

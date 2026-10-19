@@ -67,7 +67,7 @@ class JmRandomAlbumPolicyTest {
     fun `repository selects documented section and retains existing JM route`() {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.isDirectory(it.resolve("app/src/main/java/com/zycomic/app/ui/browse")) }
-        val source = Files.readString(root.resolve("app/src/main/java/com/zycomic/app/ui/browse/JmRandomAlbumRepository.kt"))
+        val source = root.resolve("app/src/main/java/com/zycomic/app/ui/browse/JmRandomAlbumRepository.kt").toFile().readText()
         assertTrue(source.contains("it.id == JmRandomAlbumPolicy.SERIES_UPDATE_SECTION_ID"))
         assertTrue(source.contains("JmAlbumJumpPolicy.route(id)"))
         assertTrue(source.contains("JmSource.getPromoteSections()"))

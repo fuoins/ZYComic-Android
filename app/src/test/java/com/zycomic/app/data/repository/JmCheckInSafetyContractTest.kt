@@ -8,10 +8,10 @@ import java.nio.file.Path
 class JmCheckInSafetyContractTest {
     private val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
         .first { Files.exists(it.resolve("app/src/main/java/com/zycomic/app/data/repository/JmCheckInRepository.kt")) }
-    private val repository = Files.readString(root.resolve("app/src/main/java/com/zycomic/app/data/repository/JmCheckInRepository.kt"))
-    private val viewModel = Files.readString(root.resolve("app/src/main/java/com/zycomic/app/ui/profile/ProfileViewModel.kt"))
-    private val profile = Files.readString(root.resolve("app/src/main/java/com/zycomic/app/ui/profile/ProfileScreen.kt"))
-    private val screens = Files.readString(root.resolve("app/src/main/java/com/zycomic/app/ui/profile/JmCheckInScreens.kt"))
+    private val repository = root.resolve("app/src/main/java/com/zycomic/app/data/repository/JmCheckInRepository.kt").toFile().readText()
+    private val viewModel = root.resolve("app/src/main/java/com/zycomic/app/ui/profile/ProfileViewModel.kt").toFile().readText()
+    private val profile = root.resolve("app/src/main/java/com/zycomic/app/ui/profile/ProfileScreen.kt").toFile().readText()
+    private val screens = root.resolve("app/src/main/java/com/zycomic/app/ui/profile/JmCheckInScreens.kt").toFile().readText()
 
     @Test
     fun `makeup batch revalidates account calendar session dates and current month`() {

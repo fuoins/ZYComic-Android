@@ -1,6 +1,9 @@
 package com.zycomic.app.net
 
-import com.sun.net.httpserver.HttpServer
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Dns
@@ -13,7 +16,6 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
 
 class JmApiResponseInterceptorTest {
@@ -34,30 +36,31 @@ class JmApiResponseInterceptorTest {
         val calls = AtomicInteger()
         val jar = MemoryJar()
         val logs = mutableListOf<String>()
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            calls.incrementAndGet()
-            val currentPath = exchange.requestURI.path
-            val hasAvs = exchange.requestHeaders.getFirst("Cookie").orEmpty().contains("AVS=accepted")
-            val code = when (currentPath) {
-                "/confirm" -> 200
-                path -> status
-                else -> if (hasAvs) 200 else 403
-            }
-            when (currentPath) {
-                "/confirm" -> exchange.responseHeaders.add("Set-Cookie", "AVS=accepted; Path=/")
-                path -> {
-                    exchange.responseHeaders.add("Set-Cookie", failedCookie)
-                    exchange.responseHeaders.add("Set-Cookie", "other=preserved; Path=/")
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                calls.incrementAndGet()
+                val currentPath = request.url.encodedPath
+                val hasAvs = request.headers["Cookie"].orEmpty().contains("AVS=accepted")
+                val code = when (currentPath) {
+                    "/confirm" -> 200
+                    path -> status
+                    else -> if (hasAvs) 200 else 403
                 }
+                val response = MockResponse.Builder().code(code).body("offline-response")
+                when (currentPath) {
+                    "/confirm" -> response.addHeader("Set-Cookie", "AVS=accepted; Path=/")
+                    path -> {
+                        response.addHeader("Set-Cookie", failedCookie)
+                        response.addHeader("Set-Cookie", "other=preserved; Path=/")
+                    }
+                }
+                return response.build()
             }
-            val bytes = "offline-response".toByteArray()
-            exchange.sendResponseHeaders(code, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
         }
         server.start()
         try {
-            val base = "http://api.local:${server.address.port}"
+            val base = "http://api.local:${server.port}"
             val client = OkHttpClient.Builder()
                 .dns(object : Dns {
                     override fun lookup(hostname: String) = listOf(InetAddress.getByName("127.0.0.1"))
@@ -95,7 +98,7 @@ class JmApiResponseInterceptorTest {
             assertTrue(logs.any { "avsUpdateSuppressed=true" in it && "status=$status" in it })
             assertTrue(logs.last().contains("avsPresent=true"), "Observe Cookie after BridgeInterceptor attaches it")
         } finally {
-            server.stop(0)
+            server.close()
         }
     }
 
@@ -103,26 +106,27 @@ class JmApiResponseInterceptorTest {
     fun `successful AVS replacement and deletion remain effective and failed writes are not replayed`() {
         val calls = AtomicInteger()
         val jar = MemoryJar()
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            calls.incrementAndGet()
-            val path = exchange.requestURI.path
-            val code = if (path == "/favorite") 403 else 200
-            exchange.responseHeaders.add(
-                "Set-Cookie",
-                when (path) {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                calls.incrementAndGet()
+                val path = request.url.encodedPath
+                val code = if (path == "/favorite") 403 else 200
+                val cookie = when (path) {
                     "/delete" -> "AVS=; Max-Age=0; Path=/"
                     "/favorite" -> "AVS=poison; Path=/"
                     else -> "AVS=${path.removePrefix("/")}; Path=/"
-                },
-            )
-            val bytes = "unchanged".toByteArray()
-            exchange.sendResponseHeaders(code, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+                }
+                return MockResponse.Builder()
+                    .code(code)
+                    .addHeader("Set-Cookie", cookie)
+                    .body("unchanged")
+                    .build()
+            }
         }
         server.start()
         try {
-            val base = "http://127.0.0.1:${server.address.port}"
+            val base = "http://127.0.0.1:${server.port}"
             val client = OkHttpClient.Builder().cookieJar(jar).retryOnConnectionFailure(false)
                 .addNetworkInterceptor(JmApiResponseInterceptor { _, _ -> error("diagnostic sink unavailable") }).build()
             val url = Request.Builder().url(base).build().url
@@ -139,7 +143,7 @@ class JmApiResponseInterceptorTest {
             assertTrue(jar.loadForRequest(url).isEmpty())
             assertEquals(4, calls.get(), "POST is submitted exactly once even if diagnostics fail")
         } finally {
-            server.stop(0)
+            server.close()
         }
     }
 

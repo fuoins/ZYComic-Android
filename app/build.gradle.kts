@@ -281,6 +281,7 @@ dependencies {
     // Tests
     testImplementation(libs.bundles.test)
     testImplementation("org.json:json:20240303")
+    testImplementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
     testRuntimeOnly(libs.junit.platform.launcher)
 
     // For detecting memory leaks; see https://square.github.io/leakcanary/

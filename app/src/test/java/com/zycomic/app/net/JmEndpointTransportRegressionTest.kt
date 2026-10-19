@@ -1,13 +1,15 @@
 package com.zycomic.app.net
 
-import com.sun.net.httpserver.HttpServer
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.io.IOException
-import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -43,12 +45,12 @@ class JmEndpointTransportRegressionTest {
             )
             .build()
         try {
-            client.newCall(Request.Builder().url("http://race.local:${server.address.port}/").build())
+            client.newCall(Request.Builder().url("http://race.local:${server.port}/").build())
                 .execute().use { assertEquals(503, it.code) }
             assertEquals(1, endpointReads.get(), "DNS must not re-read the endpoint after the request pin")
             assertEquals(DomainIp("race.local", "127.0.0.1"), failure.get())
         } finally {
-            server.stop(0)
+            server.close()
         }
     }
 
@@ -105,19 +107,20 @@ class JmEndpointTransportRegressionTest {
             )
             .build()
         try {
-            client.newCall(Request.Builder().url("http://bootstrap.local:${server.address.port}/").build())
+            client.newCall(Request.Builder().url("http://bootstrap.local:${server.port}/").build())
                 .execute().use { assertEquals(200, it.code) }
             assertEquals(DomainIp("bootstrap.local", "127.0.0.1"), persisted.get())
         } finally {
-            server.stop(0)
+            server.close()
         }
     }
 
-    private fun server(code: Int): HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
-        createContext("/") { exchange ->
-            val body = "offline-test".toByteArray()
-            exchange.sendResponseHeaders(code, body.size.toLong())
-            exchange.responseBody.use { it.write(body) }
+    private fun server(code: Int): MockWebServer = MockWebServer().apply {
+        dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse.Builder()
+                .code(code)
+                .body("offline-test")
+                .build()
         }
         start()
     }
