@@ -68,7 +68,7 @@ internal class JmCheckInViewModel {
         val state = _calendar.value
         if (state.makeupLoading || state.loading || dates.isEmpty()) return
         makeupJob = scope.launch {
-            _calendar.value = _calendar.value.copy(makeupLoading = true, makeupProgress = JmMakeupProgress(0, dates.size, dates.minOrNull(), null), makeupSummary = null, error = null)
+            _calendar.value = _calendar.value.copy(makeupLoading = true, makeupProgress = JmMakeupProgress(0, dates.size, dates.min(), null), makeupSummary = null, error = null)
             try {
                 val result = JmCheckInRepository.makeup(context, preview, dates) { progress ->
                     _calendar.value = _calendar.value.copy(makeupProgress = progress)
