@@ -153,7 +153,9 @@ object JmSpeedTester {
                     val runner = JmEndpointProbeRunner()
                     val probeClient = JmNetworkModule.newProbeClient()
                     val lineClient = probeClient.newBuilder().addInterceptor(JmApiInterceptor(recordRouteHealth = false)).build()
+                    val timings = SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.JM)
                     try {
+                        val linePreparationTiming = timings.start(SpeedTestTimings.Phase.LINE_PREPARATION)
                         val resolvedLines = if (quickLines) {
                             lineQuickEndpoints.map { endpoint ->
                                 val configuredUrl = linesToTest.firstOrNull { runCatching { URI(it).host.equals(endpoint.domain, true) }.getOrDefault(false) }
@@ -183,6 +185,8 @@ object JmSpeedTester {
                                 },
                             ).flatMap { it.second }.distinctBy { it.endpoint }
                         }
+                        linePreparationTiming.close()
+                        val lineTiming = timings.start(SpeedTestTimings.Phase.LINES)
                         phase(JmSpeedTestProgress.Phase.TESTING_LINES, resolvedLines.size)
                         val lineResults = runner.run(
                             resolvedLines,
@@ -201,6 +205,7 @@ object JmSpeedTester {
                                 }
                             },
                         )
+                        lineTiming.close()
                         val freshLineIpDelays = lineResults.associate { it.first.endpoint to it.second.delayMs }
                         val testedLineEndpoints = freshLineIpDelays.keys
                         val untestedLineIpDelays = if (quickLines) priorLineDelays.filterKeys { it !in testedLineEndpoints } else emptyMap()
@@ -217,6 +222,7 @@ object JmSpeedTester {
                             host to (freshLineIpDelays.filterKeys { it.domain.equals(host, true) }.values.minOrNull() ?: Long.MAX_VALUE)
                         }
 
+                        val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
                         val imageEndpoints = if (quickImages) {
                             imageQuickEndpoints
                         } else {
@@ -238,6 +244,8 @@ object JmSpeedTester {
                                 },
                             ).flatMap { it.second }.distinct()
                         }
+                        imagePreparationTiming.close()
+                        val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES)
                         phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageEndpoints.size)
                         val imageResults = runner.run(
                             imageEndpoints,
@@ -264,6 +272,7 @@ object JmSpeedTester {
                                 }
                             },
                         )
+                        imageTiming.close()
                         val freshImageIpDelays = imageResults.associate { it.first to it.second.delayMs }
                         val freshImageIpVerdicts = imageResults.associate { it.first to (it.second.verdict ?: ImgVerdict.UNREACHABLE) }
                         val testedImageEndpoints = freshImageIpDelays.keys
@@ -303,7 +312,7 @@ object JmSpeedTester {
                             configFingerprint = configFingerprint, imageConfigFingerprint = imageConfigFingerprint,
                             imageNetworkPolicy = imageNetworkPolicy, imageResultsReused = false,
                         )
-                        if (beforeApply() && stillCurrent()) {
+                        if (timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { beforeApply() } && stillCurrent()) {
                             pendingLogs.forEach { (kind, host, message) ->
                                 if (stillCurrent()) JmRouteManager.record(kind, host, message)
                             }
@@ -321,6 +330,7 @@ object JmSpeedTester {
                         probeClient.dispatcher.cancelAll()
                         probeClient.connectionPool.evictAll()
                         probeClient.dispatcher.executorService.shutdown()
+                        timings.finish()
                     }
                 }
             }

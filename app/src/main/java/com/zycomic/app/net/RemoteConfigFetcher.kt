@@ -68,68 +68,80 @@ object RemoteConfigFetcher {
 
     /** 执行一次远程检查；[manual] 为手动触发（仅用于日志/返回信息，行为一致）。 */
     suspend fun checkAndApply(manual: Boolean = false): Result = withContext(Dispatchers.IO) {
-        DevConfig.markBootstrapLoading()
-        if (!DevConfig.remoteEnabled() && DevConfig.hasUsableRouteConfig) {
-            DevConfig.markBootstrapReady()
-            return@withContext Result(Outcome.NOT_CHANGED, "远程更新已关闭", DevConfig.remoteVersion())
-        }
-        DevConfig.markRemoteCheck()
-        try {
-            val uri = java.net.URI(REMOTE_CONFIG_URL)
-            require(uri.scheme == "https") { "仅允许 HTTPS" }
-            require(uri.host in ALLOWED_HOSTS) { "主机不在允许列表: ${uri.host}" }
-
-            val builder = Request.Builder().url(REMOTE_CONFIG_URL).get()
-            DevConfig.remoteEtag()?.let { builder.header("If-None-Match", it) }
-
-            client.newCall(builder.build()).execute().use { resp ->
-                when (resp.code) {
-                    304 -> {
-                        if (DevConfig.hasUsableRouteConfig) {
-                            DevConfig.markBootstrapReady()
-                            Result(Outcome.NOT_CHANGED, "配置未更新（304）", DevConfig.remoteVersion())
-                        } else {
-                            fail("服务器返回 304，但本机没有有效配置缓存；请提高远程配置版本号后重试")
-                        }
-                    }
-                    200 -> {
-                        val body = resp.body?.string()
-                            ?: return@use fail("响应体为空")
-                        if (body.length > MAX_BODY_BYTES) return@use fail("配置超过 ${MAX_BODY_BYTES} 字节")
-                        Validator.validate(body) // 校验失败抛异常
-                        val etag = resp.header("ETag")
-                        val version = JSONObject(body).optInt("version", 0)
-                        if (!RemoteConfigVersionPolicy.shouldApply(version, DevConfig.remoteVersion())) {
-                            if (DevConfig.hasUsableRouteConfig) {
-                                DevConfig.markBootstrapReady()
-                                return@use Result(Outcome.NOT_CHANGED, "远程版本未递增，保留当前有效配置", DevConfig.remoteVersion())
-                            }
-                            return@use fail("远程配置版本必须高于已应用版本；当前没有可用缓存，请提高版本号后重试")
-                        }
-                        val applied = DevConfig.applyRemoteConfig(body, etag)
-                        if (applied) {
-                            // The route list is now authoritative. Rebuild the API base URL and rebind the image stack
-                            // before allowing a first-install UI to issue any requests.
-                            runCatching { NetworkModule.rebuildApi("远程配置 v$version") }
-                                .onFailure { android.util.Log.w("RemoteConfigFetcher", "API stack rebuild failed", it) }
-                            runCatching { NetworkModule.rebindImageRoute("远程配置 v$version") }
-                                .onFailure { android.util.Log.w("RemoteConfigFetcher", "image route rebind failed", it) }
-                            DevConfig.markBootstrapReady()
-                            Result(Outcome.APPLIED, "已更新到 v$version", version)
-                        } else {
-                            if (DevConfig.hasUsableRouteConfig) {
-                                DevConfig.markBootstrapReady()
-                                Result(Outcome.NOT_CHANGED, "远程版本未递增，保留当前有效配置", DevConfig.remoteVersion())
-                            } else {
-                                fail("远程配置未能应用；请确认版本号递增后重试")
-                            }
-                        }
-                    }
-                    else -> fail("HTTP ${resp.code}")
-                }
+        SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.CONFIG).use { timings ->
+            DevConfig.markBootstrapLoading()
+            if (!DevConfig.remoteEnabled() && DevConfig.hasUsableRouteConfig) {
+                DevConfig.markBootstrapReady()
+                return@withContext Result(Outcome.NOT_CHANGED, "远程更新已关闭", DevConfig.remoteVersion())
             }
-        } catch (e: Exception) {
-            fail(e.message ?: "远程更新失败")
+            DevConfig.markRemoteCheck()
+            try {
+                val uri = java.net.URI(REMOTE_CONFIG_URL)
+                require(uri.scheme == "https") { "仅允许 HTTPS" }
+                require(uri.host in ALLOWED_HOSTS) { "主机不在允许列表: ${uri.host}" }
+
+                val builder = Request.Builder().url(REMOTE_CONFIG_URL).get()
+                DevConfig.remoteEtag()?.let { builder.header("If-None-Match", it) }
+
+                val fetchTiming = timings.start(SpeedTestTimings.Phase.CONFIG_FETCH)
+                client.newCall(builder.build()).execute().use { resp ->
+                    when (resp.code) {
+                        304 -> {
+                            fetchTiming.close()
+                            if (DevConfig.hasUsableRouteConfig) {
+                                DevConfig.markBootstrapReady()
+                                Result(Outcome.NOT_CHANGED, "配置未更新（304）", DevConfig.remoteVersion())
+                            } else {
+                                fail("服务器返回 304，但本机没有有效配置缓存；请提高远程配置版本号后重试")
+                            }
+                        }
+                        200 -> {
+                            val body = resp.body?.string()
+                            fetchTiming.close()
+                            if (body == null) return@use fail("响应体为空")
+                            if (body.length > MAX_BODY_BYTES) return@use fail("配置超过 ${MAX_BODY_BYTES} 字节")
+                            timings.start(SpeedTestTimings.Phase.CONFIG_VALIDATION).use {
+                                Validator.validate(body) // 校验失败抛异常
+                            }
+                            val etag = resp.header("ETag")
+                            val version = JSONObject(body).optInt("version", 0)
+                            if (!RemoteConfigVersionPolicy.shouldApply(version, DevConfig.remoteVersion())) {
+                                if (DevConfig.hasUsableRouteConfig) {
+                                    DevConfig.markBootstrapReady()
+                                    return@use Result(Outcome.NOT_CHANGED, "远程版本未递增，保留当前有效配置", DevConfig.remoteVersion())
+                                }
+                                return@use fail("远程配置版本必须高于已应用版本；当前没有可用缓存，请提高版本号后重试")
+                            }
+                            val applied = timings.start(SpeedTestTimings.Phase.CONFIG_APPLY).use {
+                                DevConfig.applyRemoteConfig(body, etag)
+                            }
+                            if (applied) {
+                                // The route list is now authoritative. Rebuild the API base URL and rebind the image stack
+                                // before allowing a first-install UI to issue any requests.
+                                runCatching { NetworkModule.rebuildApi("远程配置 v$version") }
+                                    .onFailure { android.util.Log.w("RemoteConfigFetcher", "API stack rebuild failed", it) }
+                                runCatching { NetworkModule.rebindImageRoute("远程配置 v$version") }
+                                    .onFailure { android.util.Log.w("RemoteConfigFetcher", "image route rebind failed", it) }
+                                DevConfig.markBootstrapReady()
+                                Result(Outcome.APPLIED, "已更新到 v$version", version)
+                            } else {
+                                if (DevConfig.hasUsableRouteConfig) {
+                                    DevConfig.markBootstrapReady()
+                                    Result(Outcome.NOT_CHANGED, "远程版本未递增，保留当前有效配置", DevConfig.remoteVersion())
+                                } else {
+                                    fail("远程配置未能应用；请确认版本号递增后重试")
+                                }
+                            }
+                        }
+                        else -> {
+                            fetchTiming.close()
+                            fail("HTTP ${resp.code}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                fail(e.message ?: "远程更新失败")
+            }
         }
     }
 

@@ -278,6 +278,11 @@ object PlatformSpeedTestCoordinator {
             put(
                 JSONObject().apply {
                     put("platform", report.platform)
+                    // Wall-clock spans overlap; TOTAL is measured, never a sum of phases.
+                    val timingScope = if (report.platform == "漫蛙") SpeedTestTimingLog.Scope.MANWA else SpeedTestTimingLog.Scope.JM
+                    put("phaseTimingsMs", SpeedTestTimingLog.json(timingScope))
+                    put("startupTimingsMs", SpeedTestTimingLog.json(SpeedTestTimingLog.Scope.STARTUP))
+                    put("configTimingsMs", SpeedTestTimingLog.json(SpeedTestTimingLog.Scope.CONFIG))
                     put("status", report.status)
                     put("reason", report.reason)
                     put("lineResultStatus", report.lineStatus)

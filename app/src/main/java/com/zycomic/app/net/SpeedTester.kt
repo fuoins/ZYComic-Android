@@ -818,7 +818,9 @@ object SpeedTester {
             val previousImgIp = RouteManager.selectedImgIp
             val previousImgDomain = RouteManager.imgDomains.getOrNull(previousImgIndex)
             var samplePath: ManwaImageFallbackProbePolicy.SharedLazy<String?>? = null
+            val timings = SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.MANWA)
             try {
+                val linePreparationTiming = timings.start(SpeedTestTimings.Phase.LINE_PREPARATION)
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val compatibleHistory = RouteManager.speedTestHistoryForVersion(configVersionAtStart)
@@ -846,6 +848,8 @@ object SpeedTester {
                 } else {
                     0
                 }
+                linePreparationTiming.close()
+                val lineTiming = timings.start(SpeedTestTimings.Phase.LINES)
                 reportStage(Progress(Phase.TESTING_LINES, total = lineProbeTargets.size, reusedLines = retainedLineCount))
                 val freshLineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val lineJobs = lineProbeTargets.map { target ->
@@ -878,7 +882,8 @@ object SpeedTester {
                     }
                 }
                 val freshLineOutcomes = lineJobs.awaitAll().toMap()
-                val confirmedForApply = beforeApply()
+                lineTiming.close()
+                val confirmedForApply = timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { beforeApply() }
                 if (!confirmedForApply || !runIsCurrent()) return@coroutineScope (-1 to -1)
                 // Do not replace previously published results during an unconfirmed warmup.
                 lastImgVerdicts = emptyMap()
@@ -930,7 +935,9 @@ object SpeedTester {
                 var resolvedSamplePath: String? = null
                 val sharedSamplePath = ManwaImageFallbackProbePolicy.sharedLazy(this) {
                     reportStage(Progress(Phase.FETCHING_SAMPLE))
-                    (if (runIsCurrent()) obtainProbePath(::runIsCurrent) else null).also { path ->
+                    timings.start(SpeedTestTimings.Phase.IMAGE_SAMPLE_FETCH_FALLBACK).use {
+                        if (runIsCurrent()) obtainProbePath(::runIsCurrent) else null
+                    }.also { path ->
                         resolvedSamplePath = path
                         if (runIsCurrent()) Log.i(TAG, "img probe sample path=$path")
                     }
@@ -944,6 +951,7 @@ object SpeedTester {
                 val imageDiagnosticAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, SpeedTestEndpointDiagnostic>()
                 val freshImageCount = AtomicInteger(0)
                 val reusedImageCount = AtomicInteger(0)
+                val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
                 reportStage(Progress(Phase.PREPARING_IMAGES))
                 val imageHistory = compatibleHistory?.imgDelays.orEmpty()
                 val selectedImageEndpoints = if (allowImageReuse) {
@@ -972,6 +980,8 @@ object SpeedTester {
                         imageQuickTest = quickImageRetest,
                     ),
                 )
+                imagePreparationTiming.close()
+                val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES_INCLUDING_SAMPLE)
                 val imgJobs = imageProbeTargets.map { endpoint ->
                     async {
                         probeSemaphore.withPermit {
@@ -1016,6 +1026,7 @@ object SpeedTester {
                     }
                 }
                 imgJobs.awaitAll()
+                imageTiming.close()
                 val freshImages = imageDiagnosticAcc.keys.associateWith { imgAcc.getValue(it) }
                 val imgs = if (quickImageRetest) {
                     SpeedTestHistoryPolicy.merge(imageHistory, selectedImageEndpoints, freshImages)
@@ -1154,6 +1165,7 @@ object SpeedTester {
                 _isRunning.value = false
                 lineClient.releaseProbe()
                 imgClient.releaseProbe()
+                timings.finish()
             }
         }
     }
