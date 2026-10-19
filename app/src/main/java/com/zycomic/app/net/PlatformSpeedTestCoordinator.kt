@@ -5,6 +5,9 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -62,7 +65,11 @@ object PlatformSpeedTestCoordinator {
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
     ): List<PlatformSpeedTestReport> = withContext(Dispatchers.IO) {
-        val startupConfigUpdated = startupConfig.awaitConfigurationUpdated()
+        // First install and explicit retests still wait. A cached automatic run may
+        // measure speculatively, but each tester must cross beforeApply before selection.
+        if (!DevConfig.hasUsableRouteConfig || forceFresh || onlyPlatform != null) {
+            startupConfig.awaitConfigurationUpdated()
+        }
         DevConfig.awaitUsableRouteConfig()
         lock.withLock {
             val initialKey = currentKey()
@@ -87,7 +94,7 @@ object PlatformSpeedTestCoordinator {
                     val key = currentKey()
                     // History eligibility is version-only inside each tester. Process-local
                     // revisions/network identity still guard publication and deduplicate runs.
-                    val freshConfig = remoteConfigUpdated || (startupConfigUpdated && completedKey == null)
+                    val freshConfig = remoteConfigUpdated || (startupConfig.configurationUpdated == true && completedKey == null)
                     val reuseLines = SpeedTestRunPolicy.canFastTest(
                         policy.useLastLineResult,
                         forceFresh,
@@ -98,71 +105,90 @@ object PlatformSpeedTestCoordinator {
                         forceFresh,
                         freshConfig,
                     )
-                    val result = mutableListOf<PlatformSpeedTestReport>()
-                    for (platform in listOf(ContentPlatform.MANWA, ContentPlatform.JM)) {
-                        if (key != currentKey()) break
-                        val enabled = StartupPlatformPolicy.isEnabled(platform)
-                        var status = "skipped"
-                        var reason = if (platform == ContentPlatform.MANWA) "漫蛙未开启" else "禁漫天堂未开启"
-                        val requested = onlyPlatform == null || onlyPlatform == platform
-                        if (enabled && !requested) reason = "本轮仅重新检测${if (onlyPlatform == ContentPlatform.JM) "禁漫天堂" else "漫蛙"}"
-                        if (enabled && requested) {
-                            _jmProgress.value = null
-                            _progressText.value = null
-                            _progressText.value = if (platform == ContentPlatform.MANWA) "正在检测漫蛙线路与图源…" else "正在检测禁漫天堂线路与图源…"
-                            try {
-                                reason = "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（历史仅核对网络配置版本）"
-                                if (platform == ContentPlatform.MANWA) {
-                                    SpeedTester.runAndApply(
-                                        onProgress = onProgress,
-                                        reuseLines = reuseLines,
-                                        allowImageReuse = reuseImages,
-                                        onStageProgress = { progress ->
-                                            if (key == currentKey()) {
-                                                _progressText.value = manwaProgressMessage(progress)
-                                                onStageProgress?.invoke(progress)
-                                            }
-                                        },
-                                    )
-                                    status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
-                                    if (status == "tested") {
-                                        _progressText.value = manwaProgressMessage(SpeedTester.progress.value)
-                                        if (SpeedTester.progress.value.fullRetestRecommended) {
-                                            reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
-                                        }
-                                    } else if (SpeedTester.progress.value.phase != SpeedTester.Phase.SKIPPED) {
-                                        val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
-                                        _progressText.value = manwaProgressMessage(failed)
-                                        onStageProgress?.invoke(failed)
-                                    }
-                                } else {
-                                    val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, isCurrent = { key == currentKey() }) { progress ->
-                                        if (key == currentKey()) {
-                                            _jmProgress.value = progress
-                                            _progressText.value = progress.message()
-                                        }
-                                    }
-                                    status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
-                                    if (status == "incomplete") reason = "本轮结果未完整提交，保留当前选择"
-                                    if (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed) {
-                                        reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
-                                    }
-                                }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (_: Exception) {
-                                status = "incomplete"
-                                reason = "本轮检测失败，保留当前选择"
-                                if (platform == ContentPlatform.MANWA) {
-                                    val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
-                                    _progressText.value = manwaProgressMessage(failed)
-                                    onStageProgress?.invoke(failed)
-                                }
-                            }
-                        }
-                        result += report(platform, status, reason)
+                    val version = DevConfig.remoteVersion()
+                    fun generationIsCurrent() = key == currentKey() && version == DevConfig.remoteVersion()
+                    suspend fun beforeApply(): Boolean {
+                        startupConfig.awaitConfigurationUpdated()
+                        return generationIsCurrent()
                     }
-                    if (key != currentKey()) continue
+                    val result = coroutineScope {
+                        listOf(ContentPlatform.MANWA, ContentPlatform.JM).map { platform ->
+                            async {
+                                if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
+                                val enabled = StartupPlatformPolicy.isEnabled(platform)
+                                var status = "skipped"
+                                var reason = if (platform == ContentPlatform.MANWA) "漫蛙未开启" else "禁漫天堂未开启"
+                                val requested = onlyPlatform == null || onlyPlatform == platform
+                                if (enabled && !requested) reason = "本轮仅重新检测${if (onlyPlatform == ContentPlatform.JM) "禁漫天堂" else "漫蛙"}"
+                                if (enabled && requested) {
+                                    _progressText.value = if (platform == ContentPlatform.MANWA) "正在检测漫蛙线路与图源…" else "正在检测禁漫天堂线路与图源…"
+                                    try {
+                                        reason = "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（历史仅核对网络配置版本）"
+                                        if (platform == ContentPlatform.MANWA) {
+                                            SpeedTester.runAndApply(
+                                                onProgress = if (onProgress == null) {
+                                                    null
+                                                } else {
+                                                    { lines, images, verdicts ->
+                                                        if (startupConfig.configurationUpdated != null && generationIsCurrent()) {
+                                                            onProgress.invoke(lines, images, verdicts)
+                                                        }
+                                                    }
+                                                },
+                                                reuseLines = reuseLines,
+                                                allowImageReuse = reuseImages,
+                                                isCurrent = ::generationIsCurrent,
+                                                beforeApply = ::beforeApply,
+                                                onStageProgress = { progress ->
+                                                    if (generationIsCurrent()) {
+                                                        _progressText.value = manwaProgressMessage(progress)
+                                                        onStageProgress?.invoke(progress)
+                                                    }
+                                                },
+                                            )
+                                            status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
+                                            if (status == "tested") {
+                                                _progressText.value = manwaProgressMessage(SpeedTester.progress.value)
+                                                if (SpeedTester.progress.value.fullRetestRecommended) {
+                                                    reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
+                                                }
+                                            } else if (SpeedTester.progress.value.phase != SpeedTester.Phase.SKIPPED) {
+                                                val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
+                                                _progressText.value = manwaProgressMessage(failed)
+                                                onStageProgress?.invoke(failed)
+                                            }
+                                        } else {
+                                            val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
+                                                if (generationIsCurrent()) {
+                                                    _jmProgress.value = progress
+                                                    _progressText.value = progress.message()
+                                                }
+                                            }
+                                            status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
+                                            if (status == "incomplete") reason = "本轮结果未完整提交，保留当前选择"
+                                            if (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed) {
+                                                reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
+                                            }
+                                        }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (_: Exception) {
+                                        status = "incomplete"
+                                        reason = "本轮检测失败，保留当前选择"
+                                        if (platform == ContentPlatform.MANWA) {
+                                            val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
+                                            _progressText.value = manwaProgressMessage(failed)
+                                            onStageProgress?.invoke(failed)
+                                        }
+                                    }
+                                }
+                                report(platform, status, reason)
+                            }
+                        }.awaitAll()
+                    }
+                    // Even all-disabled/failed warm-ups must wait for authoritative config.
+                    startupConfig.awaitConfigurationUpdated()
+                    if (!generationIsCurrent()) continue
                     _reports.value = result
                     if (onlyPlatform == null) completedKey = key.takeIf { result.none { it.status == "incomplete" } }
                     persist(result)

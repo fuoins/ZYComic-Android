@@ -167,15 +167,24 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 }
             }
         }
-        // 启动后异步拉取权威远程配置。只有应用成功替换后，才针对新候选列表测速。
+        // 已保存配置可先只测不应用，与权威配置检查重叠；版本变化会丢弃整代预热。
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            val warmup = launch {
+                try {
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.run()
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    // A speculative probe failure must not cancel the config check.
+                }
+            }
             var configurationUpdated = false
             val result = try {
                 runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }.getOrNull()
                     .also { configurationUpdated = it?.configurationUpdated == true }
             } finally {
-                // Release before requesting the retest: startup/UI/network callers all share
-                // this final config generation instead of probing the cached config first.
+                // Unblock selection only after the authoritative generation is known.
+                // Cached probes from a different generation cannot cross this barrier.
                 com.zycomic.app.net.PlatformSpeedTestCoordinator.finishStartupConfigCheck(configurationUpdated)
             }
             if (result?.configurationUpdated == true) {
@@ -188,6 +197,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
                 }
             }
+            warmup.join()
         }
 
         patchInjekt()

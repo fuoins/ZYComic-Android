@@ -4,6 +4,7 @@ import android.util.Log
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -13,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -48,7 +48,7 @@ object SpeedTester {
 
     private const val TAG = "SpeedTester"
     private const val MAX = Long.MAX_VALUE
-    private val probeSemaphore = Semaphore(24)
+    private val probeSemaphore = SpeedTestProbeBudget.permits
 
     /** 探活只取前 2KB，避免逐域拉整张图/整个 JSON。 */
     private const val PROBE_BYTES = 2048L
@@ -242,52 +242,41 @@ object SpeedTester {
      *
      * 反之，**连接层失败（拿不到任何响应）不回退**：域都不通，再打两个路径只是白等两个超时。
      */
-    private suspend fun measureImg(client: OkHttpClient, domain: String, samplePath: String?): ImgProbe {
-        val candidates = buildList {
-            add(PROBE_COVER_PATH)
-            samplePath?.takeIf { it != PROBE_COVER_PATH }?.let { add(it) }
+    private suspend fun measureImg(
+        client: OkHttpClient,
+        domain: String,
+        samplePath: suspend () -> String?,
+    ): ImgProbe {
+        val attempts = ManwaImageFallbackProbePolicy.probeFixedThenFallback(
+            fixedPath = PROBE_COVER_PATH,
+            samplePath = samplePath,
+            probe = { path -> probe(client, imgProbeRequest(domain, path), requireJson = false, strictImage = true) },
+            isSuccess = { it.delayMs < MAX },
+            hasHttpResponse = { it.httpCode != -1 },
+        )
+        val outcomes = attempts.map { it.result }
+        val last = outcomes.last()
+        val success = last.delayMs < MAX
+        if (success && attempts.size > 1) Log.i(TAG, "img probe fallback ok domain=$domain path=${attempts.last().path}")
+        val verdict = when {
+            success -> ImgVerdict.OK
+            outcomes.any { it.httpCode == -1 } -> ImgVerdict.UNREACHABLE
+            else -> ImgVerdict.NO_IMAGE
         }
-        var sawConnectionFailure = false
-        var lastCode = -1
-        val attempts = mutableListOf<SpeedTestProbeAttempt>()
-        for ((i, path) in candidates.withIndex()) {
-            val outcome = probe(client, imgProbeRequest(domain, path), requireJson = false, strictImage = true)
-            attempts += outcome.toAttempt(if (i == 0) "fixed_cover" else "fallback_sample")
-            if (outcome.delayMs < MAX) {
-                if (i > 0) Log.i(TAG, "img probe fallback ok domain=$domain path=$path")
-                return ImgProbe(
-                    delayMs = outcome.delayMs,
-                    verdict = ImgVerdict.OK,
-                    diagnostic = SpeedTestEndpointDiagnostic(
-                        success = true,
-                        latencyMs = outcome.delayMs,
-                        elapsedMs = attempts.sumOf { it.elapsedMs },
-                        failureCategory = null,
-                        imageVerdict = ImgVerdict.OK.name.lowercase(java.util.Locale.ROOT),
-                        fallbackAttempted = i > 0,
-                        attempts = attempts.toList(),
-                    ),
-                )
-            }
-            if (outcome.httpCode == -1) {
-                sawConnectionFailure = true
-                break
-            }
-            lastCode = outcome.httpCode
-        }
-        val verdict = if (sawConnectionFailure) ImgVerdict.UNREACHABLE else ImgVerdict.NO_IMAGE
-        if (verdict == ImgVerdict.NO_IMAGE) Log.d(TAG, "img no-image domain=$domain lastCode=$lastCode")
+        if (verdict == ImgVerdict.NO_IMAGE) Log.d(TAG, "img no-image domain=$domain lastCode=${last.httpCode}")
         return ImgProbe(
-            delayMs = MAX,
+            delayMs = if (success) last.delayMs else MAX,
             verdict = verdict,
             diagnostic = SpeedTestEndpointDiagnostic(
-                success = false,
-                latencyMs = null,
-                elapsedMs = attempts.sumOf { it.elapsedMs },
-                failureCategory = attempts.lastOrNull()?.failureCategory,
+                success = success,
+                latencyMs = last.delayMs.takeIf { success },
+                elapsedMs = outcomes.sumOf { it.elapsedMs },
+                failureCategory = last.failureCategory,
                 imageVerdict = verdict.name.lowercase(java.util.Locale.ROOT),
-                fallbackAttempted = attempts.any { it.probe == "fallback_sample" },
-                attempts = attempts.toList(),
+                fallbackAttempted = attempts.size > 1,
+                attempts = attempts.mapIndexed { index, attempt ->
+                    attempt.result.toAttempt(if (index == 0) "fixed_cover" else "fallback_sample")
+                },
             ),
         )
     }
@@ -356,6 +345,8 @@ object SpeedTester {
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // 状态码已拿到就如实带上（404 后能否回退取样路径依赖它）
                 Log.d(TAG, "probe fail url=${req.url} code=$code err=${e.message}")
@@ -449,17 +440,20 @@ object SpeedTester {
      * 因此每个失败原因都要打出来（上一版整条链静默吞异常，真机日志里只看到
      * `img probe sample path=null`，完全查不出是接口没通、还是字段为空）。
      */
-    private suspend fun obtainProbePath(): String? {
+    private suspend fun obtainProbePath(isCurrent: () -> Boolean = { true }): String? {
         // 整轮测速已经没有"整体超时"了，这一步必须自带上限：api.index() 用的是运行时
         // apiClient（readTimeout 30s），网络半死不活时能把启动卡住半分钟。
         // 6s 内拿不到样本就退到历史缓存路径，绝不拖住进入主页。
-        val resp = runCatching { withTimeoutOrNull(SAMPLE_PATH_TIMEOUT_MS) { NetworkModule.api.index() } }
-        if (resp.isFailure) {
-            Log.w(TAG, "probe sample path: index() 请求失败 err=${resp.exceptionOrNull()?.message}")
+        val index = try {
+            withTimeoutOrNull(SAMPLE_PATH_TIMEOUT_MS) { NetworkModule.api.index() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "probe sample path: index() 请求失败 err=${error.message}")
+            null
         }
-        val index = resp.getOrNull()
-        if (resp.isSuccess && index == null) {
-            Log.w(TAG, "probe sample path: index() 在 ${SAMPLE_PATH_TIMEOUT_MS}ms 内没返回，改用历史缓存")
+        if (index == null) {
+            Log.w(TAG, "probe sample path: index() 无结果或在 ${SAMPLE_PATH_TIMEOUT_MS}ms 内没返回，改用历史缓存")
         }
         val data: Manga? = index?.data
         if (index != null && data == null) {
@@ -475,10 +469,12 @@ object SpeedTester {
             Log.w(TAG, "probe sample path: index() 有数据但所有条目的 picx/pic 都是空/无法解析")
         }
         if (live != null) {
+            if (!isCurrent()) return null
             RouteManager.saveProbeImgPath(live)
             Log.i(TAG, "probe sample path: 取到新的样本路径 $live")
             return live
         }
+        if (!isCurrent()) return null
         val cached = RouteManager.loadProbeImgPath()
         if (cached == null) {
             Log.w(TAG, "probe sample path: 本地也没有历史样本路径，图域探活只能依赖固定封面路径")
@@ -566,7 +562,11 @@ object SpeedTester {
         }
     }
 
-    private suspend fun measureImgAtIp(client: OkHttpClient, endpoint: DomainIp, samplePath: String?): ImgProbe {
+    private suspend fun measureImgAtIp(
+        client: OkHttpClient,
+        endpoint: DomainIp,
+        samplePath: suspend () -> String?,
+    ): ImgProbe {
         val routed = NetworkModule.newProbeClientForIp(client, endpoint.domain, endpoint.ip)
         return try {
             measureImg(routed, endpoint.domain, samplePath).also { result ->
@@ -631,7 +631,7 @@ object SpeedTester {
                     async {
                         probeSemaphore.withPermit {
                             val result = if (stillCurrent()) {
-                                measureImgAtIp(client, endpoint, samplePath)
+                                measureImgAtIp(client, endpoint) { samplePath }
                             } else {
                                 ImgProbe(MAX, ImgVerdict.UNREACHABLE, SpeedTestEndpointDiagnostic(false, null, 0L, null))
                             }
@@ -770,20 +770,23 @@ object SpeedTester {
         onStageProgress: ((Progress) -> Unit)? = null,
         reuseLines: Boolean = false,
         allowImageReuse: Boolean = false,
+        isCurrent: () -> Boolean = { true },
+        beforeApply: suspend () -> Boolean = { true },
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             val configRevisionAtStart = RouteManager.configRevision
             val configVersionAtStart = RouteManager.activeRemoteConfigVersion
             val platformRevisionAtStart = StartupPlatformPolicy.state.value.revision
-            if (!isPlatformCurrent(platformRevisionAtStart)) {
+            fun runIsCurrent(): Boolean =
+                isPlatformCurrent(platformRevisionAtStart) &&
+                    configRevisionAtStart == RouteManager.configRevision &&
+                    configVersionAtStart == RouteManager.activeRemoteConfigVersion &&
+                    isCurrent()
+            if (!runIsCurrent()) {
                 lastRunSkipped = true
                 onStageProgress?.invoke(Progress(Phase.SKIPPED))
                 return@coroutineScope (-1 to -1)
             }
-            fun runIsCurrent(): Boolean =
-                isPlatformCurrent(platformRevisionAtStart) &&
-                    configRevisionAtStart == RouteManager.configRevision &&
-                    configVersionAtStart == RouteManager.activeRemoteConfigVersion
             fun reportStage(progress: Progress) {
                 if (runIsCurrent()) {
                     publishProgress(progress, onStageProgress)
@@ -798,9 +801,6 @@ object SpeedTester {
             lastRunSkipped = false
             _isRunning.value = true
             reportStage(Progress(Phase.PREPARING_LINES))
-            // 本轮结论先清空：中途被取消/超时时，UI 会看到"没有结论"而不是上一轮的旧结论
-            lastImgVerdicts = emptyMap()
-            lastImgIpVerdicts = emptyMap()
             val startedAt = System.currentTimeMillis()
             val imageCacheNetworkIdentityAtStart = PlatformSpeedTestCoordinator.currentNetworkIdentity()
             val followSystemVpnEnabled = DevConfig.isFollowSystemVpnEnabled()
@@ -817,6 +817,7 @@ object SpeedTester {
             val previousImgIndex = RouteManager.imgIndex
             val previousImgIp = RouteManager.selectedImgIp
             val previousImgDomain = RouteManager.imgDomains.getOrNull(previousImgIndex)
+            var samplePath: ManwaImageFallbackProbePolicy.SharedLazy<String?>? = null
             try {
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
@@ -877,12 +878,18 @@ object SpeedTester {
                     }
                 }
                 val freshLineOutcomes = lineJobs.awaitAll().toMap()
+                val confirmedForApply = beforeApply()
+                if (!confirmedForApply || !runIsCurrent()) return@coroutineScope (-1 to -1)
+                // Do not replace previously published results during an unconfirmed warmup.
+                lastImgVerdicts = emptyMap()
+                lastImgIpVerdicts = emptyMap()
                 val freshLines = freshLineOutcomes.mapValues { it.value.delayMs }
                 val lines = if (quickLineRetest) {
                     SpeedTestHistoryPolicy.merge(lineHistory, selectedLineEndpoints, freshLines)
                 } else {
                     freshLines
                 }
+                if (runIsCurrent()) onProgress?.invoke(lines, emptyMap(), emptyMap())
                 val lineDiagnostics = freshLineOutcomes.mapValues { it.value.toLineDiagnostic() }
                 val lineQuickAllFailed = quickLineRetest && freshLines.isNotEmpty() && freshLines.values.all { it >= MAX }
                 if (!runIsCurrent()) {
@@ -904,7 +911,7 @@ object SpeedTester {
                 val bestLineIndex = bestLine?.let { endpoint ->
                     RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
                 }?.takeIf { it >= 0 }
-                if (bestLine != null && bestLineIndex != null) {
+                if (bestLine != null && bestLineIndex != null && runIsCurrent()) {
                     RouteManager.saveLastFastestLine(bestLineIndex)
                     if (runIsCurrent() && RouteManager.applyFastestLineEndpoint(
                             bestLine,
@@ -918,12 +925,17 @@ object SpeedTester {
                 }
                 Log.i(TAG, "line test done, best=$bestLine")
 
-                // 阶段 2：兜底样本路径（固定封面 404 时才用到）
-                reportStage(Progress(Phase.FETCHING_SAMPLE))
-                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
-                val samplePath = obtainProbePath()
-                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
-                Log.i(TAG, "img probe sample path=$samplePath")
+                // The fallback sample is fetched only if an image probe gets an HTTP response
+                // without a valid image; concurrent failures share this run-scoped lazy lookup.
+                var resolvedSamplePath: String? = null
+                val sharedSamplePath = ManwaImageFallbackProbePolicy.sharedLazy(this) {
+                    reportStage(Progress(Phase.FETCHING_SAMPLE))
+                    (if (runIsCurrent()) obtainProbePath(::runIsCurrent) else null).also { path ->
+                        resolvedSamplePath = path
+                        if (runIsCurrent()) Log.i(TAG, "img probe sample path=$path")
+                    }
+                }
+                samplePath = sharedSamplePath
 
                 // 阶段 3：逐条图源域名/IP探测（包含真实图片内容校验）。
                 val imgAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
@@ -964,7 +976,9 @@ object SpeedTester {
                     async {
                         probeSemaphore.withPermit {
                             val result = if (runIsCurrent()) {
-                                measureImgAtIp(imgClient, endpoint, samplePath)
+                                measureImgAtIp(imgClient, endpoint) {
+                                    if (runIsCurrent()) sharedSamplePath.await().takeIf { runIsCurrent() } else null
+                                }
                             } else {
                                 ImgProbe(MAX, ImgVerdict.UNREACHABLE, SpeedTestEndpointDiagnostic(false, null, 0L, null))
                             }
@@ -1104,7 +1118,7 @@ object SpeedTester {
                     TAG,
                     "img probe summary total=${freshVerdictAcc.size} ok=${vc[ImgVerdict.OK] ?: 0}" +
                         " unreachable=${vc[ImgVerdict.UNREACHABLE] ?: 0} no_image=${vc[ImgVerdict.NO_IMAGE] ?: 0}" +
-                        " samplePath=${if (samplePath == null) "null" else "ok"} fastest=[$fastest]",
+                        " samplePath=${if (resolvedSamplePath == null) "null" else "ok"} fastest=[$fastest]",
                 )
                 Log.i(
                     TAG,
@@ -1135,6 +1149,7 @@ object SpeedTester {
                 )
                 result
             } finally {
+                samplePath?.cancel()
                 running.set(false)
                 _isRunning.value = false
                 lineClient.releaseProbe()

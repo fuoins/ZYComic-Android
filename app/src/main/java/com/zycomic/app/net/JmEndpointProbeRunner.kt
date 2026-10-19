@@ -6,7 +6,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-/** JM owns its permits; neither probes nor progress touch the Manwa pools. */
+/** JM keeps its local scheduling; only the total endpoint budget is shared. */
 internal class JmEndpointProbeRunner(concurrency: Int = 24) {
     private val permits = Semaphore(concurrency)
 
@@ -20,7 +20,7 @@ internal class JmEndpointProbeRunner(concurrency: Int = 24) {
             async {
                 permits.withPermit {
                     onStarted(target)
-                    val result = probe(target)
+                    val result = SpeedTestProbeBudget.permits.withPermit { probe(target) }
                     onResult(target, result)
                     target to result
                 }

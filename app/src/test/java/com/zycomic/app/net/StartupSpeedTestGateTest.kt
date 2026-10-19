@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -48,9 +49,11 @@ class StartupSpeedTestGateTest {
         withTimeout(5_000) {
             val gate = StartupSpeedTestGate()
             val waiter = async(start = CoroutineStart.UNDISPATCHED) { gate.awaitConfigurationUpdated() }
+            assertNull(gate.configurationUpdated)
             assertFalse(waiter.isCompleted)
             gate.complete(configurationUpdated = false)
             assertFalse(waiter.await())
+            assertEquals(false, gate.configurationUpdated)
         }
     }
 
@@ -60,6 +63,7 @@ class StartupSpeedTestGateTest {
         gate.complete(configurationUpdated = true)
         gate.complete(configurationUpdated = false)
         assertTrue(gate.awaitConfigurationUpdated())
+        assertEquals(true, gate.configurationUpdated)
     }
 
     @Test

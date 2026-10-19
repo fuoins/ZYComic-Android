@@ -44,6 +44,7 @@ object JmSpeedTester {
         reuseLines: Boolean = false,
         reuseImages: Boolean = false,
         isCurrent: () -> Boolean = { true },
+        beforeApply: suspend () -> Boolean = { true },
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): JmRouteManager.SpeedTestSnapshot = lock.withLock {
         check(running.compareAndSet(false, true)) { "JM 测速已在运行" }
@@ -54,6 +55,7 @@ object JmSpeedTester {
                     if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM)) {
                         return@coroutineScope JmRouteManager.SpeedTestSnapshot()
                     }
+                    val configVersion = JmRouteManager.state.value.remoteVersion
                     val configRevision = JmRouteManager.currentSpeedTestConfigRevision()
                     val configFingerprint = JmRouteManager.currentSpeedTestConfigFingerprint()
                     val imageConfigFingerprint = JmRouteManager.currentImageConfigFingerprint()
@@ -109,6 +111,7 @@ object JmSpeedTester {
                     fun stillCurrent(): Boolean =
                         isCurrent() && StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
                             StartupPlatformPolicy.state.value.revision == platformRevision &&
+                            JmRouteManager.state.value.remoteVersion == configVersion &&
                             JmRouteManager.currentSpeedTestConfigRevision() == configRevision &&
                             JmRouteManager.currentSpeedTestConfigFingerprint() == configFingerprint &&
                             JmRouteManager.currentImageConfigFingerprint() == imageConfigFingerprint &&
@@ -119,6 +122,7 @@ object JmSpeedTester {
                     val startedNanos = System.nanoTime()
                     val progressGuard = Any()
                     var progress = JmSpeedTestProgress()
+                    val pendingLogs = java.util.concurrent.ConcurrentLinkedQueue<Triple<String, String, String>>()
                     fun publish(next: (JmSpeedTestProgress) -> JmSpeedTestProgress) = synchronized(progressGuard) {
                         progress = next(progress).copy(elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L)
                         if (stillCurrent()) onProgress?.invoke(progress)
@@ -186,10 +190,12 @@ object JmSpeedTester {
                             onStarted = { endpointStarted(it.endpoint) },
                             onResult = { target, result ->
                                 if (stillCurrent()) {
-                                    JmRouteManager.record(
-                                        "speed_line_ip",
-                                        "${target.endpoint.domain} [${target.endpoint.ip}]",
-                                        "JM API ${if (result.delayMs < Long.MAX_VALUE) "${result.delayMs}ms" else "不可达"}",
+                                    pendingLogs.add(
+                                        Triple(
+                                            "speed_line_ip",
+                                            "${target.endpoint.domain} [${target.endpoint.ip}]",
+                                            "JM API ${if (result.delayMs < Long.MAX_VALUE) "${result.delayMs}ms" else "不可达"}",
+                                        ),
                                     )
                                     endpointDone(target.endpoint, result)
                                 }
@@ -247,10 +253,12 @@ object JmSpeedTester {
                             onStarted = ::endpointStarted,
                             onResult = { endpoint, result ->
                                 if (stillCurrent()) {
-                                    JmRouteManager.record(
-                                        "speed_image_ip",
-                                        "${endpoint.domain} [${endpoint.ip}]",
-                                        "JM 图源 ${result.verdict}; ${result.elapsedMs}ms",
+                                    pendingLogs.add(
+                                        Triple(
+                                            "speed_image_ip",
+                                            "${endpoint.domain} [${endpoint.ip}]",
+                                            "JM 图源 ${result.verdict}; ${result.elapsedMs}ms",
+                                        ),
                                     )
                                     endpointDone(endpoint, result)
                                 }
@@ -291,11 +299,14 @@ object JmSpeedTester {
                             lineQuickTestAllFailed = quickLines && freshLineIpDelays.isNotEmpty() && freshLineIpDelays.values.none { it < Long.MAX_VALUE },
                             imageQuickTestAllFailed = quickImages && freshImageIpDelays.isNotEmpty() && freshImageIpDelays.values.none { it < Long.MAX_VALUE },
                             startedAtEpochMs = started, completedAtEpochMs = System.currentTimeMillis(),
-                            remoteVersion = JmRouteManager.state.value.remoteVersion,
+                            remoteVersion = configVersion,
                             configFingerprint = configFingerprint, imageConfigFingerprint = imageConfigFingerprint,
                             imageNetworkPolicy = imageNetworkPolicy, imageResultsReused = false,
                         )
-                        if (stillCurrent()) {
+                        if (beforeApply() && stillCurrent()) {
+                            pendingLogs.forEach { (kind, host, message) ->
+                                if (stillCurrent()) JmRouteManager.record(kind, host, message)
+                            }
                             JmRouteManager.recordSpeedTest(snapshot, platformRevision)
                             publish { it.copy(phase = JmSpeedTestProgress.Phase.COMPLETE) }
                         }
