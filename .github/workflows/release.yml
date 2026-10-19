@@ -12,6 +12,10 @@ on:
         description: '手动重跑：目标 tag（如 v1.0.0）'
         required: true
         default: 'v1.0.0'
+      validate_only:
+        description: '仅在所选分支执行发布前单元测试，不创建 Release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -23,6 +27,8 @@ jobs:
       MINIFY_ENABLED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.validate_only && github.ref || github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -69,7 +75,27 @@ jobs:
           echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "将发布 $TAG"
 
+      - name: Verify release source and version
+        env:
+          RELEASE_VERSION: ${{ steps.t.outputs.ver }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          if [ "${{ inputs.validate_only }}" != "true" ]; then
+            test "$(git rev-parse "refs/tags/${{ steps.t.outputs.tag }}^{commit}")" = "$SHA"
+          fi
+          grep -q "versionName = \"$RELEASE_VERSION\"" app/build.gradle.kts
+          echo "RELEASE_SOURCE_SHA=$SHA" >> "$GITHUB_ENV"
+          echo "Release source SHA: $SHA"
+          grep -E 'version(Code|Name) =' app/build.gradle.kts
+
+      - name: Release unit tests
+        env:
+          ORG_GRADLE_PROJECT_abi: 'arm64-v8a'
+        run: ./gradlew :app:testReleaseUnitTest --console=plain -Dorg.gradle.jvmargs="-Xmx4g" --build-cache
+
       - name: Decode release keystore
+        if: ${{ !inputs.validate_only }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
@@ -80,6 +106,7 @@ jobs:
           echo "KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
 
       - name: Build signed release APK (final, arm64-v8a)
+        if: ${{ !inputs.validate_only }}
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/zycomic-release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -93,6 +120,7 @@ jobs:
             --build-cache
 
       - name: Verify signature and rename APK
+        if: ${{ !inputs.validate_only }}
         id: pkg
         run: |
           set -e
@@ -112,20 +140,45 @@ jobs:
           cp "$APK" "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           ls -lh "$OUT"
+          echo "APK bytes: $(stat -c '%s' "$OUT")"
+          sha256sum "$OUT"
+          AAPT="$(find "$ANDROID_HOME" -name aapt -type f 2>/dev/null | sort -V | tail -1)"
+          test -n "$AAPT" || { echo "::error::未找到 aapt"; exit 1; }
+          "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
+          grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='10'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
+          test -s app/build/outputs/mapping/release/mapping.txt
+          {
+            echo "### Release verification"
+            echo "- Source: $RELEASE_SOURCE_SHA"
+            echo "- APK: $OUT"
+            echo "- Bytes: $(stat -c '%s' "$OUT")"
+            echo "- SHA256: $(sha256sum "$OUT" | cut -d ' ' -f 1)"
+            echo "- Signature: apksigner verify passed"
+            echo "- R8 mapping: present; MINIFY_ENABLED=$MINIFY_ENABLED"
+            grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Write release notes
+        if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 2.2.0 正式版
+          ZYComic 3.0.0 正式版
 
-          ZYComic 是一款安卓漫画阅读器，基于成熟的漫画阅读器内核与 Compose UI 框架，接入线路与图源服务。
-
-          本次更新
-          - 修复从阅读器返回漫画详情页后，章节已读状态未同步的问题。
+          本次更新（相对 v2.2.0）
+          - 新增 Manwa / JM 平台切换，完善 JM 浏览、分类、搜索、详情、相关推荐与评论交互。
+          - 完善 JM 登录、注册、邮箱激活、账号恢复和个人资料刷新，隔离不同平台及账号的会话与资料。
+          - 接入 JM 在线收藏、收藏夹、观看历史与阅读进度，优化书库搜索、标题和加载状态。
+          - 完善 JM 签到状态、补签预览与操作保护。
+          - 优化书库和分类工具栏、平台配色、筛选与详情页交互。
+          - 优化启动测速、配置预热与版本变更后的重测，完善线路选择、运行时恢复、图片加载及重试策略。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 仅支持 arm64-v8a（64 位真机）
+          - 版本：3.0.0（versionCode 10），正式包名 com.zycomic.app。
+          - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
 
           开源许可
@@ -134,6 +187,7 @@ jobs:
           echo "notes 已生成"
 
       - name: Create draft GitHub Release and upload APK
+        if: ${{ !inputs.validate_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -141,5 +195,5 @@ jobs:
             --title "ZYComic ${{ steps.t.outputs.tag }}" \
             --notes-file notes.md \
             --draft \
-            --target "$GITHUB_SHA"
+            --target "$RELEASE_SOURCE_SHA"
           echo "草稿 Release 已创建（未发布）"
