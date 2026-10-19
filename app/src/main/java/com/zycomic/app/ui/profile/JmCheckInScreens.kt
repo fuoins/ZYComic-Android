@@ -3,8 +3,6 @@ package com.zycomic.app.ui.profile
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -53,79 +53,40 @@ import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.zycomic.app.data.repository.JmDailyCalendar
 import com.zycomic.app.data.repository.JmMonthlyAward
+import com.zycomic.app.ui.components.JmCoverImageLoader
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 import java.time.LocalDate
 import java.time.YearMonth
 
 @Composable
-internal fun JmCalendarDetailScreen(viewModel: JmCheckInViewModel, context: Context, onClose: () -> Unit) {
+internal fun JmCalendarDetailScreen(viewModel: JmCheckInViewModel, onClose: () -> Unit) {
     val state by viewModel.calendar.collectAsState()
-    var showConfirm by remember { mutableStateOf(false) }
-    fun closeScreen() {
-        viewModel.cancelMakeup()
-        onClose()
-    }
-    BackHandler(enabled = true) {
-        if (state.makeupLoading) viewModel.cancelMakeup() else closeScreen()
-    }
+    BackHandler(enabled = true, onBack = onClose)
     LaunchedEffect(Unit) { viewModel.loadCalendar() }
-    Dialog(
-        onDismissRequest = { if (state.makeupLoading) viewModel.cancelMakeup() else closeScreen() },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-            ScreenHeader(title = "JM 签到日历", onBack = ::closeScreen, trailing = {
-                IconButton(onClick = { viewModel.loadCalendar() }, enabled = !state.loading && !state.makeupLoading) {
+            ScreenHeader(title = stringResource(KMR.strings.jm_calendar_title), onBack = onClose, trailing = {
+                IconButton(onClick = { viewModel.loadCalendar() }, enabled = !state.loading) {
                     Icon(Icons.Default.Refresh, contentDescription = "刷新")
                 }
             })
             HorizontalDivider()
             when {
-                state.loading && state.calendar == null -> CenterLoading()
+                state.loading -> CenterLoading()
                 state.error != null && state.calendar == null -> ErrorBlock(state.error!!, viewModel::loadCalendar)
                 state.calendar == null -> Text("暂无签到日历", modifier = Modifier.padding(20.dp))
-                else -> CalendarContent(
-                    calendar = state.calendar!!,
-                    selected = state.selectedDates,
-                    makeupLoading = state.makeupLoading,
-                    progressText = state.makeupProgress?.let { "补签进度 ${it.completed}/${it.total}" },
-                    summary = state.makeupSummary,
-                    error = state.error,
-                    onToggle = viewModel::toggleDate,
-                    onRequestConfirm = { showConfirm = true },
-                    onCancel = viewModel::cancelMakeup,
-                )
+                else -> {
+                    state.error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+                    CalendarContent(state.calendar!!)
+                }
             }
         }
-    }
-    if (showConfirm) {
-        val chosen = state.selectedDates.sorted()
-        AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            title = { Text("确认批量补签") },
-            text = { Text("将为 ${chosen.size} 个今天之前的缺签日期发送补签请求：\n${chosen.joinToString("、")}\n\n每次请求至少间隔 1.5 秒。只在你确认后执行；途中可取消，已完成日期会保存并在重新加载后核对。") },
-            confirmButton = {
-                Button(enabled = !state.makeupLoading, onClick = {
-                    showConfirm = false
-                    viewModel.confirmMakeup(context)
-                }) { Text("确认补签") }
-            },
-            dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("返回") } },
-        )
     }
 }
 
 @Composable
-private fun CalendarContent(
-    calendar: JmDailyCalendar,
-    selected: Set<LocalDate>,
-    makeupLoading: Boolean,
-    progressText: String?,
-    summary: String?,
-    error: String?,
-    onToggle: (LocalDate) -> Unit,
-    onRequestConfirm: () -> Unit,
-    onCancel: () -> Unit,
-) {
+private fun CalendarContent(calendar: JmDailyCalendar) {
     val today = LocalDate.now()
     val monthDays = calendar.days.associateBy { it.date }
     val startOffset = calendar.month.atDay(1).dayOfWeek.value - 1
@@ -137,6 +98,8 @@ private fun CalendarContent(
         }
         Text("连续 3 天：${calendar.threeDayCoin ?: "—"} Jcoin / ${calendar.threeDayExp ?: "—"} EXP", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
         Text("连续 7 天：${calendar.sevenDayCoin ?: "—"} Jcoin / ${calendar.sevenDayExp ?: "—"} EXP", style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(KMR.strings.jm_calendar_legend), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+        Text(stringResource(KMR.strings.jm_calendar_activity_marker), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth()) {
             listOf("一", "二", "三", "四", "五", "六", "日").forEach { day ->
@@ -157,51 +120,112 @@ private fun CalendarContent(
                             SignCalendarDayCell(null, false, false, false, false, isPlaceholder = true)
                         } else {
                             val day = monthDays[date]
-                            val isSelected = date in selected
-                            val eligible = day != null && date < today && day.signed != true
-                            Box(
-                                Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .then(if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.tertiary, RoundedCornerShape(8.dp)) else Modifier)
-                                    .clickable(enabled = eligible && !makeupLoading) { onToggle(date) }
-                                    .padding(3.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box {
-                                        SignCalendarDayCell(
-                                            dayNumber = date.dayOfMonth,
-                                            isSigned = day?.signed == true,
-                                            isMissed = day != null && date < today && day.signed != true,
-                                            isToday = date == today,
-                                            isFuture = date > today,
-                                        )
-                                    }
-                                    if (day?.bonus == true) Text("♥", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
-                                }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                SignCalendarDayCell(
+                                    dayNumber = date.dayOfMonth,
+                                    isSigned = day?.signed == true,
+                                    isMissed = day != null && date < today && day.signed != true,
+                                    isToday = date == today,
+                                    isFuture = date > today,
+                                )
+                                if (day?.bonus == true) Text("♥", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Text("点选今天之前尚未签到的日期仅作预览；不会自动补签。今天与未来日期不可选。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("月底补齐说明：月底最后一天可将本月此前缺签日期补齐；本月所有日期完成后才可能获得全签奖励。浏览页面不会领取月度奖励。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 5.dp))
-        if (selected.isNotEmpty()) {
-            Button(onClick = onRequestConfirm, enabled = !makeupLoading, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                Text("确认补签 ${selected.size} 天")
+        Text(stringResource(KMR.strings.jm_calendar_summary), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+    }
+}
+
+private data class MakeupConfirmation(val calendar: JmDailyCalendar, val dates: Set<LocalDate>)
+
+@Composable
+internal fun JmMakeupScreen(viewModel: JmCheckInViewModel, context: Context, onClose: () -> Unit) {
+    val state by viewModel.calendar.collectAsState()
+    var confirmation by remember { mutableStateOf<MakeupConfirmation?>(null) }
+    fun closeScreen() {
+        viewModel.cancelMakeup()
+        onClose()
+    }
+    BackHandler(enabled = true) {
+        if (state.makeupLoading) viewModel.cancelMakeup() else closeScreen()
+    }
+    LaunchedEffect(Unit) { viewModel.loadCalendar() }
+    Dialog(
+        onDismissRequest = { if (state.makeupLoading) viewModel.cancelMakeup() else closeScreen() },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+            ScreenHeader(title = stringResource(KMR.strings.jm_makeup_title), onBack = ::closeScreen, trailing = {
+                IconButton(onClick = { viewModel.loadCalendar() }, enabled = !state.loading && !state.makeupLoading) {
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(KMR.strings.jm_makeup_reload))
+                }
+            })
+            HorizontalDivider()
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                Text(stringResource(KMR.strings.jm_makeup_description), style = MaterialTheme.typography.bodyMedium)
+                when {
+                    state.loading -> CenterLoading()
+                    state.error != null && state.calendar == null -> ErrorBlock(state.error!!, viewModel::loadCalendar)
+                    state.calendar == null -> Text("暂无签到日历", modifier = Modifier.padding(vertical = 16.dp))
+                    else -> {
+                        val calendar = state.calendar!!
+                        val today = LocalDate.now()
+                        val candidates = calendar.makeupCandidates(today).map { it.date }.toSet()
+                        Text("${calendar.month.year}年${calendar.month.monthValue}月", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                        Text(stringResource(KMR.strings.jm_makeup_preview_count, candidates.size), modifier = Modifier.padding(top = 8.dp))
+                        Text(
+                            if (candidates.isEmpty()) stringResource(KMR.strings.jm_makeup_empty) else candidates.sorted().joinToString("、"),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        Text(stringResource(KMR.strings.jm_makeup_preview_notice), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+                        Button(
+                            enabled = !state.makeupLoading && !state.loading && state.error == null && candidates.isNotEmpty() && calendar.month == YearMonth.from(today),
+                            onClick = { confirmation = MakeupConfirmation(calendar, candidates) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                        ) { Text(stringResource(KMR.strings.jm_makeup_confirm_all)) }
+                    }
+                }
+                if (state.makeupLoading) {
+                    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text(
+                            stringResource(KMR.strings.jm_makeup_progress, state.makeupProgress?.completed ?: 0, state.makeupProgress?.total ?: 0),
+                            Modifier.weight(1f).padding(start = 10.dp),
+                        )
+                        TextButton(onClick = viewModel::cancelMakeup) { Text(stringResource(KMR.strings.jm_makeup_cancel)) }
+                    }
+                }
+                state.makeupSummary?.let { Text(it, Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.primary) }
+                state.error?.let {
+                    Text(it, Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = viewModel::loadCalendar, enabled = !state.makeupLoading && !state.loading) { Text(stringResource(KMR.strings.jm_makeup_reload)) }
+                }
             }
         }
-        if (makeupLoading) {
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Text(progressText ?: "补签进行中", Modifier.weight(1f).padding(start = 10.dp))
-                TextButton(onClick = onCancel) { Text("取消") }
-            }
-        }
-        summary?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary) }
-        error?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.error) }
+    }
+    confirmation?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { confirmation = null },
+            title = { Text(stringResource(KMR.strings.jm_makeup_confirm_title)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(stringResource(KMR.strings.jm_makeup_description))
+                    Text(stringResource(KMR.strings.jm_makeup_confirm_dates, preview.dates.size, preview.dates.sorted().joinToString("、")), Modifier.padding(top = 12.dp))
+                    Text(stringResource(KMR.strings.jm_makeup_preview_notice), Modifier.padding(top = 12.dp))
+                }
+            },
+            confirmButton = {
+                Button(enabled = !state.makeupLoading && !state.loading, onClick = {
+                    confirmation = null
+                    viewModel.confirmMakeup(context, preview.calendar, preview.dates)
+                }) { Text(stringResource(KMR.strings.jm_makeup_start)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmation = null }) { Text(stringResource(KMR.strings.jm_makeup_back)) } },
+        )
     }
 }
 
@@ -212,7 +236,7 @@ internal fun JmAnnualAwardsScreen(viewModel: JmCheckInViewModel, onClose: () -> 
     LaunchedEffect(Unit) { viewModel.loadYears() }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-            ScreenHeader("JM 年度签到奖励", onClose)
+            ScreenHeader(stringResource(KMR.strings.jm_annual_awards_title), onClose)
             HorizontalDivider()
             if (state.loadingYears && state.years.isEmpty()) {
                 CenterLoading()
@@ -250,12 +274,18 @@ internal fun JmAnnualAwardsScreen(viewModel: JmCheckInViewModel, onClose: () -> 
 
 @Composable
 private fun AwardMonthCard(month: Int, award: JmMonthlyAward?, year: Int?) {
+    val context = LocalContext.current
+    val imageLoader = remember(context) { JmCoverImageLoader.get(context) }
+    var imageFailed by remember(award?.imageUrl) { mutableStateOf(false) }
     val now = YearMonth.now()
     val target = year?.let { runCatching { YearMonth.of(it, month) }.getOrNull() }
     val status = when {
+        award?.imageUrl != null && imageFailed -> stringResource(KMR.strings.jm_award_image_load_failed)
         award?.imageUrl != null -> "全签奖励"
+        award?.imagePath != null -> stringResource(KMR.strings.jm_award_image_url_failed)
+        award == null -> stringResource(KMR.strings.jm_award_no_data)
         target == null -> "暂无数据"
-        target.isBefore(now) -> "未签到"
+        target.isBefore(now) -> stringResource(KMR.strings.jm_award_image_unavailable)
         target == now -> "进行中"
         else -> "该月还未经历"
     }
@@ -264,9 +294,12 @@ private fun AwardMonthCard(month: Int, award: JmMonthlyAward?, year: Int?) {
             Text("$month 月", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (award?.imageUrl != null) {
+        if (award?.imageUrl != null && !imageFailed) {
             AsyncImage(
                 model = award.imageUrl,
+                imageLoader = imageLoader,
+                contentScale = ContentScale.FillWidth,
+                onError = { imageFailed = true },
                 contentDescription = "${award.year}年${award.month}月全签奖励",
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(8.dp)),
             )

@@ -58,7 +58,6 @@ fun LibraryHistoryToolbar(
             LibraryHistoryToolbarPolicy.visibleActions(
                 history = history,
                 searchExpanded = searchQuery != null,
-                jmPlatform = platform == ContentPlatform.JM,
             ).forEach { action ->
                 when (action) {
                     LibraryHistoryToolbarPolicy.Action.SEARCH -> ToolbarSlot(
@@ -89,7 +88,7 @@ fun LibraryHistoryToolbar(
                 width = slotWidth,
             )
         }
-        if (LibraryHistoryToolbarPolicy.showPlatformSelector(searchQuery != null, platform == ContentPlatform.JM)) {
+        if (LibraryHistoryToolbarPolicy.showPlatformSelector(searchQuery != null)) {
             Box(
                 modifier = Modifier.width(100.dp).height(48.dp),
                 contentAlignment = Alignment.Center,

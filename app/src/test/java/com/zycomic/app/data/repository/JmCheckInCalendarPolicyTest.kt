@@ -35,6 +35,30 @@ class JmCheckInCalendarPolicyTest {
     }
 
     @Test
+    fun `makeup preview includes every past unsigned day but excludes signed today and future`() {
+        val records = (1..31).joinToString(",") { day ->
+            val signed = when (day) {
+                2 -> "true"
+                4 -> "null"
+                19 -> "false"
+                else -> "false"
+            }
+            """{"date":"%02d","signed":%s}""".format(day, signed)
+        }
+        val calendar = JmCheckInResponseParser.parseCalendar(
+            """{"daily_id":"73","record":[[$records]]}""",
+            today,
+            "account-hash",
+            7L,
+        )
+
+        assertEquals(
+            (1..18).filter { it != 2 }.map { LocalDate.of(2026, 10, it) },
+            calendar.makeupCandidates(today).map { it.date },
+        )
+    }
+
+    @Test
     fun `calendar requires positive daily id and record and ignores full dates outside its month`() {
         val calendar = JmCheckInResponseParser.parseCalendar(
             """{"daily_id":"73","record":[[{"date":"2026-10-01","signed":false},{"date":"2026-11-01","signed":false}]]}""",
@@ -83,14 +107,38 @@ class JmCheckInCalendarPolicyTest {
         assertNull(months[0].imagePath)
         assertEquals("/award/feb.jpg", months[1].imagePath)
         assertEquals("https://cdn.example/award/feb.jpg", JmCheckInResponseParser.joinImageUrl("https://cdn.example/", months[1].imagePath))
+        assertEquals("https://cdn.example/award/feb.jpg", JmCheckInResponseParser.joinImageUrl(null, "https://cdn.example/award/feb.jpg"))
+        assertEquals("https://cdn.example/award/feb.jpg", JmCheckInResponseParser.joinImageUrl("https://other.example", "//cdn.example/award/feb.jpg"))
         assertNull(JmCheckInResponseParser.joinImageUrl("https://cdn.example", null))
+        assertNull(JmCheckInResponseParser.joinImageUrl(null, "   "))
         assertNull(JmCheckInResponseParser.joinImageUrl(null, "/award/feb.jpg"))
+        assertNull(JmCheckInResponseParser.joinImageUrl("http://cdn.example", "/award/feb.jpg"))
+        assertNull(JmCheckInResponseParser.joinImageUrl("https://cdn.example", "http://cdn.example/award.jpg"))
+        assertNull(JmCheckInResponseParser.joinImageUrl(null, "javascript:alert(1)"))
+        assertNull(JmCheckInResponseParser.joinImageUrl(null, "https://"))
+        assertFalse(JmCheckInResponseParser.requiresImageHost("https://cdn.example/award/feb.jpg"))
+        assertFalse(JmCheckInResponseParser.requiresImageHost("//cdn.example/award/feb.jpg"))
+        assertFalse(JmCheckInResponseParser.requiresImageHost("http://cdn.example/award/feb.jpg"))
+        assertTrue(JmCheckInResponseParser.requiresImageHost("/award/feb.jpg"))
+        assertFalse(JmCheckInResponseParser.requiresImageHost(null))
         assertNull(JmCheckInResponseParser.parseImageHost("""{"img_host":"http://unsafe.example"}"""))
         assertEquals("https://cdn.example", JmCheckInResponseParser.parseImageHost("""{"data":{"img_host":"https://cdn.example/"}}"""))
         assertEquals(listOf("2026", "1000"), JmCheckInResponseParser.parseAwardYears("""{"list":[{"title":"2026"},{"title":"1000"},{"title":"0001"},{"title":"0010"},{"title":"0999"}]}"""))
         assertThrows(IOException::class.java) { JmCheckInResponseParser.parseMonthlyAwards("""{"list":[]}""", "0010") }
         assertTrue(isValidAwardYear("2026"))
         assertFalse(isValidAwardYear("0010"))
+    }
+
+    @Test
+    fun `unsafe nonempty award image path is preserved while resolved URL stays null`() {
+        val imagePath = "http://unsafe.example/reward.jpg"
+        val award = JmCheckInResponseParser.parseMonthlyAwards(
+            """{"list":[{"id":"73","year":"2026","month":"1","img":"$imagePath"}]}""",
+            "2026",
+        ).single()
+
+        assertEquals(imagePath, award.imagePath)
+        assertNull(JmCheckInResponseParser.joinImageUrl(null, award.imagePath))
     }
 
     @Test

@@ -45,7 +45,9 @@ class JmCheckInSafetyContractTest {
         assertTrue(viewModel.contains("fun close()"))
         assertTrue(viewModel.contains("scope.cancel()"))
         assertTrue(screens.contains("onDismissRequest = { if (state.makeupLoading) viewModel.cancelMakeup() else closeScreen() }"))
-        assertTrue(screens.contains("ScreenHeader(title = \"JM 签到日历\", onBack = ::closeScreen"))
+        assertTrue(screens.contains("ScreenHeader(title = stringResource(KMR.strings.jm_makeup_title), onBack = ::closeScreen"))
+        assertTrue(profile.contains("showJmMakeup = false"))
+        assertTrue(profile.contains("JmMakeupScreen(jmCheckInViewModel, context, ::closeMakeup)"))
     }
 
     @Test
@@ -54,5 +56,32 @@ class JmCheckInSafetyContractTest {
         assertTrue(repository.contains("fun parseMonthlyAwards(raw: String, requestedYear: String)"))
         assertTrue(repository.contains("internal fun isValidAwardYear"))
         assertTrue(screens.contains("年度奖励图片为只读浏览；此页面不会调用按月份领取奖励的接口。"))
+    }
+
+    @Test
+    fun `calendar is read only and all past missing dates are frozen before confirm start`() {
+        val calendarScreen = screens.substringAfter("internal fun JmCalendarDetailScreen").substringBefore("private data class MakeupConfirmation")
+        assertTrue(!calendarScreen.contains("confirmMakeup"))
+        assertTrue(!calendarScreen.contains("clickable"))
+        assertTrue(calendarScreen.contains("KMR.strings.jm_calendar_legend"))
+        assertTrue(calendarScreen.contains("KMR.strings.jm_calendar_activity_marker"))
+        val makeupScreen = screens.substringAfter("internal fun JmMakeupScreen").substringBefore("internal fun JmAnnualAwardsScreen")
+        assertTrue(makeupScreen.contains("calendar.makeupCandidates(today).map { it.date }.toSet()"))
+        assertTrue(makeupScreen.contains("confirmation = MakeupConfirmation(calendar, candidates)"))
+        assertTrue(makeupScreen.contains("viewModel.confirmMakeup(context, preview.calendar, preview.dates)"))
+        assertTrue(makeupScreen.contains("KMR.strings.jm_makeup_description"))
+        assertTrue(makeupScreen.contains("KMR.strings.jm_makeup_start"))
+        val load = viewModel.substringAfter("fun loadCalendar()").substringBefore("fun confirmMakeup")
+        assertTrue(!load.contains("Repository.makeup"))
+    }
+
+    @Test
+    fun `award artwork uses JM loader and missing data differs from a failed image`() {
+        assertTrue(screens.contains("JmCoverImageLoader.get(context)"))
+        assertTrue(screens.contains("imageLoader = imageLoader"))
+        assertTrue(screens.contains("onError = { imageFailed = true }"))
+        assertTrue(screens.contains("award?.imagePath != null -> stringResource(KMR.strings.jm_award_image_url_failed)"))
+        assertTrue(screens.contains("award == null -> stringResource(KMR.strings.jm_award_no_data)"))
+        assertTrue(screens.contains("KMR.strings.jm_award_image_load_failed"))
     }
 }

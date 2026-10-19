@@ -10,15 +10,14 @@ internal object LibraryHistoryToolbarPolicy {
         listOf(Action.SEARCH, Action.REFRESH, Action.FILTER)
     }
 
-    fun visibleActions(history: Boolean, searchExpanded: Boolean, jmPlatform: Boolean = false): List<Action> =
-        if (searchExpanded && jmPlatform) {
+    fun visibleActions(history: Boolean, searchExpanded: Boolean): List<Action> =
+        if (searchExpanded) {
             emptyList()
         } else {
-            leadingActions(history).filterNot { searchExpanded && it == Action.SEARCH }
+            leadingActions(history)
         }
 
-    fun showPlatformSelector(searchExpanded: Boolean, jmPlatform: Boolean): Boolean =
-        !searchExpanded || !jmPlatform
+    fun showPlatformSelector(searchExpanded: Boolean): Boolean = !searchExpanded
 }
 
 /** Reject UI results captured for a different JM account or browse tab. */

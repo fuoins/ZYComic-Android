@@ -141,6 +141,7 @@ fun LibraryScreen(
 
     // 多选模式下按返回键 = 退出多选
     BackHandler(enabled = selectionMode) { vm.exitSelection() }
+    BackHandler(enabled = searchQuery != null && !selectionMode) { vm.updateSearchQuery(null) }
 
     var showFilterDialog by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }

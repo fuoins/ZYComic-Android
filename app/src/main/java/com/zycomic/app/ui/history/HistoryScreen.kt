@@ -119,6 +119,7 @@ fun HistoryScreen(
     // 多选模式下按返回键 = 退出多选
     val manwaSelectionMode = selectionMode && platform == ContentPlatform.MANWA
     BackHandler(enabled = manwaSelectionMode) { vm.exitSelection() }
+    BackHandler(enabled = searchQuery != null && !manwaSelectionMode) { vm.updateSearchQuery(null) }
 
     var showBatchDelete by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }

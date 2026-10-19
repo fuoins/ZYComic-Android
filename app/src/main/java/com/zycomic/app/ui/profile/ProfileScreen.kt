@@ -124,6 +124,7 @@ fun ProfileScreen(
     val jmSessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
     var showJmMyComments by remember { mutableStateOf(false) }
     var showJmCalendar by remember { mutableStateOf(false) }
+    var showJmMakeup by remember { mutableStateOf(false) }
     var showJmAwards by remember { mutableStateOf(false) }
     var jmSubscreenSessionRevision by remember { mutableStateOf<Long?>(null) }
     val jmCheckInViewModel = remember(jmSessionRevision) { JmCheckInViewModel() }
@@ -133,6 +134,7 @@ fun ProfileScreen(
     LaunchedEffect(jmSessionRevision) {
         jmCheckInViewModel.cancelMakeup()
         showJmCalendar = false
+        showJmMakeup = false
         showJmAwards = false
         jmSubscreenSessionRevision = null
     }
@@ -141,7 +143,13 @@ fun ProfileScreen(
         showJmCalendar = false
         jmSubscreenSessionRevision = null
     }
+    fun closeMakeup() {
+        jmCheckInViewModel.cancelMakeup()
+        showJmMakeup = false
+        jmSubscreenSessionRevision = null
+    }
     LaunchedEffect(platform) {
+        if (platform != ContentPlatform.JM) closeMakeup()
         if (platform == ContentPlatform.MANWA && StartupPlatformPolicy.isEnabled(platform) && UserRepository.userFlow.value != null) {
             try {
                 UserRepository.refreshUserInfo()
@@ -159,6 +167,7 @@ fun ProfileScreen(
     var adProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     androidx.activity.compose.BackHandler(enabled = showPointLogs) { showPointLogs = false }
     androidx.activity.compose.BackHandler(enabled = showJmCalendar) { closeCalendar() }
+    androidx.activity.compose.BackHandler(enabled = showJmMakeup) { closeMakeup() }
     androidx.activity.compose.BackHandler(enabled = showJmAwards) { showJmAwards = false }
     androidx.activity.compose.BackHandler(enabled = showChangePwd) { showChangePwd = false }
     androidx.activity.compose.BackHandler(enabled = showRewardDialog) { showRewardDialog = false }
@@ -172,7 +181,11 @@ fun ProfileScreen(
     val scope = rememberCoroutineScope()
 
     if (showJmCalendar && jmLoggedIn && jmSubscreenSessionRevision == jmSessionRevision && platform == ContentPlatform.JM) {
-        JmCalendarDetailScreen(jmCheckInViewModel, context, ::closeCalendar)
+        JmCalendarDetailScreen(jmCheckInViewModel, ::closeCalendar)
+        return
+    }
+    if (showJmMakeup && jmLoggedIn && jmSubscreenSessionRevision == jmSessionRevision && platform == ContentPlatform.JM) {
+        JmMakeupScreen(jmCheckInViewModel, context, ::closeMakeup)
         return
     }
     if (showJmAwards && jmLoggedIn && jmSubscreenSessionRevision == jmSessionRevision && platform == ContentPlatform.JM) {
@@ -322,8 +335,8 @@ fun ProfileScreen(
             if (platform == ContentPlatform.JM) {
                 item {
                     TextPreferenceWidget(
-                        title = "JM 签到日历与补签",
-                        subtitle = "只读查看当月签到；补签需勾选并再次确认",
+                        title = stringResource(KMR.strings.jm_calendar_title),
+                        subtitle = stringResource(KMR.strings.jm_calendar_summary),
                         icon = Icons.Outlined.Refresh,
                         onPreferenceClick = {
                             if (jmLoggedIn) {
@@ -337,7 +350,22 @@ fun ProfileScreen(
                 }
                 item {
                     TextPreferenceWidget(
-                        title = "JM 年度签到奖励",
+                        title = stringResource(KMR.strings.jm_makeup_title),
+                        subtitle = stringResource(KMR.strings.jm_makeup_description),
+                        icon = Icons.Outlined.Refresh,
+                        onPreferenceClick = {
+                            if (jmLoggedIn) {
+                                jmSubscreenSessionRevision = jmSessionRevision
+                                showJmMakeup = true
+                            } else {
+                                onRequireLogin()
+                            }
+                        },
+                    )
+                }
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(KMR.strings.jm_annual_awards_title),
                         subtitle = "按年份浏览月度奖励图片，不会领取月奖",
                         icon = Icons.Filled.Star,
                         onPreferenceClick = {

@@ -230,7 +230,11 @@ object JmCheckInRepository {
                 checkErrorHeader(response)
                 JmCheckInResponseParser.parseMonthlyAwards(raw, year)
             }
-            val imageHost = if (rows.any { !it.imagePath.isNullOrBlank() }) fetchImageHost(uid, sessionRevision) else null
+            val imageHost = if (rows.any { JmCheckInResponseParser.requiresImageHost(it.imagePath) }) {
+                fetchImageHost(uid, sessionRevision)
+            } else {
+                null
+            }
             rows.map { it.copy(imageUrl = JmCheckInResponseParser.joinImageUrl(imageHost, it.imagePath)) }
         }
 
@@ -457,7 +461,7 @@ internal object JmCheckInResponseParser {
             val month = item.optString("month").toIntOrNull() ?: return@mapNotNull null
             val id = item.optString("id").takeIf(::isPositiveInteger) ?: return@mapNotNull null
             if (rowYear != year || month !in 1..12) return@mapNotNull null
-            val image = if (item.isNull("img")) null else item.optString("img").trim().takeIf { it.isNotEmpty() && it != "null" }
+            val image = if (item.isNull("img")) null else item.optString("img").takeIf { it.isNotBlank() && it.trim() != "null" }
             JmMonthlyAward(id, rowYear, month, image, null)
         }.sortedBy { it.month }
     }
@@ -472,15 +476,32 @@ internal object JmCheckInResponseParser {
     }
 
     fun joinImageUrl(imageHost: String?, imagePath: String?): String? {
+        val path = imagePath?.trim()?.takeIf { it.isNotEmpty() && it != "null" } ?: return null
+        if (path.startsWith("//")) {
+            return secureHttpsUrl("https:$path")
+        }
+        if (URL_SCHEME.containsMatchIn(path)) {
+            return secureHttpsUrl(path)
+        }
+
         val host = imageHost?.takeIf { it.isNotBlank() } ?: return null
-        val path = imagePath?.takeIf { it.isNotBlank() } ?: return null
-        val parsedHost = runCatching { host.toHttpUrl() }.getOrNull()?.takeIf { it.isHttps } ?: return null
-        val absolute = runCatching { path.toHttpUrl() }.getOrNull()
-        if (absolute != null) return absolute.toString().takeIf { absolute.isHttps }
-        val joined = parsedHost.toString().trimEnd('/') + if (path.startsWith('/')) path else "/$path"
-        val parsed = runCatching { joined.toHttpUrl() }.getOrNull()
-        return joined.takeIf { parsed?.isHttps == true }
+        val parsedHost = runCatching { host.toHttpUrl() }.getOrNull()?.takeIf(::isSecureHttpsUrl) ?: return null
+        return runCatching { parsedHost.resolve(path) }.getOrNull()?.takeIf(::isSecureHttpsUrl)?.toString()
     }
+
+    /** Only relative artwork requires the optional `/setting` image host lookup. */
+    fun requiresImageHost(imagePath: String?): Boolean {
+        val path = imagePath?.trim()?.takeIf { it.isNotEmpty() && it != "null" } ?: return false
+        return !path.startsWith("//") && !URL_SCHEME.containsMatchIn(path)
+    }
+
+    private fun secureHttpsUrl(value: String): String? =
+        runCatching { value.toHttpUrl() }.getOrNull()?.takeIf(::isSecureHttpsUrl)?.toString()
+
+    private fun isSecureHttpsUrl(url: okhttp3.HttpUrl): Boolean =
+        url.isHttps && url.host.isNotBlank() && url.username.isEmpty() && url.password.isEmpty()
+
+    private val URL_SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.-]*:")
 
     fun parseMakeupResponse(raw: String) {
         val root = parseJson(raw)

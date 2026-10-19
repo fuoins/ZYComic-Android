@@ -24,28 +24,25 @@ class JmLibraryUiPolicyTest {
     }
 
     @Test
-    fun `expanded search removes only the search action from toolbar`() {
+    fun `expanded search hides toolbar actions and restoring search restores actions`() {
         assertEquals(
-            listOf(LibraryHistoryToolbarPolicy.Action.REFRESH, LibraryHistoryToolbarPolicy.Action.FILTER),
+            emptyList<LibraryHistoryToolbarPolicy.Action>(),
             LibraryHistoryToolbarPolicy.visibleActions(history = false, searchExpanded = true),
         )
         assertEquals(
-            listOf(LibraryHistoryToolbarPolicy.Action.EMPTY, LibraryHistoryToolbarPolicy.Action.REFRESH),
+            emptyList<LibraryHistoryToolbarPolicy.Action>(),
             LibraryHistoryToolbarPolicy.visibleActions(history = true, searchExpanded = true),
+        )
+        assertEquals(
+            listOf(LibraryHistoryToolbarPolicy.Action.SEARCH, LibraryHistoryToolbarPolicy.Action.REFRESH, LibraryHistoryToolbarPolicy.Action.FILTER),
+            LibraryHistoryToolbarPolicy.visibleActions(history = false, searchExpanded = false),
         )
         assertTrue(LibraryHistoryToolbarPolicy.visibleActions(history = true, searchExpanded = false).contains(LibraryHistoryToolbarPolicy.Action.SEARCH))
     }
 
     @Test
-    fun `expanded JM search hides actions and platform selector while other platforms retain approved actions`() {
-        assertEquals(emptyList<LibraryHistoryToolbarPolicy.Action>(), LibraryHistoryToolbarPolicy.visibleActions(history = false, searchExpanded = true, jmPlatform = true))
-        assertEquals(emptyList<LibraryHistoryToolbarPolicy.Action>(), LibraryHistoryToolbarPolicy.visibleActions(history = true, searchExpanded = true, jmPlatform = true))
-        assertFalse(LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = true, jmPlatform = true))
-        assertEquals(
-            listOf(LibraryHistoryToolbarPolicy.Action.REFRESH, LibraryHistoryToolbarPolicy.Action.FILTER),
-            LibraryHistoryToolbarPolicy.visibleActions(history = false, searchExpanded = true),
-        )
-        assertTrue(LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = true, jmPlatform = false))
-        assertTrue(LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = false, jmPlatform = true))
+    fun `expanded search hides platform selector and collapse restores it on either platform`() {
+        assertFalse(LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = true))
+        assertTrue(LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = false))
     }
 }

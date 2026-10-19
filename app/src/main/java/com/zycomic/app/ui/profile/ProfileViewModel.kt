@@ -24,7 +24,6 @@ internal data class JmCalendarScreenState(
     val calendar: JmDailyCalendar? = null,
     val loading: Boolean = false,
     val error: String? = null,
-    val selectedDates: Set<LocalDate> = emptySet(),
     val makeupLoading: Boolean = false,
     val makeupProgress: JmMakeupProgress? = null,
     val makeupSummary: String? = null,
@@ -54,7 +53,7 @@ internal class JmCheckInViewModel {
         scope.launch {
             _calendar.value = _calendar.value.copy(loading = true, error = null)
             try {
-                _calendar.value = _calendar.value.copy(calendar = JmCheckInRepository.loadCalendar(), selectedDates = emptySet())
+                _calendar.value = _calendar.value.copy(calendar = JmCheckInRepository.loadCalendar())
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -65,37 +64,29 @@ internal class JmCheckInViewModel {
         }
     }
 
-    fun toggleDate(date: LocalDate) {
+    fun confirmMakeup(context: Context, preview: JmDailyCalendar, dates: Set<LocalDate>) {
         val state = _calendar.value
-        val eligible = state.calendar?.makeupCandidates(LocalDate.now())?.any { it.date == date } == true
-        if (!eligible || state.makeupLoading) return
-        _calendar.value = state.copy(selectedDates = if (date in state.selectedDates) state.selectedDates - date else state.selectedDates + date)
-    }
-
-    fun confirmMakeup(context: Context) {
-        val state = _calendar.value
-        val preview = state.calendar ?: return
-        if (state.makeupLoading || state.selectedDates.isEmpty()) return
+        if (state.makeupLoading || state.loading || dates.isEmpty()) return
         makeupJob = scope.launch {
-            _calendar.value = _calendar.value.copy(makeupLoading = true, makeupProgress = null, makeupSummary = null, error = null)
+            _calendar.value = _calendar.value.copy(makeupLoading = true, makeupProgress = JmMakeupProgress(0, dates.size, dates.minOrNull(), null), makeupSummary = null, error = null)
             try {
-                val result = JmCheckInRepository.makeup(context, preview, state.selectedDates) { progress ->
+                val result = JmCheckInRepository.makeup(context, preview, dates) { progress ->
                     _calendar.value = _calendar.value.copy(makeupProgress = progress)
                 }
                 val summary = when {
-                    result.error != null -> "已补签 ${result.completed.size} 天；${result.failedDate} 失败：${result.error}"
+                    result.error != null -> "已确认成功 ${result.completed.size} 天；${result.failedDate} 未确认成功：${result.error}。未确认的请求可能已生效，请重新加载核对"
                     else -> "补签完成：本次成功 ${result.completed.size} 天"
                 }
-                _calendar.value = _calendar.value.copy(selectedDates = emptySet(), makeupSummary = summary)
+                _calendar.value = _calendar.value.copy(makeupSummary = summary)
                 loadCalendar()
             } catch (error: CancellationException) {
                 val savedCount = _calendar.value.makeupProgress?.completed ?: 0
-                _calendar.value = _calendar.value.copy(makeupSummary = "补签已取消；已完成 $savedCount 天（可重新加载核对）")
+                _calendar.value = _calendar.value.copy(makeupSummary = "补签已取消；已确认成功 $savedCount 天，未确认的请求可能已生效，请重新加载核对")
                 throw error
             } catch (error: Exception) {
                 val savedCount = _calendar.value.makeupProgress?.completed ?: 0
                 _calendar.value = _calendar.value.copy(
-                    makeupSummary = "补签未完成；本次已完成 $savedCount 天（可重新加载核对）",
+                    makeupSummary = "补签未完成；本次已确认成功 $savedCount 天，未确认的请求可能已生效，请重新加载核对",
                     error = error.message ?: "补签失败；已完成部分已保存",
                 )
             } finally {

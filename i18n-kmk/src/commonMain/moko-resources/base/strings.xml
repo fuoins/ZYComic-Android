@@ -385,4 +385,27 @@
     <string name="manwa_session_unknown">登录状态未验证（缓存资料），请刷新重试</string>
     <string name="manwa_session_expired">登录已失效，请重新登录</string>
     <string name="manwa_profile_refresh_verified">已刷新并验证登录状态</string>
+    <!-- JM calendar, annual artwork and explicitly confirmed monthly makeup -->
+    <string name="jm_calendar_title">JM签到日历</string>
+    <string name="jm_calendar_summary">只读查看当月签到；补签请使用“JM补签破解”</string>
+    <string name="jm_calendar_legend">✓ 已签到　— 今天　♥ 活动日</string>
+    <string name="jm_calendar_activity_marker">♥ 仅为活动日标记，不代表已签到或额外奖励</string>
+    <string name="jm_annual_awards_title">JM年度签到奖励破解</string>
+    <string name="jm_award_image_url_failed">奖励图片地址不可用</string>
+    <string name="jm_award_image_load_failed">奖励图片加载失败</string>
+    <string name="jm_award_no_data">暂无数据</string>
+    <string name="jm_award_image_unavailable">暂无奖励图片</string>
+    <string name="jm_makeup_title">JM补签破解</string>
+    <string name="jm_makeup_description">使用此功能会补签此月份所有已过且未签到日，所以建议月末最后一天执行一次即可</string>
+    <string name="jm_makeup_preview_count">本次待补签 %1$d 天</string>
+    <string name="jm_makeup_empty">本月没有已过且未签到的日期</string>
+    <string name="jm_makeup_preview_notice">预览不会发送补签请求。仅处理本月今天之前的缺签日，不包含今天及未来日期；请求串行且至少间隔 1.5 秒，可中途取消。不会领取月度奖励。</string>
+    <string name="jm_makeup_confirm_all">确认补签全部缺签日</string>
+    <string name="jm_makeup_confirm_title">确认本月批量补签</string>
+    <string name="jm_makeup_confirm_dates">将处理以下 %1$d 个日期：\n%2$s</string>
+    <string name="jm_makeup_start">开始补签</string>
+    <string name="jm_makeup_back">返回</string>
+    <string name="jm_makeup_cancel">取消</string>
+    <string name="jm_makeup_reload">重新加载核对</string>
+    <string name="jm_makeup_progress">补签进度 %1$d/%2$d</string>
 </resources>
