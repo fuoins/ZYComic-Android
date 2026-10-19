@@ -1,13 +1,14 @@
 package com.zycomic.app.ui.settings
 
 import com.zycomic.app.net.DomainIp
+import com.zycomic.app.net.normalizedForComparison
 import java.util.Locale
 
 /** Pure ordering helpers shared by the JM speed-test screen and its exported log. */
 internal object JmSpeedTestLogPolicy {
-    /** A route selects a domain; an IP is only one of that domain's measured endpoints. */
-    fun isSelectedDomain(endpoint: DomainIp, selectedDomain: String): Boolean =
-        endpoint.domain.equals(selectedDomain, ignoreCase = true)
+    /** Selection is the exact hostname/address pair, not every IP returned for its hostname. */
+    fun isSelectedEndpoint(endpoint: DomainIp, selected: DomainIp?): Boolean =
+        selected != null && endpoint.normalizedForComparison() == selected.normalizedForComparison()
 
     fun rankEndpoints(
         delays: Map<DomainIp, Long>,

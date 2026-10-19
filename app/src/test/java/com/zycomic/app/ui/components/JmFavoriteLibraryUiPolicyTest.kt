@@ -11,7 +11,7 @@ class JmFavoriteLibraryUiPolicyTest {
         assertEquals(1, JmFavoriteLibraryUiPolicy.DEFAULT_DISPLAY_MODE)
         assertEquals("jm_library_display_mode", JmFavoriteLibraryUiPolicy.DISPLAY_MODE_PREFERENCE_KEY)
         assertEquals("舒适网格", JmFavoriteLibraryUiPolicy.displayModes[1].label)
-        assertEquals(2, JmFavoriteLibraryUiPolicy.gridColumns(JmFavoriteLibraryUiPolicy.DEFAULT_DISPLAY_MODE))
+        assertEquals(3, JmFavoriteLibraryUiPolicy.gridColumns())
     }
 
     @Test
@@ -26,6 +26,16 @@ class JmFavoriteLibraryUiPolicyTest {
         assertFalse(JmFavoriteLibraryUiPolicy.isGrid(3))
         assertEquals(0, JmFavoriteLibraryUiPolicy.normalizeDisplayMode(-1))
         assertEquals(5, JmFavoriteLibraryUiPolicy.normalizeDisplayMode(6))
+    }
+
+    @Test
+    fun `row count settings are JM-specific by orientation with auto fallback and bounded values`() {
+        assertEquals("jm_library_grid_columns_portrait", JmFavoriteLibraryUiPolicy.gridColumnsPreferenceKey(false))
+        assertEquals("jm_library_grid_columns_landscape", JmFavoriteLibraryUiPolicy.gridColumnsPreferenceKey(true))
+        assertEquals(3, JmFavoriteLibraryUiPolicy.gridColumns(0))
+        assertEquals(4, JmFavoriteLibraryUiPolicy.gridColumns(4))
+        assertEquals(0, JmFavoriteLibraryUiPolicy.normalizeGridColumns(-1))
+        assertEquals(10, JmFavoriteLibraryUiPolicy.normalizeGridColumns(11))
     }
 
     @Test

@@ -6,7 +6,7 @@ object JmAuthPolicy {
         if (path.startsWith("/media/") || path == "/login") return false
         if (trustedApiHosts.none { it.equals(host, ignoreCase = true) }) return false
         return when {
-            method.equals("POST", true) -> isUserEdit(path) || path in setOf("/favorite", "/favorite_folder", "/watch_list", "/like", "/comment", "/daily_chk")
+            method.equals("POST", true) -> isUserEdit(path) || path in setOf("/favorite", "/favorite_folder", "/watch_list", "/like", "/comment", "/comment_delete", "/daily_chk")
             method.equals("GET", true) -> path == "/album" || path == "/chapter" || path == "/daily" || path in USER_LIST_GET_PATHS || isUserEdit(path)
             else -> false
         }

@@ -3,8 +3,11 @@ package com.zycomic.app.ui.components
 /** JM favorites-only display and sort choices; these are intentionally independent from Manwa preferences. */
 internal object JmFavoriteLibraryUiPolicy {
     const val DEFAULT_DISPLAY_MODE = 1
+    const val DEFAULT_GRID_COLUMNS = 3
+    const val MAX_GRID_COLUMNS = 10
     const val DEFAULT_SORT_ORDER = "mr"
     const val DISPLAY_MODE_PREFERENCE_KEY = "jm_library_display_mode"
+    private const val GRID_COLUMNS_PREFERENCE_KEY = "jm_library_grid_columns"
 
     data class DisplayMode(val value: Int, val label: String)
     data class SortMode(val order: String, val label: String)
@@ -27,5 +30,14 @@ internal object JmFavoriteLibraryUiPolicy {
 
     fun isGrid(displayMode: Int): Boolean = normalizeDisplayMode(displayMode) <= 2
 
-    fun gridColumns(displayMode: Int): Int = if (normalizeDisplayMode(displayMode) == 1) 2 else 3
+    fun gridColumnsPreferenceKey(isLandscape: Boolean): String =
+        "${GRID_COLUMNS_PREFERENCE_KEY}_${if (isLandscape) "landscape" else "portrait"}"
+
+    fun normalizeGridColumns(value: Int): Int = value.coerceIn(0, MAX_GRID_COLUMNS)
+
+    /** A stored value of zero matches Manwa's automatic setting; JM's comfortable default is three. */
+    fun gridColumns(configuredColumns: Int = 0): Int {
+        val normalized = normalizeGridColumns(configuredColumns)
+        return if (normalized == 0) DEFAULT_GRID_COLUMNS else normalized
+    }
 }

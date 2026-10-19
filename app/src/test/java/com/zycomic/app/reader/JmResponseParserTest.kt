@@ -1,5 +1,6 @@
 package com.zycomic.app.reader
 
+import com.zycomic.app.data.repository.JmMyCommentsPolicy
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -259,6 +260,36 @@ class JmResponseParserTest {
             "https://image.example/media/users/https://other.example/user.jpg",
             JmResponseParser.userAvatarUrl("https://image.example", "https://other.example/user.jpg"),
         )
+    }
+
+    @Test
+    fun `forum parser reads uppercase AID and BID and skips invalid deletion identifiers`() {
+        val forum = JmResponseParser.forumPage(
+            JSONObject(
+                """{"total":3,"list":[{"CID":"11","AID":"1480008","BID":"42","name":"漫画甲","content":"评论甲"},{"CID":"12","AID":1480009,"BID":43,"content":"评论乙"},{"CID":"not-an-id","AID":"1480010","BID":"44"}]}""",
+            ),
+        )
+
+        assertEquals(listOf("11", "12"), forum.comments.map { it.id })
+        assertEquals(listOf("1480008", "1480009"), forum.comments.map { it.mangaId })
+        assertEquals(listOf("1480008", "1480009"), forum.comments.map { it.aid })
+        assertEquals(listOf("42", "43"), forum.comments.map { it.bid })
+        assertEquals("JM #1480008", "JM #${forum.comments.first().mangaId}")
+    }
+
+    @Test
+    fun `forum parser preserves null top level context and reply NID`() {
+        val forum = JmResponseParser.forumPage(
+            JSONObject(
+                """{"list":[{"CID":"11","AID":"1480008","BID":null,"NID":null},{"CID":"12","AID":"1480008","BID":"42","NID":"99"}]}""",
+            ),
+        )
+
+        assertNull(forum.comments[0].bid)
+        assertNull(forum.comments[0].nid)
+        assertTrue(JmMyCommentsPolicy.canDelete(forum.comments[0].id, forum.comments[0].aid, forum.comments[0].bid, forum.comments[0].nid))
+        assertEquals("42", forum.comments[1].bid)
+        assertEquals("99", forum.comments[1].nid)
     }
 
     private fun chapters(series: String) = JmResponseParser.chapters(JSONObject("""{"id":"999","series":$series}"""))

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.IOException
 
 class JmMyCommentsPolicyTest {
     @Test
@@ -44,6 +45,69 @@ class JmMyCommentsPolicyTest {
         assertEquals("JM 登录已失效，请重新登录", JmMyCommentsPolicy.responseError(false, 401, null))
         assertEquals("JM 留言记录请求失败（HTTP 503）", JmMyCommentsPolicy.responseError(false, 503, null))
         assertEquals("JM 留言记录请求失败：session expired", JmMyCommentsPolicy.responseError(true, 200, "session expired"))
+    }
+
+    @Test
+    fun `delete request uses exact POST route and multipart fields`() {
+        val request = JmMyCommentsPolicy.deleteRequest(commentId = "321", aid = "654", bid = "987")
+
+        assertEquals("POST", request.method)
+        assertEquals("/comment_delete", request.path)
+        assertTrue(request.queryParameters.isEmpty())
+        assertEquals(linkedMapOf("comment_id" to "321", "aid" to "654", "bid" to "987"), request.formParameters)
+    }
+
+    @Test
+    fun `top level comments with null BID and NID remain deletable`() {
+        assertTrue(JmMyCommentsPolicy.canDelete("321", "654", null, null))
+        assertTrue(JmMyCommentsPolicy.canDelete("321", "654", "", ""))
+        val request = JmMyCommentsPolicy.deleteRequest("321", "654", null, null)
+        assertEquals(linkedMapOf("comment_id" to "321", "aid" to "654"), request.formParameters)
+    }
+
+    @Test
+    fun `reply delete request forwards valid BID and NID context`() {
+        assertTrue(JmMyCommentsPolicy.canDelete("321", "654", "987", "1234"))
+        val request = JmMyCommentsPolicy.deleteRequest("321", "654", "987", "1234")
+        assertEquals(
+            linkedMapOf("comment_id" to "321", "aid" to "654", "bid" to "987", "nid" to "1234"),
+            request.formParameters,
+        )
+    }
+
+    @Test
+    fun `delete is prohibited unless required IDs and present optional context IDs are valid`() {
+        assertTrue(JmMyCommentsPolicy.canDelete("1", "22", "33"))
+        listOf(
+            listOf("", "22", "33", "44"),
+            listOf("1", "", "33", "44"),
+            listOf("0", "22", "33", "44"),
+            listOf("1", "0", "33", "44"),
+            listOf("-1", "22", "33", "44"),
+            listOf("1", "abc", "33", "44"),
+            listOf("1", "22", "0", "44"),
+            listOf("1", "22", "33", "-2"),
+            listOf("1", "22", "33", "x"),
+        ).forEach { assertFalse(JmMyCommentsPolicy.canDelete(it[0], it[1], it[2], it[3])) }
+        assertThrows(IllegalArgumentException::class.java) {
+            JmMyCommentsPolicy.deleteRequest(commentId = "1", aid = "22", bid = "x")
+        }
+    }
+
+    @Test
+    fun `delete succeeds only when documented response status is ok`() {
+        JmMyCommentsPolicy.parseDeleteResponse("""{"status":"ok","msg":"deleted"}""")
+        JmMyCommentsPolicy.parseDeleteResponse("""{"data":{"status":"ok"}}""")
+        assertEquals(
+            "forbidden",
+            assertThrows(IOException::class.java) {
+                JmMyCommentsPolicy.parseDeleteResponse("""{"status":"fail","msg":"forbidden"}""")
+            }.message,
+        )
+        assertThrows(IOException::class.java) {
+            JmMyCommentsPolicy.parseDeleteResponse("""{"msg":"no status"}""")
+        }
+        assertThrows(IOException::class.java) { JmMyCommentsPolicy.parseDeleteResponse("not json") }
     }
 
     @Test

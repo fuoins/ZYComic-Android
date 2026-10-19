@@ -78,19 +78,25 @@ internal object JmResponseParser {
         val comments = (0 until list.length()).mapNotNull { index ->
             val item = list.optJSONObject(index) ?: return@mapNotNull null
             val id = item.text("CID")
-            if (id.isBlank()) return@mapNotNull null
+            if (!validId(id)) return@mapNotNull null
             val raw = item.text("content")
             val start = raw.indexOf('>')
             val end = raw.lastIndexOf('<')
             val content = if (start >= 0 && end > start) raw.substring(start + 1, end) else raw
             val album = item.optJSONObject("album") ?: item.optJSONObject("manhua")
-            val mangaId = sequenceOf(item.text("aid"), item.text("album_id"), item.text("book_id"), album?.text("id").orEmpty())
+            val aid = sequenceOf(item.text("AID"), item.text("aid")).firstOrNull(::validId).orEmpty()
+            val bid = sequenceOf(item.optionalText("BID"), item.optionalText("bid")).filterNotNull().firstOrNull()
+            val nid = sequenceOf(item.optionalText("NID"), item.optionalText("nid")).filterNotNull().firstOrNull()
+            val mangaId = sequenceOf(aid, item.text("album_id"), item.text("book_id"), album?.text("id").orEmpty())
                 .firstOrNull { validId(it) }.orEmpty()
             val mangaName = sequenceOf(item.text("album_name"), item.text("book_name"), item.text("manga_name"), item.text("name"), album?.text("name").orEmpty())
                 .firstOrNull(String::isNotBlank).orEmpty()
             com.zycomic.app.data.dto.JmComment(
                 id = id,
                 parentId = item.text("parent_CID"),
+                aid = aid,
+                bid = bid,
+                nid = nid,
                 mangaId = mangaId,
                 mangaName = mangaName,
                 username = item.text("username"),
@@ -250,5 +256,11 @@ internal object JmResponseParser {
         is String -> value.trim()
         is Number -> value.toString()
         else -> ""
+    }
+
+    private fun JSONObject.optionalText(key: String): String? = when (val value = opt(key)) {
+        is String -> value.trim().takeIf(String::isNotEmpty)
+        is Number -> value.toString()
+        else -> null
     }
 }

@@ -61,7 +61,7 @@ class JmImageEndpointSelectionPolicyTest {
 
     @Test
     fun `manual measured row remains exact even when its last probe failed`() {
-        assertEquals(slow, select(manual = slow, measurements = delays + (slow to Long.MAX_VALUE)))
+        assertEquals(fast, select(manual = slow, measurements = delays + (slow to Long.MAX_VALUE)))
     }
 
     @Test

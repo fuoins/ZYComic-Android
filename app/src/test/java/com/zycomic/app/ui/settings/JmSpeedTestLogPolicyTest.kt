@@ -6,14 +6,15 @@ import org.junit.jupiter.api.Test
 
 class JmSpeedTestLogPolicyTest {
     @Test
-    fun `selected route marker matches domain rather than an individual IP`() {
-        val selectedDomainEndpoint = DomainIp("route.example", "203.0.113.1")
+    fun `selected route marker highlights only the exact domain and IP`() {
+        val selected = DomainIp("route.example", "203.0.113.1")
         val sameDomainDifferentIp = DomainIp("ROUTE.EXAMPLE", "203.0.113.2")
-        val differentDomainSameIp = DomainIp("other.example", "203.0.113.1")
+        val exactWithDifferentHostCase = DomainIp("ROUTE.EXAMPLE", "203.0.113.1")
 
-        assertEquals(true, JmSpeedTestLogPolicy.isSelectedDomain(selectedDomainEndpoint, "route.example"))
-        assertEquals(true, JmSpeedTestLogPolicy.isSelectedDomain(sameDomainDifferentIp, "route.example"))
-        assertEquals(false, JmSpeedTestLogPolicy.isSelectedDomain(differentDomainSameIp, "route.example"))
+        assertEquals(true, JmSpeedTestLogPolicy.isSelectedEndpoint(selected, selected))
+        assertEquals(false, JmSpeedTestLogPolicy.isSelectedEndpoint(sameDomainDifferentIp, selected))
+        assertEquals(true, JmSpeedTestLogPolicy.isSelectedEndpoint(exactWithDifferentHostCase, selected))
+        assertEquals(false, JmSpeedTestLogPolicy.isSelectedEndpoint(selected, null))
     }
 
     @Test

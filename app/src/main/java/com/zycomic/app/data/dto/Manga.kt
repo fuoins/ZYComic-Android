@@ -71,6 +71,12 @@ data class Manga(
 data class JmComment(
     val id: String = "",
     val parentId: String = "",
+    /** Raw album ID returned by the comment record; kept distinct from display fallbacks. */
+    val aid: String = "",
+    /** Raw nullable comment board ID; top-level comments may omit this context. */
+    val bid: String? = null,
+    /** Raw nullable comment thread ID used as optional deletion context. */
+    val nid: String? = null,
     val mangaId: String = "",
     val mangaName: String = "",
     val username: String = "",

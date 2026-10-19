@@ -9,7 +9,34 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import java.net.InetAddress
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
+
+/**
+ * Pins one JM request's exact endpoint across the synchronous OkHttp chain and DNS lookup.
+ * Call.execute and the dispatcher worker for Call.enqueue both run DNS on the same thread as
+ * application interceptors; restoring in the interceptor's finally prevents worker-thread leaks.
+ */
+internal object JmEndpointRequestContext {
+    internal data class Pin(
+        val domain: String,
+        val image: Boolean,
+        var endpoint: DomainIp?,
+        val bootstrapAllowed: Boolean,
+    )
+
+    private val active = ThreadLocal<Pin?>()
+
+    fun current(hostname: String, image: Boolean): Pin? = active.get()?.takeIf {
+        it.image == image && it.domain.equals(hostname, ignoreCase = true)
+    }
+
+    fun install(pin: Pin): Pin? = active.get().also { active.set(pin) }
+
+    fun restore(previous: Pin?) {
+        if (previous == null) active.remove() else active.set(previous)
+    }
+}
 
 /** JM 专用网络栈：独立 CookieJar、Dispatcher、连接池、协议拦截器和 host 路由。 */
 object JmNetworkModule {
@@ -18,43 +45,65 @@ object JmNetworkModule {
     private val confirmMutex = Mutex()
     private val confirmedHosts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    @Volatile private var selectedImageEndpoint: DomainIp? = null
-
     val selectedImageIp: String?
         get() = currentImageEndpoint()?.ip
 
-    fun currentImageEndpoint(domain: String = JmRouteManager.activeImageDomain): DomainIp? {
-        val snapshot = JmRouteManager.speedTestSnapshot.value
-        return JmImageEndpointSelectionPolicy.currentEndpoint(
-            domain = domain,
-            configuredDomains = JmRouteManager.imageDomains,
-            delays = snapshot.imageIpDelaysMs,
-            verdicts = snapshot.imageIpVerdicts,
-            manualEndpoint = selectedImageEndpoint,
-        )
-    }
+    fun currentImageEndpoint(domain: String = JmRouteManager.activeImageDomain): DomainIp? =
+        JmRouteManager.currentImageEndpoint(domain)
 
-    private val jmDns = object : Dns {
+    private val jmApiDns = singleAddressDns(
+        JmRouteManager::currentLineEndpoint,
+        JmRouteManager::resolveLineIp,
+        { host -> JmRouteManager.hasEndpointMeasurements(host, image = false) },
+        image = false,
+    )
+    private val jmImageDns = singleAddressDns(
+        JmRouteManager::currentImageEndpoint,
+        JmRouteManager::resolveImageIp,
+        { host -> JmRouteManager.hasEndpointMeasurements(host, image = true) },
+        image = true,
+    )
+
+    internal fun singleAddressDns(
+        endpoint: (String) -> DomainIp?,
+        configuredIps: (String) -> List<String>,
+        measuredResults: (String) -> Boolean,
+        image: Boolean,
+    ) = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            currentImageEndpoint(hostname)?.let { endpoint ->
-                return listOf(InetAddress.getByName(endpoint.ip))
+            val requestPin = JmEndpointRequestContext.current(hostname, image)
+            val selected = if (requestPin != null) {
+                requestPin.endpoint?.takeIf { it.domain.equals(hostname, true) }
+            } else {
+                endpoint(hostname)?.takeIf { it.domain.equals(hostname, true) }
             }
-            val configured = JmRouteManager.resolveIp(hostname)
-            if (configured.isNotEmpty()) {
-                return configured.mapNotNull { ip -> runCatching { InetAddress.getByName(ip) }.getOrNull() }
-                    .takeIf { it.isNotEmpty() }
-                    ?: throw java.net.UnknownHostException("JM configured DNS has no valid address: $hostname")
+            val bootstrapAllowed = requestPin?.bootstrapAllowed ?: !measuredResults(hostname)
+            if (selected == null && !bootstrapAllowed) {
+                throw java.net.UnknownHostException("JM has no successful measured address for $hostname")
             }
-            return Dns.SYSTEM.lookup(hostname)
+            val ip = selected?.ip ?: configuredIps(hostname).firstOrNull(::isLiteralIp)
+                ?: Dns.SYSTEM.lookup(hostname).firstOrNull()?.hostAddress
+                ?: throw java.net.UnknownHostException("JM has no bootstrap address for $hostname")
+            val address = runCatching { InetAddress.getByName(ip) }.getOrElse {
+                throw java.net.UnknownHostException("JM selected address is invalid for $hostname: $ip")
+            }
+            requestPin?.endpoint = DomainIp(hostname, address.hostAddress.substringBefore('%'))
+            return listOf(address)
         }
     }
+
+    private fun isLiteralIp(value: String): Boolean =
+        value.isNotBlank() && (value.all { it.isDigit() || it == '.' } || ':' in value) &&
+            runCatching { InetAddress.getByName(value) }.isSuccess
 
     private fun createBaseClient(): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .callTimeout(60, TimeUnit.SECONDS)
-        .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
+        // HTTP/1.1 + zero idle sockets prevents cross-host HTTP/2 coalescing and stale route reuse.
+        .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+        .proxy(Proxy.NO_PROXY)
         .dispatcher(
             okhttp3.Dispatcher().apply {
                 maxRequests = 16
@@ -62,8 +111,8 @@ object JmNetworkModule {
             },
         )
         .cookieJar(cookieJar)
-        .dns(jmDns)
-        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+        .dns(jmApiDns)
+        .protocols(listOf(Protocol.HTTP_1_1))
         .build()
 
     private val baseClient: OkHttpClient by lazy(::createBaseClient)
@@ -74,18 +123,21 @@ object JmNetworkModule {
             .retryOnConnectionFailure(false)
             .addInterceptor(JmApiInterceptor())
             .addInterceptor(JmImageInterceptor())
+            .addInterceptor(JmEndpointTransportInterceptor())
             .build()
     }
 
     /** Image-only transport: no cookies, no redirects, no retries, and the API interceptor strips JWT. */
     val imageClient: OkHttpClient by lazy {
         baseClient.newBuilder()
+            .dns(jmImageDns)
             .cookieJar(okhttp3.CookieJar.NO_COOKIES)
             .followRedirects(false)
             .followSslRedirects(false)
             .retryOnConnectionFailure(false)
             .addInterceptor(JmApiInterceptor(allowAuthentication = false))
             .addInterceptor(JmImageInterceptor())
+            .addInterceptor(JmEndpointTransportInterceptor())
             .build()
     }
 
@@ -109,38 +161,48 @@ object JmNetworkModule {
         .followSslRedirects(false)
         .build()
 
-    /** Pin only an active JM sources2 hostname to its measured address; URL host/SNI remain unchanged. */
-    fun selectImageEndpoint(domain: String, ip: String): Boolean {
-        if (JmRouteManager.imageDomains.none { it.equals(domain, ignoreCase = true) }) return false
-        if (ip.isBlank()) return false
-        val endpoint = JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.keys.firstOrNull {
-            it.domain.equals(domain, true) && it.ip.equals(ip.trim(), true)
-        } ?: return false
-        selectedImageEndpoint = endpoint
-        return true
-    }
+    /** Persist one successful sources2 endpoint through the route manager. */
+    fun selectImageEndpoint(domain: String, ip: String): Boolean = JmRouteManager.selectImageEndpoint(domain, ip)
 
-    /** Forget the manual override and resume the active domain's fastest valid measured IP. */
     fun clearSelectedImageEndpoint() {
-        selectedImageEndpoint = null
+        JmRouteManager.selectImageDomain(null)
     }
 
-    /** The JM client has a dedicated pool; evict old sockets after changing a hostname's pinned IP. */
-    fun rebindImageEndpoint() {
+    /** Cancel outstanding requests and discard idle sockets on any endpoint transition. */
+    fun rebindImageEndpoint() = rebindEndpointPools()
+
+    fun rebindApiEndpoint() = rebindEndpointPools()
+
+    private fun rebindEndpointPools() {
+        runCatching { baseClient.dispatcher.cancelAll() }
+        runCatching { imageClient.dispatcher.cancelAll() }
+        evictIdleEndpointPools()
+    }
+
+    internal fun evictIdleEndpointPools() {
         runCatching { baseClient.connectionPool.evictAll() }
     }
 
-    private val boundImageRoutes = mutableMapOf<String, List<String>>()
+    private val boundImageRoutes = mutableMapOf<String, String>()
+    private val boundApiRoutes = mutableMapOf<String, String>()
 
-    /** Called only by the image interceptor on its request thread, never by main-thread state updates. */
     @Synchronized
     internal fun prepareImageRoute(host: String) {
         if (JmRouteManager.imageDomains.none { it.equals(host, ignoreCase = true) }) return
-        val key = host.lowercase(java.util.Locale.ROOT)
-        val addresses = currentImageEndpoint(host)?.let { listOf(it.ip) } ?: JmRouteManager.resolveIp(host)
-        if (boundImageRoutes[key] != addresses) {
-            rebindImageEndpoint()
-            boundImageRoutes[key] = addresses
+        val identity = "${host.lowercase(java.util.Locale.ROOT)}|${currentImageEndpoint(host)?.ip.orEmpty()}"
+        if (boundImageRoutes[host.lowercase(java.util.Locale.ROOT)] != identity) {
+            evictIdleEndpointPools()
+            boundImageRoutes[host.lowercase(java.util.Locale.ROOT)] = identity
+        }
+    }
+
+    @Synchronized
+    internal fun prepareApiRoute(host: String) {
+        if (JmRouteManager.lineHosts.none { runCatching { java.net.URI(it).host.equals(host, true) }.getOrDefault(false) }) return
+        val identity = "${host.lowercase(java.util.Locale.ROOT)}|${JmRouteManager.currentLineEndpoint(host)?.ip.orEmpty()}"
+        if (boundApiRoutes[host.lowercase(java.util.Locale.ROOT)] != identity) {
+            evictIdleEndpointPools()
+            boundApiRoutes[host.lowercase(java.util.Locale.ROOT)] = identity
         }
     }
 

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,6 +59,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -77,7 +82,9 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 import androidx.compose.foundation.lazy.grid.items as gridItems
 
 /** JM controls and requests live in the same account-keyed composition, separate from Manwa state. */
@@ -125,6 +132,16 @@ private fun JmOnlineLibraryContent(
     val jmDisplayPreferences = remember(context) {
         context.getSharedPreferences("zycomic_display", android.content.Context.MODE_PRIVATE)
     }
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val gridColumnsPreferenceKey = JmFavoriteLibraryUiPolicy.gridColumnsPreferenceKey(isLandscape)
+    var configuredGridColumns by remember(jmDisplayPreferences, gridColumnsPreferenceKey) {
+        mutableIntStateOf(
+            JmFavoriteLibraryUiPolicy.normalizeGridColumns(
+                jmDisplayPreferences.getInt(gridColumnsPreferenceKey, 0),
+            ),
+        )
+    }
     var displayMode by remember(jmDisplayPreferences) {
         mutableIntStateOf(
             JmFavoriteLibraryUiPolicy.normalizeDisplayMode(
@@ -170,6 +187,10 @@ private fun JmOnlineLibraryContent(
     fun updateDisplayMode(mode: Int) {
         displayMode = JmFavoriteLibraryUiPolicy.normalizeDisplayMode(mode)
         jmDisplayPreferences.edit().putInt(JmFavoriteLibraryUiPolicy.DISPLAY_MODE_PREFERENCE_KEY, displayMode).apply()
+    }
+    fun updateGridColumns(columns: Int) {
+        configuredGridColumns = JmFavoriteLibraryUiPolicy.normalizeGridColumns(columns)
+        jmDisplayPreferences.edit().putInt(gridColumnsPreferenceKey, configuredGridColumns).apply()
     }
     fun mutate(action: suspend () -> Unit) {
         if (busy || !loggedIn) return
@@ -371,7 +392,7 @@ private fun JmOnlineLibraryContent(
                     )
                 }
                 activeGrid -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(JmFavoriteLibraryUiPolicy.gridColumns(displayMode)),
+                    columns = GridCells.Fixed(JmFavoriteLibraryUiPolicy.gridColumns(configuredGridColumns)),
                     state = gridState,
                     modifier = Modifier.weight(1f).onGloballyPositioned {
                         val token = JmLibraryLayoutToken(loadGeneration, activeGrid)
@@ -462,6 +483,9 @@ private fun JmOnlineLibraryContent(
                             selected = displayMode,
                             onSelect = ::updateDisplayMode,
                         )
+                        if (displayMode <= 2) {
+                            JmGridColumnsControl(configuredGridColumns, ::updateGridColumns)
+                        }
                     }
                     3 -> {
                         TextButton(
@@ -644,6 +668,31 @@ private fun <T> JmSingleChoiceChipRow(
     }
 }
 
+@Composable
+private fun JmGridColumnsControl(columns: Int, onSetColumns: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(
+            text = stringResource(KMR.strings.jm_library_columns_per_row),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (columns == 0) stringResource(KMR.strings.jm_library_columns_auto) else columns.toString(),
+                modifier = Modifier.padding(end = 8.dp),
+            )
+            Slider(
+                value = columns.toFloat(),
+                onValueChange = { onSetColumns(it.toInt()) },
+                valueRange = 0f..JmFavoriteLibraryUiPolicy.MAX_GRID_COLUMNS.toFloat(),
+                steps = JmFavoriteLibraryUiPolicy.MAX_GRID_COLUMNS - 1,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun JmLibraryRow(
@@ -679,8 +728,27 @@ private fun JmLibraryRow(
 @Composable
 private fun JmLibraryCard(item: JmOnlineLibraryItem, displayMode: Int, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     Column(Modifier.padding(6.dp).background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
-        JmLibraryCover(item, Modifier.fillMaxWidth())
+        Box(Modifier.fillMaxWidth().aspectRatio(0.75f).clip(RoundedCornerShape(8.dp))) {
+            JmLibraryCover(item, Modifier.fillMaxSize())
+            if (displayMode == 0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.35f)
+                        .align(Alignment.BottomCenter)
+                        .background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color(0xAA000000))),
+                )
+                Text(
+                    text = item.name,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall.copy(shadow = Shadow(color = Color.Black, blurRadius = 4f)),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                )
+            }
+        }
         if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
-        if (displayMode != 2) Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+        if (displayMode == 1) Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
     }
 }

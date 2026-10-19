@@ -69,7 +69,9 @@ class JmApiInterceptor internal constructor(
             if (response.code == 401) {
                 if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
             }
-            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
+            if (recordRouteHealth && (response.code == 408 || response.code == 429 || response.code >= 500)) {
+                JmRouteManager.recordApiFailure(host, "JM HTTP ${response.code}")
+            }
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
 
@@ -88,7 +90,7 @@ class JmApiInterceptor internal constructor(
             if (apiCode == 401) {
                 if (session == null) JmAuthStore.clear() else JmRequestSession.clearIfCurrent(session)
             }
-            if (recordRouteHealth) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
+            if (recordRouteHealth && apiCode >= 500) JmRouteManager.recordApiFailure(host, "JM API code $apiCode")
             throw IOException("JM API rejected request (code=$apiCode)${apiMessage?.let { ": $it" }.orEmpty()}")
         }
 

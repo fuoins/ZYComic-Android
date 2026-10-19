@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,7 +32,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.DomainIp
-import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.JmSpeedTester
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
@@ -57,6 +57,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
     val snapshot by JmRouteManager.speedTestSnapshot.collectAsState()
     val routeState by JmRouteManager.state.collectAsState()
     val routeLogs by JmRouteManager.logs.collectAsState()
+    val endpointSelection by JmRouteManager.endpointSelection.collectAsState()
     val running by PlatformSpeedTestCoordinator.running.collectAsState()
     val status = remember { mutableStateOf<String?>(null) }
     val pendingExport = remember { mutableStateOf<Pair<JmRouteManager.SpeedTestSnapshot, String>?>(null) }
@@ -79,8 +80,9 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
         }
     }
     val selectedLine = JmRouteManager.lineHost
+    val selectedLineEndpoint = endpointSelection.line
     val selectedImageDomain = routeState.imageDomain
-    val selectedImageEndpoint = JmNetworkModule.currentImageEndpoint(selectedImageDomain)
+    val selectedImageEndpoint = endpointSelection.image?.takeIf { it.domain.equals(selectedImageDomain, true) }
     val lineRows = JmSpeedTestLogPolicy.rankEndpoints(snapshot.lineIpDelaysMs)
     val failedImageEndpoints = snapshot.imageIpDelaysMs.keys.filterTo(mutableSetOf()) { endpoint ->
         snapshot.imageIpDelaysMs.getValue(endpoint) == Long.MAX_VALUE ||
@@ -112,7 +114,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     )
                     snapshot.remoteVersion?.let { Text("远程配置版本：$it", style = MaterialTheme.typography.bodySmall) }
                     Text(
-                        "当前选中线路（${if (routeState.autoSelect) "自动" else "手动"}）：$selectedLine",
+                        "当前选中线路（${if (routeState.autoSelect) "自动" else "手动"}）：$selectedLine${selectedLineEndpoint?.let { " · ${it.ip}" }.orEmpty()}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
@@ -132,6 +134,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                                     snapshot = snapshot,
                                     routeLogs = routeLogs,
                                     selectedLine = selectedLine,
+                                    selectedLineEndpoint = selectedLineEndpoint,
                                     selectedImageDomain = selectedImageDomain,
                                     selectedImageEndpoint = selectedImageEndpoint,
                                     autoSelect = routeState.autoSelect,
@@ -178,12 +181,13 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
             }
             items(lineRows) { endpoint ->
                 val delay = snapshot.lineIpDelaysMs.getValue(endpoint)
-                val isSelectedDomain = JmSpeedTestLogPolicy.isSelectedDomain(endpoint, selectedLine)
+                val isSelectedEndpoint = JmSpeedTestLogPolicy.isSelectedEndpoint(endpoint, selectedLineEndpoint)
                 EndpointLogRow(
                     endpoint = endpoint,
                     delay = delay,
                     verdict = null,
-                    marker = if (isSelectedDomain) stringResource(KMR.strings.jm_speed_log_selected_domain) else null,
+                    marker = if (isSelectedEndpoint) "当前实际 API 端点" else null,
+                    onClick = { JmRouteManager.selectLineEndpoint(endpoint.domain, endpoint.ip) },
                 )
             }
             item { Text("图源端点（域名 · IP）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
@@ -205,7 +209,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
 }
 
 @Composable
-private fun EndpointLogRow(endpoint: DomainIp, delay: Long, verdict: JmSpeedTester.ImgVerdict?, marker: String?) {
+private fun EndpointLogRow(endpoint: DomainIp, delay: Long, verdict: JmSpeedTester.ImgVerdict?, marker: String?, onClick: (() -> Unit)? = null) {
     val result = when {
         verdict == JmSpeedTester.ImgVerdict.NO_IMAGE -> "无图"
         verdict == JmSpeedTester.ImgVerdict.UNREACHABLE -> "不可达"
@@ -220,6 +224,7 @@ private fun EndpointLogRow(endpoint: DomainIp, delay: Long, verdict: JmSpeedTest
                 color = if (marker != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background,
                 shape = RoundedCornerShape(8.dp),
             )
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
             .padding(horizontal = 16.dp, vertical = 8.dp),
         style = MaterialTheme.typography.bodyMedium,
         color = when {
@@ -235,6 +240,7 @@ private fun encodeJmSpeedTestLog(
     snapshot: JmRouteManager.SpeedTestSnapshot,
     routeLogs: List<JmRouteManager.LogEntry>,
     selectedLine: String,
+    selectedLineEndpoint: DomainIp?,
     selectedImageDomain: String,
     selectedImageEndpoint: DomainIp?,
     autoSelect: Boolean,
@@ -248,6 +254,15 @@ private fun encodeJmSpeedTestLog(
     put("imageNetworkPolicy", snapshot.imageNetworkPolicy?.let(::JsonPrimitive) ?: JsonNull)
     put("imageResultsReused", JsonPrimitive(snapshot.imageResultsReused))
     put("selectedLineHost", JsonPrimitive(selectedLine))
+    put(
+        "selectedLineEndpoint",
+        selectedLineEndpoint?.let {
+            buildJsonObject {
+                put("domain", JsonPrimitive(it.domain))
+                put("ip", JsonPrimitive(it.ip))
+            }
+        } ?: JsonNull,
+    )
     put("lineSelectionMode", JsonPrimitive(if (autoSelect) "automatic" else "manual"))
     put("selectedImageDomain", JsonPrimitive(selectedImageDomain))
     put(

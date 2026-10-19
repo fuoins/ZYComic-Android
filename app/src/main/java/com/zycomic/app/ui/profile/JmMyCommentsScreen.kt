@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.JmComment
+import com.zycomic.app.data.repository.JmMyCommentsPolicy
 import com.zycomic.app.data.repository.JmMyCommentsRepository
 import com.zycomic.app.net.JmAuthStore
 import kotlinx.coroutines.CancellationException
@@ -45,11 +47,16 @@ import tachiyomi.presentation.core.i18n.stringResource
 private data class JmMyCommentsUiState(
     val comments: List<JmComment> = emptyList(),
     val page: Int = 0,
+    val total: Int? = null,
     val hasMore: Boolean = false,
     val loading: Boolean = false,
     val error: String? = null,
+    val deletingCommentId: String? = null,
+    val deleteError: String? = null,
     val requestedPage: Int = 1,
 )
+
+private data class PendingCommentDelete(val comment: JmComment, val uid: String, val revision: Long)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,11 +71,15 @@ fun JmMyCommentsScreen(
     val sessionRevision by JmAuthStore.sessionRevisionFlow.collectAsState()
     val uid = JmAuthStore.uid()
     var state by remember(sessionRevision, accountName) { mutableStateOf(JmMyCommentsUiState()) }
+    var pendingDelete by remember(sessionRevision, accountName) { mutableStateOf<PendingCommentDelete?>(null) }
     val scope = rememberCoroutineScope()
     val loadingText = stringResource(KMR.strings.jm_loading)
+    val loadFailedText = stringResource(KMR.strings.jm_comments_load_failed)
+    val deleteFailedText = stringResource(KMR.strings.jm_comments_delete_failed)
+    val invalidDeleteContextText = stringResource(KMR.strings.jm_comments_delete_context_invalid)
 
     fun load(page: Int, append: Boolean) {
-        if (state.loading || !loggedIn || uid.isNullOrBlank()) return
+        if (state.loading || state.deletingCommentId != null || !loggedIn || uid.isNullOrBlank()) return
         val requestedRevision = sessionRevision
         state = state.copy(loading = true, error = null, requestedPage = page)
         scope.launch {
@@ -78,13 +89,48 @@ fun JmMyCommentsScreen(
                 state = JmMyCommentsUiState(
                     comments = (if (append) state.comments + result.comments else result.comments).distinctBy { it.id },
                     page = page,
+                    total = result.total,
                     hasMore = result.hasMore,
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 if (requestedRevision != JmAuthStore.sessionRevision) return@launch
-                state = state.copy(loading = false, error = error.message ?: "JM 留言记录加载失败")
+                state = state.copy(loading = false, error = error.message ?: loadFailedText)
+            }
+        }
+    }
+
+    fun delete(comment: JmComment, expectedUid: String, expectedRevision: Long) {
+        if (state.loading || state.deletingCommentId != null) return
+        if (!JmMyCommentsPolicy.canDelete(comment.id, comment.aid, comment.bid, comment.nid)) {
+            state = state.copy(deleteError = invalidDeleteContextText)
+            return
+        }
+        state = state.copy(deletingCommentId = comment.id, deleteError = null)
+        scope.launch {
+            try {
+                JmMyCommentsRepository.deleteComment(comment, expectedUid, expectedRevision)
+                if (expectedRevision != JmAuthStore.sessionRevision || expectedUid != JmAuthStore.uid()) return@launch
+                state = state.copy(
+                    comments = state.comments.filterNot { it.id == comment.id },
+                    total = state.total?.minus(1)?.coerceAtLeast(0),
+                    deletingCommentId = null,
+                    deleteError = null,
+                )
+                load(1, append = false)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (expectedRevision != JmAuthStore.sessionRevision || expectedUid != JmAuthStore.uid()) return@launch
+                state = state.copy(
+                    deletingCommentId = null,
+                    deleteError = error.message ?: deleteFailedText,
+                )
+            } finally {
+                if (expectedRevision == JmAuthStore.sessionRevision && expectedUid == JmAuthStore.uid() && state.deletingCommentId == comment.id) {
+                    state = state.copy(deletingCommentId = null)
+                }
             }
         }
     }
@@ -105,7 +151,7 @@ fun JmMyCommentsScreen(
                 },
                 actions = {
                     if (loggedIn && !uid.isNullOrBlank()) {
-                        IconButton(onClick = { load(1, append = false) }, enabled = !state.loading) {
+                        IconButton(onClick = { load(1, append = false) }, enabled = !state.loading && state.deletingCommentId == null) {
                             Icon(Icons.Outlined.Refresh, contentDescription = stringResource(KMR.strings.jm_retry))
                         }
                     }
@@ -167,8 +213,24 @@ fun JmMyCommentsScreen(
                     )
                 }
             }
+            if (state.total != null && state.page > 0) {
+                item {
+                    Text(stringResource(KMR.strings.jm_comments_count, state.total ?: 0), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                }
+            }
+            if (state.deleteError != null) {
+                item {
+                    Text(state.deleteError.orEmpty(), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
+                }
+            }
             items(state.comments, key = { it.id }) { comment ->
-                JmMyCommentItem(comment = comment, onOpenManga = onOpenManga)
+                JmMyCommentItem(
+                    comment = comment,
+                    onOpenManga = onOpenManga,
+                    deleting = state.deletingCommentId == comment.id,
+                    deleteEnabled = !state.loading && state.deletingCommentId == null && JmMyCommentsPolicy.canDelete(comment.id, comment.aid, comment.bid, comment.nid),
+                    onDelete = { pendingDelete = PendingCommentDelete(comment, uid.orEmpty(), sessionRevision) },
+                )
             }
             if (state.error != null && state.comments.isNotEmpty()) {
                 item {
@@ -195,10 +257,38 @@ fun JmMyCommentsScreen(
             }
         }
     }
+
+    pendingDelete?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { if (state.deletingCommentId == null) pendingDelete = null },
+            title = { Text(stringResource(KMR.strings.jm_comment_delete_confirm_title)) },
+            text = {
+                Text(stringResource(KMR.strings.jm_comment_delete_confirm_message, pending.comment.mangaId.ifBlank { stringResource(KMR.strings.jm_unknown) }))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        delete(pending.comment, pending.uid, pending.revision)
+                    },
+                    enabled = state.deletingCommentId == null,
+                ) { Text(stringResource(KMR.strings.jm_comment_delete_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }, enabled = state.deletingCommentId == null) { Text(stringResource(KMR.strings.jm_cancel)) }
+            },
+        )
+    }
 }
 
 @Composable
-private fun JmMyCommentItem(comment: JmComment, onOpenManga: (String) -> Unit) {
+private fun JmMyCommentItem(
+    comment: JmComment,
+    onOpenManga: (String) -> Unit,
+    deleting: Boolean,
+    deleteEnabled: Boolean,
+    onDelete: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -207,15 +297,29 @@ private fun JmMyCommentItem(comment: JmComment, onOpenManga: (String) -> Unit) {
             Text(comment.time.ifBlank { "—" }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (comment.mangaId.isNotBlank()) {
                 Text(
-                    comment.mangaName.ifBlank { "禁漫 #${comment.mangaId}" },
+                    stringResource(KMR.strings.jm_comment_album_number, comment.mangaId),
                     modifier = Modifier.clickable { onOpenManga("jm:${comment.mangaId}") },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                 )
+                if (comment.mangaName.isNotBlank()) {
+                    Text(comment.mangaName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Text(stringResource(KMR.strings.jm_comment_album_id_missing), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
             }
         }
         Text(comment.content, style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onDelete, enabled = deleteEnabled && !deleting) {
+                if (deleting) CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                Text(stringResource(if (deleting) KMR.strings.jm_comment_deleting else KMR.strings.jm_comment_delete))
+            }
+            if (!JmMyCommentsPolicy.canDelete(comment.id, comment.aid, comment.bid, comment.nid)) {
+                Text(stringResource(KMR.strings.jm_comments_delete_context_invalid), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
         androidx.compose.material3.HorizontalDivider()
     }
 }

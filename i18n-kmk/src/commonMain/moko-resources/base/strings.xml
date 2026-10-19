@@ -308,6 +308,18 @@
     <string name="jm_comments_login_required">JM 登录已失效或尚未登录，请登录后查看留言记录。</string>
     <string name="jm_comments_uid_missing">当前 JM 登录资料缺少有效用户 ID。为避免读取错误账号，请退出 JM 账号后重新登录。</string>
     <string name="jm_comments_empty">暂无留言记录</string>
+    <string name="jm_comments_load_failed">JM 留言记录加载失败</string>
+    <string name="jm_comments_delete_failed">删除 JM 评论失败</string>
+    <string name="jm_comments_delete_context_invalid">缺少可靠的评论/作品 ID，禁止删除</string>
+    <string name="jm_comments_count">共 %1$d 条评论</string>
+    <string name="jm_comment_delete_confirm_title">删除这条评论？</string>
+    <string name="jm_comment_delete_confirm_message">将从当前 JM 账号中删除此评论（JM #%1$s）。此操作无法撤销。</string>
+    <string name="jm_comment_delete_confirm">删除此条</string>
+    <string name="jm_comment_deleting">删除中…</string>
+    <string name="jm_comment_delete">删除评论</string>
+    <string name="jm_comment_album_id_missing">JM 号缺失</string>
+    <string name="jm_comment_album_number">JM #%1$s</string>
+    <string name="jm_unknown">未知</string>
     <string name="jm_back">返回</string>
     <string name="jm_comment_placeholder">写下你的评论</string>
     <string name="jm_comment_send">发表</string>
@@ -315,6 +327,8 @@
     <string name="jm_retry">重试</string>
     <string name="jm_no_comments">暂无评论</string>
     <string name="jm_loading">加载中…</string>
+    <string name="jm_library_columns_per_row">每行数量</string>
+    <string name="jm_library_columns_auto">自动</string>
     <string name="jm_account_manage">账号管理</string>
     <string name="jm_login_first">请先登录禁漫账号</string>
     <string name="jm_saved_cover">封面已保存到相册</string>

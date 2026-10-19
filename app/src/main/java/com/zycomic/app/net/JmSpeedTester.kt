@@ -150,7 +150,7 @@ object JmSpeedTester {
                         phase(JmSpeedTestProgress.Phase.PREPARING_IMAGES, imagesToTest.size)
                         val imageEndpoints = runner.run(
                             imagesToTest,
-                            probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain)) },
+                            probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain, image = true)) },
                             onStarted = { domain -> publish { it.copy(endpoint = domain, endpointSuccessful = null, endpointElapsedMs = null) } },
                             onResult = { domain, endpoints ->
                                 publish {
@@ -254,8 +254,8 @@ object JmSpeedTester {
         }
     }
 
-    private suspend fun resolveProbeIps(host: String): List<String> {
-        val configured = JmRouteManager.resolveIp(host).map(String::trim).filter(String::isNotEmpty).distinct()
+    private suspend fun resolveProbeIps(host: String, image: Boolean = false): List<String> {
+        val configured = if (image) JmRouteManager.resolveImageIp(host) else JmRouteManager.resolveLineIp(host).map(String::trim).filter(String::isNotEmpty).distinct()
         if (configured.isNotEmpty()) {
             return configured.filter { ip -> ':' in ip || ip.all { it.isDigit() || it == '.' } }
                 .mapNotNull { ip -> runCatching { InetAddress.getByName(ip).hostAddress.substringBefore('%') }.getOrNull() }.distinct()

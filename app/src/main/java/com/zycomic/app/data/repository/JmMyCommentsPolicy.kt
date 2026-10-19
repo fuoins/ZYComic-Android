@@ -1,6 +1,9 @@
 package com.zycomic.app.data.repository
 
-/** Pure, offline-testable contract for the read-only JM profile comment history endpoint. */
+import org.json.JSONObject
+import java.io.IOException
+
+/** Pure, offline-testable contract for JM profile comment history and narrowly scoped deletion. */
 internal object JmMyCommentsPolicy {
     const val PAGE_SIZE = 10
 
@@ -8,6 +11,7 @@ internal object JmMyCommentsPolicy {
         val method: String,
         val path: String,
         val queryParameters: Map<String, String>,
+        val formParameters: Map<String, String> = emptyMap(),
     )
 
     fun request(uid: String, page: Int): Request {
@@ -17,6 +21,22 @@ internal object JmMyCommentsPolicy {
             method = "GET",
             path = "/forum",
             queryParameters = mapOf("uid" to uid, "page" to page.toString()),
+        )
+    }
+
+    fun canDelete(commentId: String, aid: String, bid: String? = null, nid: String? = null): Boolean =
+        validPositiveId(commentId) && validPositiveId(aid) && validOptionalId(bid) && validOptionalId(nid)
+
+    fun deleteRequest(commentId: String, aid: String, bid: String? = null, nid: String? = null): Request {
+        require(canDelete(commentId, aid, bid, nid)) { "JM 评论缺少有效 CID/AID/BID/NID，已禁止删除" }
+        val formParameters = linkedMapOf("comment_id" to commentId, "aid" to aid)
+        bid?.takeIf(String::isNotBlank)?.let { formParameters["bid"] = it }
+        nid?.takeIf(String::isNotBlank)?.let { formParameters["nid"] = it }
+        return Request(
+            method = "POST",
+            path = "/comment_delete",
+            queryParameters = emptyMap(),
+            formParameters = formParameters,
         )
     }
 
@@ -32,6 +52,21 @@ internal object JmMyCommentsPolicy {
         else -> null
     }
 
+    fun parseDeleteResponse(body: String) {
+        val root = runCatching { JSONObject(body) }.getOrElse {
+            throw IOException("JM 删除评论响应无法解析", it)
+        }
+        val result = root.optJSONObject("data") ?: root
+        if (result.opt("status") != "ok") {
+            val message = result.optString("msg").trim().take(256)
+            throw IOException(message.ifBlank { "JM 删除评论未确认成功" })
+        }
+    }
+
     fun isCurrentSession(requestRevision: Long, currentRevision: Long): Boolean =
         requestRevision == currentRevision
+
+    private fun validPositiveId(id: String): Boolean = id.matches(Regex("[0-9]+")) && id.any { it != '0' }
+
+    private fun validOptionalId(id: String?): Boolean = id == null || id.isBlank() || validPositiveId(id)
 }
