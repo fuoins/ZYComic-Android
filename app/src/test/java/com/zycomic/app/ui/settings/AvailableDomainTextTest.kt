@@ -10,6 +10,21 @@ import org.junit.jupiter.api.Test
 class AvailableDomainTextTest {
 
     @Test
+    fun `picacg export excludes stale hosts and retains current candidate order`() {
+        assertEquals(
+            "pica.example\n\nimg.example",
+            buildPicacgAvailableDomainText(
+                listOf("https://pica.example/api", "https://PICA.example/duplicate", "https://unverified.example"),
+                listOf("img.example", "IMG.example", "bad.example"),
+                setOf("pica.example", "stale.example"),
+                setOf("img.example", "removed.example"),
+            ),
+        )
+        assertEquals("manwa\n\npica\n\njm", selectAvailableDomainText("manwa", "jm", AvailableDomainGroup.ALL, "pica"))
+        assertEquals("pica", selectAvailableDomainText("manwa", "jm", AvailableDomainGroup.PICACG, "pica"))
+    }
+
+    @Test
     fun `only successful domains are listed once in candidate order`() {
         val lineOne = DomainIp("line-one.example", "203.0.113.1")
         val lineOneAltIp = DomainIp("line-one.example", "203.0.113.2")

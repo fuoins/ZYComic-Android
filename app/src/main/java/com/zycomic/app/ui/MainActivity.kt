@@ -228,6 +228,7 @@ private enum class SettingsDialog {
     BookBlock,
     DeveloperSettings,
     SpeedTest,
+    PicacgSpeedTestLog,
     JmSpeedTestLog,
     DataStorage,
     About,
@@ -301,6 +302,7 @@ fun AppContent(
     val remoteInfo by settingsVm.remoteInfo.collectAsState()
     val platformTestText by PlatformSpeedTestCoordinator.progressText.collectAsState()
     val jmTestProgress by PlatformSpeedTestCoordinator.jmProgress.collectAsState()
+    val picacgTestProgress by com.zycomic.app.net.PicacgSpeedTester.progress.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
 
@@ -356,6 +358,7 @@ fun AppContent(
     val openBookBlock = { requireLogin { settingsDialog = SettingsDialog.BookBlock } }
     val openDeveloperSettings = { settingsDialog = SettingsDialog.DeveloperSettings }
     val openSpeedTest = { settingsDialog = SettingsDialog.SpeedTest }
+    val openPicacgSpeedTestLog = { settingsDialog = SettingsDialog.PicacgSpeedTestLog }
     val openJmSpeedTestLog = { settingsDialog = SettingsDialog.JmSpeedTestLog }
     val openDataStorage = { settingsDialog = SettingsDialog.DataStorage }
     val openAbout = { settingsDialog = SettingsDialog.About }
@@ -433,7 +436,7 @@ fun AppContent(
                                 searchProvider = provider
                                 showSearch = true
                             },
-                            onRequireLogin = { openLogin(null) },
+                            onRequireLogin = { openLogin(browseVm.currentPlatform.value) },
                         )
                     }
                     1 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_FAVORITES_STATE_KEY) {
@@ -516,7 +519,19 @@ fun AppContent(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 val jmProgress = jmTestProgress
-                if (jmProgress != null && jmProgress.total > 0) {
+                val picacgProgress = picacgTestProgress?.takeIf {
+                    it.total > 0 && it.stage in setOf(
+                        com.zycomic.app.net.PicacgSpeedTester.Stage.TESTING_API,
+                        com.zycomic.app.net.PicacgSpeedTester.Stage.TESTING_IMAGES,
+                    )
+                }
+                if (picacgProgress != null) {
+                    Text(stringResource(KMR.strings.picacg_speed_progress, picacgProgress.completed, picacgProgress.total))
+                    LinearProgressIndicator(
+                        progress = { picacgProgress.completed.toFloat() / picacgProgress.total },
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                    )
+                } else if (jmProgress != null && jmProgress.total > 0) {
                     LinearProgressIndicator(
                         progress = { jmProgress.completed.toFloat() / jmProgress.total },
                         modifier = Modifier.fillMaxWidth().height(6.dp),
@@ -630,6 +645,7 @@ fun AppContent(
                     vm = settingsVm,
                     onClose = { settingsDialog = null },
                     onOpenManwaSpeedTest = openSpeedTest,
+                    onOpenPicacgSpeedTest = openPicacgSpeedTestLog,
                     onOpenJmSpeedTest = openJmSpeedTestLog,
                     onCheckUpdates = { settingsVm.checkRemoteConfig() },
                 )
@@ -641,6 +657,14 @@ fun AppContent(
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 SpeedTestScreen(vm = settingsVm, onClose = { settingsDialog = SettingsDialog.DeveloperSettings })
+            }
+        }
+        SettingsDialog.PicacgSpeedTestLog -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = SettingsDialog.DeveloperSettings },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                com.zycomic.app.ui.settings.PicacgSpeedTestLogScreen(onClose = { settingsDialog = SettingsDialog.DeveloperSettings })
             }
         }
         SettingsDialog.JmSpeedTestLog -> {
@@ -726,6 +750,11 @@ private fun StartupPlatformSwitches() {
     Column(modifier = Modifier.fillMaxWidth()) {
         StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA) {
             if (!StartupPlatformPolicy.setManwaEnabled(it)) {
+                Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+        StartupSwitch(stringResource(KMR.strings.startup_enable_picacg), !policy.disablePicacg, ContentPlatform.PICACG) {
+            if (!StartupPlatformPolicy.setPicacgEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }

@@ -37,32 +37,56 @@ class BrowseTabPersistenceTest {
     }
 
     @Test
-    fun `JM tabs initialize before Manwa and restoring defaults uses the same order`() {
+    fun `default shared tabs initialize Manwa then Picacg then JM and reset restores that order`() {
         installMemoryPreferences()
         val loaded = BrowseTabStore.loadAll()
-        assertEquals(listOf(ContentPlatform.JM, ContentPlatform.JM), loaded.take(2).map { it.platformId })
-        assertEquals(listOf(BrowseTabStore.ID_JM_HOME, JmBrowsePolicy.ALL_HOT_TAB_ID), loaded.take(2).map { it.id })
+        assertEquals(ContentPlatform.MANWA, loaded.first().platformId)
+        assertEquals(listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM), loaded.map { it.platformId }.distinctBy { it })
+        assertEquals(2, loaded.count { it.platformId == ContentPlatform.JM })
+        assertEquals(BrowseTabStore.ID_PICACG_HOME, loaded.first { it.platformId == ContentPlatform.PICACG }.id)
 
         val restored = BrowseTabStore.resetAll()
-        assertEquals(listOf(ContentPlatform.JM, ContentPlatform.JM), restored.take(2).map { it.platformId })
-        assertEquals(listOf(BrowseTabStore.ID_JM_HOME, JmBrowsePolicy.ALL_HOT_TAB_ID), restored.take(2).map { it.id })
+        assertEquals(loaded.map { BrowseTabPolicy.identity(it) }, restored.map { BrowseTabPolicy.identity(it) })
     }
 
     @Test
-    fun `adding a missing fixed JM tab inserts before Manwa without reordering existing mixed tabs`() {
+    fun `adding missing fixed JM tab preserves existing mixed tabs and appends at its default boundary`() {
         val manwa = BrowseTabStore.defaultTabs(ContentPlatform.MANWA)
         val home = BrowseTabStore.jmHomeTab()
         val existing = listOf(manwa[0], BrowseTabStore.jmAllHotTab(), manwa[1])
         val added = BrowseTabPolicy.addFixedJmTab(existing, home)
         assertNotNull(added)
         assertEquals(
-            listOf(home.id, manwa[0].id, BrowseTabStore.jmAllHotTab().id, manwa[1].id),
+            listOf(manwa[0].id, BrowseTabStore.jmAllHotTab().id, manwa[1].id, home.id),
             added!!.first.map { it.id },
         )
         assertNull(BrowseTabPolicy.addFixedJmTab(added.first, home))
 
         val afterDelete = added.first.filterNot { it.platformId == ContentPlatform.JM && it.id == home.id }
         assertNotNull(BrowseTabPolicy.addFixedJmTab(afterDelete, home))
+    }
+
+    @Test
+    fun `Picacg home joins the shared order and retains selected identity`() {
+        installMemoryPreferences()
+        val manwa = BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first()
+        val jm = BrowseTabStore.jmHomeTab()
+        val existing = listOf(manwa, jm)
+        val withPicacg = BrowseTabPolicy.addMissingPicacgHome(existing, BrowseTabStore.picacgHomeTab())
+
+        assertEquals(
+            listOf(manwa.id, BrowseTabStore.ID_PICACG_HOME, jm.id),
+            withPicacg.map { it.id },
+        )
+        assertEquals(existing, BrowseTabPolicy.addMissingPicacgHome(withPicacg, BrowseTabStore.picacgHomeTab()).filterNot { it.id == BrowseTabStore.ID_PICACG_HOME })
+
+        BrowseTabStore.saveAll(existing, selectedTabIndex = 1)
+        val migrated = BrowseTabStore.loadAll()
+        assertEquals(BrowseTabPolicy.identity(BrowseTabStore.picacgHomeTab()), BrowseTabPolicy.identity(migrated[1]))
+        assertEquals(BrowseTabPolicy.identity(jm), BrowseTabPolicy.identity(migrated[BrowseTabStore.loadSelectedTab()]))
+
+        val reordered = BrowseTabPolicy.reorder(migrated, migrated.reversed(), BrowseTabStore.loadSelectedTab())!!
+        assertEquals(jm.id, reordered.tabs[reordered.selectedIndex].id)
     }
 
     @Test
@@ -85,8 +109,12 @@ class BrowseTabPersistenceTest {
         assertEquals(jmHot.id, result!!.tabs[result.selectedIndex].id)
         BrowseTabStore.saveAll(result.tabs, selectedTabIndex = result.selectedIndex)
 
-        assertEquals(draft.map { it.id }, BrowseTabStore.loadAll().map { it.id })
-        assertEquals(result.selectedIndex, BrowseTabStore.loadSelectedTab())
+        val loaded = BrowseTabStore.loadAll()
+        assertEquals(
+            listOf(draft[0], draft[1], BrowseTabStore.picacgHomeTab(), draft[2], draft[3]).map { BrowseTabPolicy.identity(it) },
+            loaded.map { BrowseTabPolicy.identity(it) },
+        )
+        assertEquals(BrowseTabPolicy.identity(jmHot), BrowseTabPolicy.identity(loaded[BrowseTabStore.loadSelectedTab()]))
         assertEquals(manwaFilter, BrowseTabStore.loadFilter(ContentPlatform.MANWA, manwa[0].id))
         assertEquals(jmFilters, BrowseTabStore.loadJmFilters(jmHome.id))
     }
@@ -102,8 +130,11 @@ class BrowseTabPersistenceTest {
         // A dialog may preview any number of draft moves without writing the store.
         val draft = current.reversed()
         BrowseTabPolicy.reorder(current, draft, 1)
-        assertEquals(current, BrowseTabStore.loadAll())
-        assertEquals(1, BrowseTabStore.loadSelectedTabOrNull())
+        assertEquals(
+            listOf(current[0], BrowseTabStore.picacgHomeTab(), current[1], current[2]).map { BrowseTabPolicy.identity(it) },
+            BrowseTabStore.loadAll().map { BrowseTabPolicy.identity(it) },
+        )
+        assertEquals(BrowseTabPolicy.identity(home), BrowseTabPolicy.identity(BrowseTabStore.loadAll()[BrowseTabStore.loadSelectedTab()]))
     }
 
     @Test
@@ -126,7 +157,11 @@ class BrowseTabPersistenceTest {
         BrowseTabStore.saveAll(original, selectedTabIndex = 1)
         val migrated = BrowseTabStore.loadAll()
         assertEquals(manwa[1], migrated[BrowseTabStore.loadSelectedTab()])
-        assertEquals(original, migrated.filterNot { it.id == JmBrowsePolicy.ALL_HOT_TAB_ID })
+        assertEquals(
+            original.map { BrowseTabPolicy.identity(it) },
+            migrated.filterNot { it.id == JmBrowsePolicy.ALL_HOT_TAB_ID || it.platformId == ContentPlatform.PICACG }
+                .map { BrowseTabPolicy.identity(it) },
+        )
     }
 
     @Test

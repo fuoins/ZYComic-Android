@@ -119,6 +119,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 初始化网络模块上下文（VPN 检测需要），并注册网络/VPN 变化监听
         com.zycomic.app.net.NetworkModule.init(this)
         com.zycomic.app.net.JmAuthStore.initialize(this)
+        com.zycomic.app.picacg.PicacgRepository.init(this)
         registerNetworkCallback()
         runCatching {
             if (getSharedPreferences("zycomic_data", android.content.Context.MODE_PRIVATE)

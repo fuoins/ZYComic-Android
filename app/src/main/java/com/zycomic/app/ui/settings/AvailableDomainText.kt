@@ -64,11 +64,25 @@ internal fun buildJmAvailableDomainText(
     return listOf(lines, images).filter(List<String>::isNotEmpty).joinToString("\n\n") { it.joinToString("\n") }
 }
 
-internal enum class AvailableDomainGroup { ALL, MANWA, JM }
+/** Only currently configured Picacg hosts verified by the independent speed tester are exported. */
+internal fun buildPicacgAvailableDomainText(
+    lineCandidates: List<String>,
+    imageCandidates: List<String>,
+    successfulLineDomains: Set<String>,
+    successfulImageDomains: Set<String>,
+): String {
+    val lines = lineCandidates.mapNotNull { runCatching { URI(it.trim()).host }.getOrNull() }
+        .orderedSuccessfulDomains(successfulLineDomains.map { it.lowercase(Locale.ROOT) }.toSet())
+    val images = imageCandidates.orderedSuccessfulDomains(successfulImageDomains.map { it.lowercase(Locale.ROOT) }.toSet())
+    return listOf(lines, images).filter(List<String>::isNotEmpty).joinToString("\n\n") { it.joinToString("\n") }
+}
 
-internal fun selectAvailableDomainText(manwaText: String, jmText: String, group: AvailableDomainGroup): String = when (group) {
-    AvailableDomainGroup.ALL -> listOf(manwaText, jmText).filter(String::isNotBlank).joinToString("\n\n")
+internal enum class AvailableDomainGroup { ALL, MANWA, PICACG, JM }
+
+internal fun selectAvailableDomainText(manwaText: String, jmText: String, group: AvailableDomainGroup, picacgText: String = ""): String = when (group) {
+    AvailableDomainGroup.ALL -> listOf(manwaText, picacgText, jmText).filter(String::isNotBlank).joinToString("\n\n")
     AvailableDomainGroup.MANWA -> manwaText
+    AvailableDomainGroup.PICACG -> picacgText
     AvailableDomainGroup.JM -> jmText
 }
 

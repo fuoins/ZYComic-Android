@@ -58,6 +58,10 @@ import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun LoginOverlay(onClose: () -> Unit, fixedPlatform: ContentPlatform? = null) {
+    if (fixedPlatform == ContentPlatform.PICACG) {
+        com.zycomic.app.ui.picacg.PicacgLoginScreen(onClose)
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -72,6 +76,10 @@ fun LoginOverlay(onClose: () -> Unit, fixedPlatform: ContentPlatform? = null) {
 
 @Composable
 fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () -> Unit = {}, fixedPlatform: ContentPlatform? = null) {
+    if (fixedPlatform == ContentPlatform.PICACG) {
+        com.zycomic.app.ui.picacg.PicacgLoginScreen(onClose)
+        return
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     var platform by remember { mutableStateOf(fixedPlatform ?: ContentPlatformPrefs.load("profile")) }
     val jmAccount by JmAuthStore.accountNameFlow.collectAsState()
@@ -95,6 +103,23 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
     LaunchedEffect(success) { if (success) onClose() }
     LaunchedEffect(platform, mode) {
         if (platform == ContentPlatform.MANWA && mode == 0) vm.refreshCaptcha()
+    }
+    if (platform == ContentPlatform.PICACG) {
+        Column(Modifier.fillMaxSize()) {
+            ContentPlatformSelector(
+                selected = platform,
+                onSelect = {
+                    if (StartupPlatformPolicy.checkSelection(context, it)) {
+                        platform = it
+                        ContentPlatformPrefs.save("profile", it)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                compact = true,
+            )
+            com.zycomic.app.ui.picacg.PicacgLoginScreen(onClose)
+        }
+        return
     }
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {

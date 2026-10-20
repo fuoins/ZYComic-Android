@@ -79,6 +79,7 @@ object DevConfig {
                     cachedJson = EMPTY_CONFIG_JSON
                     RouteManager.clearConfiguration()
                     JmRouteManager.applyRemoteConfig(emptyList(), emptyList(), emptyMap(), null)
+                    PicacgRouteManager.clearConfiguration()
                     remotePrefs.edit()
                         .remove("remote_etag")
                         .remove("remote_updated_at")
@@ -92,6 +93,7 @@ object DevConfig {
             cachedJson = EMPTY_CONFIG_JSON
             RouteManager.clearConfiguration()
             JmRouteManager.applyRemoteConfig(emptyList(), emptyList(), emptyMap(), null)
+            PicacgRouteManager.clearConfiguration()
             // Discard only the unusable snapshot/ETag. Keep the last applied version marker monotonic,
             // while forcing a full response instead of allowing an old ETag to produce a cacheless 304.
             remotePrefs.edit()
@@ -142,6 +144,12 @@ object DevConfig {
                 }
                 root.optJSONArray("sources2")?.let { jmSources ->
                     for (i in 0 until jmSources.length()) actual += jmSources.getString(i).lowercase()
+                }
+                root.optJSONArray("lines3")?.let { picacgLines ->
+                    for (i in 0 until picacgLines.length()) actual += bareHost(picacgLines.getString(i)).lowercase()
+                }
+                root.optJSONArray("sources3")?.let { picacgSources ->
+                    for (i in 0 until picacgSources.length()) actual += picacgSources.getString(i).lowercase()
                 }
                 actual == expectedHosts
             }
@@ -279,6 +287,20 @@ object DevConfig {
         }
     }
 
+    /** Picacg-only API/image rules; never merged into Manwa or JM route maps. */
+    fun getPicacgRouteRules(): Map<String, List<String>> {
+        return try {
+            val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(getConfigJson()).jsonObject
+            val hosts = root["lines3"]?.jsonArray.orEmpty().map { bareHost(it.jsonPrimitive.content).lowercase() }.toSet() +
+                root["sources3"]?.jsonArray.orEmpty().map { it.jsonPrimitive.content.lowercase() }
+            val rules = root["rule"]?.jsonObject ?: return emptyMap()
+            rules.filterKeys { it.lowercase() in hosts }.mapValues { (_, values) -> values.jsonArray.map { it.jsonPrimitive.content } }
+        } catch (e: Exception) {
+            Log.e(TAG, "getPicacgRouteRules failed", e)
+            emptyMap()
+        }
+    }
+
     /** 保存配置到 SharedPreferences 并更新缓存。 */
     fun saveConfig(json: String) {
         val ctx = context
@@ -312,6 +334,8 @@ object DevConfig {
         val sources = strList("sources")
         val lines2 = strList("lines2")
         val sources2 = strList("sources2")
+        val lines3 = strList("lines3")
+        val sources3 = strList("sources3")
         require(lines.isNotEmpty() && sources.isNotEmpty()) { "Remote routes and sources must not be empty" }
         val manwaHosts = (lines.map(::bareHost) + sources).map { it.lowercase() }.toSet()
         val manwaRules = ruleMap.filterKeys { it.lowercase() in manwaHosts }
@@ -319,6 +343,7 @@ object DevConfig {
         val version = root["version"]?.jsonPrimitive?.content?.toIntOrNull()
         RouteManager.applyBaseLists(lines, sources, version)
         JmRouteManager.applyRemoteConfig(lines2, sources2, ruleMap, version)
+        PicacgRouteManager.applyRemoteConfig(lines3, sources3, ruleMap, version)
         val manwaRuleHosts = manwaRules.keys.map { it.lowercase() }.filter { it in manwaHosts }
         RouteManager.setSniDomains((manwaHosts + manwaRuleHosts) - "dns.google")
     }
@@ -368,12 +393,16 @@ object DevConfig {
             val sources = remote.getJSONArray("sources")
             val lines2 = remote.optJSONArray("lines2")
             val sources2 = remote.optJSONArray("sources2")
+            val lines3 = remote.optJSONArray("lines3")
+            val sources3 = remote.optJSONArray("sources3")
             val rules = remote.getJSONObject("rule")
             val hosts = LinkedHashSet<String>()
             for (i in 0 until lines.length()) hosts += bareHost(lines.getString(i)).lowercase()
             for (i in 0 until sources.length()) hosts += sources.getString(i).lowercase()
             lines2?.let { array -> for (i in 0 until array.length()) hosts += bareHost(array.getString(i)).lowercase() }
             sources2?.let { array -> for (i in 0 until array.length()) hosts += array.getString(i).lowercase() }
+            lines3?.let { array -> for (i in 0 until array.length()) hosts += bareHost(array.getString(i)).lowercase() }
+            sources3?.let { array -> for (i in 0 until array.length()) hosts += array.getString(i).lowercase() }
 
             val snapshot = JSONObject().apply {
                 put("version", version)
@@ -383,6 +412,8 @@ object DevConfig {
                 put("sources", sources)
                 lines2?.let { put("lines2", deduplicateLineArray(it)) }
                 sources2?.let { put("sources2", deduplicateHostArray(it)) }
+                lines3?.let { put("lines3", deduplicateLineArray(it)) }
+                sources3?.let { put("sources3", deduplicateHostArray(it)) }
                 put("rule", rules)
             }.toString()
             val previous = getConfigJson()

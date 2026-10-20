@@ -736,9 +736,18 @@ private fun FilterTabFormDialog(
 
                     if (allowPlatformSelect) {
                         Text(stringResource(KMR.strings.content_platform_custom_tab_target), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                        val picacgPresetNotice = stringResource(KMR.strings.picacg_presets_pending)
                         ContentPlatformSelector(
                             selected = targetPlatform,
-                            onSelect = { if (StartupPlatformPolicy.checkSelection(context, it)) targetPlatform = it },
+                            onSelect = {
+                                if (StartupPlatformPolicy.checkSelection(context, it)) {
+                                    if (it == ContentPlatform.PICACG) {
+                                        android.widget.Toast.makeText(context, picacgPresetNotice, android.widget.Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        targetPlatform = it
+                                    }
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         )
                         if (targetPlatform == ContentPlatform.JM) {

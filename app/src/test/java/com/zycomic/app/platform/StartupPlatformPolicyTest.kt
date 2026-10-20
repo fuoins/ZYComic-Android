@@ -14,6 +14,10 @@ class StartupPlatformPolicyTest {
             StartupPlatformPolicy.disabledSelectionMessage(ContentPlatform.MANWA),
         )
         assertEquals(
+            "请在开屏页开启哔咔，或在设置页开启后重启软件",
+            StartupPlatformPolicy.disabledSelectionMessage(ContentPlatform.PICACG),
+        )
+        assertEquals(
             "请在开屏页开启禁漫天堂，或在设置页开启后重启软件",
             StartupPlatformPolicy.disabledSelectionMessage(ContentPlatform.JM),
         )
@@ -24,6 +28,7 @@ class StartupPlatformPolicyTest {
         val state = State()
 
         assertTrue(state.disableManwa)
+        assertTrue(state.disablePicacg)
         assertFalse(state.disableJm)
         assertTrue(state.useLastResult)
         assertTrue(state.useLastLineResult)
@@ -43,6 +48,30 @@ class StartupPlatformPolicyTest {
         assertEquals(ContentPlatform.MANWA, StartupPlatformPolicy.resolve(onlyManwa, null))
         assertEquals(ContentPlatform.MANWA, StartupPlatformPolicy.resolve(onlyManwa, ContentPlatform.JM))
         assertEquals(ContentPlatform.MANWA, StartupPlatformPolicy.resolve(bothAvailable, ContentPlatform.MANWA))
+    }
+
+    @Test
+    fun `platform ids and selector order preserve existing identities and defaults`() {
+        assertEquals(listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM), ContentPlatform.entries)
+        assertEquals("manwa", ContentPlatform.MANWA.id)
+        assertEquals("jm", ContentPlatform.JM.id)
+        assertEquals(ContentPlatform.JM, ContentPlatform.fromId(null))
+        assertEquals(ContentPlatform.PICACG, ContentPlatform.fromId("picacg"))
+    }
+
+    @Test
+    fun `Picacg can be the only enabled platform and disabled choices resolve without cross-routing`() {
+        val picacgOnly = StartupPlatformPolicy.transition(
+            State(),
+            disablePicacg = false,
+            disableJm = true,
+        )
+
+        assertTrue(StartupPlatformPolicy.isEnabled(picacgOnly, ContentPlatform.PICACG))
+        assertFalse(StartupPlatformPolicy.isEnabled(picacgOnly, ContentPlatform.MANWA))
+        assertFalse(StartupPlatformPolicy.isEnabled(picacgOnly, ContentPlatform.JM))
+        assertEquals(ContentPlatform.PICACG, StartupPlatformPolicy.resolve(picacgOnly, ContentPlatform.JM))
+        assertEquals(picacgOnly, StartupPlatformPolicy.transition(picacgOnly, disablePicacg = true))
     }
 
     @Test
@@ -156,6 +185,28 @@ class StartupPlatformPolicyTest {
                 jmEnabled = false,
                 legacyDisableManwa = false,
                 legacyDisableJm = true,
+            ),
+        )
+        assertEquals(
+            Triple(false, false, true),
+            StartupPlatformPolicy.migratedEnabledState(
+                manwaEnabled = false,
+                picacgEnabled = false,
+                jmEnabled = false,
+                legacyDisableManwa = false,
+                legacyDisablePicacg = false,
+                legacyDisableJm = true,
+            ),
+        )
+        assertEquals(
+            Triple(true, false, true),
+            StartupPlatformPolicy.migratedEnabledState(
+                manwaEnabled = null,
+                picacgEnabled = null,
+                jmEnabled = null,
+                legacyDisableManwa = false,
+                legacyDisablePicacg = true,
+                legacyDisableJm = false,
             ),
         )
     }

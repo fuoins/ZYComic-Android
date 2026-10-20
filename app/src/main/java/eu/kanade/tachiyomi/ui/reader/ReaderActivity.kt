@@ -527,6 +527,7 @@ class ReaderActivity : BaseActivity() {
 
             // 图源切换对话框
             val isJmSource = state.manga?.source == com.zycomic.app.reader.JmSource.id
+            val isPicacgSource = state.manga?.source == com.zycomic.app.reader.PicacgSource.id
             if (showImgSourceDialog) {
                 var imgTesting by remember { mutableStateOf(false) }
                 var imgTestCompleted by remember { mutableStateOf(0) }
@@ -537,7 +538,16 @@ class ReaderActivity : BaseActivity() {
                     onDismissRequest = { showImgSourceDialog = false },
                     title = { Text("切换图源") },
                     text = {
-                        if (isJmSource) {
+                        if (isPicacgSource) {
+                            PicacgReaderImageSourceList(
+                                maxHeight = dialogMaxHeight,
+                                testing = imgTesting,
+                                onSelect = { domain, ip ->
+                                    showImgSourceDialog = false
+                                    switchImgSource(domain, ip)
+                                },
+                            )
+                        } else if (isJmSource) {
                             JmReaderImageSourceList(
                                 maxHeight = dialogMaxHeight,
                                 testing = imgTesting,
@@ -668,7 +678,35 @@ class ReaderActivity : BaseActivity() {
                                     imgTesting = true
                                     imgTestCompleted = 0
                                     imgTestTotal = 0
-                                    if (isJmSource) {
+                                    if (isPicacgSource) {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val route = com.zycomic.app.net.PicacgRouteManager
+                                                val previousHost = route.currentImageHost
+                                                val report = com.zycomic.app.net.PicacgSpeedTester.run()
+                                                val selectedHost = route.currentImageHost
+                                                launch(Dispatchers.Main) {
+                                                    imgTesting = false
+                                                    if (!selectedHost.equals(previousHost, ignoreCase = true)) {
+                                                        showImgSourceDialog = false
+                                                        val readerIntent = intent
+                                                        finish()
+                                                        startActivity(readerIntent)
+                                                    }
+                                                    Toast.makeText(
+                                                        this@ReaderActivity,
+                                                        report.imageBlockedReason ?: "Picacg 测速完成：API ${report.apiProbes.count { it.success }}/${report.apiProbes.size}，图源 ${report.imageProbes.count { it.success }}/${report.imageProbes.size}",
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                }
+                                            } catch (_: Exception) {
+                                                launch(Dispatchers.Main) {
+                                                    imgTesting = false
+                                                    Toast.makeText(this@ReaderActivity, "Picacg 图源测速失败", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    } else if (isJmSource) {
                                         scope.launch(Dispatchers.IO) {
                                             try {
                                                 val previousDomain = com.zycomic.app.net.JmRouteManager.activeImageDomain
@@ -786,6 +824,72 @@ class ReaderActivity : BaseActivity() {
     }
 
     @Composable
+    private fun PicacgReaderImageSourceList(
+        maxHeight: androidx.compose.ui.unit.Dp,
+        testing: Boolean,
+        onSelect: (String, String) -> Unit,
+    ) {
+        val routeState by com.zycomic.app.net.PicacgRouteManager.state.collectAsState()
+        val snapshot by com.zycomic.app.net.PicacgSpeedTester.snapshot.collectAsState()
+        val successful = snapshot?.imageProbes.orEmpty().filter { it.success }
+            .sortedBy { it.elapsedMs }
+        ScrollbarLazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (testing) {
+                item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Text("Picacg 图源测速中…", style = MaterialTheme.typography.bodySmall)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    }
+                }
+            }
+            item {
+                Text(
+                    "Picacg sources3 图源池；仅在真实图片响应验证后显示成功 IP\n当前：${routeState.imageHost ?: "未配置"} · ${routeState.pinnedImage?.ip ?: "IP 自动/未测"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            if (successful.isNotEmpty()) {
+                items(successful) { probe ->
+                    val selected = routeState.imageHost.equals(probe.endpoint.domain, true) &&
+                        routeState.pinnedImage?.ip.equals(probe.endpoint.ip, true)
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { onSelect(probe.endpoint.domain, probe.endpoint.ip) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (selected) "● ${probe.endpoint.domain} · ${probe.endpoint.ip}" else "○ ${probe.endpoint.domain} · ${probe.endpoint.ip}",
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text("${probe.elapsedMs}ms", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            } else if (routeState.imageHosts.isEmpty()) {
+                item { Text("Picacg sources3 尚未配置", style = MaterialTheme.typography.bodySmall) }
+            } else {
+                items(routeState.imageHosts) { host ->
+                    val selected = routeState.imageHost.equals(host, true)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(host, "") }.padding(vertical = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(if (selected) "● $host" else "○ $host", color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.weight(1f))
+                        Text("未验证", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun JmReaderImageSourceList(
         maxHeight: androidx.compose.ui.unit.Dp,
         testing: Boolean,
@@ -897,6 +1001,28 @@ class ReaderActivity : BaseActivity() {
      * 否则抛 NetworkOnMainThreadException（这里原先被外层 try/catch 吃掉，表现为"切了没反应/切换失败"）。
      */
     private fun switchImgSource(domain: String, ip: String) {
+        if (viewModel.state.value.manga?.source == com.zycomic.app.reader.PicacgSource.id) {
+            val routes = com.zycomic.app.net.PicacgRouteManager
+            val selectedDomain = routes.imageHosts.firstOrNull { it.equals(domain, ignoreCase = true) }
+            if (selectedDomain == null) {
+                Toast.makeText(this, "Picacg 图源不在当前 sources3 候选池中", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (ip.isBlank()) {
+                routes.pinImageEndpoint(null)
+            } else if (!routes.pinImageEndpoint(com.zycomic.app.net.DomainIp(selectedDomain, ip))) {
+                Toast.makeText(this, "Picacg 图源 IP 不在当前 sources3 候选池中", Toast.LENGTH_SHORT).show()
+                return
+            }
+            routes.selectImageHost(selectedDomain)
+            lifecycleScope.launch(Dispatchers.Main) {
+                val readerIntent = intent
+                finish()
+                startActivity(readerIntent)
+                Toast.makeText(this@ReaderActivity, "已切换 Picacg 图源: $selectedDomain${ip.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()}", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
         if (viewModel.state.value.manga?.source == com.zycomic.app.reader.JmSource.id) {
             val selectedDomain = com.zycomic.app.net.JmRouteManager.state.value.imageDomains
                 .firstOrNull { it.equals(domain, ignoreCase = true) }

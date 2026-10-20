@@ -197,7 +197,7 @@ class LibraryViewModel(val mode: Int = 2) {
         if (!StartupPlatformPolicy.isEnabled(platform)) return
         if (currentPlatform.value == platform) return
         currentPlatform.value = platform
-        if (platform == ContentPlatform.JM) {
+        if (platform != ContentPlatform.MANWA) {
             favJob?.cancel()
             historyJob?.cancel()
             _favLoading.value = false

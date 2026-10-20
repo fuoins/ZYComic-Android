@@ -121,20 +121,44 @@ fun BrowseScreen(
     onOpenSearch: (String, SearchProvider?) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
+    val platform by vm.currentPlatform.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Column(Modifier.fillMaxSize()) {
+        com.zycomic.app.platform.ContentPlatformSelector(
+            selected = platform,
+            onSelect = { if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, it)) vm.selectPlatform(it) },
+            modifier = Modifier.fillMaxWidth(),
+            compact = true,
+        )
+        Box(Modifier.weight(1f)) {
+            LegacyBrowseScreen(vm, pendingTag, onPendingTagConsumed, onOpenManga, onOpenSearch, onRequireLogin)
+        }
+    }
+}
+
+@Composable
+private fun LegacyBrowseScreen(
+    vm: BrowseViewModel,
+    pendingTag: String?,
+    onPendingTagConsumed: () -> Unit,
+    onOpenManga: (String) -> Unit,
+    onOpenSearch: (String, SearchProvider?) -> Unit,
+    onRequireLogin: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val platform by vm.currentPlatform.collectAsState()
 
     pendingTag?.let { tag ->
         LaunchedEffect(tag) {
-            if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.MANWA)) {
+            if (platform == ContentPlatform.MANWA && com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.MANWA)) {
                 vm.applyPendingTag(tag)
+                onPendingTagConsumed()
             }
-            onPendingTagConsumed()
         }
     }
 
     val mainTab by vm.mainTab.collectAsState()
-    val platform by vm.currentPlatform.collectAsState()
     val tabs = vm.tabs
     val pagerState = rememberPagerState(
         initialPage = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
@@ -515,7 +539,7 @@ fun BrowseScreen(
                                     )
                                 }
                             }
-                            if (index == pagerState.currentPage) {
+                            if (index == pagerState.currentPage && item.platformId != ContentPlatform.PICACG) {
                                 item(key = "filter_affordance") {
                                     TabBarIcon(
                                         icon = Icons.Outlined.FilterList,
@@ -545,6 +569,8 @@ fun BrowseScreen(
                     page = page,
                     vm = vm,
                     platform = platform,
+                    pendingTag = pendingTag,
+                    onPendingTagConsumed = onPendingTagConsumed,
                     displayMode = displayMode,
                     gridColumns = gridColumns,
                     selectionMode = if (page == mainTab && vm.tabs.getOrNull(page)?.platformId == ContentPlatform.JM) jmSelectionMode else selectionMode,
@@ -574,6 +600,7 @@ fun BrowseScreen(
                     },
                     bottomPadding = contentPadding.calculateBottomPadding(),
                     onOpenSearch = { keyword, provider -> onOpenSearch(keyword, provider) },
+                    onRequireLogin = onRequireLogin,
                 )
             }
         }
@@ -667,6 +694,7 @@ private fun BrowseTabItem.isUngatedYuzongRank(): Boolean =
 private fun CategoryPlatformLegend() {
     Column(verticalArrangement = Arrangement.spacedBy(0.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
         PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.MANWA), label = "漫蛙")
+        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.PICACG), label = "哔咔")
         PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.JM), label = "禁漫天堂")
         PlatformLegendRow(color = MaterialTheme.colorScheme.primary, label = "宇总排行")
     }
@@ -685,6 +713,8 @@ private fun BrowseTabContent(
     page: Int,
     vm: BrowseViewModel,
     platform: ContentPlatform,
+    pendingTag: String?,
+    onPendingTagConsumed: () -> Unit,
     displayMode: Int,
     gridColumns: Int,
     selectionMode: Boolean,
@@ -694,9 +724,24 @@ private fun BrowseTabContent(
     onLongClick: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenSearch: (String, SearchProvider?) -> Unit,
+    onRequireLogin: () -> Unit,
 ) {
     val item = vm.tabs.getOrNull(page)
     val tabPlatform = item?.platformId ?: platform
+    if (tabPlatform == ContentPlatform.PICACG) {
+        if (page == vm.mainTab.value) {
+            com.zycomic.app.ui.picacg.PicacgBrowseScreen(
+                pendingTag = pendingTag,
+                onPendingTagConsumed = onPendingTagConsumed,
+                onOpenManga = onOpenManga,
+                onOpenSearch = { onOpenSearch(it, SearchProvider.PICACG) },
+                onRequireLogin = onRequireLogin,
+            )
+        } else {
+            Box(Modifier.fillMaxSize())
+        }
+        return
+    }
     if (item?.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.YUZONG_RANK) {
         com.zycomic.app.platform.YuzongRankContent(
             onSearchTitle = { title -> onOpenSearch(title, null) },

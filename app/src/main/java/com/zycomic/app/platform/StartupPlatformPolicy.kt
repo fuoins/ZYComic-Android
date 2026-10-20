@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object StartupPlatformPolicy {
     data class State(
         val disableManwa: Boolean = true,
+        val disablePicacg: Boolean = true,
         val disableJm: Boolean = false,
         /** Re-test the previous image-source top five when the config version matches. */
         val useLastResult: Boolean = true,
@@ -21,8 +22,10 @@ object StartupPlatformPolicy {
 
     private const val PREFS = "zycomic_startup_platform_policy"
     private const val KEY_DISABLE_MANWA = "disable_manwa"
+    private const val KEY_DISABLE_PICACG = "disable_picacg"
     private const val KEY_DISABLE_JM = "disable_jm"
     private const val KEY_ENABLED_MANWA = "enabled_manwa"
+    private const val KEY_ENABLED_PICACG = "enabled_picacg"
     private const val KEY_ENABLED_JM = "enabled_jm"
     private const val KEY_USE_LAST_RESULT = "use_last_result"
     private const val KEY_USE_LAST_LINE_RESULT = "use_last_line_result"
@@ -42,16 +45,19 @@ object StartupPlatformPolicy {
     fun load(context: Context) {
         if (loaded) return
         preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val enabled = migratedEnabledValues(
+        val enabled = migratedEnabledState(
             manwaEnabled = preferences.getBoolean(KEY_ENABLED_MANWA, false).takeIf { preferences.contains(KEY_ENABLED_MANWA) },
+            picacgEnabled = preferences.getBoolean(KEY_ENABLED_PICACG, false).takeIf { preferences.contains(KEY_ENABLED_PICACG) },
             jmEnabled = preferences.getBoolean(KEY_ENABLED_JM, false).takeIf { preferences.contains(KEY_ENABLED_JM) },
             legacyDisableManwa = preferences.getBoolean(KEY_DISABLE_MANWA, true),
+            legacyDisablePicacg = preferences.getBoolean(KEY_DISABLE_PICACG, true),
             legacyDisableJm = preferences.getBoolean(KEY_DISABLE_JM, false),
         )
-        val normalized = normalize(!enabled.first, !enabled.second)
+        val normalized = normalize(!enabled.first, !enabled.second, !enabled.third)
         _state.value = State(
             disableManwa = normalized.first,
-            disableJm = normalized.second,
+            disablePicacg = normalized.second,
+            disableJm = normalized.third,
             useLastResult = preferences.getBoolean(KEY_USE_LAST_RESULT, true),
             useLastLineResult = preferences.getBoolean(KEY_USE_LAST_LINE_RESULT, true),
             revision = _state.value.revision,
@@ -63,12 +69,12 @@ object StartupPlatformPolicy {
 
     /** Startup controls apply immediately and become the next launch's saved configuration. */
     fun setManwaEnabled(enabled: Boolean): Boolean = update(disableManwa = !enabled)
-
+    fun setPicacgEnabled(enabled: Boolean): Boolean = update(disablePicacg = !enabled)
     fun setJmEnabled(enabled: Boolean): Boolean = update(disableJm = !enabled)
 
     /** Settings controls update only the next-launch configuration; live state is unchanged. */
     fun setSettingsManwaEnabled(enabled: Boolean): Boolean = updateSettings(disableManwa = !enabled)
-
+    fun setSettingsPicacgEnabled(enabled: Boolean): Boolean = updateSettings(disablePicacg = !enabled)
     fun setSettingsJmEnabled(enabled: Boolean): Boolean = updateSettings(disableJm = !enabled)
 
     fun setUseLastResult(use: Boolean): Boolean = update(useLastResult = use)
@@ -90,21 +96,23 @@ object StartupPlatformPolicy {
 
     internal fun disabledSelectionMessage(platform: ContentPlatform): String = when (platform) {
         ContentPlatform.MANWA -> "请在开屏页开启漫蛙，或在设置页开启后重启软件"
+        ContentPlatform.PICACG -> "请在开屏页开启哔咔，或在设置页开启后重启软件"
         ContentPlatform.JM -> "请在开屏页开启禁漫天堂，或在设置页开启后重启软件"
     }
 
     @Synchronized
     private fun update(
         disableManwa: Boolean? = null,
+        disablePicacg: Boolean? = null,
         disableJm: Boolean? = null,
         useLastResult: Boolean? = null,
         useLastLineResult: Boolean? = null,
     ): Boolean {
         check(loaded) { "StartupPlatformPolicy.load(context) must be called before setting platform preferences" }
         val previous = _state.value
-        val next = transition(previous, disableManwa, disableJm, useLastResult, useLastLineResult)
-        if (!canTransition(previous, disableManwa, disableJm)) return false
-        if (disableManwa == null && disableJm == null) {
+        val next = transition(previous, disableManwa, disablePicacg, disableJm, useLastResult, useLastLineResult)
+        if (!canTransition(previous, disableManwa, disablePicacg, disableJm)) return false
+        if (disableManwa == null && disablePicacg == null && disableJm == null) {
             val settingsNext = transition(
                 _settingsState.value,
                 useLastResult = useLastResult,
@@ -126,12 +134,13 @@ object StartupPlatformPolicy {
     @Synchronized
     private fun updateSettings(
         disableManwa: Boolean? = null,
+        disablePicacg: Boolean? = null,
         disableJm: Boolean? = null,
     ): Boolean {
         check(loaded) { "StartupPlatformPolicy.load(context) must be called before setting platform preferences" }
         val previous = _settingsState.value
-        val next = transition(previous, disableManwa, disableJm)
-        if (!canTransition(previous, disableManwa, disableJm)) return false
+        val next = transition(previous, disableManwa, disablePicacg, disableJm)
+        if (!canTransition(previous, disableManwa, disablePicacg, disableJm)) return false
         if (next == previous) return true
         persist(next)
         _settingsState.value = next
@@ -141,8 +150,10 @@ object StartupPlatformPolicy {
     private fun persist(state: State) {
         preferences.edit()
             .putBoolean(KEY_ENABLED_MANWA, !state.disableManwa)
+            .putBoolean(KEY_ENABLED_PICACG, !state.disablePicacg)
             .putBoolean(KEY_ENABLED_JM, !state.disableJm)
             .putBoolean(KEY_DISABLE_MANWA, state.disableManwa)
+            .putBoolean(KEY_DISABLE_PICACG, state.disablePicacg)
             .putBoolean(KEY_DISABLE_JM, state.disableJm)
             .putBoolean(KEY_USE_LAST_RESULT, state.useLastResult)
             .putBoolean(KEY_USE_LAST_LINE_RESULT, state.useLastLineResult)
@@ -153,20 +164,24 @@ object StartupPlatformPolicy {
     internal fun transition(
         state: State,
         disableManwa: Boolean? = null,
+        disablePicacg: Boolean? = null,
         disableJm: Boolean? = null,
         useLastResult: Boolean? = null,
         useLastLineResult: Boolean? = null,
     ): State {
         val manwa = disableManwa ?: state.disableManwa
+        val picacg = disablePicacg ?: state.disablePicacg
         val jm = disableJm ?: state.disableJm
-        if (manwa && jm) return state
+        if (manwa && picacg && jm) return state
         val candidate = state.copy(
             disableManwa = manwa,
+            disablePicacg = picacg,
             disableJm = jm,
             useLastResult = useLastResult ?: state.useLastResult,
             useLastLineResult = useLastLineResult ?: state.useLastLineResult,
         )
         return if (candidate.disableManwa == state.disableManwa &&
+            candidate.disablePicacg == state.disablePicacg &&
             candidate.disableJm == state.disableJm &&
             candidate.useLastResult == state.useLastResult &&
             candidate.useLastLineResult == state.useLastLineResult
@@ -180,10 +195,13 @@ object StartupPlatformPolicy {
     internal fun canTransition(
         state: State,
         disableManwa: Boolean? = null,
+        disablePicacg: Boolean? = null,
         disableJm: Boolean? = null,
-    ): Boolean = !(disableManwa ?: state.disableManwa) || !(disableJm ?: state.disableJm)
+    ): Boolean = !(disableManwa ?: state.disableManwa) ||
+        !(disablePicacg ?: state.disablePicacg) ||
+        !(disableJm ?: state.disableJm)
 
-    /** Prefer explicit positive preferences; otherwise invert legacy negative flags during upgrade. */
+    /** Legacy two-platform migration helper retained for callers/tests using the old schema. */
     internal fun migratedEnabledValues(
         manwaEnabled: Boolean?,
         jmEnabled: Boolean?,
@@ -195,20 +213,33 @@ object StartupPlatformPolicy {
         return if (!manwa && !jm) false to true else manwa to jm
     }
 
+    /** Positive platform preferences take precedence; Picacg stays disabled for users upgrading old installs. */
+    internal fun migratedEnabledState(
+        manwaEnabled: Boolean?,
+        picacgEnabled: Boolean?,
+        jmEnabled: Boolean?,
+        legacyDisableManwa: Boolean,
+        legacyDisablePicacg: Boolean,
+        legacyDisableJm: Boolean,
+    ): Triple<Boolean, Boolean, Boolean> {
+        val manwa = manwaEnabled ?: !legacyDisableManwa
+        val picacg = picacgEnabled ?: !legacyDisablePicacg
+        val jm = jmEnabled ?: !legacyDisableJm
+        return if (!manwa && !picacg && !jm) Triple(false, false, true) else Triple(manwa, picacg, jm)
+    }
+
     internal fun isEnabled(state: State, platform: ContentPlatform): Boolean = when (platform) {
         ContentPlatform.MANWA -> !state.disableManwa
+        ContentPlatform.PICACG -> !state.disablePicacg
         ContentPlatform.JM -> !state.disableJm
     }
 
     internal fun resolve(state: State, platform: ContentPlatform?): ContentPlatform {
         val requested = platform ?: ContentPlatform.JM
         if (isEnabled(state, requested)) return requested
-        return when (requested) {
-            ContentPlatform.MANWA -> ContentPlatform.JM
-            ContentPlatform.JM -> ContentPlatform.MANWA
-        }
+        return ContentPlatform.entries.first { isEnabled(state, it) }
     }
 
-    private fun normalize(disableManwa: Boolean, disableJm: Boolean): Pair<Boolean, Boolean> =
-        if (disableManwa && disableJm) true to false else disableManwa to disableJm
+    private fun normalize(disableManwa: Boolean, disablePicacg: Boolean, disableJm: Boolean): Triple<Boolean, Boolean, Boolean> =
+        if (disableManwa && disablePicacg && disableJm) Triple(true, true, false) else Triple(disableManwa, disablePicacg, disableJm)
 }

@@ -3,7 +3,8 @@ package com.zycomic.app.ui.search
 import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
-import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.picacg.PicacgAuthStore
+import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -15,6 +16,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 class SearchViewModel(initialProvider: SearchProvider? = null) {
@@ -87,10 +89,24 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
     val provider = MutableStateFlow(resolveInitialProvider(initialProvider))
     val displayMode = MutableStateFlow(loadDisplayMode(provider.value))
     val jmSortCode = MutableStateFlow(jmSearchSortCode(searchPrefs.getString(KEY_JM_SORT, null)))
+    val picacgCategories = MutableStateFlow<List<String>>(emptyList())
+    val picacgSortCode = MutableStateFlow(picacgSearchSortCode(searchPrefs.getString(KEY_PICACG_SORT, null)))
     val gridColumns = MutableStateFlow(3)
 
     init {
         migrateGridColumnsIfNeeded("search")
+        var picacgRevision = PicacgAuthStore.sessionRevision.value
+        scope.launch {
+            PicacgAuthStore.sessionRevision.collect { revision ->
+                if (revision != picacgRevision) {
+                    picacgRevision = revision
+                    if (provider.value == SearchProvider.PICACG) {
+                        clearSearchResults()
+                        if (PicacgAuthStore.loggedIn.value && keyword.value.isNotBlank()) doSearch()
+                    }
+                }
+            }
+        }
     }
 
     fun setDisplayMode(mode: Int) {
@@ -125,6 +141,20 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         jmSortCode.value = code
         searchPrefs.edit().putString(KEY_JM_SORT, code).apply()
         if (provider.value == SearchProvider.JM && keyword.value.isNotBlank()) doSearch()
+    }
+
+    fun setPicacgSortCode(code: String) {
+        if (PicacgSearchSortOptions.none { it.second == code } || picacgSortCode.value == code) return
+        picacgSortCode.value = code
+        searchPrefs.edit().putString(KEY_PICACG_SORT, code).apply()
+        if (provider.value == SearchProvider.PICACG && keyword.value.isNotBlank()) doSearch()
+    }
+
+    fun setPicacgCategories(categories: List<String>) {
+        val normalized = normalizedPicacgSearchCategories(categories)
+        if (picacgCategories.value == normalized) return
+        picacgCategories.value = normalized
+        if (provider.value == SearchProvider.PICACG && keyword.value.isNotBlank()) doSearch()
     }
 
     private fun loadDisplayMode(selected: SearchProvider): Int =
@@ -171,7 +201,17 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         }
         recordHistory(k)
         hasSearched = true
-        startLoad(reset = true, query = k, selectedProvider = provider.value, order = jmSortCode.value, page = 1)
+        startLoad(
+            reset = true,
+            query = k,
+            selectedProvider = provider.value,
+            order = when (provider.value) {
+                SearchProvider.MANWA -> "dd"
+                SearchProvider.PICACG -> picacgSortCode.value
+                SearchProvider.JM -> jmSortCode.value
+            },
+            page = 1,
+        )
     }
 
     /** 记一条历史：同一个词重复搜只顶到最前，不产生重复条目；超出上限丢弃最旧的。 */
@@ -188,7 +228,11 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
             reset = false,
             query = keyword.value.trim(),
             selectedProvider = provider.value,
-            order = jmSortCode.value,
+            order = when (provider.value) {
+                SearchProvider.MANWA -> "dd"
+                SearchProvider.PICACG -> picacgSortCode.value
+                SearchProvider.JM -> jmSortCode.value
+            },
             page = currentPage,
         )
     }
@@ -206,8 +250,9 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
             _appending.value = false
         } else {
             _appending.value = true
+            if (selectedProvider == SearchProvider.PICACG) _error.value = null
         }
-        val request = SearchRequest(query, selectedProvider, order, page, generation)
+        val request = SearchRequest(query, selectedProvider, order, page, generation, if (selectedProvider == SearchProvider.PICACG) picacgCategories.value.toList() else emptyList())
         activeSearchJob = scope.launch { load(request, reset) }
     }
 
@@ -215,39 +260,51 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         val coroutineJob = currentCoroutineContext()[Job]
         try {
             if (!StartupPlatformPolicy.isEnabled(request.provider.toContentPlatform())) return
-            if (request.provider == SearchProvider.JM) {
-                val pageResult = com.zycomic.app.reader.JmSource.browse(
-                    mode = 0,
-                    page = request.page,
-                    query = request.query,
-                    order = request.order,
-                )
-                if (!requestGeneration.isCurrent(request.generation)) return
-                currentPage = request.page + 1
-                _mangas.value = if (reset) pageResult.items else _mangas.value + pageResult.items
-                _hasMore.value = pageResult.hasMore
-            } else {
-                val target = if (reset) 30 else 15
-                var lastInvoked = request.page
-                val raw: suspend (Int) -> List<Manga> = { p ->
-                    lastInvoked = p
-                    MangaRepository.search(request.query, p)
+            when (request.provider) {
+                SearchProvider.PICACG -> {
+                    if (PicacgAuthStore.token().isNullOrBlank()) throw IllegalStateException("请先登录哔咔后再搜索")
+                    val session = PicacgAuthStore.sessionRevision.value
+                    val result = PicacgRepository.search(request.query, request.page, request.order, request.picacgCategories)
+                    if (!requestGeneration.isCurrent(request.generation) || session != PicacgAuthStore.sessionRevision.value) return
+                    currentPage = request.page + 1
+                    _mangas.value = if (reset) result.items else _mangas.value + result.items
+                    _hasMore.value = result.hasMore
                 }
-                val result = if (MangaRepository.isAnyFilterEnabled()) {
-                    MangaRepository.loadWithFilter(request.page, target, raw)
-                } else {
-                    raw(request.page)
+                SearchProvider.JM -> {
+                    val pageResult = com.zycomic.app.reader.JmSource.browse(
+                        mode = 0,
+                        page = request.page,
+                        query = request.query,
+                        order = request.order,
+                    )
+                    if (!requestGeneration.isCurrent(request.generation)) return
+                    currentPage = request.page + 1
+                    _mangas.value = if (reset) pageResult.items else _mangas.value + pageResult.items
+                    _hasMore.value = pageResult.hasMore
                 }
-                if (!requestGeneration.isCurrent(request.generation)) return
-                currentPage = lastInvoked + 1
-                _mangas.value = if (reset) result else _mangas.value + result
-                if (result.isEmpty()) _hasMore.value = false
+                SearchProvider.MANWA -> {
+                    val target = if (reset) 30 else 15
+                    var lastInvoked = request.page
+                    val raw: suspend (Int) -> List<Manga> = { p ->
+                        lastInvoked = p
+                        MangaRepository.search(request.query, p)
+                    }
+                    val result = if (MangaRepository.isAnyFilterEnabled()) {
+                        MangaRepository.loadWithFilter(request.page, target, raw)
+                    } else {
+                        raw(request.page)
+                    }
+                    if (!requestGeneration.isCurrent(request.generation)) return
+                    currentPage = lastInvoked + 1
+                    _mangas.value = if (reset) result else _mangas.value + result
+                    if (result.isEmpty()) _hasMore.value = false
+                }
             }
             if (requestGeneration.isCurrent(request.generation)) _error.value = null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (requestGeneration.isCurrent(request.generation) && reset) _error.value = e.message ?: "加载失败"
+            if (requestGeneration.isCurrent(request.generation) && (reset || request.provider == SearchProvider.PICACG)) _error.value = e.message ?: "加载失败"
         } finally {
             if (requestGeneration.isCurrent(request.generation)) {
                 _loading.value = false
@@ -282,6 +339,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
         private const val KEY_HISTORY = "search_history"
         private const val KEY_PROVIDER = "search_provider"
         private const val KEY_JM_SORT = "jm_search_sort"
+        private const val KEY_PICACG_SORT = "picacg_search_sort"
         private const val HISTORY_MAX = 20
         private lateinit var prefs: android.content.SharedPreferences
         private lateinit var searchPrefs: android.content.SharedPreferences
@@ -293,6 +351,7 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
                 rememberedProvider = SearchProvider.fromStorage(searchPrefs.getString(KEY_PROVIDER, null)),
                 manwaEnabled = !state.disableManwa,
                 jmEnabled = !state.disableJm,
+                picacgEnabled = !state.disablePicacg,
             )
         }
 
@@ -301,9 +360,4 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
             searchPrefs = context.getSharedPreferences("zycomic_search", Context.MODE_PRIVATE)
         }
     }
-}
-
-private fun SearchProvider.toContentPlatform(): ContentPlatform = when (this) {
-    SearchProvider.MANWA -> ContentPlatform.MANWA
-    SearchProvider.JM -> ContentPlatform.JM
 }

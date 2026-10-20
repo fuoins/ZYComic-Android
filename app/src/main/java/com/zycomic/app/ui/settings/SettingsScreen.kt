@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -65,6 +66,7 @@ fun SettingsScreen() {
     val filterEnabled by vm.filterEnabled.collectAsState()
     val platformSettings by StartupPlatformPolicy.settingsState.collectAsState()
     val manwaAccent = rememberContentPlatformAccent(ContentPlatform.MANWA)
+    val picacgAccent = rememberContentPlatformAccent(ContentPlatform.PICACG)
     val jmAccent = rememberContentPlatformAccent(ContentPlatform.JM)
     val restartRequiredMessage = stringResource(KMR.strings.startup_platform_restart_toast)
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
@@ -142,7 +144,7 @@ fun SettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp),
         )
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(KMR.strings.startup_enable_manwa), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = manwaAccent)
             Switch(
                 checked = !platformSettings.disableManwa,
@@ -153,7 +155,18 @@ fun SettingsScreen() {
                 colors = SwitchDefaults.colors(checkedThumbColor = manwaAccent, checkedTrackColor = manwaAccent.copy(alpha = 0.42f), checkedBorderColor = manwaAccent),
             )
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(KMR.strings.startup_enable_picacg), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = picacgAccent)
+            Switch(
+                checked = !platformSettings.disablePicacg,
+                onCheckedChange = { enabled ->
+                    val accepted = StartupPlatformPolicy.setSettingsPicacgEnabled(enabled)
+                    Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+                },
+                colors = SwitchDefaults.colors(checkedThumbColor = picacgAccent, checkedTrackColor = picacgAccent.copy(alpha = 0.42f), checkedBorderColor = picacgAccent),
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(KMR.strings.startup_enable_jm), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = jmAccent)
             Switch(
                 checked = !platformSettings.disableJm,

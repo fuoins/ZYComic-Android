@@ -40,12 +40,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * 设置主页面：一级选项列表。
@@ -103,6 +107,11 @@ fun SettingsMainScreen(
                     )
                     SettingsPlatformSwitch("开启漫蛙", !platformPolicy.disableManwa, ContentPlatform.MANWA) {
                         if (!StartupPlatformPolicy.setSettingsManwaEnabled(it)) {
+                            Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    SettingsPlatformSwitch(stringResource(KMR.strings.startup_enable_picacg), !platformPolicy.disablePicacg, ContentPlatform.PICACG) {
+                        if (!StartupPlatformPolicy.setSettingsPicacgEnabled(it)) {
                             Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -207,7 +216,8 @@ private fun SettingsPlatformSwitch(
         color = accent.copy(alpha = 0.10f),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                .semantics(mergeDescendants = true) { contentDescription = title },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(title, modifier = Modifier.weight(1f), color = accent, style = MaterialTheme.typography.bodyMedium)

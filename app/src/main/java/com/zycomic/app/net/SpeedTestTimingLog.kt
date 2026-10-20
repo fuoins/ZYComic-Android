@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** Only fixed phase names and elapsed milliseconds enter this diagnostic path. */
 internal object SpeedTestTimingLog {
-    enum class Scope { STARTUP, CONFIG, MANWA, JM }
+    enum class Scope { STARTUP, CONFIG, MANWA, PICACG, JM }
 
     private val latest = mutableMapOf<Scope, Map<SpeedTestTimings.Phase, Long>>()
 

@@ -90,10 +90,19 @@ fun LibraryScreen(
     val platform by vm.currentPlatform.collectAsState()
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
         if (StartupPlatformPolicy.checkSelection(context, selected)) {
-            if (selected == ContentPlatform.JM) vm.exitSelection()
+            if (selected != ContentPlatform.MANWA) vm.exitSelection()
             ContentPlatformPrefs.save("library", selected)
             vm.selectPlatform(selected)
         }
+    }
+    if (platform == ContentPlatform.PICACG) {
+        com.zycomic.app.ui.components.PicacgLibraryScreen(
+            history = false,
+            onRequireLogin = onRequireLogin,
+            onOpenManga = onOpenManga,
+            onSelectPlatform = selectPlatform,
+        )
+        return
     }
     if (platform == ContentPlatform.JM) {
         JmOnlineLibraryScreen(

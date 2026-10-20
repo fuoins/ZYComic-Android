@@ -30,6 +30,8 @@ object PlatformSpeedTestCoordinator {
     val progressText = _progressText.asStateFlow()
     private val _jmProgress = MutableStateFlow<JmSpeedTestProgress?>(null)
     val jmProgress = _jmProgress.asStateFlow()
+    /** Structured Picacg stage and per-endpoint progress for startup and settings UI. */
+    val picacgProgress = PicacgSpeedTester.progress
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
     private var completedKey: SpeedTestRunKey? = null
@@ -43,6 +45,7 @@ object PlatformSpeedTestCoordinator {
         RouteManager.configRevision,
         JmRouteManager.currentSpeedTestConfigRevision(),
         currentNetworkIdentity(),
+        PicacgRouteManager.configRevision,
     )
 
     internal fun currentNetworkIdentity(): String {
@@ -112,16 +115,20 @@ object PlatformSpeedTestCoordinator {
                         return generationIsCurrent()
                     }
                     val result = coroutineScope {
-                        listOf(ContentPlatform.MANWA, ContentPlatform.JM).map { platform ->
+                        listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).map { platform ->
                             async {
                                 if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                 val enabled = StartupPlatformPolicy.isEnabled(platform)
                                 var status = "skipped"
-                                var reason = if (platform == ContentPlatform.MANWA) "漫蛙未开启" else "禁漫天堂未开启"
+                                var reason = when (platform) {
+                                    ContentPlatform.MANWA -> "漫蛙未开启"
+                                    ContentPlatform.PICACG -> "哔咔未开启"
+                                    ContentPlatform.JM -> "禁漫天堂未开启"
+                                }
                                 val requested = onlyPlatform == null || onlyPlatform == platform
-                                if (enabled && !requested) reason = "本轮仅重新检测${if (onlyPlatform == ContentPlatform.JM) "禁漫天堂" else "漫蛙"}"
+                                if (enabled && !requested) reason = "本轮仅重新检测${platformName(onlyPlatform ?: platform)}"
                                 if (enabled && requested) {
-                                    _progressText.value = if (platform == ContentPlatform.MANWA) "正在检测漫蛙线路与图源…" else "正在检测禁漫天堂线路与图源…"
+                                    _progressText.value = "正在检测${platformName(platform)}线路与图源…"
                                     try {
                                         reason = "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（历史仅核对网络配置版本）"
                                         if (platform == ContentPlatform.MANWA) {
@@ -156,6 +163,27 @@ object PlatformSpeedTestCoordinator {
                                                 val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
                                                 _progressText.value = manwaProgressMessage(failed)
                                                 onStageProgress?.invoke(failed)
+                                            }
+                                        } else if (platform == ContentPlatform.PICACG) {
+                                            val snapshot = PicacgSpeedTester.run(
+                                                isCurrent = ::generationIsCurrent,
+                                                beforeApply = ::beforeApply,
+                                                onProgress = { progress ->
+                                                    if (generationIsCurrent()) _progressText.value = picacgProgressMessage(progress)
+                                                },
+                                            )
+                                            status = if (snapshot.complete) "tested" else "incomplete"
+                                            reason = if (snapshot.complete) {
+                                                val apiAvailable = snapshot.apiProbes.count(PicacgSpeedTester.Probe::success)
+                                                val imagesVerified = snapshot.imageProbes.count(PicacgSpeedTester.Probe::success)
+                                                "API 根路径 HTTP 200–499 可用 $apiAvailable/${snapshot.apiProbes.size}；真实图片 GET 200/image 且解码成功 $imagesVerified/${snapshot.imageProbes.size}"
+                                            } else {
+                                                snapshot.imageBlockedReason ?: "线路或真实图源样本不足，图源状态未确认"
+                                            }
+                                            _progressText.value = if (snapshot.complete) {
+                                                "哔咔线路与真实图源测速完成"
+                                            } else {
+                                                "哔咔 API 已检测；图源验证阻塞（无真实图片样本）"
                                             }
                                         } else {
                                             val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
@@ -237,6 +265,29 @@ object PlatformSpeedTestCoordinator {
         SpeedTester.Phase.SKIPPED -> "漫蛙已有测速任务正在运行，本轮未重复检测"
     }
 
+    internal fun picacgProgressMessage(progress: PicacgSpeedTester.Progress): String = when (progress.stage) {
+        PicacgSpeedTester.Stage.PREPARING_API -> "哔咔 · 正在解析 API 线路与 IP…"
+        PicacgSpeedTester.Stage.TESTING_API -> SpeedTestUiTextPolicy.platformEndpointProgress(
+            platform = "哔咔",
+            endpointKind = "API 线路",
+            completed = progress.completed,
+            total = progress.total,
+            successful = progress.successful,
+            failed = progress.failed,
+        )
+        PicacgSpeedTester.Stage.PREPARING_IMAGES -> "哔咔 · 正在准备真实图源样本与图源 IP…"
+        PicacgSpeedTester.Stage.TESTING_IMAGES -> SpeedTestUiTextPolicy.platformEndpointProgress(
+            platform = "哔咔",
+            endpointKind = "图源",
+            completed = progress.completed,
+            total = progress.total,
+            successful = progress.successful,
+            failed = progress.failed,
+        )
+        PicacgSpeedTester.Stage.IMAGE_BLOCKED -> "哔咔 · 图源验证受阻：无 API 返回的真实图片样本或可用图源 IP"
+        PicacgSpeedTester.Stage.COMPLETE -> "哔咔测速完成：API ${progress.successful}/${progress.total} 可用；图源按真实图片样本验证"
+    }
+
     private fun report(platform: ContentPlatform, status: String, reason: String): PlatformSpeedTestReport = when (platform) {
         ContentPlatform.MANWA -> PlatformSpeedTestReport(
             platform = "漫蛙",
@@ -255,6 +306,25 @@ object PlatformSpeedTestCoordinator {
             lineStatus = if (status == "tested" && SpeedTester.progress.value.lineQuickTest) "quick" else status,
             imageStatus = if (status == "tested" && SpeedTester.progress.value.imageQuickTest) "quick" else status,
         )
+        ContentPlatform.PICACG -> {
+            val snapshot = PicacgSpeedTester.snapshot.value
+            PlatformSpeedTestReport(
+                platform = "哔咔",
+                status = status,
+                reason = reason,
+                selectedLine = PicacgRouteManager.currentBaseUrl() + (PicacgRouteManager.selectedApiEndpoint?.let { " [${it.ip}]" } ?: ""),
+                selectedImage = PicacgRouteManager.currentImageHost.orEmpty() + (PicacgRouteManager.selectedImageEndpoint?.let { " [${it.ip}]" } ?: ""),
+                manualLine = PicacgRouteManager.isApiManuallyPinned,
+                manualImage = PicacgRouteManager.isImageManuallyPinned,
+                lineCandidates = PicacgRouteManager.apiUrls.toList(),
+                imageCandidates = PicacgRouteManager.imageHosts.toList(),
+                lineDelays = if (status == "skipped") emptyMap() else snapshot?.apiProbes.orEmpty().associate { "${it.endpoint.domain} [${it.endpoint.ip}]" to if (it.success) it.elapsedMs else Long.MAX_VALUE },
+                imageDelays = if (status == "skipped") emptyMap() else snapshot?.imageProbes.orEmpty().associate { "${it.endpoint.domain} [${it.endpoint.ip}]" to if (it.success) it.elapsedMs else Long.MAX_VALUE },
+                remoteVersion = PicacgRouteManager.remoteVersion,
+                lineStatus = if (snapshot?.apiComplete == true) "tested" else "incomplete",
+                imageStatus = if (snapshot?.imageComplete == true) "tested" else "incomplete",
+            )
+        }
         ContentPlatform.JM -> PlatformSpeedTestReport(
             platform = "禁漫天堂",
             status = status,
@@ -273,13 +343,23 @@ object PlatformSpeedTestCoordinator {
         )
     }
 
+    private fun platformName(platform: ContentPlatform): String = when (platform) {
+        ContentPlatform.MANWA -> "漫蛙"
+        ContentPlatform.PICACG -> "哔咔"
+        ContentPlatform.JM -> "禁漫天堂"
+    }
+
     fun reportsJson(reports: List<PlatformSpeedTestReport> = _reports.value): JSONArray = JSONArray().apply {
         reports.forEach { report ->
             put(
                 JSONObject().apply {
                     put("platform", report.platform)
                     // Wall-clock spans overlap; TOTAL is measured, never a sum of phases.
-                    val timingScope = if (report.platform == "漫蛙") SpeedTestTimingLog.Scope.MANWA else SpeedTestTimingLog.Scope.JM
+                    val timingScope = when (report.platform) {
+                        "漫蛙" -> SpeedTestTimingLog.Scope.MANWA
+                        "哔咔" -> SpeedTestTimingLog.Scope.PICACG
+                        else -> SpeedTestTimingLog.Scope.JM
+                    }
                     put("phaseTimingsMs", SpeedTestTimingLog.json(timingScope))
                     put("startupTimingsMs", SpeedTestTimingLog.json(SpeedTestTimingLog.Scope.STARTUP))
                     put("configTimingsMs", SpeedTestTimingLog.json(SpeedTestTimingLog.Scope.CONFIG))
@@ -296,6 +376,9 @@ object PlatformSpeedTestCoordinator {
                     put("imageCandidates", JSONArray(report.imageCandidates))
                     put("lineDelaysMs", delaysJson(report.lineDelays))
                     put("imageDelaysMs", delaysJson(report.imageDelays))
+                    if (report.platform == "哔咔") {
+                        PicacgSpeedTester.snapshot.value?.let { put("picacgProbeLog", JSONObject(PicacgSpeedTester.exportJson(it))) }
+                    }
                 },
             )
         }
@@ -307,9 +390,14 @@ object PlatformSpeedTestCoordinator {
 
     private fun persist(reports: List<PlatformSpeedTestReport>) {
         val json = reportsJson(reports).toString()
-        DevConfig.appContext?.getSharedPreferences("zycomic_platform_speed_test", Context.MODE_PRIVATE)?.edit()
-            ?.putString("last_result", json)?.apply()
+        DevConfig.appContext?.getSharedPreferences("zycomic_platform_speed_test", Context.MODE_PRIVATE)?.edit()?.apply {
+            putString("last_result", json)
+            PicacgSpeedTester.snapshot.value?.let { putString("picacg_last_speed_test", PicacgSpeedTester.exportJson(it)) }
+        }?.apply()
         reports.forEach { android.util.Log.i("PlatformSpeedTest", it.summary()) }
         android.util.Log.i("PlatformSpeedTest", json)
     }
+
+    /** Export only fixed Picacg route/HTTP/image-decode diagnostics; never includes a sample URL or token. */
+    fun picacgSpeedTestExport(): String? = PicacgSpeedTester.snapshot.value?.let(PicacgSpeedTester::exportJson)
 }

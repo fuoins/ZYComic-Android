@@ -46,6 +46,7 @@ fun LibraryHistoryToolbar(
     onInvertSelection: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior?,
     history: Boolean = false,
+    selectionSupported: Boolean = true,
 ) {
     val slotWidth = 40.dp
     val actions: @Composable RowScope.() -> Unit = {
@@ -82,7 +83,7 @@ fun LibraryHistoryToolbar(
                 }
             }
             ToolbarSlot(
-                onClick = onEnterSelection,
+                onClick = onEnterSelection.takeIf { selectionSupported },
                 description = "多选",
                 icon = Icons.Outlined.Checklist,
                 width = slotWidth,

@@ -40,6 +40,7 @@ object ReaderLauncher {
     ) = withContext(Dispatchers.IO) {
         try {
             val isJm = sourceId == JmSource.id
+            val isPicacg = sourceId == PicacgSource.id
             if (isJm) {
                 require(mangaDto.chapterList.isNotEmpty()) { "JM 暂无可读章节，请重新加载详情" }
                 require(mangaDto.chapterList.all { it.id.matches(Regex("[0-9]+")) && it.id.any { digit -> digit != '0' } }) {
@@ -47,17 +48,38 @@ object ReaderLauncher {
                 }
                 require(mangaDto.chapterList.any { it.id == chapterId }) { "JM 目标章节不存在，请重新加载详情" }
             }
+            val picacgChapter = if (isPicacg) {
+                mangaDto.chapterList.firstOrNull { it.id == chapterId || it.sort.toString() == chapterId }
+                    ?: error("Picacg 目标章节不存在，请重新加载详情")
+            } else {
+                null
+            }
+            if (isPicacg) {
+                require(mangaDto.chapterList.isNotEmpty() && mangaDto.chapterList.all { it.sort > 0 }) {
+                    "Picacg 章节顺序无效，请重新加载详情"
+                }
+                require(mangaDto.chapterList.map { it.sort }.distinct().size == mangaDto.chapterList.size) {
+                    "Picacg 章节顺序重复，请重新加载详情"
+                }
+            }
             val mangaRepository = Injekt.get<MangaRepository>()
             val chapterRepository = Injekt.get<ChapterRepository>()
 
             // 1. 构造 komikku Manga 并插入（upsert by url+source），拿到数据库 mangaId
-            val mangaPath = if (isJm) "/album/${mangaDto.id}" else "/manga/${mangaDto.id}"
+            val mangaPath = when {
+                isJm -> "/album/${mangaDto.id}"
+                isPicacg -> "/comic/${mangaDto.id}"
+                else -> "/manga/${mangaDto.id}"
+            }
             val domainManga = DomainManga.create().copy(
                 source = sourceId,
                 url = mangaPath,
                 ogTitle = mangaDto.name,
                 ogAuthor = mangaDto.author,
-                ogThumbnailUrl = if (isJm) mangaDto.picx.takeIf { it.isNotBlank() } else ManwaSource.coverUrl(mangaDto).takeIf { it.isNotBlank() },
+                ogThumbnailUrl = when {
+                    isJm || isPicacg -> mangaDto.picx.takeIf { it.isNotBlank() }
+                    else -> ManwaSource.coverUrl(mangaDto).takeIf { it.isNotBlank() }
+                },
                 ogDescription = mangaDto.text.takeIf { it.isNotBlank() },
                 ogGenre = mangaDto.tags.map { it.name },
                 ogStatus = when {
@@ -74,8 +96,13 @@ object ReaderLauncher {
             )
             val insertedManga = mangaRepository.insertNetworkManga(listOf(domainManga)).first()
 
-            // 2. 读取已有章节；JM 后续按 URL 更新已有行，Manwa 仍删除后重插。
+            // 2. JM/Picacg update stable chapter rows; Manwa retains its existing replacement behavior.
             val oldChapters = chapterRepository.getChapterByMangaId(insertedManga.id)
+            val picacgSavedProgress = if (isPicacg) {
+                oldChapters.associate { it.url to PicacgSavedChapterProgress(it.id, it.read, it.lastPageRead) }
+            } else {
+                emptyMap()
+            }
             val jmExistingIdsByUrl = if (isJm) oldChapters.associate { it.url to it.id } else emptyMap()
             val jmSavedProgress = if (isJm) {
                 oldChapters.mapNotNull { chapter ->
@@ -86,12 +113,14 @@ object ReaderLauncher {
             } else {
                 emptyMap()
             }
-            if (!isJm && oldChapters.isNotEmpty()) {
+            if (!isJm && !isPicacg && oldChapters.isNotEmpty()) {
                 chapterRepository.removeChaptersWithIds(oldChapters.map { it.id })
             }
 
-            // 3. JM 更新已有章节的元数据/进度并仅插入新章节；Manwa 全量重插。
+            // 3. Existing Picacg row IDs preserve history references and local progress across launches.
             val domainChapters = mangaDto.chapterList.map { ch ->
+                val picacgUrl = if (isPicacg) PicacgChapterProgressPolicy.chapterUrl(mangaDto.id, ch.sort) else null
+                val picacgProgress = picacgUrl?.let { PicacgChapterProgressPolicy.preserve(it, picacgSavedProgress) }
                 val savedProgress = jmSavedProgress[ch.id]
                 val jmProgress = if (isJm) {
                     JmChapterProgressPolicy.preserveProgress(ch.readed == 1, savedProgress)
@@ -102,19 +131,19 @@ object ReaderLauncher {
                     id = if (isJm) {
                         JmChapterProgressPolicy.existingChapterId("/chapter/${ch.id}", jmExistingIdsByUrl) ?: -1
                     } else {
-                        -1
+                        picacgProgress?.id ?: -1
                     },
                     mangaId = insertedManga.id,
-                    url = "/chapter/${ch.id}",
+                    url = picacgUrl ?: "/chapter/${ch.id}",
                     name = ch.name,
-                    dateUpload = if (isJm) 0L else ManwaSource.parseAddtime(ch.addtime),
+                    dateUpload = if (isJm || isPicacg) 0L else ManwaSource.parseAddtime(ch.addtime),
                     sourceOrder = ch.sort.toLong(),
                     chapterNumber = ch.sort.toDouble(),
-                    read = jmProgress?.read ?: (ch.readed == 1),
-                    lastPageRead = jmProgress?.lastPageRead ?: 0,
+                    read = picacgProgress?.read ?: jmProgress?.read ?: (ch.readed == 1),
+                    lastPageRead = picacgProgress?.lastPageRead ?: jmProgress?.lastPageRead ?: 0,
                 )
             }
-            if (isJm) {
+            if (isJm || isPicacg) {
                 val updates = domainChapters.mapNotNull { chapter ->
                     chapter.takeIf { it.id >= 0 }?.let {
                         ChapterUpdate(
@@ -137,7 +166,7 @@ object ReaderLauncher {
             }
 
             // 4. 找到目标章节的数据库 id
-            val targetUrl = "/chapter/$chapterId"
+            val targetUrl = if (isPicacg) PicacgChapterProgressPolicy.chapterUrl(mangaDto.id, picacgChapter!!.sort) else "/chapter/$chapterId"
             val targetChapter = chapterRepository.getChapterByUrlAndMangaId(targetUrl, insertedManga.id)
                 ?: error("目标章节未入库: $targetUrl (已插入 ${domainChapters.size} 章)")
 

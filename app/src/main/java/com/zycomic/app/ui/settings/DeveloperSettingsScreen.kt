@@ -40,10 +40,13 @@ fun DeveloperSettingsScreen(
     onClose: () -> Unit,
     onOpenManwaSpeedTest: () -> Unit,
     onOpenJmSpeedTest: () -> Unit,
+    onOpenPicacgSpeedTest: () -> Unit,
     onCheckUpdates: () -> Unit,
 ) {
     val context = LocalContext.current
     val snapshot by RouteManager.speedTestSnapshot.collectAsState()
+    val picacgSnapshot by com.zycomic.app.net.PicacgSpeedTester.snapshot.collectAsState()
+    val picacgRoutes by com.zycomic.app.net.PicacgRouteManager.state.collectAsState()
     val jmSnapshot by JmRouteManager.speedTestSnapshot.collectAsState()
     val manwaDomains = buildAvailableDomainText(
         lineCandidates = RouteManager.lineHosts,
@@ -53,7 +56,14 @@ fun DeveloperSettingsScreen(
         imageVerdicts = snapshot.imgVerdicts,
     )
     val jmDomains = buildJmAvailableDomainText(jmSnapshot, JmRouteManager.lineHosts, JmRouteManager.imageDomains)
-    val allDomains = selectAvailableDomainText(manwaDomains, jmDomains, AvailableDomainGroup.ALL)
+    val validatedPicacgSnapshot = picacgSnapshot?.takeIf { it.revision == com.zycomic.app.net.PicacgRouteManager.configRevision }
+    val picacgDomains = buildPicacgAvailableDomainText(
+        lineCandidates = picacgRoutes.apiUrls,
+        imageCandidates = picacgRoutes.imageHosts,
+        successfulLineDomains = validatedPicacgSnapshot?.apiProbes.orEmpty().filter { it.success }.map { it.endpoint.domain }.toSet(),
+        successfulImageDomains = validatedPicacgSnapshot?.imageProbes.orEmpty().filter { it.success }.map { it.endpoint.domain }.toSet(),
+    )
+    val allDomains = selectAvailableDomainText(manwaDomains, jmDomains, AvailableDomainGroup.ALL, picacgDomains)
     val allDomainCount = allDomains.lineSequence().count(String::isNotBlank)
     val pendingExport = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Pair<String, Int>?>(null) }
 
@@ -75,7 +85,7 @@ fun DeveloperSettingsScreen(
     }
 
     fun exportAvailableDomains(group: AvailableDomainGroup, filename: String) {
-        val text = selectAvailableDomainText(manwaDomains, jmDomains, group)
+        val text = selectAvailableDomainText(manwaDomains, jmDomains, group, picacgDomains)
         val count = text.lineSequence().count(String::isNotBlank)
         if (text.isBlank()) {
             Toast.makeText(context, "暂无当前配置的测速成功域名，请先完成测速", Toast.LENGTH_SHORT).show()
@@ -120,6 +130,14 @@ fun DeveloperSettingsScreen(
             }
             item {
                 TextPreferenceWidget(
+                    title = stringResource(KMR.strings.picacg_speed_log_title),
+                    subtitle = "查看哔咔独立线路与图源域名/IP、测速结果并导出诊断",
+                    icon = Icons.Outlined.Speed,
+                    onPreferenceClick = onOpenPicacgSpeedTest,
+                )
+            }
+            item {
+                TextPreferenceWidget(
                     title = stringResource(KMR.strings.jm_speed_log_title),
                     subtitle = "查看禁漫天堂线路与图源域名/IP、导出诊断或重新测速",
                     icon = Icons.Outlined.Speed,
@@ -137,7 +155,7 @@ fun DeveloperSettingsScreen(
             item {
                 TextPreferenceWidget(
                     title = "导出可用域名 · 全部",
-                    subtitle = if (allDomainCount == 0) "暂无可用域名" else "漫蛙与禁漫天堂（$allDomainCount 行域名）",
+                    subtitle = if (allDomainCount == 0) "暂无可用域名" else "漫蛙、哔咔与禁漫天堂（$allDomainCount 行域名）",
                     icon = Icons.Outlined.Download,
                     onPreferenceClick = { exportAvailableDomains(AvailableDomainGroup.ALL, "available_domains_all.txt") },
                 )
@@ -152,6 +170,14 @@ fun DeveloperSettingsScreen(
             }
             item {
                 TextPreferenceWidget(
+                    title = stringResource(KMR.strings.picacg_export_domains),
+                    subtitle = stringResource(KMR.strings.picacg_export_domains_hint),
+                    icon = Icons.Outlined.Download,
+                    onPreferenceClick = { exportAvailableDomains(AvailableDomainGroup.PICACG, "available_domains_picacg.txt") },
+                )
+            }
+            item {
+                TextPreferenceWidget(
                     title = "导出可用域名 · 禁漫天堂",
                     subtitle = "保存禁漫天堂测速成功的线路与图源域名",
                     icon = Icons.Outlined.Download,
@@ -162,7 +188,7 @@ fun DeveloperSettingsScreen(
             item {
                 TextPreferenceWidget(
                     title = "复制全部可用域名",
-                    subtitle = if (allDomainCount == 0) "暂无可用域名" else "复制漫蛙与禁漫天堂测速成功域名",
+                    subtitle = if (allDomainCount == 0) "暂无可用域名" else "复制漫蛙、哔咔与禁漫天堂测速成功域名",
                     icon = Icons.Outlined.ContentCopy,
                     onPreferenceClick = {
                         if (allDomains.isBlank()) {

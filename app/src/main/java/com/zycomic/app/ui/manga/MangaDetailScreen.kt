@@ -1082,19 +1082,23 @@ fun MangaDetailOverlay(
     onSearchKeyword: (String) -> Unit,
     onTagClick: (String) -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onClose,
-        properties = androidx.compose.ui.window.DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        MangaDetailScreen(
-            bookId = bookId,
-            onClose = onClose,
-            onOpenManga = onOpenManga,
-            onSearchKeyword = onSearchKeyword,
-            onTagClick = onTagClick,
-        )
+    if (bookId.startsWith("picacg:")) {
+        com.zycomic.app.ui.picacg.PicacgDetailOverlay(bookId, onClose)
+    } else {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = onClose,
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            MangaDetailScreen(
+                bookId = bookId,
+                onClose = onClose,
+                onOpenManga = onOpenManga,
+                onSearchKeyword = onSearchKeyword,
+                onTagClick = onTagClick,
+            )
+        }
     }
 }

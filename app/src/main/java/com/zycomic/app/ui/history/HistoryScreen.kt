@@ -84,6 +84,15 @@ fun HistoryScreen(
         }
     }
 
+    if (platform == ContentPlatform.PICACG) {
+        com.zycomic.app.ui.components.PicacgLibraryScreen(
+            history = true,
+            onRequireLogin = onRequireLogin,
+            onOpenManga = onOpenManga,
+            onSelectPlatform = selectPlatform,
+        )
+        return
+    }
     if (platform == ContentPlatform.JM) {
         JmOnlineLibraryScreen(
             history = true,

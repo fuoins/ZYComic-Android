@@ -163,8 +163,13 @@ object RemoteConfigFetcher {
             val sourcesArr = root.optJSONArray("sources") ?: throw IllegalArgumentException("缺少 sources")
             val lines2Arr = root.optJSONArray("lines2")
             val sources2Arr = root.optJSONArray("sources2")
+            val lines3Arr = root.optJSONArray("lines3")
+            val sources3Arr = root.optJSONArray("sources3")
             require(!root.has("lines2") || lines2Arr != null) { "lines2 必须是数组" }
             require(!root.has("sources2") || sources2Arr != null) { "sources2 必须是数组" }
+            require(!root.has("lines3") || lines3Arr != null) { "lines3 必须是数组" }
+            require(!root.has("sources3") || sources3Arr != null) { "sources3 必须是数组" }
+            require(PicacgNetworkPolicy.poolsArePaired(lines3Arr != null, sources3Arr != null)) { "lines3 与 sources3 必须同时提供或同时省略" }
             val ruleObj = root.optJSONObject("rule") ?: throw IllegalArgumentException("缺少 rule")
             require(linesArr.length() > 0) { "lines 不能为空" }
             require(sourcesArr.length() > 0) { "sources 不能为空" }
@@ -207,9 +212,37 @@ object RemoteConfigFetcher {
             }
             require(lineHosts2.none { it in sources2 }) { "lines2 与 sources2 存在重叠主机" }
 
+            // Picacg has an independent API URL pool and bare image-host pool.
+            val lineHosts3 = LinkedHashSet<String>()
+            lines3Arr?.let { array ->
+                require(array.length() > 0) { "lines3 不能为空" }
+                for (i in 0 until array.length()) {
+                    val value = array.optString(i)
+                    val uri = runCatching { java.net.URI(value) }.getOrNull()
+                    require(uri != null && uri.scheme?.lowercase(Locale.ROOT) in setOf("http", "https") && uri.host != null) {
+                        "lines3[$i] 必须是 HTTP(S) API URL: $value"
+                    }
+                    require(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "lines3[$i] 不可包含凭据、query 或 fragment" }
+                    require(uri.port == -1 || uri.port in 1..65535) { "lines3[$i] 端口非法" }
+                    val host = uri.host.lowercase(Locale.ROOT)
+                    require(HOST_REGEX.matches(host)) { "lines3[$i] 主机非法: ${uri.host}" }
+                    require(lineHosts3.add(host)) { "lines3 主机重复: $host" }
+                }
+            }
+            val sources3 = LinkedHashSet<String>()
+            sources3Arr?.let { array ->
+                require(array.length() > 0) { "sources3 不能为空" }
+                for (i in 0 until array.length()) {
+                    val host = array.optString(i)
+                    require(HOST_REGEX.matches(host.lowercase(Locale.ROOT))) { "sources3[$i] 必须是裸主机名: $host" }
+                    require(sources3.add(host.lowercase(Locale.ROOT))) { "sources3 主机重复: $host" }
+                }
+            }
+            require(lineHosts3.none { it in sources3 }) { "lines3 与 sources3 存在重叠主机" }
+
             // Cross-platform identity is intentionally retained: a Manwa host and a JM host
             // may be the same hostname, while each platform keeps its own runtime pool.
-            val classified = (lineHosts + sources + lineHosts2 + sources2)
+            val classified = (lineHosts + sources + lineHosts2 + sources2 + lineHosts3 + sources3)
                 .mapTo(LinkedHashSet()) { it.lowercase(Locale.ROOT) }
             require(classified.size <= MAX_HOSTS) { "主机数超过 $MAX_HOSTS" }
             val ruleKeys = LinkedHashSet<String>()

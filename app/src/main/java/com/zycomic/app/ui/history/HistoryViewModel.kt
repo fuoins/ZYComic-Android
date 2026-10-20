@@ -112,7 +112,7 @@ class HistoryViewModel {
         if (!StartupPlatformPolicy.isEnabled(platform)) return
         if (currentPlatform.value == platform) return
         currentPlatform.value = platform
-        if (platform == ContentPlatform.JM) {
+        if (platform != ContentPlatform.MANWA) {
             historyJob?.cancel()
             _historyLoading.value = false
             exitSelection()

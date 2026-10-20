@@ -34,11 +34,14 @@ internal object BrowseTabPolicy {
         return ReorderResult(draftIds.map { currentById.getValue(it) }, nextSelectedIndex.coerceAtLeast(0))
     }
 
-    /** New JM tabs go immediately before the first Manwa tab; existing entries are never rearranged. */
+    /** New platform tabs are inserted at the default Manwa → Picacg → JM boundary without rearranging existing entries. */
     fun insertNewTab(current: List<BrowseTabItem>, item: BrowseTabItem): Pair<List<BrowseTabItem>, Int> {
         val result = current.toMutableList()
-        val index = if (item.platformId == ContentPlatform.JM) {
-            result.indexOfFirst { it.platformId == ContentPlatform.MANWA }.takeIf { it >= 0 } ?: result.size
+        val index = if (item.platformId == ContentPlatform.MANWA) {
+            result.indexOfFirst { it.platformId != ContentPlatform.MANWA }.takeIf { it >= 0 } ?: result.size
+        } else if (item.platformId == ContentPlatform.PICACG) {
+            val lastManwa = result.indexOfLast { it.platformId == ContentPlatform.MANWA }
+            if (lastManwa >= 0) lastManwa + 1 else result.indexOfFirst { it.platformId == ContentPlatform.JM }.takeIf { it >= 0 } ?: result.size
         } else {
             result.size
         }
@@ -61,6 +64,12 @@ internal object BrowseTabPolicy {
         defaults: List<BrowseTabItem>,
     ): List<BrowseTabItem> = defaults.fold(tabs) { current, item ->
         addFixedJmTab(current, item)?.first ?: current
+    }
+
+    /** Adds the single Picacg entry at its platform boundary without reordering existing tabs. */
+    fun addMissingPicacgHome(tabs: List<BrowseTabItem>, home: BrowseTabItem): List<BrowseTabItem> {
+        if (tabs.any { it.platformId == ContentPlatform.PICACG && it.id == home.id }) return tabs
+        return insertNewTab(tabs, home).first
     }
 
     /** Rename only known historical default labels; user-customized names remain untouched. */

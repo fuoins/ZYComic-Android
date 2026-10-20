@@ -333,10 +333,13 @@ class BrowseViewModel {
 
     init {
         if (tabs.isNotEmpty()) mainTab.value = mainTab.value.coerceIn(0, tabs.lastIndex)
+        if (currentPlatform.value == ContentPlatform.PICACG && tabs.getOrNull(mainTab.value)?.platformId != ContentPlatform.PICACG) {
+            tabs.indexOfFirst { it.platformId == ContentPlatform.PICACG }.takeIf { it >= 0 }?.let { mainTab.value = it }
+        }
         tabs.getOrNull(mainTab.value)?.let { bindPlatform(it.platformId, allowIndependentRanking = isIndependentRanking(it)) }
         BrowseTabStore.saveSelectedTab(mainTab.value)
         bindFilterFor(mainTab.value)
-        refresh()
+        if (currentPlatform.value != ContentPlatform.PICACG) refresh()
     }
 
     private fun isIndependentRanking(item: BrowseTabItem): Boolean =
@@ -367,6 +370,12 @@ class BrowseViewModel {
         BrowseTabStore.saveSelectedTab(tab)
         bindFilterFor(tab)
         if (!stateFor(tab).loaded) refresh()
+    }
+
+    fun selectPlatform(platform: ContentPlatform) {
+        if (!StartupPlatformPolicy.isEnabled(platform)) return
+        val index = tabs.indexOfFirst { it.platformId == platform }
+        if (index >= 0) selectMainTab(index)
     }
 
     private fun bindPlatform(platform: ContentPlatform, allowIndependentRanking: Boolean = false) {
@@ -566,6 +575,7 @@ class BrowseViewModel {
     }
 
     fun refresh(tab: Int = mainTab.value) {
+        if (currentPlatform.value == ContentPlatform.PICACG) return
         if (tabs.isEmpty() || tab !in tabs.indices) return
         if (isIndependentRanking(tabs[tab])) return
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
@@ -582,6 +592,7 @@ class BrowseViewModel {
     }
 
     fun loadMore(tab: Int) {
+        if (currentPlatform.value == ContentPlatform.PICACG) return
         if (tab !in tabs.indices) return
         if (isIndependentRanking(tabs[tab])) return
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
@@ -596,6 +607,7 @@ class BrowseViewModel {
     }
 
     private suspend fun doLoad(reset: Boolean, tab: Int = mainTab.value) {
+        if (currentPlatform.value == ContentPlatform.PICACG || tabs.getOrNull(tab)?.platformId == ContentPlatform.PICACG) return
         if (tab !in tabs.indices) return
         if (isIndependentRanking(tabs[tab])) return
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
@@ -749,7 +761,8 @@ class BrowseViewModel {
      * 最新更新/gay排行均以 builtin=false 的可添加预设存在，3 个内置热门筛选 tab 也可删（靠恢复默认找回），
      * 故当前没有受保护 tab。
      */
-    fun isProtected(item: BrowseTabItem): Boolean = false
+    fun isProtected(item: BrowseTabItem): Boolean =
+        item.platformId == ContentPlatform.PICACG && item.id == BrowseTabStore.ID_PICACG_HOME
 
     /** Persists one complete drag draft and restores selection by stable platform-qualified identity. */
     fun reorderTabs(draft: List<BrowseTabItem>): Boolean {

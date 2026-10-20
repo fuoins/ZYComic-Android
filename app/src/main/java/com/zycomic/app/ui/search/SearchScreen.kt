@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
@@ -98,16 +99,21 @@ fun SearchScreen(
     val hasMore by vm.hasMore.collectAsState()
 
     val provider by vm.provider.collectAsState()
+    val picacgLoggedIn by PicacgAuthStore.loggedIn.collectAsState()
+    var showPicacgLogin by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val resultImageLoader = remember(context, provider) {
-        if (provider.usesJmCoverImageLoader) {
-            com.zycomic.app.ui.components.JmCoverImageLoader.get(context)
-        } else {
-            context.imageLoader
+        when (provider) {
+            SearchProvider.MANWA -> context.imageLoader
+            SearchProvider.PICACG -> com.zycomic.app.ui.components.PicacgImageLoader.get(context)
+            SearchProvider.JM -> com.zycomic.app.ui.components.JmCoverImageLoader.get(context)
         }
     }
     val displayMode by vm.displayMode.collectAsState()
     val jmSortCode by vm.jmSortCode.collectAsState()
+    val picacgCategories by vm.picacgCategories.collectAsState()
+    var showPicacgCategories by remember { mutableStateOf(false) }
+    val picacgSortCode by vm.picacgSortCode.collectAsState()
     /** 删除模式必须 collect 成状态，直读 .value 不会随点击重组 */
     val historyDeleting by vm.historyDeleting.collectAsState()
     val gridColumns by vm.gridColumns.collectAsState()
@@ -119,6 +125,7 @@ fun SearchScreen(
     /** 列表档（displayMode == 3）用独立滚动状态，触底加载逻辑与网格档一致 */
     val listState = rememberLazyListState()
     var showJmSortMenu by remember { mutableStateOf(false) }
+    var showPicacgSortMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (initialKeyword.isNotBlank()) {
@@ -129,14 +136,14 @@ fun SearchScreen(
 
     LaunchedEffect(gridState.canScrollForward, mangas.size) {
         val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading) {
+        if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading && (provider != SearchProvider.PICACG || error == null)) {
             vm.loadMore()
         }
     }
 
     LaunchedEffect(listState.canScrollForward, mangas.size) {
         val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading) {
+        if (mangas.isNotEmpty() && lastVisible >= mangas.size - 4 && hasMore && !loading && (provider != SearchProvider.PICACG || error == null)) {
             vm.loadMore()
         }
     }
@@ -230,6 +237,28 @@ fun SearchScreen(
                         }
                     }
                 }
+            } else if (provider == SearchProvider.PICACG) {
+                Spacer(modifier = Modifier.weight(1f))
+                var showPicacgSortMenu by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { showPicacgSortMenu = true }) {
+                        val label = PicacgSearchSortOptions.firstOrNull { it.second == picacgSortCode }?.first ?: "最新"
+                        Text("排序：$label")
+                    }
+                    DropdownMenu(expanded = showPicacgSortMenu, onDismissRequest = { showPicacgSortMenu = false }) {
+                        PicacgSearchSortOptions.forEach { (label, code) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = {
+                                showPicacgSortMenu = false
+                                vm.setPicacgSortCode(code)
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        if (provider == SearchProvider.PICACG) {
+            TextButton(onClick = { showPicacgCategories = true }, enabled = picacgLoggedIn) {
+                Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_search_categories) + " · ${picacgCategories.size}")
             }
         }
         HorizontalDivider()
@@ -237,6 +266,15 @@ fun SearchScreen(
         // 搜索结果
         Box(modifier = Modifier.fillMaxSize()) {
             when {
+                provider == SearchProvider.PICACG && !picacgLoggedIn -> Column(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_session_required))
+                    TextButton(onClick = { showPicacgLogin = true }) {
+                        Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_login_action))
+                    }
+                }
                 loading && mangas.isEmpty() -> LoadingFooter()
                 mangas.isEmpty() && !loading && keyword.isNotBlank() && error != null -> Column(
                     modifier = Modifier.align(Alignment.Center).fillMaxWidth().padding(24.dp),
@@ -262,10 +300,18 @@ fun SearchScreen(
                         SearchMangaListRow(
                             manga = m,
                             imageLoader = resultImageLoader,
+                            picacg = provider == SearchProvider.PICACG,
                             onClick = { onOpenManga(searchDetailId(provider, m.id)) },
                         )
                     }
-                    if (appending) {
+                    if (provider == SearchProvider.PICACG && error != null && !appending) {
+                        item {
+                            Column {
+                                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = vm::loadMore) { Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_retry)) }
+                            }
+                        }
+                    } else if (appending) {
                         item { LoadingFooter() }
                     } else if (!hasMore && mangas.isNotEmpty()) {
                         item {
@@ -291,10 +337,18 @@ fun SearchScreen(
                             manga = m,
                             displayMode = displayMode,
                             imageLoader = resultImageLoader,
+                            picacg = provider == SearchProvider.PICACG,
                             onClick = { onOpenManga(searchDetailId(provider, m.id)) },
                         )
                     }
-                    if (appending) {
+                    if (provider == SearchProvider.PICACG && error != null && !appending) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Column {
+                                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = vm::loadMore) { Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_retry)) }
+                            }
+                        }
+                    } else if (appending) {
                         item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
                     } else if (!hasMore && mangas.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -338,6 +392,17 @@ fun SearchScreen(
             }
         }
     }
+    if (showPicacgCategories && provider == SearchProvider.PICACG) {
+        com.zycomic.app.ui.picacg.PicacgSearchCategoriesDialog(
+            selected = picacgCategories,
+            onApply = {
+                vm.setPicacgCategories(it)
+                showPicacgCategories = false
+            },
+            onClose = { showPicacgCategories = false },
+        )
+    }
+    if (showPicacgLogin) com.zycomic.app.ui.picacg.PicacgLoginDialog { showPicacgLogin = false }
 }
 
 /**
@@ -381,6 +446,7 @@ private fun SearchMangaGridItem(
     manga: Manga,
     displayMode: Int,
     imageLoader: coil3.ImageLoader,
+    picacg: Boolean,
     onClick: () -> Unit,
 ) {
     Column(
@@ -396,7 +462,7 @@ private fun SearchMangaGridItem(
                 .clip(RoundedCornerShape(8.dp)),
         ) {
             SubcomposeAsyncImage(
-                model = coverUrl(manga),
+                model = if (picacg) manga.picx.ifBlank { manga.pic } else coverUrl(manga),
                 imageLoader = imageLoader,
                 contentDescription = manga.name,
                 modifier = Modifier.fillMaxSize(),
@@ -456,6 +522,7 @@ private fun SearchMangaGridItem(
 private fun SearchMangaListRow(
     manga: Manga,
     imageLoader: coil3.ImageLoader,
+    picacg: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
@@ -466,7 +533,7 @@ private fun SearchMangaListRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SubcomposeAsyncImage(
-            model = coverUrl(manga),
+            model = if (picacg) manga.picx.ifBlank { manga.pic } else coverUrl(manga),
             imageLoader = imageLoader,
             contentDescription = manga.name,
             modifier = Modifier
