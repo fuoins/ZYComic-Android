@@ -67,6 +67,8 @@ import androidx.lifecycle.lifecycleScope
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import com.zycomic.app.net.StartupCheckResult
+import com.zycomic.app.net.startupChecksPassed
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
@@ -715,6 +717,7 @@ private fun KomikkuSettingsDialog(
 private fun StartupPlatformSwitches() {
     val policy by StartupPlatformPolicy.state.collectAsState()
     val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
+    val checkStatuses by PlatformSpeedTestCoordinator.startupCheckStatuses.collectAsState()
     val context = LocalContext.current
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -731,6 +734,54 @@ private fun StartupPlatformSwitches() {
         StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM, platformStatuses[ContentPlatform.JM]) {
             if (!StartupPlatformPolicy.setJmEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "通过 ${startupChecksPassed(checkStatuses)}/6",
+            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            checkStatuses.forEach { check ->
+                val passed = check.result == StartupCheckResult.SUCCESS
+                Column(
+                    modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        if (passed) {
+                            "✓"
+                        } else {
+                            when (check.result) {
+                                StartupCheckResult.NOT_TESTED -> "·"
+                                StartupCheckResult.RUNNING -> "…"
+                                StartupCheckResult.SUCCESS -> "✓"
+                                StartupCheckResult.FAILED -> "×"
+                                StartupCheckResult.DISABLED -> "禁"
+                                StartupCheckResult.BLOCKED -> "阻"
+                                StartupCheckResult.NOT_RUN -> "—"
+                                StartupCheckResult.INTERRUPTED -> "!"
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        check.phase.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        check.result.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center,
+                        color = if (passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

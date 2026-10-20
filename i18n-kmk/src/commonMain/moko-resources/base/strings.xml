@@ -500,6 +500,7 @@
     <string name="zy_account_picacg_favorites_login_required">登录哔咔账号后查看收藏</string>
     <string name="zy_account_manwa_login_action">mw 登录</string>
     <string name="zy_account_manwa_favorites_login_required">登录 mw 账号后查看收藏</string>
+    <string name="zy_account_manwa_history_login_required">登录 mw 账号后查看阅读历史</string>
     <string name="picacg_profile_title">哔咔个人资料</string>
     <string name="picacg_punch_in">打卡</string>
     <string name="picacg_punch_in_success">哔咔打卡成功</string>
@@ -520,6 +521,8 @@
     <string name="picacg_profile_punched">今日签到：%1$s</string>
     <string name="picacg_profile_punched_yes">已完成</string>
     <string name="picacg_profile_punched_no">未完成</string>
+    <string name="picacg_auto_punch_in">自动签到</string>
+    <string name="picacg_auto_punch_in_summary">进入已登录的我的页时，若今日未签到则自动尝试一次</string>
     <string name="picacg_profile_check_in_unknown">尚未确认</string>
     <string name="picacg_punch_in_done">今日已打卡</string>
     <string name="picacg_punch_in_unconfirmed">签到状态尚未确认，请刷新资料核对</string>

@@ -99,7 +99,7 @@ enum class PicacgLoginFailure { INVALID_CREDENTIALS, RATE_LIMITED, BANNED, LOCKE
 
 class PicacgLoginException(val reason: PicacgLoginFailure, message: String) : java.io.IOException(message)
 
-/** Exact signatures use the request's complete path-and-query string, including its original ordering/encoding. */
+/** Signing omits the leading slash only; query ordering/encoding and the request itself stay intact. */
 object PicacgSigner {
     const val API_KEY = "C69BAF41DA5ABD1FFEDC6D2FEA56B"
     private const val HMAC_KEY = "~d}\$Q7\$eIni=V)9\\RK/P.RM4;9[7|@/CA}b~OW!3?EV`:<>M7pddUBL5n|0/*Cn"
@@ -107,7 +107,7 @@ object PicacgSigner {
     fun sign(pathAndQuery: String, method: String, timeSeconds: Long, nonce: String): String {
         require(pathAndQuery.startsWith('/')) { "Picacg path must begin with /" }
         require(nonce.matches(Regex("[a-z0-9]{32}"))) { "Picacg nonce must be 32 lowercase alphanumeric characters" }
-        val message = (pathAndQuery + timeSeconds + nonce + method.lowercase(java.util.Locale.ROOT) + API_KEY)
+        val message = (pathAndQuery.removePrefix("/") + timeSeconds + nonce + method.lowercase(java.util.Locale.ROOT) + API_KEY)
             .lowercase(java.util.Locale.ROOT)
             .toByteArray(Charsets.UTF_8)
         val mac = Mac.getInstance("HmacSHA256")

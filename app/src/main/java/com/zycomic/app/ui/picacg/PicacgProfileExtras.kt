@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,9 +29,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
+import com.zycomic.app.picacg.AndroidPicacgAutoPunchBooleanStore
 import com.zycomic.app.picacg.PicacgAuthStore
+import com.zycomic.app.picacg.PicacgAutoPunchCoordinator
 import com.zycomic.app.picacg.PicacgProfile
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.picacg.StoredPicacgAutoPunchPreference
 import com.zycomic.app.ui.components.PicacgImageLoader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.CancellationException
@@ -48,26 +52,38 @@ fun PicacgAccountProfileContent(onRequireLogin: () -> Unit) {
     var error by remember(session) { mutableStateOf<String?>(null) }
     var message by remember(session) { mutableStateOf<String?>(null) }
     var busy by remember(session) { mutableStateOf(false) }
-    var refresh by remember { mutableStateOf(0) }
+    val autoPunchPreference = remember(context) {
+        StoredPicacgAutoPunchPreference(AndroidPicacgAutoPunchBooleanStore(context))
+    }
+    var autoPunchEnabled by remember(context) { mutableStateOf(autoPunchPreference.enabled) }
     val scope = rememberCoroutineScope()
+    val autoPunchCoordinator = remember(autoPunchPreference) {
+        PicacgAutoPunchCoordinator(
+            preference = autoPunchPreference,
+            isLoggedIn = { PicacgAuthStore.loggedIn.value },
+            currentSessionRevision = { PicacgAuthStore.sessionRevision.value },
+            loadProfile = { expectedRevision -> PicacgRepository.profile(expectedRevision) },
+            punchInAndRefresh = { expectedRevision -> PicacgRepository.punchIn(expectedRevision) },
+        )
+    }
     val punchSuccess = stringResource(KMR.strings.picacg_punch_in_success)
     val punchUnconfirmed = stringResource(KMR.strings.picacg_punch_in_unconfirmed)
     val punchDone = stringResource(KMR.strings.picacg_punch_in_done)
     val punchUnknown = stringResource(KMR.strings.picacg_profile_check_in_unknown)
 
-    LaunchedEffect(loggedIn, session, refresh) {
+    LaunchedEffect(loggedIn, session) {
         if (!loggedIn) return@LaunchedEffect
         busy = true
         try {
-            val loaded = PicacgRepository.profile()
-            if (session == PicacgAuthStore.sessionRevision.value && loggedIn) {
+            val loaded = autoPunchCoordinator.loadProfileForPage(session)
+            if (loaded != null && session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) {
                 profile = loaded
                 error = null
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            if (session == PicacgAuthStore.sessionRevision.value && loggedIn) error = failure.message
+            if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) error = failure.message
         } finally {
             busy = false
         }
@@ -79,6 +95,19 @@ fun PicacgAccountProfileContent(onRequireLogin: () -> Unit) {
             Text(stringResource(KMR.strings.picacg_session_required))
             Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
         } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(KMR.strings.picacg_auto_punch_in))
+                    Text(stringResource(KMR.strings.picacg_auto_punch_in_summary), style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = autoPunchEnabled,
+                    onCheckedChange = { enabled ->
+                        autoPunchPreference.enabled = enabled
+                        autoPunchEnabled = enabled
+                    },
+                )
+            }
             profile?.let { user ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (user.avatarUrl.isNotBlank()) {
@@ -121,7 +150,27 @@ fun PicacgAccountProfileContent(onRequireLogin: () -> Unit) {
             if (busy) CircularProgressIndicator()
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             message?.let { Text(it) }
-            TextButton(onClick = { refresh++ }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_profile_refresh)) }
+            TextButton(
+                onClick = {
+                    busy = true
+                    scope.launch {
+                        try {
+                            val refreshed = PicacgRepository.profile(session)
+                            if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) {
+                                profile = refreshed
+                                error = null
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) error = failure.message
+                        } finally {
+                            busy = false
+                        }
+                    }
+                },
+                enabled = !busy,
+            ) { Text(stringResource(KMR.strings.picacg_profile_refresh)) }
             Button(
                 onClick = {
                     busy = true
@@ -129,15 +178,15 @@ fun PicacgAccountProfileContent(onRequireLogin: () -> Unit) {
                     message = null
                     scope.launch {
                         try {
-                            val refreshed = PicacgRepository.punchIn()
-                            if (session == PicacgAuthStore.sessionRevision.value && loggedIn) {
+                            val refreshed = PicacgRepository.punchIn(session)
+                            if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) {
                                 profile = refreshed
                                 message = if (refreshed.isPunched == true) punchSuccess else punchUnconfirmed
                             }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {
-                            if (session == PicacgAuthStore.sessionRevision.value && loggedIn) error = failure.message
+                            if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) error = failure.message
                         } finally {
                             busy = false
                         }

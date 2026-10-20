@@ -284,6 +284,9 @@ object PicacgRepository {
 
     suspend fun profile(): PicacgProfile = loadProfile(expectedSessionRevision = null)
 
+    /** Load a profile only for the session that initiated the operation. */
+    suspend fun profile(expectedSessionRevision: Long): PicacgProfile = loadProfile(expectedSessionRevision)
+
     private suspend fun loadProfile(expectedSessionRevision: Long?): PicacgProfile {
         val profile = client().request("/users/profile", expectedSessionRevision = expectedSessionRevision).data.optJSONObject("user")
             ?: throw IOException("Picacg profile response has no user")
@@ -323,11 +326,11 @@ object PicacgRepository {
         )
     }
 
-    /** The write response does not carry a reliable profile flag; read back the account state. */
-    suspend fun punchIn(): PicacgProfile {
-        val expectedSessionRevision = PicacgAuthStore.sessionRevision.value
-        client().request("/users/punch-in", "POST", JSONObject(), expectedSessionRevision = expectedSessionRevision)
-        return loadProfile(expectedSessionRevision)
+    /** The write response does not carry a reliable profile flag; read back in the same session. */
+    suspend fun punchIn(expectedSessionRevision: Long? = null): PicacgProfile {
+        val requestSessionRevision = expectedSessionRevision ?: PicacgAuthStore.sessionRevision.value
+        client().request("/users/punch-in", "POST", JSONObject(), expectedSessionRevision = requestSessionRevision)
+        return loadProfile(requestSessionRevision)
     }
 
     private fun comicList(data: JSONObject, page: Int = 1): PicacgPage<Manga> {

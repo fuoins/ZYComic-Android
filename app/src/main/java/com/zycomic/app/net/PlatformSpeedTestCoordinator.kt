@@ -35,6 +35,8 @@ object PlatformSpeedTestCoordinator {
         ContentPlatform.entries.associateWith { PlatformStartupStatus("等待测速") },
     )
     val platformStartupStatuses = _platformStartupStatuses.asStateFlow()
+    private val _startupCheckStatuses = MutableStateFlow(initialStartupCheckStatuses())
+    val startupCheckStatuses = _startupCheckStatuses.asStateFlow()
     private val _jmProgress = MutableStateFlow<JmSpeedTestProgress?>(null)
     val jmProgress = _jmProgress.asStateFlow()
     /** Structured Picacg stage and per-endpoint progress for startup and settings UI. */
@@ -116,6 +118,14 @@ object PlatformSpeedTestCoordinator {
                             else -> PlatformStartupStatus("等待测速…", running = true)
                         }
                     }
+                    _startupCheckStatuses.value = initialStartupCheckStatuses().map { check ->
+                        val platform = check.phase.platform()
+                        when {
+                            !StartupPlatformPolicy.isEnabled(policy, platform) -> check.copy(result = StartupCheckResult.DISABLED)
+                            onlyPlatform != null && onlyPlatform != platform -> check.copy(result = StartupCheckResult.NOT_RUN)
+                            else -> check
+                        }
+                    }
                     // History eligibility is version-only inside each tester. Process-local
                     // revisions/network identity still guard publication and deduplicate runs.
                     val freshConfig = remoteConfigUpdated || (startupConfig.configurationUpdated == true && completedKey == null)
@@ -188,6 +198,7 @@ object PlatformSpeedTestCoordinator {
                                                     if (generationIsCurrent()) {
                                                         _progressText.value = manwaProgressMessage(progress)
                                                         publishManwaProgress(progress)
+                                                        publishManwaCheckProgress(progress)
                                                         onStageProgress?.invoke(progress)
                                                     }
                                                 },
@@ -215,6 +226,7 @@ object PlatformSpeedTestCoordinator {
                                                     if (generationIsCurrent()) {
                                                         _progressText.value = picacgProgressMessage(progress)
                                                         publishPicacgProgress(progress)
+                                                        publishPicacgCheckProgress(progress)
                                                     }
                                                 },
                                             )
@@ -239,6 +251,7 @@ object PlatformSpeedTestCoordinator {
                                                     _jmProgress.value = progress
                                                     _progressText.value = progress.message()
                                                     publishJmProgress(progress)
+                                                    publishJmCheckProgress(progress)
                                                 }
                                             }
                                             status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
@@ -252,6 +265,7 @@ object PlatformSpeedTestCoordinator {
                                     } catch (_: Exception) {
                                         status = "incomplete"
                                         reason = "本轮检测失败，保留当前选择"
+                                        failRunningChecks(platform, "本轮检测失败")
                                         if (platform == ContentPlatform.MANWA) {
                                             val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
                                             _progressText.value = manwaProgressMessage(failed)
@@ -262,6 +276,7 @@ object PlatformSpeedTestCoordinator {
                                 }
                                 report(platform, status, reason, picacgSnapshot).also { platformReport ->
                                     publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
+                                    blockUnresolvedChecks(platform)
                                 }
                             }
                         }.awaitAll()
@@ -298,6 +313,9 @@ object PlatformSpeedTestCoordinator {
                     _platformStartupStatuses.value = _platformStartupStatuses.value.mapValues { (_, status) ->
                         if (status.running) status.copy(message = "测速中断", running = false) else status
                     }
+                    _startupCheckStatuses.value = _startupCheckStatuses.value.map { check ->
+                        if (check.result == StartupCheckResult.RUNNING) check.copy(result = StartupCheckResult.INTERRUPTED) else check
+                    }
                 }
                 _running.value = false
                 _progressText.value = null
@@ -312,6 +330,99 @@ object PlatformSpeedTestCoordinator {
 
     private fun publishPlatformStatus(platform: ContentPlatform, status: PlatformStartupStatus) {
         _platformStartupStatuses.update { current -> updatePlatformStartupStatus(current, platform, status) }
+    }
+
+    private fun publishStartupCheck(phase: StartupCheckPhase, result: StartupCheckResult, detail: String? = null) {
+        _startupCheckStatuses.update { current -> updateStartupCheckStatus(current, phase, result, detail) }
+    }
+
+    private fun publishMeasuredCheck(phase: StartupCheckPhase, completed: Int, total: Int, successful: Int) {
+        if (total <= 0 || completed < total) {
+            publishStartupCheck(phase, StartupCheckResult.RUNNING)
+        } else {
+            publishStartupCheck(
+                phase,
+                if (successful > 0) StartupCheckResult.SUCCESS else StartupCheckResult.FAILED,
+                if (successful > 0) "本轮检测到可用结果" else "本轮已检测，未发现可用结果",
+            )
+        }
+    }
+
+    private fun blockUnresolvedChecks(platform: ContentPlatform) {
+        phasesFor(platform).forEach { phase ->
+            if (_startupCheckStatuses.value.first { it.phase == phase }.result == StartupCheckResult.RUNNING) {
+                publishStartupCheck(phase, StartupCheckResult.NOT_TESTED, "本轮未取得可计为通过的完整检测结果")
+            }
+        }
+    }
+
+    private fun failRunningChecks(platform: ContentPlatform, detail: String) {
+        val phases = phasesFor(platform).toSet()
+        _startupCheckStatuses.update { current ->
+            current.map { check ->
+                if (check.phase in phases && check.result == StartupCheckResult.RUNNING) {
+                    check.copy(result = StartupCheckResult.FAILED, detail = detail)
+                } else {
+                    check
+                }
+            }
+        }
+    }
+
+    private fun phasesFor(platform: ContentPlatform): List<StartupCheckPhase> = when (platform) {
+        ContentPlatform.MANWA -> listOf(StartupCheckPhase.MANWA_LINE, StartupCheckPhase.MANWA_IMAGE)
+        ContentPlatform.PICACG -> listOf(StartupCheckPhase.PICACG_LINE, StartupCheckPhase.PICACG_IMAGE)
+        ContentPlatform.JM -> listOf(StartupCheckPhase.JM_LINE, StartupCheckPhase.JM_IMAGE)
+    }
+
+    private fun publishManwaCheckProgress(progress: SpeedTester.Progress) {
+        when (progress.phase) {
+            SpeedTester.Phase.PREPARING_LINES -> publishStartupCheck(StartupCheckPhase.MANWA_LINE, StartupCheckResult.RUNNING)
+            SpeedTester.Phase.TESTING_LINES -> publishMeasuredCheck(StartupCheckPhase.MANWA_LINE, progress.completed, progress.total, progress.successful)
+            SpeedTester.Phase.APPLYING_LINE -> publishMeasuredCheck(StartupCheckPhase.MANWA_LINE, progress.completed, progress.total, progress.successful)
+            SpeedTester.Phase.FETCHING_SAMPLE, SpeedTester.Phase.PREPARING_IMAGES -> publishStartupCheck(StartupCheckPhase.MANWA_IMAGE, StartupCheckResult.RUNNING)
+            SpeedTester.Phase.TESTING_IMAGES -> publishMeasuredCheck(StartupCheckPhase.MANWA_IMAGE, progress.completed, progress.total, progress.successful)
+            SpeedTester.Phase.APPLYING_RESULTS -> Unit
+            SpeedTester.Phase.COMPLETE -> Unit
+            SpeedTester.Phase.FAILED -> _startupCheckStatuses.update { current ->
+                current.map { check ->
+                    if (check.phase in setOf(StartupCheckPhase.MANWA_LINE, StartupCheckPhase.MANWA_IMAGE) && check.result == StartupCheckResult.RUNNING) {
+                        check.copy(result = StartupCheckResult.FAILED, detail = "本轮检测失败")
+                    } else {
+                        check
+                    }
+                }
+            }
+            SpeedTester.Phase.SKIPPED -> Unit
+        }
+    }
+
+    private fun publishPicacgCheckProgress(progress: PicacgSpeedTester.Progress) {
+        when (progress.stage) {
+            PicacgSpeedTester.Stage.PREPARING_API -> publishStartupCheck(StartupCheckPhase.PICACG_LINE, StartupCheckResult.RUNNING)
+            PicacgSpeedTester.Stage.TESTING_API -> publishMeasuredCheck(StartupCheckPhase.PICACG_LINE, progress.completed, progress.total, progress.successful)
+            PicacgSpeedTester.Stage.PREPARING_IMAGES -> publishStartupCheck(StartupCheckPhase.PICACG_IMAGE, StartupCheckResult.RUNNING)
+            PicacgSpeedTester.Stage.TESTING_IMAGES -> publishMeasuredCheck(StartupCheckPhase.PICACG_IMAGE, progress.completed, progress.total, progress.successful)
+            PicacgSpeedTester.Stage.IMAGE_BLOCKED -> publishStartupCheck(StartupCheckPhase.PICACG_IMAGE, StartupCheckResult.BLOCKED, "无真实图片样本或图源 IP，未验证通过")
+            PicacgSpeedTester.Stage.COMPLETE -> Unit
+        }
+    }
+
+    private fun publishJmCheckProgress(progress: JmSpeedTestProgress) {
+        when (progress.phase) {
+            JmSpeedTestProgress.Phase.PREPARING_LINES -> publishStartupCheck(StartupCheckPhase.JM_LINE, StartupCheckResult.RUNNING)
+            JmSpeedTestProgress.Phase.TESTING_LINES -> publishMeasuredCheck(StartupCheckPhase.JM_LINE, progress.completed, progress.total, progress.successful)
+            JmSpeedTestProgress.Phase.PREPARING_IMAGES -> publishStartupCheck(StartupCheckPhase.JM_IMAGE, StartupCheckResult.RUNNING)
+            JmSpeedTestProgress.Phase.TESTING_IMAGES -> publishMeasuredCheck(StartupCheckPhase.JM_IMAGE, progress.completed, progress.total, progress.successful)
+            JmSpeedTestProgress.Phase.REUSING_IMAGES -> Unit
+            JmSpeedTestProgress.Phase.COMPLETE, JmSpeedTestProgress.Phase.FAILED -> Unit
+        }
+    }
+
+    private fun StartupCheckPhase.platform(): ContentPlatform = when (this) {
+        StartupCheckPhase.MANWA_LINE, StartupCheckPhase.MANWA_IMAGE -> ContentPlatform.MANWA
+        StartupCheckPhase.PICACG_LINE, StartupCheckPhase.PICACG_IMAGE -> ContentPlatform.PICACG
+        StartupCheckPhase.JM_LINE, StartupCheckPhase.JM_IMAGE -> ContentPlatform.JM
     }
 
     private fun publishManwaProgress(progress: SpeedTester.Progress) {
