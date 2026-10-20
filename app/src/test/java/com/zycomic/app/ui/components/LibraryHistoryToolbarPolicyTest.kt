@@ -1,9 +1,20 @@
 package com.zycomic.app.ui.components
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class LibraryHistoryToolbarPolicyTest {
+    @Test
+    fun `toolbar reserves room for all platform options and fits a compact row`() {
+        val platformMinimumWidth = 3 * 48 + 2 * 2 + 2 * 3
+        val toolbarActionWidth = 4 * LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP +
+            LibraryHistoryToolbarPolicy.PLATFORM_SELECTOR_WIDTH_DP
+
+        assertTrue(LibraryHistoryToolbarPolicy.PLATFORM_SELECTOR_WIDTH_DP >= platformMinimumWidth)
+        assertTrue(toolbarActionWidth <= 360 - 48)
+    }
+
     @Test
     fun `history reserves the first action slot and keeps shared actions compact`() {
         assertEquals(

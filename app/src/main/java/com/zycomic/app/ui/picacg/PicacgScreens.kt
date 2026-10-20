@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,7 +85,7 @@ fun PicacgLoginDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-fun PicacgProfileScreen(onRequireLogin: () -> Unit) {
+fun PicacgProfileContent(onRequireLogin: () -> Unit) {
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val observedSession by PicacgAuthStore.sessionRevision.collectAsState()
     val session = observedSession
@@ -114,42 +113,37 @@ fun PicacgProfileScreen(onRequireLogin: () -> Unit) {
             busy = false
         }
     }
-    LazyColumn(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(stringResource(KMR.strings.picacg_profile_title), style = MaterialTheme.typography.headlineSmall) }
+    // The shared profile page owns scrolling; do not nest a scrolling container here.
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(KMR.strings.picacg_profile_title), style = MaterialTheme.typography.titleMedium)
         if (!loggedIn) {
-            item {
-                Text(stringResource(KMR.strings.picacg_session_required))
-                Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
-            }
+            Text(stringResource(KMR.strings.picacg_session_required))
+            Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
         } else {
-            item {
-                Text(name)
-                if (busy) CircularProgressIndicator()
-            }
-            error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
-            message?.let { item { Text(it) } }
-            item { TextButton(onClick = { refresh++ }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_profile_refresh)) } }
-            item {
-                Button(onClick = {
-                    busy = true
-                    error = null
-                    message = null
-                    scope.launch {
-                        try {
-                            PicacgRepository.punchIn()
-                            if (sessionIsCurrent(session)) message = punchSuccess
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (failure: Exception) {
-                            if (sessionIsCurrent(session)) error = failure.message
-                        } finally {
-                            busy = false
-                        }
+            Text(name)
+            if (busy) CircularProgressIndicator()
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            message?.let { Text(it) }
+            TextButton(onClick = { refresh++ }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_profile_refresh)) }
+            Button(onClick = {
+                busy = true
+                error = null
+                message = null
+                scope.launch {
+                    try {
+                        PicacgRepository.punchIn()
+                        if (sessionIsCurrent(session)) message = punchSuccess
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        if (sessionIsCurrent(session)) error = failure.message
+                    } finally {
+                        busy = false
                     }
-                }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_punch_in)) }
-            }
-            item { TextButton(onClick = { PicacgRepository.logout() }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_logout)) } }
+                }
+            }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_punch_in)) }
+            TextButton(onClick = { PicacgRepository.logout() }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_logout)) }
         }
-        item { Text(stringResource(KMR.strings.picacg_features_pending), style = MaterialTheme.typography.bodySmall) }
+        Text(stringResource(KMR.strings.picacg_features_pending), style = MaterialTheme.typography.bodySmall)
     }
 }

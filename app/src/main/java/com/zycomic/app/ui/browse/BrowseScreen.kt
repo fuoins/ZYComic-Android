@@ -121,19 +121,7 @@ fun BrowseScreen(
     onOpenSearch: (String, SearchProvider?) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
-    val platform by vm.currentPlatform.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    Column(Modifier.fillMaxSize()) {
-        com.zycomic.app.platform.ContentPlatformSelector(
-            selected = platform,
-            onSelect = { if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, it)) vm.selectPlatform(it) },
-            modifier = Modifier.fillMaxWidth(),
-            compact = true,
-        )
-        Box(Modifier.weight(1f)) {
-            LegacyBrowseScreen(vm, pendingTag, onPendingTagConsumed, onOpenManga, onOpenSearch, onRequireLogin)
-        }
-    }
+    LegacyBrowseScreen(vm, pendingTag, onPendingTagConsumed, onOpenManga, onOpenSearch, onRequireLogin)
 }
 
 @Composable

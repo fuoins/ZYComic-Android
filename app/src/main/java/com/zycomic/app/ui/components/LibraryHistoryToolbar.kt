@@ -48,7 +48,7 @@ fun LibraryHistoryToolbar(
     history: Boolean = false,
     selectionSupported: Boolean = true,
 ) {
-    val slotWidth = 40.dp
+    val slotWidth = LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP.dp
     val actions: @Composable RowScope.() -> Unit = {
         if (selectionMode) {
             ToolbarSlot(onClick = onSelectAll, description = "全选", icon = Icons.Outlined.SelectAll, width = slotWidth)
@@ -91,7 +91,7 @@ fun LibraryHistoryToolbar(
         }
         if (LibraryHistoryToolbarPolicy.showPlatformSelector(searchQuery != null)) {
             Box(
-                modifier = Modifier.width(100.dp).height(48.dp),
+                modifier = Modifier.width(LibraryHistoryToolbarPolicy.PLATFORM_SELECTOR_WIDTH_DP.dp).height(48.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 ContentPlatformSelector(

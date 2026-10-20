@@ -4,6 +4,9 @@ package com.zycomic.app.ui.components
 internal object LibraryHistoryToolbarPolicy {
     enum class Action { SEARCH, REFRESH, FILTER, EMPTY }
 
+    const val ACTION_SLOT_WIDTH_DP = 36
+    const val PLATFORM_SELECTOR_WIDTH_DP = 156
+
     fun leadingActions(history: Boolean): List<Action> = if (history) {
         listOf(Action.EMPTY, Action.SEARCH, Action.REFRESH)
     } else {

@@ -111,24 +111,6 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     var platform by remember { mutableStateOf(ContentPlatformPrefs.load("profile")) }
-    if (platform == ContentPlatform.PICACG) {
-        Column(Modifier.fillMaxSize()) {
-            ContentPlatformSelector(
-                selected = platform,
-                onSelect = {
-                    if (StartupPlatformPolicy.checkSelection(context, it)) {
-                        platform = it
-                        ContentPlatformPrefs.save("profile", it)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                compact = true,
-            )
-            Box(Modifier.weight(1f)) { com.zycomic.app.ui.picacg.PicacgProfileScreen(onRequireLogin) }
-            com.zycomic.app.ui.picacg.PicacgProfileExtras(onOpenSettings = { onNavigateToTab(4) })
-        }
-        return
-    }
     val selectPlatform: (ContentPlatform) -> Unit = { selected ->
         if (StartupPlatformPolicy.checkSelection(context, selected)) {
             platform = selected
@@ -312,29 +294,31 @@ fun ProfileScreen(
         ScrollbarLazyColumn(contentPadding = contentPadding) {
             item {
                 LogoHeader {
-                    TextButton(
-                        enabled = when (platform) {
-                            ContentPlatform.MANWA -> user != null && !manwaRefreshing
-                            ContentPlatform.PICACG -> false // Rendered by the isolated Picacg profile above.
-                            ContentPlatform.JM -> jmLoggedIn && !jmRefreshing
-                        },
-                        onClick = {
-                            when (platform) {
-                                ContentPlatform.MANWA -> if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
-                                ContentPlatform.PICACG -> Unit
-                                ContentPlatform.JM -> if (!jmRefreshing) scope.launch { refreshJm() }
-                            }
-                        },
-                    ) {
-                        if ((platform == ContentPlatform.MANWA && manwaRefreshing) ||
-                            (platform == ContentPlatform.JM && jmRefreshing)
+                    if (platform != ContentPlatform.PICACG) {
+                        TextButton(
+                            enabled = when (platform) {
+                                ContentPlatform.MANWA -> user != null && !manwaRefreshing
+                                ContentPlatform.PICACG -> false // Refresh is owned by the embedded Picacg content.
+                                ContentPlatform.JM -> jmLoggedIn && !jmRefreshing
+                            },
+                            onClick = {
+                                when (platform) {
+                                    ContentPlatform.MANWA -> if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
+                                    ContentPlatform.PICACG -> Unit
+                                    ContentPlatform.JM -> if (!jmRefreshing) scope.launch { refreshJm() }
+                                }
+                            },
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            if ((platform == ContentPlatform.MANWA && manwaRefreshing) ||
+                                (platform == ContentPlatform.JM && jmRefreshing)
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(KMR.strings.profile_refresh))
                         }
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(KMR.strings.profile_refresh))
                     }
                 }
             }
@@ -358,7 +342,9 @@ fun ProfileScreen(
 
             // ---- 用户信息 ----
             item {
-                if (platform == ContentPlatform.JM) {
+                if (platform == ContentPlatform.PICACG) {
+                    com.zycomic.app.ui.picacg.PicacgProfileContent(onRequireLogin)
+                } else if (platform == ContentPlatform.JM) {
                     TextPreferenceWidget(
                         title = jmAccount.takeIf { jmLoggedIn } ?: stringResource(KMR.strings.jm_account_title),
                         subtitle = if (jmLoggedIn) {
@@ -549,6 +535,11 @@ fun ProfileScreen(
             }
 
             // ---- 设置入口 ----
+            if (platform == ContentPlatform.PICACG) {
+                item {
+                    com.zycomic.app.ui.picacg.PicacgProfileExtras(onOpenSettings = { onNavigateToTab(4) })
+                }
+            }
             if (platform == ContentPlatform.MANWA) {
                 item {
                     TextPreferenceWidget(

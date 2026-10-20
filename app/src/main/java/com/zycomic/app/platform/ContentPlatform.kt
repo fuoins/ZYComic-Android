@@ -36,7 +36,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 /** UI 平台选择；Picacg 与 JM 保持独立身份，接口未接入时不得回退到其他平台数据。 */
 enum class ContentPlatform(val id: String, val accent: Color) {
     MANWA("manwa", Color(0xFF248A48)),
-    PICACG("picacg", Color(0xFF7E57C2)),
+    PICACG("picacg", Color(0xFFFF77A8)),
     JM("jm", Color(0xFFEF8733)),
     ;
 
