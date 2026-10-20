@@ -7,6 +7,13 @@ import org.junit.jupiter.api.Test
 
 class PicacgCollectionPolicyTest {
     @Test
+    fun `only online favorites require an account and local history stays available signed out`() {
+        assertTrue(PicacgCollectionPolicy.requiresLogin(history = false, loggedIn = false))
+        assertFalse(PicacgCollectionPolicy.requiresLogin(history = true, loggedIn = false))
+        assertFalse(PicacgCollectionPolicy.requiresLogin(history = false, loggedIn = true))
+    }
+
+    @Test
     fun `accepts only results from an authenticated unchanged account session`() {
         assertTrue(PicacgCollectionPolicy.acceptsResult(3, 3, loggedIn = true))
         assertFalse(PicacgCollectionPolicy.acceptsResult(3, 4, loggedIn = true))

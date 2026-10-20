@@ -72,13 +72,38 @@ internal object BrowseTabPolicy {
         return insertNewTab(tabs, home).first
     }
 
-    /** Rename only known historical default labels; user-customized names remain untouched. */
-    fun migrateLegacyJmName(item: BrowseTabItem): BrowseTabItem = when {
-        item.platformId != ContentPlatform.JM -> item
-        item.builtin && item.id == BrowseTabStore.ID_JM_HOME && item.name == BrowseTabStore.LEGACY_JM_HOME_NAME ->
-            item.copy(name = BrowseTabStore.JM_HOME_NAME)
-        item.builtin && item.id == JmBrowsePolicy.ALL_HOT_TAB_ID && item.name in BrowseTabStore.LEGACY_JM_ALL_HOT_NAMES ->
-            item.copy(name = BrowseTabStore.JM_ALL_HOT_NAME)
-        else -> item
+    /**
+     * Migrate only a complete, canonical previous default sequence. Names, custom ordering, filters and
+     * any extra/missing tabs make the list user-owned and therefore ineligible for this migration.
+     */
+    fun migrateCompleteDefaultPreset(
+        tabs: List<BrowseTabItem>,
+        previousDefaults: List<BrowseTabItem>,
+        defaults: List<BrowseTabItem>,
+    ): List<BrowseTabItem>? {
+        if (tabs.size != previousDefaults.size || defaults.size != previousDefaults.size) return null
+        val identities = tabs.map(::identity)
+        if (identities.toSet().size != identities.size) return null
+        if (identities != previousDefaults.map(::identity)) return null
+        if (identities.toSet() != defaults.map(::identity).toSet()) return null
+
+        val defaultByIdentity = defaults.associateBy(::identity)
+        val isKnownDefaultName = tabs.zip(previousDefaults).all { (item, expected) ->
+            val currentDefaultName = defaultByIdentity.getValue(identity(expected)).name
+            val acceptedNames = when {
+                item.platformId == ContentPlatform.JM && item.id == BrowseTabStore.ID_JM_HOME ->
+                    setOf(expected.name, currentDefaultName, BrowseTabStore.LEGACY_JM_HOME_NAME)
+                item.platformId == ContentPlatform.JM && item.id == JmBrowsePolicy.ALL_HOT_TAB_ID ->
+                    setOf(expected.name, currentDefaultName) + BrowseTabStore.LEGACY_JM_ALL_HOT_NAMES
+                item.platformId == ContentPlatform.MANWA && item.id == BrowseTabStore.ID_JINMAN ->
+                    setOf(expected.name, currentDefaultName, "禁漫热门")
+                else -> setOf(expected.name, currentDefaultName)
+            }
+            item.name in acceptedNames && item.copy(name = expected.name) == expected
+        }
+        if (!isKnownDefaultName) return null
+
+        val currentByIdentity = tabs.associateBy(::identity)
+        return defaults.map { default -> currentByIdentity.getValue(identity(default)).copy(name = default.name) }
     }
 }

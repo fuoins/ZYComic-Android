@@ -48,11 +48,12 @@ object BrowseTabStore {
     const val YUZONG_NAME = "宇总排行"
 
     const val ID_JM_HOME = "jm_recommendations"
-    const val JM_HOME_NAME = "首页"
+    const val JM_HOME_NAME = "jm首页"
     const val LEGACY_JM_HOME_NAME = "JM 推荐"
+    const val PREVIOUS_JM_HOME_NAME = "首页"
     const val ID_PICACG_HOME = "picacg_home"
     const val PICACG_HOME_NAME = "哔咔首页"
-    const val JM_ALL_HOT_NAME = "全部热门"
+    const val JM_ALL_HOT_NAME = "jm热门"
     val LEGACY_JM_ALL_HOT_NAMES = setOf("JM 全部热门", "JM全部热门")
 
     private fun specialLatest() = BrowseTabItem(id = ID_LATEST_ADD, name = LATEST_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.LATEST)
@@ -89,21 +90,21 @@ object BrowseTabStore {
             specialYuzong(),
             BrowseTabItem(
                 id = ID_GENERAL,
-                name = "一般向热门",
+                name = "mw一般向热门",
                 kind = TabKind.FILTER,
                 builtin = true,
                 filter = FilterSnapshot(gender = 2, tags = emptyList(), area = 0, end = 0, st = 2),
             ),
             BrowseTabItem(
                 id = ID_JINMAN,
-                name = "禁漫向热门",
+                name = "mw禁漫向热门",
                 kind = TabKind.FILTER,
                 builtin = true,
                 filter = FilterSnapshot(gender = 1, tags = emptyList(), area = 0, end = 0, st = 2),
             ),
             BrowseTabItem(
                 id = ID_REXUE,
-                name = "热血热门",
+                name = "mw热血热门",
                 kind = TabKind.FILTER,
                 builtin = true,
                 filter = FilterSnapshot(gender = 2, tags = listOf("热血"), area = 0, end = 0, st = 2),
@@ -144,16 +145,7 @@ object BrowseTabStore {
                     list.addAll(migrated)
                 }
                 val normalized = list.mapNotNull { item ->
-                    if (item.id.isBlank()) {
-                        null
-                    } else {
-                        BrowseTabPolicy.migrateLegacyJmName(
-                            item.copy(
-                                name = if (item.id == ID_JINMAN && item.name == "禁漫热门") "禁漫向热门" else item.name,
-                                platformId = platform,
-                            ),
-                        )
-                    }
+                    if (item.id.isBlank()) null else item.copy(platformId = platform)
                 }
                 save(normalized, platform)
                 prefs.edit().putInt(seedKey(platform), SEED_VERSION).apply()
@@ -178,30 +170,66 @@ object BrowseTabStore {
             }.getOrNull()
             if (mixed != null) {
                 val normalized = mixed.map { item ->
-                    BrowseTabPolicy.migrateLegacyJmName(
-                        if (item.platformId == ContentPlatform.JM && item.filter != null) item.copy(filter = null) else item,
-                    )
+                    if (item.platformId == ContentPlatform.JM && item.filter != null) item.copy(filter = null) else item
                 }
                 val selectedIdentity = loadSelectedTabOrNull()?.let { normalized.getOrNull(it) }?.let(BrowseTabPolicy::identity)
                 if (!prefs.getBoolean(JM_ALL_HOT_SEEDED_KEY, false)) {
                     val migrated = BrowseTabPolicy.addMissingJmDefaults(normalized, defaultTabs(ContentPlatform.JM))
                     val withPicacg = BrowseTabPolicy.addMissingPicacgHome(migrated, picacgHomeTab())
-                    val selectedWithPicacg = selectedIdentity?.let { selected -> withPicacg.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
-                    saveAll(withPicacg, selectedWithPicacg)
+                    val normalizedDefaults = migrateCompleteDefaultPreset(withPicacg)
+                    val selectedIndex = selectedIdentity?.let { selected -> normalizedDefaults.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
+                    saveAll(normalizedDefaults, selectedIndex)
                     prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
-                    return withPicacg
+                    return normalizedDefaults
                 }
                 val withPicacg = BrowseTabPolicy.addMissingPicacgHome(normalized, picacgHomeTab())
-                val selectedIndex = selectedIdentity?.let { selected -> withPicacg.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
-                saveAll(withPicacg, selectedIndex)
-                return withPicacg
+                val normalizedDefaults = migrateCompleteDefaultPreset(withPicacg)
+                val selectedIndex = selectedIdentity?.let { selected -> normalizedDefaults.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
+                saveAll(normalizedDefaults, selectedIndex)
+                return normalizedDefaults
             }
         }
 
+        val legacyTabsExist = prefs.contains(LEGACY_KEY_TABS) || ContentPlatform.entries.any { prefs.contains(tabsKey(it)) }
+        if (!legacyTabsExist) {
+            val defaults = defaultSharedTabs()
+            saveAll(defaults)
+            prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
+            return defaults
+        }
         val migrated = load(ContentPlatform.MANWA) + picacgHomeTab() + load(ContentPlatform.JM)
-        saveAll(migrated)
+        val normalizedDefaults = migrateCompleteDefaultPreset(migrated)
+        saveAll(normalizedDefaults)
         prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
-        return migrated
+        return normalizedDefaults
+    }
+
+    private fun defaultSharedTabs(): List<BrowseTabItem> {
+        val manwa = defaultTabs(ContentPlatform.MANWA).associateBy { it.id }
+        return listOf(
+            specialYuzong(),
+            jmHomeTab(),
+            jmAllHotTab(),
+            picacgHomeTab(),
+            manwa.getValue(ID_GENERAL),
+            manwa.getValue(ID_JINMAN),
+            manwa.getValue(ID_REXUE),
+        )
+    }
+
+    /** Convert only the exact, untouched prior default sequence; preserve every item's other data. */
+    private fun migrateCompleteDefaultPreset(tabs: List<BrowseTabItem>): List<BrowseTabItem> {
+        val manwa = defaultTabs(ContentPlatform.MANWA).associateBy { it.id }
+        val previousDefaults = listOf(
+            specialYuzong(),
+            manwa.getValue(ID_GENERAL).copy(name = "一般向热门"),
+            manwa.getValue(ID_JINMAN).copy(name = "禁漫向热门"),
+            manwa.getValue(ID_REXUE).copy(name = "热血热门"),
+            picacgHomeTab(),
+            jmHomeTab().copy(name = PREVIOUS_JM_HOME_NAME),
+            jmAllHotTab().copy(name = "全部热门"),
+        )
+        return BrowseTabPolicy.migrateCompleteDefaultPreset(tabs, previousDefaults, defaultSharedTabs()) ?: tabs
     }
 
     fun saveAll(tabs: List<BrowseTabItem>, selectedTabIndex: Int? = null) {
@@ -298,7 +326,7 @@ object BrowseTabStore {
     }
 
     fun resetAll(): List<BrowseTabItem> {
-        val defaults = defaultTabs(ContentPlatform.MANWA) + defaultTabs(ContentPlatform.PICACG) + defaultTabs(ContentPlatform.JM)
+        val defaults = defaultSharedTabs()
         saveAll(defaults)
         val editor = prefs.edit()
         prefs.all.keys.filter { it.startsWith("filter_manwa_") || it.startsWith("filter_jm_") }.forEach { editor.remove(it) }

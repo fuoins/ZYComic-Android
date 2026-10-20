@@ -9,9 +9,9 @@ enum class SearchProvider(
     val displayModeKey: String,
     val defaultDisplayMode: Int,
 ) {
-    MANWA("manwa", "漫蛙", "search_display_mode", 3),
+    MANWA("manwa", "mw", "search_display_mode", 3),
     PICACG("picacg", "哔咔", "picacg_search_display_mode", 1),
-    JM("jm", "JM", "jm_search_display_mode", 1),
+    JM("jm", "jm", "jm_search_display_mode", 1),
     ;
 
     companion object {

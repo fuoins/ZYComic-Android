@@ -3,12 +3,22 @@ package com.zycomic.app.ui.picacg
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -22,7 +32,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -47,34 +59,42 @@ fun PicacgLoginScreen(onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     val loginFailed = stringResource(KMR.strings.picacg_login_failed)
     Surface(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(KMR.strings.picacg_login_title), style = MaterialTheme.typography.headlineSmall)
-            OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(KMR.strings.picacg_email)) }, singleLine = true, enabled = !loading, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-            OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(KMR.strings.picacg_password)) }, singleLine = true, enabled = !loading, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Row {
-                TextButton(onClick = onClose) { Text(stringResource(KMR.strings.picacg_cancel)) }
-                Button(
-                    onClick = {
-                        loading = true
-                        error = null
-                        scope.launch {
-                            try {
-                                PicacgRepository.login(email.trim(), password)
-                                password = ""
-                                onClose()
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (failure: Exception) {
-                                error = failure.message ?: loginFailed
-                            } finally {
-                                loading = false
-                            }
-                        }
-                    },
-                    enabled = !loading && email.isNotBlank() && password.isNotBlank(),
-                ) { Text(stringResource(if (loading) KMR.strings.picacg_loading else KMR.strings.picacg_login_action)) }
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = onClose, enabled = !loading) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(KMR.strings.picacg_back), tint = MaterialTheme.colorScheme.onSurface)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(KMR.strings.picacg_login_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
+            OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(KMR.strings.zy_account_picacg_username)) }, singleLine = true, enabled = !loading, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), shape = MaterialTheme.shapes.small)
+            OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(KMR.strings.picacg_password)) }, singleLine = true, enabled = !loading, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), shape = MaterialTheme.shapes.small)
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(
+                onClick = {
+                    loading = true
+                    error = null
+                    scope.launch {
+                        try {
+                            PicacgRepository.login(email.trim(), password)
+                            password = ""
+                            onClose()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            error = failure.message ?: loginFailed
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                enabled = !loading && email.isNotBlank() && password.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+            ) { Text(stringResource(if (loading) KMR.strings.picacg_loading else KMR.strings.zy_account_picacg_login_action)) }
         }
     }
 }

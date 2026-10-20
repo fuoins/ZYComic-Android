@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.Manga
@@ -115,9 +117,13 @@ fun PicacgLibraryScreen(
                 onOpenManga = onOpenManga,
                 modifier = Modifier.padding(contentPadding),
             )
-            !loggedIn -> Column(modifier = Modifier.padding(contentPadding).padding(24.dp)) {
-                Text(stringResource(KMR.strings.picacg_library_login_required))
-                TextButton(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
+            PicacgCollectionPolicy.requiresLogin(history, loggedIn) -> Column(
+                modifier = Modifier.fillMaxSize().padding(contentPadding).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(stringResource(KMR.strings.zy_account_picacg_favorites_login_required))
+                Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.zy_account_picacg_login_action)) }
             }
             loading && comics.isEmpty() -> LoadingScreen(modifier = Modifier.padding(contentPadding))
             error != null && comics.isEmpty() -> Column(modifier = Modifier.padding(contentPadding).padding(24.dp)) {

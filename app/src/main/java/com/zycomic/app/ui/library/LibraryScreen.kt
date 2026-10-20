@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -72,8 +74,10 @@ import com.zycomic.app.ui.components.coverUrl
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
@@ -249,10 +253,15 @@ fun LibraryScreen(
         },
     ) { contentPadding ->
         when {
-            user == null -> EmptyScreen(
-                message = "请先登录",
-                modifier = Modifier.padding(contentPadding),
-            )
+            user == null -> Column(
+                modifier = Modifier.fillMaxSize().padding(contentPadding).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(stringResource(KMR.strings.zy_account_manwa_favorites_login_required))
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.zy_account_manwa_login_action)) }
+            }
             loading && favs.isEmpty() -> LoadingScreen(modifier = Modifier.padding(contentPadding))
             filtered.isEmpty() -> EmptyScreen(
                 message = if (!searchQuery.isNullOrBlank()) "没有搜索结果" else "暂无收藏",

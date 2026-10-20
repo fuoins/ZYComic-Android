@@ -561,17 +561,23 @@ class BrowseViewModel {
         }
     }
 
-    /** 从详情页标签点击返回：定位到第一个 FILTER tab，并把该标签作为当次临时筛选。 */
-    fun applyPendingTag(tag: String) {
-        if (tabs.isEmpty() || !StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return
-        val idx = tabs.indexOfFirst { it.kind == TabKind.FILTER && it.platformId == ContentPlatform.MANWA }
-        if (idx < 0) return
+    /** 详情标签复用漫蛙 FILTER tab；不存在时仅在末尾追加，标签仍只作为会话临时筛选。 */
+    fun applyPendingTag(tag: String): Boolean {
+        val target = PendingTagPolicy.resolve(tabs.toList(), StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) ?: return false
+        val idx = target.index
+        if (target.tabs.size > tabs.size) {
+            tabs.add(target.tabs[idx])
+            persist()
+        }
         bindPlatform(ContentPlatform.MANWA)
+        if (currentPlatform.value != ContentPlatform.MANWA) return false
+        if (mainTab.value != idx) exitSelection()
         mainTab.value = idx
         BrowseTabStore.saveSelectedTab(idx)
         bindFilterFor(idx)
-        updateCurrentFilter((tabs[idx].filter ?: FilterSnapshot()).copy(tags = listOf(tag)))
+        updateCurrentFilter(PendingTagPolicy.temporaryFilter(tabs[idx], tag))
         refresh()
+        return true
     }
 
     fun refresh(tab: Int = mainTab.value) {

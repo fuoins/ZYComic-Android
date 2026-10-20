@@ -12,41 +12,59 @@ import java.lang.reflect.Proxy
 
 class BrowseTabPersistenceTest {
     @Test
-    fun `legacy JM default names migrate but customized fixed tab names remain`() {
+    fun `complete legacy default preset migrates names and order while customized presets stay untouched`() {
         installMemoryPreferences()
-        BrowseTabStore.saveAll(
-            listOf(
-                BrowseTabStore.jmHomeTab().copy(name = BrowseTabStore.LEGACY_JM_HOME_NAME),
-                BrowseTabStore.jmAllHotTab().copy(name = "JM全部热门"),
-            ),
-        )
+        val legacy = legacyDefaultTabs()
+        BrowseTabStore.saveAll(legacy, selectedTabIndex = 5)
+        val jmFilters = JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, category = "doujin", order = "mv_m")
+        BrowseTabStore.saveJmFilters(BrowseTabStore.ID_JM_HOME, jmFilters)
 
-        val migrated = BrowseTabStore.loadAll().associate { it.id to it.name }
-        assertEquals(BrowseTabStore.JM_HOME_NAME, migrated[BrowseTabStore.ID_JM_HOME])
-        assertEquals(BrowseTabStore.JM_ALL_HOT_NAME, migrated[JmBrowsePolicy.ALL_HOT_TAB_ID])
+        val migrated = BrowseTabStore.loadAll()
+        assertEquals(defaultIdentityOrder(), migrated.map(BrowseTabPolicy::identity))
+        assertEquals(BrowseTabStore.JM_HOME_NAME, migrated[1].name)
+        assertEquals(BrowseTabStore.JM_ALL_HOT_NAME, migrated[2].name)
+        assertEquals(BrowseTabPolicy.identity(legacy[5]), BrowseTabPolicy.identity(migrated[BrowseTabStore.loadSelectedTab()]))
+        assertEquals(jmFilters, BrowseTabStore.loadJmFilters(BrowseTabStore.ID_JM_HOME))
 
-        BrowseTabStore.saveAll(
-            listOf(
-                BrowseTabStore.jmHomeTab().copy(name = "我自定义的首页"),
-                BrowseTabStore.jmAllHotTab().copy(name = "我的热门"),
-            ),
-        )
-        val customized = BrowseTabStore.loadAll().associate { it.id to it.name }
-        assertEquals("我自定义的首页", customized[BrowseTabStore.ID_JM_HOME])
-        assertEquals("我的热门", customized[JmBrowsePolicy.ALL_HOT_TAB_ID])
+        installMemoryPreferences()
+        val customName = legacy.map { item ->
+            if (item.id == BrowseTabStore.ID_JM_HOME) item.copy(name = "我的首页") else item
+        }
+        val customOrder = customName.reversed()
+        val selected = 4
+        BrowseTabStore.saveAll(customOrder, selectedTabIndex = selected)
+        val customized = BrowseTabStore.loadAll()
+        assertEquals(customOrder.map(BrowseTabPolicy::identity), customized.map(BrowseTabPolicy::identity))
+        assertEquals("我的首页", customized.first { it.id == BrowseTabStore.ID_JM_HOME }.name)
+        assertEquals(BrowseTabPolicy.identity(customOrder[selected]), BrowseTabPolicy.identity(customized[BrowseTabStore.loadSelectedTab()]))
     }
 
     @Test
-    fun `default shared tabs initialize Manwa then Picacg then JM and reset restores that order`() {
+    fun `default shared tabs use the approved exact cross-platform order and reset restores it`() {
         installMemoryPreferences()
         val loaded = BrowseTabStore.loadAll()
-        assertEquals(ContentPlatform.MANWA, loaded.first().platformId)
-        assertEquals(listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM), loaded.map { it.platformId }.distinctBy { it })
-        assertEquals(2, loaded.count { it.platformId == ContentPlatform.JM })
-        assertEquals(BrowseTabStore.ID_PICACG_HOME, loaded.first { it.platformId == ContentPlatform.PICACG }.id)
+        assertEquals(defaultIdentityOrder(), loaded.map(BrowseTabPolicy::identity))
+        assertEquals(
+            listOf("宇总排行", "jm首页", "jm热门", "哔咔首页", "mw一般向热门", "mw禁漫向热门", "mw热血热门"),
+            loaded.map { it.name },
+        )
 
         val restored = BrowseTabStore.resetAll()
         assertEquals(loaded.map { BrowseTabPolicy.identity(it) }, restored.map { BrowseTabPolicy.identity(it) })
+    }
+
+    @Test
+    fun `customized default filter blocks legacy preset migration without changing selection or snapshot`() {
+        installMemoryPreferences()
+        val legacy = legacyDefaultTabs().toMutableList()
+        val changedFilter = legacy[1].filter!!.copy(tags = listOf("用户筛选"))
+        legacy[1] = legacy[1].copy(filter = changedFilter)
+        BrowseTabStore.saveAll(legacy, selectedTabIndex = 1)
+
+        val loaded = BrowseTabStore.loadAll()
+        assertEquals(legacy.map(BrowseTabPolicy::identity), loaded.map(BrowseTabPolicy::identity))
+        assertEquals(changedFilter, loaded[1].filter)
+        assertEquals(1, BrowseTabStore.loadSelectedTab())
     }
 
     @Test
@@ -202,6 +220,29 @@ class BrowseTabPersistenceTest {
         val manwaTab = legacyJm.copy(id = "manwa-custom", platformId = ContentPlatform.MANWA)
         assertEquals(manwaSnapshot, BrowseTabItem.fromJson(JSONObject(manwaTab.toJson().toString())).filter)
     }
+
+    private fun legacyDefaultTabs(): List<BrowseTabItem> {
+        val manwa = BrowseTabStore.defaultTabs(ContentPlatform.MANWA).associateBy { it.id }
+        return listOf(
+            BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_YUZONG },
+            manwa.getValue(BrowseTabStore.ID_GENERAL).copy(name = "一般向热门"),
+            manwa.getValue(BrowseTabStore.ID_JINMAN).copy(name = "禁漫向热门"),
+            manwa.getValue(BrowseTabStore.ID_REXUE).copy(name = "热血热门"),
+            BrowseTabStore.picacgHomeTab(),
+            BrowseTabStore.jmHomeTab().copy(name = BrowseTabStore.PREVIOUS_JM_HOME_NAME),
+            BrowseTabStore.jmAllHotTab().copy(name = "全部热门"),
+        )
+    }
+
+    private fun defaultIdentityOrder(): List<BrowseTabPolicy.Identity> = listOf(
+        BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_YUZONG },
+        BrowseTabStore.jmHomeTab(),
+        BrowseTabStore.jmAllHotTab(),
+        BrowseTabStore.picacgHomeTab(),
+        BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_GENERAL },
+        BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_JINMAN },
+        BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_REXUE },
+    ).map(BrowseTabPolicy::identity)
 
     private fun installMemoryPreferences() {
         val values = mutableMapOf<String, Any?>()

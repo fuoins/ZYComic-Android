@@ -129,9 +129,9 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         )
                     }
                 },
-                Preference.PreferenceItem.CustomPreference(title = "漫蛙对应颜色") {
+                Preference.PreferenceItem.CustomPreference(title = stringResource(KMR.strings.zy_platform_manwa_accent)) {
                     PlatformAccentPreferenceRow(
-                        title = "漫蛙对应颜色",
+                        title = stringResource(KMR.strings.zy_platform_manwa_accent),
                         color = manwaAccent,
                         onEditClick = { editingAccent = ContentPlatform.MANWA },
                         onPaletteClick = { navigator.push(PlatformAccentPaletteScreen(ContentPlatform.MANWA)) },
@@ -145,9 +145,9 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         onPaletteClick = { navigator.push(PlatformAccentPaletteScreen(ContentPlatform.PICACG)) },
                     )
                 },
-                Preference.PreferenceItem.CustomPreference(title = "禁漫天堂对应颜色") {
+                Preference.PreferenceItem.CustomPreference(title = stringResource(KMR.strings.zy_platform_jm_accent)) {
                     PlatformAccentPreferenceRow(
-                        title = "禁漫天堂对应颜色",
+                        title = stringResource(KMR.strings.zy_platform_jm_accent),
                         color = jmAccent,
                         onEditClick = { editingAccent = ContentPlatform.JM },
                         onPaletteClick = { navigator.push(PlatformAccentPaletteScreen(ContentPlatform.JM)) },
@@ -354,9 +354,9 @@ private class PlatformAccentPaletteScreen(
         val currentColor = rememberContentPlatformAccent(platform)
         val controller = rememberColorPickerController()
         val title = when (platform) {
-            ContentPlatform.MANWA -> "漫蛙对应颜色"
+            ContentPlatform.MANWA -> stringResource(KMR.strings.zy_platform_manwa_accent)
             ContentPlatform.PICACG -> stringResource(KMR.strings.content_platform_picacg_accent)
-            ContentPlatform.JM -> "禁漫天堂对应颜色"
+            ContentPlatform.JM -> stringResource(KMR.strings.zy_platform_jm_accent)
         }
 
         Scaffold(
@@ -414,9 +414,9 @@ private fun PlatformAccentDialog(platform: ContentPlatform, onDismiss: () -> Uni
     var hex by remember(platform) { mutableStateOf(ContentPlatformAccentPrefs.format(current)) }
     val parsed = ContentPlatformAccentPrefs.parseColor(hex)
     val platformName = when (platform) {
-        ContentPlatform.MANWA -> "漫蛙"
+        ContentPlatform.MANWA -> stringResource(KMR.strings.content_platform_manwa)
         ContentPlatform.PICACG -> stringResource(KMR.strings.content_platform_picacg)
-        ContentPlatform.JM -> "禁漫天堂"
+        ContentPlatform.JM -> stringResource(KMR.strings.content_platform_jm)
     }
 
     AlertDialog(

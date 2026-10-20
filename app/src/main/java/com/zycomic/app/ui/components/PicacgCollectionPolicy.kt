@@ -2,6 +2,8 @@ package com.zycomic.app.ui.components
 
 /** A collection response belongs only to the account session that issued it. */
 internal object PicacgCollectionPolicy {
+    fun requiresLogin(history: Boolean, loggedIn: Boolean): Boolean = !history && !loggedIn
+
     fun acceptsResult(startedSession: Long, currentSession: Long, loggedIn: Boolean): Boolean =
         loggedIn && startedSession == currentSession
 

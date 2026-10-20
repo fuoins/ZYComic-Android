@@ -139,9 +139,8 @@ private fun LegacyBrowseScreen(
 
     pendingTag?.let { tag ->
         LaunchedEffect(tag) {
-            if (platform == ContentPlatform.MANWA && com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.MANWA)) {
-                vm.applyPendingTag(tag)
-                onPendingTagConsumed()
+            if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.MANWA)) {
+                PendingTagPolicy.applyAndConsume(tag, vm::applyPendingTag, onPendingTagConsumed)
             }
         }
     }
@@ -557,8 +556,6 @@ private fun LegacyBrowseScreen(
                     page = page,
                     vm = vm,
                     platform = platform,
-                    pendingTag = pendingTag,
-                    onPendingTagConsumed = onPendingTagConsumed,
                     displayMode = displayMode,
                     gridColumns = gridColumns,
                     selectionMode = if (page == mainTab && vm.tabs.getOrNull(page)?.platformId == ContentPlatform.JM) jmSelectionMode else selectionMode,
@@ -681,9 +678,9 @@ private fun BrowseTabItem.isUngatedYuzongRank(): Boolean =
 @Composable
 private fun CategoryPlatformLegend() {
     Column(verticalArrangement = Arrangement.spacedBy(0.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
-        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.MANWA), label = "漫蛙")
-        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.PICACG), label = "哔咔")
-        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.JM), label = "禁漫天堂")
+        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.MANWA), label = stringResource(KMR.strings.content_platform_manwa))
+        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.PICACG), label = stringResource(KMR.strings.content_platform_picacg))
+        PlatformLegendRow(color = rememberContentPlatformAccent(ContentPlatform.JM), label = stringResource(KMR.strings.content_platform_jm))
         PlatformLegendRow(color = MaterialTheme.colorScheme.primary, label = "宇总排行")
     }
 }
@@ -701,8 +698,6 @@ private fun BrowseTabContent(
     page: Int,
     vm: BrowseViewModel,
     platform: ContentPlatform,
-    pendingTag: String?,
-    onPendingTagConsumed: () -> Unit,
     displayMode: Int,
     gridColumns: Int,
     selectionMode: Boolean,
@@ -719,8 +714,6 @@ private fun BrowseTabContent(
     if (tabPlatform == ContentPlatform.PICACG) {
         if (page == vm.mainTab.value) {
             com.zycomic.app.ui.picacg.PicacgBrowseScreen(
-                pendingTag = pendingTag,
-                onPendingTagConsumed = onPendingTagConsumed,
                 onOpenManga = onOpenManga,
                 onOpenSearch = { onOpenSearch(it, SearchProvider.PICACG) },
                 onRequireLogin = onRequireLogin,

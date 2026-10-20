@@ -71,6 +71,23 @@ fun SettingsMainScreen(
     var showDeveloperWarning by remember { mutableStateOf(false) }
     val topBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
+    val restartMessage = stringResource(KMR.strings.startup_platform_restart_toast)
+    val picacgRestartMessage = stringResource(KMR.strings.zy_platform_picacg_restart_required)
+    val keepOneMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
+
+    fun updatePlatform(platform: ContentPlatform, enabled: Boolean) {
+        val accepted = when (platform) {
+            ContentPlatform.MANWA -> StartupPlatformPolicy.setSettingsManwaEnabled(enabled)
+            ContentPlatform.PICACG -> StartupPlatformPolicy.setSettingsPicacgEnabled(enabled)
+            ContentPlatform.JM -> StartupPlatformPolicy.setSettingsJmEnabled(enabled)
+        }
+        val message = when {
+            !accepted -> keepOneMessage
+            platform == ContentPlatform.PICACG -> picacgRestartMessage
+            else -> restartMessage
+        }
+        Toast.makeText(context, message, if (accepted) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
+    }
 
     Scaffold(
         topBar = {
@@ -105,20 +122,20 @@ fun SettingsMainScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
-                    SettingsPlatformSwitch("开启漫蛙", !platformPolicy.disableManwa, ContentPlatform.MANWA) {
-                        if (!StartupPlatformPolicy.setSettingsManwaEnabled(it)) {
-                            Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
-                        }
+                    SettingsPlatformSwitch(stringResource(KMR.strings.startup_enable_manwa), !platformPolicy.disableManwa, ContentPlatform.MANWA) {
+                        updatePlatform(ContentPlatform.MANWA, it)
                     }
                     SettingsPlatformSwitch(stringResource(KMR.strings.startup_enable_picacg), !platformPolicy.disablePicacg, ContentPlatform.PICACG) {
-                        if (!StartupPlatformPolicy.setSettingsPicacgEnabled(it)) {
-                            Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
-                        }
+                        updatePlatform(ContentPlatform.PICACG, it)
                     }
-                    SettingsPlatformSwitch("开启禁漫天堂", !platformPolicy.disableJm, ContentPlatform.JM) {
-                        if (!StartupPlatformPolicy.setSettingsJmEnabled(it)) {
-                            Toast.makeText(context, "至少保留一个漫画源", Toast.LENGTH_SHORT).show()
-                        }
+                    Text(
+                        text = stringResource(KMR.strings.zy_platform_picacg_login_restart_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    SettingsPlatformSwitch(stringResource(KMR.strings.startup_enable_jm), !platformPolicy.disableJm, ContentPlatform.JM) {
+                        updatePlatform(ContentPlatform.JM, it)
                     }
                 }
             }

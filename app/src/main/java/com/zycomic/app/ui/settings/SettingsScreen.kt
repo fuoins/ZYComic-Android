@@ -69,6 +69,7 @@ fun SettingsScreen() {
     val picacgAccent = rememberContentPlatformAccent(ContentPlatform.PICACG)
     val jmAccent = rememberContentPlatformAccent(ContentPlatform.JM)
     val restartRequiredMessage = stringResource(KMR.strings.startup_platform_restart_toast)
+    val picacgRestartRequiredMessage = stringResource(KMR.strings.zy_platform_picacg_restart_required)
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     val allTags by vm.allTags.collectAsState()
     val addingBlacklist by vm.addingBlacklist.collectAsState()
@@ -161,11 +162,17 @@ fun SettingsScreen() {
                 checked = !platformSettings.disablePicacg,
                 onCheckedChange = { enabled ->
                     val accepted = StartupPlatformPolicy.setSettingsPicacgEnabled(enabled)
-                    Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, if (accepted) picacgRestartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_LONG).show()
                 },
                 colors = SwitchDefaults.colors(checkedThumbColor = picacgAccent, checkedTrackColor = picacgAccent.copy(alpha = 0.42f), checkedBorderColor = picacgAccent),
             )
         }
+        Text(
+            text = stringResource(KMR.strings.zy_platform_picacg_login_restart_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(KMR.strings.startup_enable_jm), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = jmAccent)
             Switch(
