@@ -19,11 +19,14 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformSelector
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.SearchToolbar
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /** Library/history toolbar: title and all supported actions share one compact, aligned row. */
 @Composable
@@ -49,6 +52,7 @@ fun LibraryHistoryToolbar(
     selectionSupported: Boolean = true,
 ) {
     val slotWidth = LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP.dp
+    val platformSelectorWidth = LibraryHistoryToolbarPolicy.COMPACT_PLATFORM_SELECTOR_WIDTH_DP.dp
     val actions: @Composable RowScope.() -> Unit = {
         if (selectionMode) {
             ToolbarSlot(onClick = onSelectAll, description = "全选", icon = Icons.Outlined.SelectAll, width = slotWidth)
@@ -91,13 +95,15 @@ fun LibraryHistoryToolbar(
         }
         if (LibraryHistoryToolbarPolicy.showPlatformSelector(searchQuery != null)) {
             Box(
-                modifier = Modifier.width(LibraryHistoryToolbarPolicy.PLATFORM_SELECTOR_WIDTH_DP.dp).height(48.dp),
+                modifier = Modifier.width(platformSelectorWidth).height(48.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 ContentPlatformSelector(
                     selected = platform,
                     onSelect = onSelectPlatform,
                     compact = true,
+                    compactButtonSize = 40.dp,
+                    compactJmLabel = stringResource(KMR.strings.library_history_platform_jm_short),
                 )
             }
         }

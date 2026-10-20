@@ -7,11 +7,11 @@ import org.junit.jupiter.api.Test
 class LibraryHistoryToolbarPolicyTest {
     @Test
     fun `toolbar reserves room for all platform options and fits a compact row`() {
-        val platformMinimumWidth = 3 * 48 + 2 * 2 + 2 * 3
+        val platformMinimumWidth = 3 * 40 + 2 * 2 + 2 * 3
         val toolbarActionWidth = 4 * LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP +
-            LibraryHistoryToolbarPolicy.PLATFORM_SELECTOR_WIDTH_DP
+            LibraryHistoryToolbarPolicy.COMPACT_PLATFORM_SELECTOR_WIDTH_DP
 
-        assertTrue(LibraryHistoryToolbarPolicy.PLATFORM_SELECTOR_WIDTH_DP >= platformMinimumWidth)
+        assertEquals(platformMinimumWidth, LibraryHistoryToolbarPolicy.COMPACT_PLATFORM_SELECTOR_WIDTH_DP)
         assertTrue(toolbarActionWidth <= 360 - 48)
     }
 

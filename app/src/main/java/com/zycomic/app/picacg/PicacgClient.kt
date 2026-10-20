@@ -35,7 +35,12 @@ class PicacgClient(
     private val sessionProvider: () -> PicacgAuthStore.Session = PicacgAuthStore::session,
     private val clearSessionIfRevision: (Long) -> Boolean = PicacgAuthStore::clearIfRevision,
 ) {
-    private val noRetryHttp = http.newBuilder().retryOnConnectionFailure(false).build()
+    private val noRetryHttp =
+        http.newBuilder()
+            .retryOnConnectionFailure(false)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
 
     data class Envelope(val code: Int, val message: String, val error: String, val data: JSONObject)
 
@@ -83,7 +88,7 @@ class PicacgClient(
                 require(body == null) { "Only POST Picacg requests may have a body" }
                 builder.get()
             }
-            val response = noRetryHttp.newCall(builder.build()).execute()
+            val response = executeWithSafeRedirect(builder.build())
             response.use { response ->
                 if (expectedSessionRevision != null && sessionProvider().revision != expectedSessionRevision) {
                     throw IOException("Picacg session changed while the request was in progress")
@@ -110,6 +115,28 @@ class PicacgClient(
         }
         val data = json?.optJSONObject("data") ?: if (allowMissingData) JSONObject() else throw IOException("Picacg response has no data; sign in is required")
         return Envelope(code, message, error, data)
+    }
+
+    private fun executeWithSafeRedirect(request: Request): Response {
+        val firstResponse = noRetryHttp.newCall(request).execute()
+        if (firstResponse.code != 301) {
+            if (firstResponse.code in 300..399 && firstResponse.code != 304) {
+                firstResponse.close()
+                throw IOException("Picacg redirect rejected (${firstResponse.code})")
+            }
+            return firstResponse
+        }
+
+        val redirectUrl = firstResponse.use { response ->
+            PicacgRedirectPolicy.targetFor301(response.request.url, response.header("Location"))
+        }
+        val redirectedRequest = request.newBuilder().url(redirectUrl).build()
+        val secondResponse = noRetryHttp.newCall(redirectedRequest).execute()
+        if (secondResponse.code in 300..399 && secondResponse.code != 304) {
+            secondResponse.close()
+            throw IOException("Additional Picacg redirect rejected (${secondResponse.code})")
+        }
+        return secondResponse
     }
 
     companion object {

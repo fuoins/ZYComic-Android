@@ -281,6 +281,40 @@ object SpeedTester {
         )
     }
 
+    /** Read-only single-address probe for the deprecated-host diagnostic; never applies route results. */
+    internal suspend fun probeForDeprecatedScan(
+        endpoint: DomainIp,
+        image: Boolean,
+        imageSamplePath: String?,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (image && imageSamplePath.isNullOrBlank()) return@withContext false
+        if (RouteManager.customRule.entries.none { (domain, addresses) ->
+                domain.equals(endpoint.domain, ignoreCase = true) &&
+                    addresses.any { it.trim().equals(endpoint.ip, ignoreCase = true) }
+            }
+        ) {
+            return@withContext false
+        }
+        val lineUrl = if (image) {
+            null
+        } else {
+            RouteManager.lineHosts.firstOrNull { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
+                ?: return@withContext false
+        }
+        val client = if (image) NetworkModule.newSpeedTestClient() else NetworkModule.newLineProbeClient()
+        val routed = NetworkModule.newDiagnosticProbeClientForIp(client, endpoint.domain, endpoint.ip)
+        try {
+            if (image) {
+                measureImg(routed, endpoint.domain) { imageSamplePath }.delayMs < MAX
+            } else {
+                measureLineOnce(routed, lineUrl!!).delayMs < MAX
+            }
+        } finally {
+            routed.releaseProbe()
+            client.releaseProbe()
+        }
+    }
+
     private suspend fun measureLineOnce(client: OkHttpClient, lineUrl: String): ProbeOutcome =
         measureLine(client, lineRequest(lineUrl))
 

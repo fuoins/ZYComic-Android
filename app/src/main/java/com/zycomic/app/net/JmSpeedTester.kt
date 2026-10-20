@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 import java.net.InetAddress
+import java.net.Proxy
 import java.net.URI
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -372,6 +373,75 @@ object JmSpeedTester {
             })
             .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
             .build()
+
+    /** A diagnostic-only JM client that resolves only one configured literal and never retries addresses. */
+    private fun newDiagnosticProbeClientForIp(
+        client: OkHttpClient,
+        endpoint: DomainIp,
+        image: Boolean,
+    ): OkHttpClient {
+        require(isIpLiteral(endpoint.ip)) { "JM diagnostic probes require a literal IP" }
+        val configured = if (image) JmRouteManager.resolveImageIp(endpoint.domain) else JmRouteManager.resolveLineIp(endpoint.domain)
+        require(configured.any { it.trim().equals(endpoint.ip, ignoreCase = true) }) {
+            "JM diagnostic probes require an IP configured for this host and probe type"
+        }
+        return client.newBuilder()
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> {
+                    if (!hostname.equals(endpoint.domain, true)) {
+                        throw java.net.UnknownHostException("JM diagnostic probe is pinned to one host")
+                    }
+                    return listOf(InetAddress.getByName(endpoint.ip))
+                }
+            })
+            .proxy(Proxy.NO_PROXY)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+            .build()
+    }
+
+    /** Reuses JM's API/image validation while avoiding speed-test persistence and route selection. */
+    internal suspend fun probeForDeprecatedScan(endpoint: DomainIp, image: Boolean, configuredLineUrl: String): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!isIpLiteral(endpoint.ip)) return@withContext false
+            val configuredIps = if (image) JmRouteManager.resolveImageIp(endpoint.domain) else JmRouteManager.resolveLineIp(endpoint.domain)
+            if (configuredIps.none { it.trim().equals(endpoint.ip, ignoreCase = true) }) return@withContext false
+            if (!image && !runCatching { URI(configuredLineUrl).host.equals(endpoint.domain, true) }.getOrDefault(false)) {
+                return@withContext false
+            }
+            val probeClient = JmNetworkModule.newProbeClient()
+            val routed = newDiagnosticProbeClientForIp(probeClient, endpoint, image)
+            val client = if (image) {
+                routed
+            } else {
+                routed.newBuilder()
+                    .addInterceptor(JmApiInterceptor(recordRouteHealth = false))
+                    .build()
+            }
+            try {
+                val url = if (image) {
+                    "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}"
+                } else {
+                    "${configuredLineUrl.trimEnd('/')}${JmSpeedProbeProtocol.LINE_PATH}"
+                }
+                measure(client, url, image).delayMs < Long.MAX_VALUE
+            } finally {
+                client.dispatcher.cancelAll()
+                routed.connectionPool.evictAll()
+                probeClient.connectionPool.evictAll()
+                client.dispatcher.executorService.shutdown()
+            }
+        }
+
+    private fun isIpLiteral(value: String): Boolean = if (':' in value) {
+        value.matches(Regex("[0-9a-fA-F:.]+")) &&
+            runCatching { InetAddress.getByName(value) }.isSuccess
+    } else {
+        val parts = value.split('.')
+        parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && it.toIntOrNull() in 0..255 }
+    }
 
     private suspend fun measureAtIp(
         client: OkHttpClient,

@@ -3,6 +3,7 @@ package com.zycomic.app.ui.settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -22,13 +24,20 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RouteManager
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.tachiyomi.util.system.copyToClipboard
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.i18n.stringResource
@@ -44,6 +53,41 @@ fun DeveloperSettingsScreen(
     onCheckUpdates: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val platformReports by PlatformSpeedTestCoordinator.reports.collectAsState()
+    val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
+    val platformExportSuccess = stringResource(KMR.strings.platform_speed_log_export_success)
+    val platformExportFailed = stringResource(KMR.strings.platform_speed_log_export_failed)
+    val pendingPlatformExport = remember { mutableStateOf<String?>(null) }
+    val orderedPlatformReports = remember(platformReports) {
+        platformReports.sortedBy { report ->
+            when (report.platform) {
+                "漫蛙" -> 0
+                "哔咔" -> 1
+                "禁漫天堂" -> 2
+                else -> 3
+            }
+        }
+    }
+    val platformExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val json = pendingPlatformExport.value
+        pendingPlatformExport.value = null
+        if (uri != null && json != null) {
+            scope.launch {
+                val success = runCatching {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(json) }
+                            ?: error("无法打开导出文件")
+                    }
+                }.isSuccess
+                Toast.makeText(
+                    context,
+                    if (success) platformExportSuccess else platformExportFailed,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
     val snapshot by RouteManager.speedTestSnapshot.collectAsState()
     val picacgSnapshot by com.zycomic.app.net.PicacgSpeedTester.snapshot.collectAsState()
     val picacgRoutes by com.zycomic.app.net.PicacgRouteManager.state.collectAsState()
@@ -119,6 +163,31 @@ fun DeveloperSettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
+            }
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Text(stringResource(KMR.strings.platform_speed_log_title), style = MaterialTheme.typography.titleMedium)
+                    orderedPlatformReports.forEach { report ->
+                        Text(report.summary(), modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                        Text("实际线路：${report.selectedLine}", style = MaterialTheme.typography.bodySmall)
+                        Text("实际图源：${report.selectedImage}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "线路候选 ${report.lineCandidates.size} 项 · 图源候选 ${report.imageCandidates.size} 项 · 配置 ${report.remoteVersion?.let { "v$it" } ?: "未知"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Button(
+                        enabled = orderedPlatformReports.size == 3 && !platformTestsRunning,
+                        onClick = {
+                            pendingPlatformExport.value = PlatformSpeedTestCoordinator.reportsJson(orderedPlatformReports).toString(2)
+                            platformExportLauncher.launch("zycomic-platform-speed-test.json")
+                        },
+                        modifier = Modifier.padding(top = 8.dp),
+                    ) { Text(stringResource(KMR.strings.platform_speed_log_export)) }
+                }
             }
             item {
                 TextPreferenceWidget(

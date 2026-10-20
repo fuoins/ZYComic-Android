@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.net.PicacgSpeedTester
+import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -153,6 +154,7 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                     }
                 }
             }
+            item { DeprecatedEndpointQuerySection(ContentPlatform.PICACG, enabled = !running.value) }
             item { Text("线路端点（域名 · IP；点击选择API线路）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
             if (apiRows.isEmpty()) {
                 items(routeState.apiUrls) { url ->

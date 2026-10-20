@@ -3,6 +3,7 @@ package com.zycomic.app.ui.settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -41,6 +43,7 @@ import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
 import com.zycomic.app.net.SpeedTestUiTextPolicy
 import com.zycomic.app.net.SpeedTester
+import com.zycomic.app.platform.ContentPlatform
 import eu.kanade.tachiyomi.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -57,26 +60,9 @@ fun SpeedTestScreen(
 ) {
     val context = LocalContext.current
     val exportScope = rememberCoroutineScope()
-    val platformReports by PlatformSpeedTestCoordinator.reports.collectAsState()
     val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
     val platformProgress by PlatformSpeedTestCoordinator.progressText.collectAsState()
     val jmTestProgress by PlatformSpeedTestCoordinator.jmProgress.collectAsState()
-    val platformExport = remember { mutableStateOf<String?>(null) }
-    val platformLogLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val json = platformExport.value
-        platformExport.value = null
-        if (uri != null && json != null) {
-            exportScope.launch {
-                val ok = runCatching {
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(json) }
-                            ?: error("Unable to open the selected document")
-                    }
-                }.isSuccess
-                Toast.makeText(context, if (ok) "双平台日志已导出" else "双平台日志导出失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
     val fullSnapshot by RouteManager.completedSpeedTestSnapshot.collectAsState()
     val currentSpeedSnapshot by RouteManager.speedTestSnapshot.collectAsState()
     val speedTesterRunning by SpeedTester.isRunningFlow.collectAsState()
@@ -233,42 +219,52 @@ fun SpeedTestScreen(
             }
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
                 item {
-                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                        Text("双平台测速与实际选择", style = MaterialTheme.typography.titleMedium)
-                        platformReports.forEach { report ->
-                            Text(report.summary(), modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium)
-                            Text("线路候选 ${report.lineCandidates.size} 项 · 图源候选 ${report.imageCandidates.size} 项", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Button(
-                            enabled = platformReports.isNotEmpty() && !speedTestActive,
-                            onClick = {
-                                platformExport.value = PlatformSpeedTestCoordinator.reportsJson().toString(2)
-                                platformLogLauncher.launch("zycomic-platform-speed-test.json")
-                            },
-                        ) { Text("导出双平台选择日志") }
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(
+                            fullSnapshot.completedAtEpochMs?.let { stringResource(KMR.strings.manwa_speed_log_recently_completed, formatSpeedTestTime(it)) }
+                                ?: stringResource(KMR.strings.manwa_speed_log_no_completed_time),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            speedTestResultVersion?.let { "测速结果对应配置：远程配置 v$it" }
+                                ?: "测速结果对应配置：暂无当前配置的完整测速结果",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        val selectedLine = RouteManager.lineHosts.getOrNull(currentLineIdx)
+                            ?.let { runCatching { java.net.URI(it).host ?: it }.getOrDefault(it) } ?: "暂无"
+                        Text(
+                            stringResource(
+                                KMR.strings.manwa_speed_log_current_line,
+                                if (RouteManager.hasManualLineSelection) "手动" else "自动",
+                                selectedLine + currentLineIp?.let { " · $it" }.orEmpty(),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            stringResource(
+                                KMR.strings.manwa_speed_log_current_image,
+                                currentImageSource.kind.label,
+                                (currentImageSource.domain ?: "暂无") + currentImgIp?.let { " · $it" }.orEmpty(),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
-                item {
-                    Text(
-                        speedTestResultVersion?.let { "测速结果对应配置：远程配置 v$it" }
-                            ?: "测速结果对应配置：暂无当前配置的完整测速结果",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
+                item { DeprecatedEndpointQuerySection(ContentPlatform.MANWA, enabled = !speedTestActive) }
                 item {
                     Text("线路（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(lineOrder.withIndex().toList()) { (position, entry) ->
+                items(lineOrder) { entry ->
                     val endpoint = entry.key
                     val index = RouteManager.lineHosts.indexOfFirst {
                         runCatching { java.net.URI(it).host.equals(endpoint.domain, ignoreCase = true) }.getOrDefault(false)
                     }
                     SpeedRow(
-                        index = position,
                         host = SpeedTestUiTextPolicy.endpointLabel(endpoint.domain, endpoint.ip),
                         delay = entry.value,
+                        isImage = false,
                         isSelected = index == currentLineIdx && endpoint.ip == currentLineIp,
                         isUntested = endpoint in currentSpeedSnapshot.lineUntestedEndpoints,
                         measuredAtEpochMs = currentSpeedSnapshot.lineMeasuredAtEpochMs[endpoint],
@@ -279,11 +275,10 @@ fun SpeedTestScreen(
                 item {
                     Text("图源（点击切换）：", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                 }
-                items(imgOrder.withIndex().toList()) { (position, entry) ->
+                items(imgOrder) { entry ->
                     val endpoint = entry.key
                     val index = RouteManager.imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
                     SpeedRow(
-                        index = position,
                         host = SpeedTestUiTextPolicy.endpointLabel(endpoint.domain, endpoint.ip),
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
@@ -291,6 +286,7 @@ fun SpeedTestScreen(
                         measuredAtEpochMs = currentSpeedSnapshot.imageMeasuredAtEpochMs[endpoint],
                         isSelected = currentImageSource.matchesEndpoint(endpoint),
                         selectionLabel = currentImageSource.kind.label.takeIf { currentImageSource.matchesEndpoint(endpoint) },
+                        isImage = true,
                         onClick = { if (index >= 0) vm.selectImgHost(index, endpoint.ip) },
                     )
                 }
@@ -360,10 +356,10 @@ fun SpeedTestScreen(
 
 @Composable
 private fun SpeedRow(
-    index: Int,
     host: String,
     delay: Long?,
     isSelected: Boolean,
+    isImage: Boolean,
     verdict: SpeedTester.ImgVerdict? = null,
     selectionLabel: String? = null,
     isUntested: Boolean = false,
@@ -371,50 +367,53 @@ private fun SpeedRow(
     onClick: () -> Unit,
 ) {
     val measuredAt = remember(measuredAtEpochMs) {
-        measuredAtEpochMs?.takeIf { it > 0L }?.let {
-            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.MEDIUM)
-                .format(java.util.Date(it))
-        }
+        measuredAtEpochMs?.takeIf { it > 0L }?.let(::formatSpeedTestTime)
     }
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val result = when {
+        isUntested -> stringResource(KMR.strings.manwa_speed_log_untested) +
+            measuredAt?.let { " · ${stringResource(KMR.strings.manwa_speed_log_previous_test, it)}" }.orEmpty()
+        verdict == SpeedTester.ImgVerdict.NO_IMAGE -> stringResource(KMR.strings.manwa_speed_log_no_image)
+        verdict == SpeedTester.ImgVerdict.UNREACHABLE -> stringResource(KMR.strings.manwa_speed_log_unreachable)
+        delay == null || delay == Long.MAX_VALUE -> stringResource(KMR.strings.manwa_speed_log_failed)
+        else -> stringResource(KMR.strings.manwa_speed_log_success, delay)
+    }
+    val marker = when {
+        isSelected && isImage -> stringResource(KMR.strings.manwa_speed_log_selected_image) + selectionLabel?.let { " · $it" }.orEmpty()
+        isSelected -> stringResource(KMR.strings.manwa_speed_log_selected_line)
+        else -> null
+    }
+    val timestamp = measuredAt?.takeUnless { isUntested }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Column(Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(
-                text = "${index + 1}. $host",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                text = if (isUntested) "本轮未测 · 上次 ${measuredAt ?: "时间未知"}" else "测于 ${measuredAt ?: "时间未知"}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         Text(
-            text = "HTTP:${formatDelay(delay, verdict)}${if (isUntested) "（本轮未测）" else ""}",
+            text = host,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+        Text(
+            text = listOfNotNull(result, timestamp, marker).joinToString(" · "),
             style = MaterialTheme.typography.bodySmall,
             color = when {
                 isUntested -> MaterialTheme.colorScheme.onSurfaceVariant
-                verdict == SpeedTester.ImgVerdict.OK && (delay ?: 0) < 300 -> MaterialTheme.colorScheme.primary
-                verdict != null && verdict != SpeedTester.ImgVerdict.OK -> MaterialTheme.colorScheme.error
-                delay == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
-                delay < 300 -> MaterialTheme.colorScheme.primary
+                delay == null || delay == Long.MAX_VALUE || verdict == SpeedTester.ImgVerdict.UNREACHABLE || verdict == SpeedTester.ImgVerdict.NO_IMAGE -> MaterialTheme.colorScheme.error
+                isSelected -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
-        if (isSelected) {
-            Text(" ✓", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-        }
-        if (selectionLabel != null) {
-            Text(selectionLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-        }
     }
 }
+
+private fun formatSpeedTestTime(epochMs: Long): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(epochMs))
 
 /**
  * 延迟显示。图源行带 [verdict] 时区分三种曾经都叫"超时"的情况：

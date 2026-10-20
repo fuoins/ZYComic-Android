@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -157,6 +158,8 @@ fun ContentPlatformSelector(
     onSelect: (ContentPlatform) -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    compactButtonSize: androidx.compose.ui.unit.Dp? = null,
+    compactJmLabel: String? = null,
 ) {
     Surface(
         modifier = modifier,
@@ -174,8 +177,15 @@ fun ContentPlatformSelector(
                 Box(
                     modifier = Modifier
                         .then(if (compact) Modifier else Modifier.weight(1f))
-                        .defaultMinSize(minHeight = 48.dp)
-                        .widthIn(min = if (compact) 48.dp else 0.dp)
+                        .then(
+                            if (compact && compactButtonSize != null) {
+                                Modifier.size(compactButtonSize)
+                            } else {
+                                Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .widthIn(min = if (compact) 48.dp else 0.dp)
+                            },
+                        )
                         .selectable(
                             selected = isSelected,
                             role = Role.RadioButton,
@@ -187,13 +197,17 @@ fun ContentPlatformSelector(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = stringResource(
-                            when (platform) {
-                                ContentPlatform.MANWA -> KMR.strings.content_platform_manwa
-                                ContentPlatform.PICACG -> KMR.strings.content_platform_picacg
-                                ContentPlatform.JM -> KMR.strings.content_platform_jm
-                            },
-                        ),
+                        text = if (compact && platform == ContentPlatform.JM && compactJmLabel != null) {
+                            compactJmLabel
+                        } else {
+                            stringResource(
+                                when (platform) {
+                                    ContentPlatform.MANWA -> KMR.strings.content_platform_manwa
+                                    ContentPlatform.PICACG -> KMR.strings.content_platform_picacg
+                                    ContentPlatform.JM -> KMR.strings.content_platform_jm
+                                },
+                            )
+                        },
                         color = if (isSelected) {
                             if (accent.luminance() > 0.55f) Color.Black else Color.White
                         } else {

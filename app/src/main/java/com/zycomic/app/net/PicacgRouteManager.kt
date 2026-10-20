@@ -8,6 +8,7 @@ import okhttp3.Dns
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import java.net.InetAddress
+import java.net.Proxy
 import java.net.URI
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -214,6 +215,8 @@ object PicacgRouteManager {
     }
 
     fun routeRules(): Map<String, List<String>> = apiRouteRules + imageRouteRules
+    fun apiRouteRules(): Map<String, List<String>> = apiRouteRules.toMap()
+    fun imageRouteRules(): Map<String, List<String>> = imageRouteRules.toMap()
     fun resolveIps(host: String): List<String> = (apiRouteRules + imageRouteRules).entries
         .firstOrNull { it.key.equals(host, true) }?.value.orEmpty()
 
@@ -244,6 +247,32 @@ object PicacgRouteManager {
             })
             .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
             .retryOnConnectionFailure(false)
+            .build()
+    }
+
+    /** Diagnostic child client: only the measured host is resolvable and redirects cannot change the target. */
+    fun newDiagnosticPinnedClient(base: OkHttpClient, endpoint: DomainIp): OkHttpClient {
+        require(isIpv4Literal(endpoint.ip)) { "Invalid Picacg endpoint address" }
+        require((apiUrls.map(::hostOf) + imageHosts).any { it.equals(endpoint.domain, true) }) { "Host is not in the active Picacg route pools" }
+        require(
+            (apiRouteRules.entries + imageRouteRules.entries).any { (host, addresses) ->
+                host.equals(endpoint.domain, true) && addresses.any { it.trim() == endpoint.ip }
+            },
+        ) { "IP is not configured for this Picacg host" }
+        return base.newBuilder()
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> {
+                    if (!hostname.equals(endpoint.domain, true)) {
+                        throw java.net.UnknownHostException("Diagnostic probe is pinned to one host")
+                    }
+                    return listOf(InetAddress.getByName(endpoint.ip))
+                }
+            })
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .proxy(Proxy.NO_PROXY)
+            .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
             .build()
     }
 

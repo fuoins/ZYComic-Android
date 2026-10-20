@@ -179,6 +179,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     ) { Text(if (running) "测速中…" else "完整重新测速") }
                 }
             }
+            item { DeprecatedEndpointQuerySection(ContentPlatform.JM, enabled = !running) }
             item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text("线路端点（域名 · IP）", style = MaterialTheme.typography.titleSmall)

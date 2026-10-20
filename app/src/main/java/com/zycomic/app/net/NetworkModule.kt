@@ -17,6 +17,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.create
 import java.net.InetAddress
+import java.net.Proxy
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -191,6 +192,45 @@ object NetworkModule {
             // Never let an existing pooled connection make a probe appear to have used another IP.
             .connectionPool(ConnectionPool(1, 1, TimeUnit.SECONDS))
             .build()
+
+    /** A diagnostic-only client that cannot resolve or retry any address except the configured literal. */
+    fun newDiagnosticProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient {
+        require(isIpLiteral(ip)) { "Diagnostic probes require a configured IP literal" }
+        require(
+            RouteManager.customRule.entries.any { (domain, addresses) ->
+                domain.equals(hostname, ignoreCase = true) && addresses.any { it.trim().equals(ip, ignoreCase = true) }
+            },
+        ) { "Diagnostic probes require an IP configured for this host" }
+        return client.newBuilder()
+            .dns(object : Dns {
+                override fun lookup(requestedHost: String): List<InetAddress> {
+                    if (!requestedHost.equals(hostname, ignoreCase = true)) {
+                        throw java.net.UnknownHostException("Diagnostic probe is pinned to one host")
+                    }
+                    return listOf(InetAddress.getByName(ip))
+                }
+            })
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .proxy(Proxy.NO_PROXY)
+            .apply {
+                interceptors().removeAll { it is LineFailoverInterceptor }
+                networkInterceptors().removeAll { it is LineFailoverInterceptor }
+                interceptors().removeAll { it is ImageInterceptor }
+                networkInterceptors().removeAll { it is ImageInterceptor }
+            }
+            .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+            .build()
+    }
+
+    private fun isIpLiteral(value: String): Boolean = if (':' in value) {
+        value.matches(Regex("[0-9a-fA-F:.]+")) &&
+            runCatching { InetAddress.getByName(value) }.isSuccess
+    } else {
+        val parts = value.split('.')
+        parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && it.toIntOrNull() in 0..255 }
+    }
 
     private val apiProbeRetryAfter = RuntimeRetryAfterPolicy()
 

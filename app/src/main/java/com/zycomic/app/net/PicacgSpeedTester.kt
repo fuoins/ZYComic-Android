@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -181,11 +182,33 @@ object PicacgSpeedTester {
         return runCatching { okhttp3.Dns.SYSTEM.lookup(host).map { it.hostAddress.substringBefore('%') }.distinct() }.getOrDefault(emptyList())
     }
 
-    private fun probeApi(baseUrl: String, endpoint: DomainIp): Probe {
+    /** Diagnostic-only adapter: validates the same API/image response without publishing or selecting routes. */
+    internal suspend fun probeForDeprecatedScan(endpoint: DomainIp, url: String, image: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            val urlHost = runCatching { URI(url).host }.getOrNull() ?: return@withContext false
+            if (!urlHost.equals(endpoint.domain, ignoreCase = true)) return@withContext false
+            val rules = if (image) PicacgRouteManager.imageRouteRules() else PicacgRouteManager.apiRouteRules()
+            if (rules.entries.none { (host, addresses) ->
+                    host.equals(endpoint.domain, ignoreCase = true) && addresses.any { it.trim() == endpoint.ip }
+                }
+            ) {
+                return@withContext false
+            }
+            runInterruptible {
+                val client = PicacgRouteManager.newDiagnosticPinnedClient(baseProbeClient, endpoint)
+                try {
+                    if (image) probeImage(url, endpoint, client).success else probeApi(url, endpoint, client).success
+                } finally {
+                    client.connectionPool.evictAll()
+                }
+            }
+        }
+
+    private fun probeApi(baseUrl: String, endpoint: DomainIp, clientOverride: OkHttpClient? = null): Probe {
         val start = System.nanoTime()
         var code: Int? = null
         val success = runCatching {
-            val client = PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
+            val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
             val request = Request.Builder().url(baseUrl.trimEnd('/') + "/").get().build()
             client.newCall(request).execute().use { response ->
                 code = response.code
@@ -196,13 +219,13 @@ object PicacgSpeedTester {
         return Probe(endpoint, success, elapsedMs(start), code)
     }
 
-    private fun probeImage(url: String, endpoint: DomainIp): Probe {
+    private fun probeImage(url: String, endpoint: DomainIp, clientOverride: OkHttpClient? = null): Probe {
         val start = System.nanoTime()
         var code: Int? = null
         var contentType: String? = null
         var decoded: Boolean? = false
         val success = runCatching {
-            val client = PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
+            val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
             val request = Request.Builder().url(url).header("User-Agent", "okhttp/3.8.1").get().build()
             client.newCall(request).execute().use { response ->
                 code = response.code
