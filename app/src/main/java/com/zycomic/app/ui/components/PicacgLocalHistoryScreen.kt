@@ -112,6 +112,14 @@ fun PicacgLocalHistoryScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Text(
+                                text = stringResource(
+                                    KMR.strings.picacg_local_history_last_page,
+                                    PicacgLocalHistoryPolicy.lastReadPageNumber(history.lastPageRead).toInt(),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             history.readAt?.let { readAt ->
                                 Text(
                                     text = dateTimeFormat.format(readAt),

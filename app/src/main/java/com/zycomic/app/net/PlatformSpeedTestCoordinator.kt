@@ -35,6 +35,8 @@ object PlatformSpeedTestCoordinator {
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
     private var completedKey: SpeedTestRunKey? = null
+    private val completedPhases = CompletedSpeedTestPhases()
+    private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
 
     internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
         startupConfig.complete(configurationUpdated)
@@ -46,6 +48,19 @@ object PlatformSpeedTestCoordinator {
         JmRouteManager.currentSpeedTestConfigRevision(),
         currentNetworkIdentity(),
         PicacgRouteManager.configRevision,
+        DevConfig.remoteVersion(),
+    )
+
+    private fun phaseKey(key: SpeedTestRunKey, platform: ContentPlatform) = CompletedSpeedTestPhases.Key(
+        remoteVersion = key.remoteVersion,
+        routingRevision = when (platform) {
+            ContentPlatform.MANWA -> key.manwaConfigRevision
+            ContentPlatform.PICACG -> key.picacgConfigRevision
+            ContentPlatform.JM -> key.jmConfigRevision
+        },
+        platformRevision = key.platformRevision,
+        networkIdentity = key.networkIdentity,
+        platform = platform.name,
     )
 
     internal fun currentNetworkIdentity(): String {
@@ -75,16 +90,6 @@ object PlatformSpeedTestCoordinator {
         }
         DevConfig.awaitUsableRouteConfig()
         lock.withLock {
-            val initialKey = currentKey()
-            if (SpeedTestRunPolicy.canSkip(
-                    completedKey,
-                    initialKey,
-                    forceFresh,
-                    onlyPlatform != null,
-                )
-            ) {
-                return@withLock _reports.value
-            }
             _running.value = true
             _progressText.value = null
             _jmProgress.value = null
@@ -114,6 +119,7 @@ object PlatformSpeedTestCoordinator {
                         startupConfig.awaitConfigurationUpdated()
                         return generationIsCurrent()
                     }
+                    val measuredPlatforms = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
                     val result = coroutineScope {
                         listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).map { platform ->
                             async {
@@ -126,8 +132,20 @@ object PlatformSpeedTestCoordinator {
                                     ContentPlatform.JM -> "禁漫天堂未开启"
                                 }
                                 val requested = onlyPlatform == null || onlyPlatform == platform
+                                var picacgSnapshot: PicacgSpeedTester.Snapshot? = null
                                 if (enabled && !requested) reason = "本轮仅重新检测${platformName(onlyPlatform ?: platform)}"
                                 if (enabled && requested) {
+                                    val phaseKey = phaseKey(key, platform)
+                                    if (forceFresh || onlyPlatform != null) completedPhases.invalidate(platform.name)
+                                    val linesDone = completedPhases.canReuse(phaseKey, CompletedSpeedTestPhases.Phase.LINES, forceFresh, onlyPlatform != null)
+                                    val imagesDone = completedPhases.canReuse(phaseKey, CompletedSpeedTestPhases.Phase.IMAGES, forceFresh, onlyPlatform != null)
+                                    // Incomplete Picacg images must not invalidate other platforms or its API results.
+                                    // Without a real sample there is no new work to perform on a duplicate caller.
+                                    if (linesDone && (imagesDone || (platform == ContentPlatform.PICACG && PicacgRouteManager.verifiedImageSampleUrl == null))) {
+                                        val cached = completedReports[platform]?.takeIf { it.first == phaseKey }?.second
+                                        if (cached != null) return@async cached
+                                    }
+                                    measuredPlatforms.add(platformName(platform))
                                     _progressText.value = "正在检测${platformName(platform)}线路与图源…"
                                     try {
                                         reason = "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（历史仅核对网络配置版本）"
@@ -166,13 +184,16 @@ object PlatformSpeedTestCoordinator {
                                             }
                                         } else if (platform == ContentPlatform.PICACG) {
                                             val snapshot = PicacgSpeedTester.run(
+                                                reuseApi = linesDone,
+                                                reuseImages = imagesDone,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
                                                 onProgress = { progress ->
                                                     if (generationIsCurrent()) _progressText.value = picacgProgressMessage(progress)
                                                 },
                                             )
-                                            status = if (snapshot.complete) "tested" else "incomplete"
+                                            picacgSnapshot = snapshot.takeIf { PicacgSpeedTester.snapshot.value == it && generationIsCurrent() }
+                                            status = if (picacgSnapshot?.complete == true) "tested" else "incomplete"
                                             reason = if (snapshot.complete) {
                                                 val apiAvailable = snapshot.apiProbes.count(PicacgSpeedTester.Probe::success)
                                                 val imagesVerified = snapshot.imageProbes.count(PicacgSpeedTester.Probe::success)
@@ -210,7 +231,7 @@ object PlatformSpeedTestCoordinator {
                                         }
                                     }
                                 }
-                                report(platform, status, reason)
+                                report(platform, status, reason, picacgSnapshot)
                             }
                         }.awaitAll()
                     }
@@ -218,9 +239,22 @@ object PlatformSpeedTestCoordinator {
                     startupConfig.awaitConfigurationUpdated()
                     if (!generationIsCurrent()) continue
                     _reports.value = result
+                    listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).forEach { platform ->
+                        val platformReport = result.first { it.platform == platformName(platform) }
+                        if (platformReport.status != "skipped") {
+                            val phaseKey = phaseKey(key, platform)
+                            completedReports[platform] = phaseKey to platformReport
+                            if (platformReport.lineStatus in setOf("tested", "quick")) {
+                                completedPhases.record(phaseKey, CompletedSpeedTestPhases.Phase.LINES)
+                            }
+                            if (platformReport.imageStatus in setOf("tested", "quick")) {
+                                completedPhases.record(phaseKey, CompletedSpeedTestPhases.Phase.IMAGES)
+                            }
+                        }
+                    }
                     if (onlyPlatform == null) completedKey = key.takeIf { result.none { it.status == "incomplete" } }
                     persist(result)
-                    if (notifyCompletion) result.filter { it.status != "skipped" }.forEach { _completions.emit(it) }
+                    if (notifyCompletion) result.filter { it.platform in measuredPlatforms && it.status != "skipped" }.forEach { _completions.emit(it) }
                     return@withLock result
                 }
                 @Suppress("UNREACHABLE_CODE")
@@ -288,7 +322,12 @@ object PlatformSpeedTestCoordinator {
         PicacgSpeedTester.Stage.COMPLETE -> "哔咔测速完成：API ${progress.successful}/${progress.total} 可用；图源按真实图片样本验证"
     }
 
-    private fun report(platform: ContentPlatform, status: String, reason: String): PlatformSpeedTestReport = when (platform) {
+    private fun report(
+        platform: ContentPlatform,
+        status: String,
+        reason: String,
+        picacgSnapshot: PicacgSpeedTester.Snapshot? = null,
+    ): PlatformSpeedTestReport = when (platform) {
         ContentPlatform.MANWA -> PlatformSpeedTestReport(
             platform = "漫蛙",
             status = status,
@@ -307,7 +346,7 @@ object PlatformSpeedTestCoordinator {
             imageStatus = if (status == "tested" && SpeedTester.progress.value.imageQuickTest) "quick" else status,
         )
         ContentPlatform.PICACG -> {
-            val snapshot = PicacgSpeedTester.snapshot.value
+            val snapshot = picacgSnapshot
             PlatformSpeedTestReport(
                 platform = "哔咔",
                 status = status,

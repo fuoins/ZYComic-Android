@@ -20,7 +20,22 @@ data class PicacgCategory(
 data class PicacgPage<T>(val items: List<T>, val hasMore: Boolean, val page: Int)
 data class PicacgEpisode(val id: String, val title: String, val order: Int, val updatedAt: String = "")
 data class PicacgImage(val id: String, val url: String, val originalName: String)
-data class PicacgProfile(val id: String, val name: String, val avatarUrl: String = "", val raw: Map<String, String> = emptyMap())
+data class PicacgProfile(
+    val id: String,
+    val name: String,
+    val email: String = "",
+    val avatarUrl: String = "",
+    val slogan: String = "",
+    val title: String = "",
+    val gender: String = "",
+    val birthday: String = "",
+    val level: Int = 0,
+    val exp: Int = 0,
+    val characters: List<String> = emptyList(),
+    val createdAt: String = "",
+    val isPunched: Boolean? = null,
+    val verified: Boolean = false,
+)
 
 /** Interaction fields supplied by the comic detail endpoint, kept separate from the legacy Manga DTO. */
 data class PicacgComicDetail(
@@ -128,7 +143,7 @@ internal fun Map<String, Any?>.toPicacgManga(): Manga {
         Chapter(id = episode["_id"]?.toString().orEmpty(), name = episode["title"]?.toString().orEmpty(), sort = (episode["order"]?.toString()?.toIntOrNull() ?: 0))
     }.orEmpty()
     return Manga(
-        id = str("_id"),
+        id = str("_id").ifBlank { str("id") },
         name = str("title"),
         author = str("author"),
         picx = coverPath,

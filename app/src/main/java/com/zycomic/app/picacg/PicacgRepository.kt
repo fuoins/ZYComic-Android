@@ -282,20 +282,52 @@ object PicacgRepository {
         return comicList(paged, page)
     }
 
-    suspend fun profile(): PicacgProfile {
-        val profile = client().request("/users/profile").data.optJSONObject("user")
+    suspend fun profile(): PicacgProfile = loadProfile(expectedSessionRevision = null)
+
+    private suspend fun loadProfile(expectedSessionRevision: Long?): PicacgProfile {
+        val profile = client().request("/users/profile", expectedSessionRevision = expectedSessionRevision).data.optJSONObject("user")
             ?: throw IOException("Picacg profile response has no user")
-        val id = profile.optString("_id")
-        val name = profile.optString("name")
+        fun text(key: String, fallbackKey: String? = null): String {
+            val value = profile.optString(key).takeIf { it.isNotBlank() && it != "null" }
+            val fallback = fallbackKey?.let { profile.optString(it) }?.takeIf { it.isNotBlank() && it != "null" }
+            return value ?: fallback.orEmpty()
+        }
+        val id = text("id", "_id")
+        val name = text("name")
         val avatar = profile.optJSONObject("avatar")
-        val avatarUrl = avatar?.optString("path")?.takeIf(String::isNotBlank)?.let { PicacgImageUrl.resolve(it, PicacgRouteManager.currentImageHost.orEmpty()) }.orEmpty()
-        return PicacgProfile(id, name, avatarUrl, profile.toMap().mapValues { it.value?.toString().orEmpty() })
+        val avatarUrl = avatar?.optString("path")?.takeIf { it.isNotBlank() && it != "null" }
+            ?.let { PicacgImageUrl.resolve(it, PicacgRouteManager.currentImageHost.orEmpty()) }.orEmpty()
+        val isPunched = when (val value = profile.opt("isPunched")) {
+            is Boolean -> value
+            is String -> value.toBooleanStrictOrNull()
+            else -> null
+        }
+        val characters = profile.optJSONArray("characters")?.let { array ->
+            (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
+        }.orEmpty()
+        return PicacgProfile(
+            id = id,
+            name = name,
+            email = text("email"),
+            avatarUrl = avatarUrl,
+            slogan = text("slogan"),
+            title = text("title"),
+            gender = text("gender"),
+            birthday = text("birthday"),
+            level = profile.optInt("level", 0),
+            exp = profile.optInt("exp", 0),
+            characters = characters,
+            createdAt = text("createdAt"),
+            isPunched = isPunched,
+            verified = profile.optBoolean("verified"),
+        )
     }
 
-    /** Documented POST; the client accepts a successful status-only response for write operations. */
-    suspend fun punchIn(): Boolean {
-        client().request("/users/punch-in", "POST", JSONObject())
-        return true
+    /** The write response does not carry a reliable profile flag; read back the account state. */
+    suspend fun punchIn(): PicacgProfile {
+        val expectedSessionRevision = PicacgAuthStore.sessionRevision.value
+        client().request("/users/punch-in", "POST", JSONObject(), expectedSessionRevision = expectedSessionRevision)
+        return loadProfile(expectedSessionRevision)
     }
 
     private fun comicList(data: JSONObject, page: Int = 1): PicacgPage<Manga> {

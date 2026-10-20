@@ -33,6 +33,8 @@ class SpeedTestRunPolicyTest {
         assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(platformRevision = 2), false, false))
         assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(manwaConfigRevision = 4), false, false))
         assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(jmConfigRevision = 5), false, false))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(picacgConfigRevision = 6), false, false))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key.copy(remoteVersion = 21), false, false))
     }
 
     @Test

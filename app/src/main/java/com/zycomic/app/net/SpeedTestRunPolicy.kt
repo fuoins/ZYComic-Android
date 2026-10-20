@@ -7,6 +7,7 @@ internal data class SpeedTestRunKey(
     val jmConfigRevision: Long,
     val networkIdentity: String,
     val picacgConfigRevision: Long = 0L,
+    val remoteVersion: Int = 0,
 )
 
 internal object SpeedTestRunPolicy {

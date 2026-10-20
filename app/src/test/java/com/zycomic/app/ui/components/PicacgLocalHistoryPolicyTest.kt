@@ -37,14 +37,25 @@ class PicacgLocalHistoryPolicyTest {
         assertEquals(emptyList<HistoryWithRelations>(), filtered)
     }
 
-    private fun historyEntry(id: Long, sourceId: Long) = HistoryWithRelations(
+    @Test
+    fun `keeps the saved last page and exposes a user-facing one-based page number`() {
+        val entry = historyEntry(id = 1L, sourceId = PICACG_SOURCE_ID, lastPageRead = 8L)
+
+        val filtered = PicacgLocalHistoryPolicy.onlyPicacg(listOf(entry), PICACG_SOURCE_ID)
+
+        assertEquals(8L, filtered.single().lastPageRead)
+        assertEquals(9L, PicacgLocalHistoryPolicy.lastReadPageNumber(filtered.single().lastPageRead))
+        assertEquals(1L, PicacgLocalHistoryPolicy.lastReadPageNumber(-1L))
+    }
+
+    private fun historyEntry(id: Long, sourceId: Long, lastPageRead: Long = 0L) = HistoryWithRelations(
         id = id,
         chapterId = id,
         mangaId = id,
         ogTitle = "Manga $id",
         chapterNumber = 1.0,
         read = false,
-        lastPageRead = 0,
+        lastPageRead = lastPageRead,
         totalCountCalculated = 1,
         readCountCalculated = 0,
         readAt = null,

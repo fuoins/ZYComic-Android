@@ -43,6 +43,38 @@ class PicacgClientRedirectTest {
     }
 
     @Test
+    fun `sign-in diagnostics identify API base and redact request query and body`() = runBlocking {
+        val requests = mutableListOf<Request>()
+        val diagnostics = mutableListOf<String>()
+        val client = testClient(
+            baseUrl = "http://api.example/api/v2",
+            replies = listOf(
+                Reply(301, location = "https://api.example/api/v2/auth/sign-in?marker=private-query"),
+                Reply(200, body = """{"code":200,"data":{}}"""),
+            ),
+            requests = requests,
+            bodies = mutableListOf(),
+            diagnostics = diagnostics,
+        )
+
+        client.request(
+            "/auth/sign-in?marker=private-query",
+            method = "POST",
+            body = JSONObject().put("password", "offline-test-value"),
+            authenticated = false,
+        )
+
+        assertEquals(
+            listOf(
+                "Picacg sign-in configured endpoint=api-base",
+                "Picacg HTTP 301 redirect; source=api-base; location=same-host-https",
+            ),
+            diagnostics,
+        )
+        assertEquals(2, requests.size)
+    }
+
+    @Test
     fun `invalid redirect targets and non-301 redirects are not followed`() = runBlocking {
         val invalidReplies = listOf(
             Reply(301, location = "https://other.example/api/v2/item?q=1"),
@@ -70,14 +102,16 @@ class PicacgClientRedirectTest {
     @Test
     fun `second redirect is rejected without following a third request`() = runBlocking {
         val requests = mutableListOf<Request>()
+        val diagnostics = mutableListOf<String>()
         val client = testClient(
             baseUrl = "http://api.example/api/v2",
             replies = listOf(
                 Reply(301, location = "https://api.example/api/v2/item"),
-                Reply(301, location = "https://api.example/api/v2/item"),
+                Reply(301, location = "https://private.example/item?token=must-not-be-logged"),
             ),
             requests = requests,
             bodies = mutableListOf(),
+            diagnostics = diagnostics,
         )
 
         assertThrows(IOException::class.java) {
@@ -85,6 +119,13 @@ class PicacgClientRedirectTest {
         }
         assertEquals(2, requests.size)
         assertEquals(listOf("http", "https"), requests.map { it.url.scheme })
+        assertEquals(
+            listOf(
+                "Picacg HTTP 301 redirect; source=api-base; location=same-host-https",
+                "Picacg HTTP 301 redirect; source=api-base; location=source-not-http",
+            ),
+            diagnostics,
+        )
     }
 
     private fun testClient(
@@ -92,6 +133,7 @@ class PicacgClientRedirectTest {
         replies: List<Reply>,
         requests: MutableList<Request>,
         bodies: MutableList<String?>,
+        diagnostics: MutableList<String> = mutableListOf(),
     ): PicacgClient {
         val remaining = ArrayDeque(replies)
         val http = OkHttpClient.Builder()
@@ -119,6 +161,7 @@ class PicacgClientRedirectTest {
             epochSeconds = { 1_700_000_000L },
             nonce = { "0123456789abcdef0123456789abcdef" },
             appUuid = "redirect-offline-test",
+            diagnosticLog = diagnostics::add,
         )
     }
 

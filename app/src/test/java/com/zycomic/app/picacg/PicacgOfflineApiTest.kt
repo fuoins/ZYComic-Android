@@ -158,6 +158,63 @@ class PicacgOfflineApiTest {
     }
 
     @Test
+    fun `favorites maps records that identify comics with either id or underscore id`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"comics":{"docs":[{"_id":"wire-id","title":"Underscore"},{"id":"plain-id","title":"Plain"}],"pages":1}}}"""
+
+        val result = PicacgRepository.favourites(1)
+
+        assertEquals(listOf("wire-id", "plain-id"), result.items.map { it.id })
+    }
+
+    @Test
+    fun `profile maps Me fields and today's check-in status`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"user":{"id":"user-id","name":"Reader","email":"reader@example.invalid","avatar":{"path":"avatar/a.jpg"},"slogan":"Hello","title":"Member","gender":"m","birthday":"2000-01-01","level":4,"exp":321,"characters":["cat","fox"],"createdAt":"2024-01-02","isPunched":true,"verified":true}}}"""
+
+        val profile = PicacgRepository.profile()
+
+        assertEquals("user-id", profile.id)
+        assertEquals("Reader", profile.name)
+        assertEquals("reader@example.invalid", profile.email)
+        assertEquals("https://img.example/static/avatar/a.jpg", profile.avatarUrl)
+        assertEquals("Hello", profile.slogan)
+        assertEquals("Member", profile.title)
+        assertEquals("m", profile.gender)
+        assertEquals("2000-01-01", profile.birthday)
+        assertEquals(4, profile.level)
+        assertEquals(321, profile.exp)
+        assertEquals(listOf("cat", "fox"), profile.characters)
+        assertEquals("2024-01-02", profile.createdAt)
+        assertEquals(true, profile.isPunched)
+        assertTrue(profile.verified)
+    }
+
+    @Test
+    fun `profile without a valid check-in flag reports an unknown state`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"user":{"_id":"user-id","name":"Reader","isPunched":"unknown"}}}"""
+
+        val profile = PicacgRepository.profile()
+
+        assertEquals(null, profile.isPunched)
+    }
+
+    @Test
+    fun `punch in posts an empty object then reads back authoritative profile status`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{}}"""
+        responses += 200 to """{"code":200,"data":{"user":{"_id":"user-id","name":"Reader","isPunched":true}}}"""
+
+        val profile = PicacgRepository.punchIn()
+
+        assertEquals(true, profile.isPunched)
+        assertEquals("/api/v2/users/punch-in", requests[0].url.encodedPath)
+        assertEquals("{}", Buffer().also { requests[0].body!!.writeTo(it) }.readUtf8())
+        assertEquals("/api/v2/users/profile", requests[1].url.encodedPath)
+    }
+
+    @Test
     fun `browse serializes all documented filter keys`() = runBlocking {
         PicacgRepository.installClientForTests(client)
         responses += 200 to """{"code":200,"data":{"comics":{"docs":[],"pages":1}}}"""

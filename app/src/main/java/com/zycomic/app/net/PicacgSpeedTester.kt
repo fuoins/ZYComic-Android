@@ -73,6 +73,8 @@ object PicacgSpeedTester {
     }
 
     suspend fun run(
+        reuseApi: Boolean = false,
+        reuseImages: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onProgress: (Progress) -> Unit = {},
@@ -85,14 +87,23 @@ object PicacgSpeedTester {
             SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.PICACG).use { timings ->
                 val revision = PicacgRouteManager.configRevision
                 val started = System.currentTimeMillis()
-                val apiResults = mutableListOf<Probe>()
-                val imageResults = mutableListOf<Probe>()
+                val previous = _snapshot.value?.takeIf {
+                    it.revision == revision && it.remoteVersion == PicacgRouteManager.remoteVersion
+                }
+                val cachedApi = previous?.apiProbes.orEmpty().takeIf { reuseApi }.orEmpty()
+                val cachedImages = previous?.imageProbes.orEmpty().takeIf { reuseImages }.orEmpty()
+                val apiResults = cachedApi.toMutableList()
+                val imageResults = cachedImages.toMutableList()
                 val urls = PicacgRouteManager.apiUrls
                 val apiEndpoints = timings.start(SpeedTestTimings.Phase.PICACG_LINE_PREPARATION).use {
                     publishProgress(Progress(Stage.PREPARING_API, total = urls.size))
-                    urls.flatMap { baseUrl ->
-                        val host = runCatching { URI(baseUrl).host }.getOrNull()
-                        if (host == null) emptyList() else resolve(host).map { ip -> baseUrl to DomainIp(host, ip) }
+                    if (cachedApi.isNotEmpty()) {
+                        emptyList()
+                    } else {
+                        urls.flatMap { baseUrl ->
+                            val host = runCatching { URI(baseUrl).host }.getOrNull()
+                            if (host == null) emptyList() else resolve(host).map { ip -> baseUrl to DomainIp(host, ip) }
+                        }
                     }
                 }
                 timings.start(SpeedTestTimings.Phase.PICACG_LINES).use {
@@ -115,7 +126,9 @@ object PicacgSpeedTester {
                 val actualSampleUrl = PicacgRouteManager.verifiedImageSampleUrl
                 val imageEndpoints = timings.start(SpeedTestTimings.Phase.PICACG_IMAGE_PREPARATION).use {
                     publishProgress(Progress(Stage.PREPARING_IMAGES, total = PicacgRouteManager.imageHosts.size))
-                    if (actualSampleUrl == null) {
+                    if (cachedImages.isNotEmpty()) {
+                        emptyList()
+                    } else if (actualSampleUrl == null) {
                         blockedReason = "没有来自真实 Picacg 封面/章节图片 API 响应的样本 URL；图源验证未运行（不可仅探测根路径或伪造成功）"
                         emptyList()
                     } else {
@@ -147,7 +160,7 @@ object PicacgSpeedTester {
                         )
                     }
                 }
-                if (imageEndpoints.isEmpty() && blockedReason == null) {
+                if (imageEndpoints.isEmpty() && imageResults.isEmpty() && blockedReason == null) {
                     blockedReason = "真实图片样本可用，但当前 sources3 图源没有可探测的 IP；图源验证未完成"
                     publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
                 }
@@ -170,7 +183,7 @@ object PicacgSpeedTester {
                     }
                     _snapshot.value = result
                 }
-                publishProgress(Progress(Stage.COMPLETE, apiResults.size, apiEndpoints.size, apiResults.count(Probe::success), apiResults.count { !it.success }))
+                publishProgress(Progress(Stage.COMPLETE, apiResults.size, apiResults.size, apiResults.count(Probe::success), apiResults.count { !it.success }))
                 result
             }
         }

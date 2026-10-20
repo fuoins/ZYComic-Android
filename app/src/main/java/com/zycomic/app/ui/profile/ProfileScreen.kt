@@ -343,7 +343,7 @@ fun ProfileScreen(
             // ---- 用户信息 ----
             item {
                 if (platform == ContentPlatform.PICACG) {
-                    com.zycomic.app.ui.picacg.PicacgProfileContent(onRequireLogin)
+                    com.zycomic.app.ui.picacg.PicacgAccountProfileContent(onRequireLogin)
                 } else if (platform == ContentPlatform.JM) {
                     TextPreferenceWidget(
                         title = jmAccount.takeIf { jmLoggedIn } ?: stringResource(KMR.strings.jm_account_title),

@@ -526,7 +526,6 @@ fun AppContent(
                     )
                 }
                 if (picacgProgress != null) {
-                    Text(stringResource(KMR.strings.picacg_speed_progress, picacgProgress.completed, picacgProgress.total))
                     LinearProgressIndicator(
                         progress = { picacgProgress.completed.toFloat() / picacgProgress.total },
                         modifier = Modifier.fillMaxWidth().height(6.dp),
