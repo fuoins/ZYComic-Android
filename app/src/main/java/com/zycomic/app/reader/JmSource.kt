@@ -298,14 +298,6 @@ object JmSource : HttpSource() {
 
     data class JmCommentPage(val total: Int?, val comments: List<JmComment>, val hasMore: Boolean)
 
-    suspend fun login(username: String, password: String): String = withContext(Dispatchers.IO) {
-        val response = postJson("/login", mapOf("username" to username, "password" to password))
-        val token = response.optString("jwttoken").takeIf(String::isNotBlank)
-            ?: throw IOException(response.optString("errorMsg").ifBlank { response.optString("msg") }.ifBlank { "JM 登录失败：响应缺少 JWT" })
-        JmAuthStore.save(token, username)
-        username
-    }
-
     fun logout() {
         JmAuthStore.clear()
         JmNetworkModule.clearCookies()

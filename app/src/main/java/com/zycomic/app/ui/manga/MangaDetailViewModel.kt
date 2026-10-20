@@ -17,6 +17,7 @@ import com.zycomic.app.reader.JmChapterProgress
 import com.zycomic.app.reader.JmChapterProgressPolicy
 import com.zycomic.app.reader.JmSource
 import com.zycomic.app.reader.ManwaSource
+import com.zycomic.app.ui.login.JmAccountLogin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -452,7 +453,8 @@ class MangaDetailViewModel(private val bookId: String, context: Context) {
             jmLoginBusy.value = true
             jmLoginError.value = null
             try {
-                jmAccountName.value = JmSource.login(username.trim(), password)
+                JmAccountLogin.login(username.trim(), password)
+                jmAccountName.value = username.trim()
                 jmNeedLogin.value = false
                 refreshJmState()
                 jmCommentPage = 0

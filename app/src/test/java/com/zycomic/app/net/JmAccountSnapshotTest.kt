@@ -82,10 +82,13 @@ class JmAccountSnapshotTest {
     }
 
     @Test
-    fun `remembered password requires explicit opt in and nonblank credentials`() {
-        assertFalse(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword = false, username = "alice", password = "secret"))
-        assertFalse(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword = true, username = "alice", password = " "))
-        assertTrue(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword = true, username = "alice", password = "secret"))
+    fun `credentials are automatically eligible only when username and password are nonblank`() {
+        for (blank in listOf(null, "", " ")) {
+            assertFalse(JmCredentialRefreshPolicy.shouldStorePassword(username = blank, password = "secret"))
+            assertFalse(JmCredentialRefreshPolicy.shouldStorePassword(username = "alice", password = blank))
+        }
+        assertTrue(JmCredentialRefreshPolicy.shouldStorePassword(username = "alice", password = "secret"))
+        assertTrue(JmCredentialRefreshPolicy.shouldStorePassword(username = "alice", password = " secret "))
     }
 
     @Test

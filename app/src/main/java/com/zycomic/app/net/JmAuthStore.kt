@@ -12,7 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** JM-only encrypted token and explicitly opted-in password storage. The API's optional `s` is never stored. */
+/** JM-only encrypted token and automatic login credential storage. The API's optional `s` is never stored. */
 object JmAuthStore {
     private const val PREFS = "jm_auth_secure"
     private const val TOKEN = "jwt_ciphertext"
@@ -101,24 +101,14 @@ object JmAuthStore {
         username: String,
         uid: String?,
         profile: JmAccountSnapshot,
-        rememberPassword: Boolean = false,
-        credentialUsername: String? = null,
-        credentialPassword: String? = null,
+        credentialUsername: String,
+        credentialPassword: String,
         commitCookies: () -> Unit = {},
     ): Boolean {
         return loginAttempts.runIfCurrent(attempt, sessionRevision) {
             require(token.isNotBlank())
-            val credentials = if (rememberPassword) {
-                require(JmCredentialRefreshPolicy.shouldStorePassword(rememberPassword, credentialUsername, credentialPassword))
-                encryptRememberedCredentials(
-                    username,
-                    uid,
-                    checkNotNull(credentialUsername),
-                    checkNotNull(credentialPassword),
-                )
-            } else {
-                null
-            }
+            require(JmCredentialRefreshPolicy.shouldStorePassword(credentialUsername, credentialPassword))
+            val credentials = encryptRememberedCredentials(username, uid, credentialUsername, credentialPassword)
             saveValues(token, username, uid, profile, credentials)
             commitCookies()
         }
@@ -165,7 +155,7 @@ object JmAuthStore {
     @Synchronized
     fun uid(): String? = accountUid
 
-    /** Returns credentials only when they were explicitly saved for the currently authenticated account. */
+    /** Returns saved login credentials only when bound to the currently authenticated account. */
     @Synchronized
     internal fun rememberedCredentialsForCurrentSession(): JmRememberedCredentials? {
         if (token() == null) return null

@@ -93,10 +93,10 @@ internal class JmLoginAttemptPolicy {
     }
 }
 
-/** Pure policy for opt-in credential persistence and account/revision isolation. */
+/** Pure policy for automatic credential persistence and account/revision isolation. */
 internal object JmCredentialRefreshPolicy {
-    fun shouldStorePassword(rememberPassword: Boolean, username: String?, password: String?): Boolean =
-        rememberPassword && !username.isNullOrBlank() && !password.isNullOrBlank()
+    fun shouldStorePassword(username: String?, password: String?): Boolean =
+        !username.isNullOrBlank() && !password.isNullOrBlank()
 
     fun belongsToAccount(
         savedAccountName: String?,

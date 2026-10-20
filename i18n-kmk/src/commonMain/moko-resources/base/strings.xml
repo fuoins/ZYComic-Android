@@ -343,7 +343,6 @@
     <string name="jm_account_login_title">禁漫账号登录</string>
     <string name="jm_username_login_label">禁漫账号 / 用户名</string>
     <string name="jm_password_login_notice">请使用用户名和密码登录，不支持邮箱作为用户名。</string>
-    <string name="jm_remember_password">记住密码（仅在本机加密保存，默认关闭）</string>
     <string name="jm_account_more_actions">注册、邮箱登录或找回密码？</string>
     <string name="jm_auth_unavailable_title">禁漫账号功能暂未开放</string>
     <string name="jm_auth_evidence_notice">当前已验证的客户端流程只有用户名和密码登录。邮箱登录（如有独立流程）、注册请求、激活、忘记密码后的重设以及设密接口，尚缺可复核的脱敏成功请求与响应样本；为避免误操作账号，不会猜测接口或提交账户变更。</string>

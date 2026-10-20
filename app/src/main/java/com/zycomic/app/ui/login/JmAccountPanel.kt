@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -38,7 +37,6 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
     var confirmation by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    var rememberPassword by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -49,7 +47,6 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
         password = ""
         confirmation = ""
         code = ""
-        rememberPassword = false
         message = null
     }
     fun submit() {
@@ -62,9 +59,8 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
             try {
                 when (mode) {
                     JmAccountMode.LOGIN -> {
-                        JmAccountLogin.login(username, password, rememberPassword)
+                        JmAccountLogin.login(username, password)
                         password = ""
-                        rememberPassword = false
                         onLoggedIn()
                     }
                     JmAccountMode.REGISTER -> {
@@ -119,10 +115,6 @@ internal fun JmAccountPanel(onLoggedIn: () -> Unit, onBusyChanged: (Boolean) -> 
         }
         when (mode) {
             JmAccountMode.LOGIN -> {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Checkbox(checked = rememberPassword, onCheckedChange = { rememberPassword = it }, enabled = !busy)
-                    Text(stringResource(KMR.strings.jm_remember_password), style = MaterialTheme.typography.bodySmall)
-                }
                 Text(stringResource(KMR.strings.jm_password_login_notice), style = MaterialTheme.typography.bodySmall)
             }
             JmAccountMode.REGISTER -> {

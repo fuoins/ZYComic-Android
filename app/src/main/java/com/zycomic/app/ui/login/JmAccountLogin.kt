@@ -20,20 +20,19 @@ import java.io.IOException
 internal object JmAccountLogin {
     private val refreshGate = JmRefreshGate()
 
-    suspend fun login(username: String, password: String, rememberPassword: Boolean = false) {
-        loginInternal(username, password, rememberPassword, preserveSessionOnUnauthorized = false)
+    suspend fun login(username: String, password: String) {
+        loginInternal(username, password, preserveSessionOnUnauthorized = false)
     }
 
-    /** Explicitly re-authenticates the active JM account using only its opt-in encrypted credentials. */
+    /** Explicitly re-authenticates the active JM account using its automatically encrypted login credentials. */
     suspend fun refreshSavedAccountCredentials() {
         if (!refreshGate.tryStart()) throw IOException("禁漫账号正在刷新，请稍后重试")
         try {
             val credentials = JmAuthStore.rememberedCredentialsForCurrentSession()
-                ?: throw IOException("此禁漫账号未保存密码，请重新登录并勾选“记住密码”后再刷新")
+                ?: throw IOException("此禁漫账号未保存密码，请重新登录后再刷新")
             loginInternal(
                 credentials.username,
                 credentials.password,
-                rememberPassword = true,
                 preserveSessionOnUnauthorized = true,
                 expectedSessionRevision = credentials.sessionRevision,
                 expectedAccountName = credentials.accountName,
@@ -47,7 +46,6 @@ internal object JmAccountLogin {
     private suspend fun loginInternal(
         username: String,
         password: String,
-        rememberPassword: Boolean,
         preserveSessionOnUnauthorized: Boolean,
         expectedSessionRevision: Long? = null,
         expectedAccountName: String? = null,
@@ -113,7 +111,6 @@ internal object JmAccountLogin {
                         username = displayName,
                         uid = uid,
                         profile = snapshot,
-                        rememberPassword = rememberPassword,
                         credentialUsername = username.trim(),
                         credentialPassword = password,
                     ) {
