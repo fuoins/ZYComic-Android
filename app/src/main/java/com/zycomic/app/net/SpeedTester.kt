@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
@@ -48,7 +47,7 @@ object SpeedTester {
 
     private const val TAG = "SpeedTester"
     private const val MAX = Long.MAX_VALUE
-    private val probeSemaphore = SpeedTestProbeBudget.permits
+    private val probeScheduler = SpeedTestProbeBudget.scheduler
 
     /** 探活只取前 2KB，避免逐域拉整张图/整个 JSON。 */
     private const val PROBE_BYTES = 2048L
@@ -630,7 +629,7 @@ object SpeedTester {
             coroutineScope {
                 targets.map { target ->
                     async {
-                        probeSemaphore.withPermit {
+                        probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
                             val delay = if (stillCurrent()) measureLineAtIp(client, target).delayMs else MAX
                             if (stillCurrent()) onResult?.invoke(target.endpoint, delay)
                             target.endpoint to delay
@@ -663,7 +662,7 @@ object SpeedTester {
             val delays = coroutineScope {
                 targets.map { endpoint ->
                     async {
-                        probeSemaphore.withPermit {
+                        probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
                             val result = if (stillCurrent()) {
                                 measureImgAtIp(client, endpoint) { samplePath }
                             } else {
@@ -764,7 +763,7 @@ object SpeedTester {
             coroutineScope {
                 targets.map { target ->
                     async {
-                        probeSemaphore.withPermit {
+                        probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
                             target.endpoint to (if (stillCurrent()) measureLineAtIp(client, target).delayMs else MAX)
                         }
                     }
@@ -888,7 +887,7 @@ object SpeedTester {
                 val freshLineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val lineJobs = lineProbeTargets.map { target ->
                     async {
-                        probeSemaphore.withPermit {
+                        probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
                             val outcome = if (runIsCurrent()) {
                                 measureLineAtIp(lineClient, target)
                             } else {
@@ -1018,7 +1017,7 @@ object SpeedTester {
                 val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES_INCLUDING_SAMPLE)
                 val imgJobs = imageProbeTargets.map { endpoint ->
                     async {
-                        probeSemaphore.withPermit {
+                        probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
                             val result = if (runIsCurrent()) {
                                 measureImgAtIp(imgClient, endpoint) {
                                     if (runIsCurrent()) sharedSamplePath.await().takeIf { runIsCurrent() } else null

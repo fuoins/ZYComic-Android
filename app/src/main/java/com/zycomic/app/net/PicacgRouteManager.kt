@@ -56,7 +56,8 @@ object PicacgRouteManager {
     /** Install only already-validated remote values; no built-in domain, IP, or fallback pool is introduced. */
     @Synchronized
     fun applyRemoteConfig(apiUrls: List<String>, imageHosts: List<String>, rules: Map<String, List<String>>, version: Int?) {
-        val normalizedUrls = apiUrls.map(String::trim).filter(String::isNotEmpty).distinctBy { hostOf(it).lowercase(Locale.ROOT) }
+        val normalizedUrls = apiUrls.map(String::trim).filter(PicacgNetworkPolicy::apiBaseAllowed)
+            .distinctBy { hostOf(it).lowercase(Locale.ROOT) }
         val normalizedHosts = imageHosts.map { it.trim().lowercase(Locale.ROOT) }.filter(String::isNotEmpty).distinct()
         val old = _state.value
         val prefs = prefs()

@@ -56,7 +56,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -297,12 +296,10 @@ fun AppContent(
 
     // 共享的设置 ViewModel（启动测速 + 设置页共用）
     val settingsVm = remember { SettingsViewModel() }
-    val speedTestProgress by settingsVm.speedTestProgress.collectAsState()
     val configRetest by com.zycomic.app.net.RemoteConfigFetcher.configRetest.collectAsState()
     val remoteInfo by settingsVm.remoteInfo.collectAsState()
-    val platformTestText by PlatformSpeedTestCoordinator.progressText.collectAsState()
-    val jmTestProgress by PlatformSpeedTestCoordinator.jmProgress.collectAsState()
-    val picacgTestProgress by com.zycomic.app.net.PicacgSpeedTester.progress.collectAsState()
+    val platformTestSummary by PlatformSpeedTestCoordinator.startupSummary.collectAsState()
+    val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
 
@@ -518,39 +515,12 @@ fun AppContent(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                val jmProgress = jmTestProgress
-                val picacgProgress = picacgTestProgress?.takeIf {
-                    it.total > 0 && it.stage in setOf(
-                        com.zycomic.app.net.PicacgSpeedTester.Stage.TESTING_API,
-                        com.zycomic.app.net.PicacgSpeedTester.Stage.TESTING_IMAGES,
-                    )
-                }
-                if (picacgProgress != null) {
-                    LinearProgressIndicator(
-                        progress = { picacgProgress.completed.toFloat() / picacgProgress.total },
-                        modifier = Modifier.fillMaxWidth().height(6.dp),
-                    )
-                } else if (jmProgress != null && jmProgress.total > 0) {
-                    LinearProgressIndicator(
-                        progress = { jmProgress.completed.toFloat() / jmProgress.total },
-                        modifier = Modifier.fillMaxWidth().height(6.dp),
-                    )
-                } else if (jmProgress == null && speedTestProgress.total > 0 &&
-                    speedTestProgress.phase in setOf(
-                        com.zycomic.app.net.SpeedTester.Phase.TESTING_LINES,
-                        com.zycomic.app.net.SpeedTester.Phase.TESTING_IMAGES,
-                    )
-                ) {
-                    LinearProgressIndicator(
-                        progress = { speedTestProgress.completed.toFloat() / speedTestProgress.total },
-                        modifier = Modifier.fillMaxWidth().height(6.dp),
-                    )
-                } else {
+                if (platformTestsRunning) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp))
                 }
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
-                    platformTestText ?: settingsVm.speedTestProgressMessage(speedTestProgress),
+                    platformTestSummary ?: "正在准备启动测速…",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -744,37 +714,24 @@ private fun KomikkuSettingsDialog(
 @Composable
 private fun StartupPlatformSwitches() {
     val policy by StartupPlatformPolicy.state.collectAsState()
+    val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
     val context = LocalContext.current
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     Column(modifier = Modifier.fillMaxWidth()) {
-        StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA, platformStatuses[ContentPlatform.MANWA]) {
             if (!StartupPlatformPolicy.setManwaEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        StartupSwitch(stringResource(KMR.strings.startup_enable_picacg), !policy.disablePicacg, ContentPlatform.PICACG) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_picacg), !policy.disablePicacg, ContentPlatform.PICACG, platformStatuses[ContentPlatform.PICACG]) {
             if (!StartupPlatformPolicy.setPicacgEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM, platformStatuses[ContentPlatform.JM]) {
             if (!StartupPlatformPolicy.setJmEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
-        }
-        StartupSwitch(
-            stringResource(KMR.strings.startup_use_last_speed_test),
-            policy.useLastResult,
-            accentOverride = MaterialTheme.colorScheme.primary,
-        ) {
-            StartupPlatformPolicy.setUseLastResult(it)
-        }
-        StartupSwitch(
-            stringResource(KMR.strings.startup_use_last_line_speed_test),
-            policy.useLastLineResult,
-            accentOverride = MaterialTheme.colorScheme.primary,
-        ) {
-            StartupPlatformPolicy.setUseLastLineResult(it)
         }
     }
 }
@@ -783,30 +740,46 @@ private fun StartupPlatformSwitches() {
 private fun StartupSwitch(
     title: String,
     checked: Boolean,
-    platform: ContentPlatform? = null,
-    accentOverride: Color? = null,
+    platform: ContentPlatform,
+    status: com.zycomic.app.net.PlatformStartupStatus?,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    val platformAccent = if (platform == null) null else rememberContentPlatformAccent(platform)
-    val accent = accentOverride ?: platformAccent
+    val accent = rememberContentPlatformAccent(platform)
     Surface(
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
         shape = RoundedCornerShape(14.dp),
-        color = accent?.copy(alpha = 0.10f) ?: Color.Transparent,
+        color = accent.copy(alpha = 0.10f),
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = accent ?: MaterialTheme.colorScheme.onSurface)
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = accent?.let {
-                    SwitchDefaults.colors(
-                        checkedThumbColor = it,
-                        checkedTrackColor = it.copy(alpha = 0.42f),
-                        checkedBorderColor = it,
-                    )
-                } ?: SwitchDefaults.colors(),
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = accent)
+                Switch(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = accent,
+                        checkedTrackColor = accent.copy(alpha = 0.42f),
+                        checkedBorderColor = accent,
+                    ),
+                )
+            }
+            Text(
+                status?.message ?: "等待测速",
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = if (status?.running == true) 5.dp else 2.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (status?.running == true) {
+                if (status.fraction == null) {
+                    LinearProgressIndicator(color = accent, modifier = Modifier.fillMaxWidth().height(3.dp))
+                } else {
+                    LinearProgressIndicator(
+                        progress = { status.fraction },
+                        color = accent,
+                        modifier = Modifier.fillMaxWidth().height(3.dp),
+                    )
+                }
+            }
         }
     }
 }

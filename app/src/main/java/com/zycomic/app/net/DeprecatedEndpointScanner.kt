@@ -11,7 +11,17 @@ import kotlin.coroutines.coroutineContext
 
 /** Read-only per-platform diagnosis. Never selects, pins, persists, or resolves extra addresses. */
 internal object DeprecatedEndpointScanner {
-    data class Progress(val completedIps: Int, val totalIps: Int, val currentHost: String)
+    data class Progress(
+        val completedIps: Int,
+        val totalIps: Int,
+        val currentHost: String,
+        val totalTargets: Int,
+        val lineTargets: Int,
+        val imageTargets: Int,
+        val groups: List<Group>,
+    )
+
+    data class Group(val kind: DeprecatedEndpointScanPolicy.Kind, val host: String, val configuredIpCount: Int)
 
     data class Report(
         val platform: ContentPlatform,
@@ -28,6 +38,7 @@ internal object DeprecatedEndpointScanner {
         val imageRules: Map<String, List<String>>,
         val imageSample: String?,
         val strategy: String = "",
+        val imageSampleHost: String? = null,
     )
 
     /** Cancellation invalidates the whole scan; the UI explicitly displays an undetermined result. */
@@ -77,6 +88,19 @@ internal object DeprecatedEndpointScanner {
         coroutineContext.ensureActive()
         val initial = readSnapshot()
         val targets = targets(initial)
+        val totalIps = targets.sumOf { it.configuredIps.size }
+        val groups = targets.map { Group(it.kind, it.host, it.configuredIps.distinct().size) }
+        onProgress?.invoke(
+            Progress(
+                completedIps = 0,
+                totalIps = totalIps,
+                currentHost = "",
+                totalTargets = targets.size,
+                lineTargets = targets.count { it.kind == DeprecatedEndpointScanPolicy.Kind.LINE },
+                imageTargets = targets.count { it.kind == DeprecatedEndpointScanPolicy.Kind.IMAGE },
+                groups = groups,
+            ),
+        )
         var configurationChanged = false
         fun current(): Boolean {
             if (readSnapshot() != initial) configurationChanged = true
@@ -87,7 +111,19 @@ internal object DeprecatedEndpointScanner {
             isConfigurationCurrent = ::current,
             probe = { kind, host, ip -> probe(initial, kind, host, ip) },
             onProgress = onProgress?.let { callback ->
-                { value -> callback(Progress(value.completedIps, value.totalIps, value.currentHost)) }
+                { value ->
+                    callback(
+                        Progress(
+                            completedIps = value.completedIps,
+                            totalIps = value.totalIps,
+                            currentHost = value.currentHost,
+                            totalTargets = targets.size,
+                            lineTargets = targets.count { it.kind == DeprecatedEndpointScanPolicy.Kind.LINE },
+                            imageTargets = targets.count { it.kind == DeprecatedEndpointScanPolicy.Kind.IMAGE },
+                            groups = groups,
+                        ),
+                    )
+                }
             },
         )
         coroutineContext.ensureActive()
@@ -119,6 +155,8 @@ internal object DeprecatedEndpointScanner {
             val target = configuredTarget(snapshot.imageRules, DeprecatedEndpointScanPolicy.Kind.IMAGE, host)
             add(
                 if (snapshot.imageSample.isNullOrBlank()) {
+                    target.copy(blockedReason = DeprecatedEndpointScanPolicy.Reason.MISSING_IMAGE_SAMPLE)
+                } else if (snapshot.imageSampleHost != null && !snapshot.imageSampleHost.equals(host, true)) {
                     target.copy(blockedReason = DeprecatedEndpointScanPolicy.Reason.MISSING_IMAGE_SAMPLE)
                 } else {
                     target
@@ -159,6 +197,7 @@ internal object DeprecatedEndpointScanner {
         }
         ContentPlatform.PICACG -> {
             val state = PicacgRouteManager.state.value
+            val imageSample = PicacgRouteManager.verifiedImageSampleUrl
             Snapshot(
                 revision = PicacgRouteManager.configRevision,
                 version = state.remoteVersion,
@@ -166,13 +205,22 @@ internal object DeprecatedEndpointScanner {
                 images = state.imageHosts.map { it.lowercase(Locale.ROOT) },
                 lineRules = copyRules(PicacgRouteManager.apiRouteRules()),
                 imageRules = copyRules(PicacgRouteManager.imageRouteRules()),
-                imageSample = PicacgRouteManager.verifiedImageSampleUrl,
+                imageSample = imageSample,
                 strategy = PlatformSpeedTestCoordinator.currentNetworkIdentity(),
+                imageSampleHost = imageSample?.let { sample ->
+                    runCatching { URI(sample).host }.getOrNull()
+                },
             )
         }
         ContentPlatform.JM -> {
             val lines = lines(JmRouteManager.lineHosts)
             val images = JmRouteManager.imageDomains.map { it.lowercase(Locale.ROOT) }
+            val speedSnapshot = JmRouteManager.speedTestSnapshot.value
+            val verifiedImageSampleHost = (speedSnapshot.imageIpVerdicts.entries + speedSnapshot.untestedImageIpVerdicts.entries)
+                .firstOrNull { (endpoint, verdict) ->
+                    verdict == JmSpeedTester.ImgVerdict.OK && images.any { it.equals(endpoint.domain, true) }
+                }
+                ?.key?.domain
             Snapshot(
                 revision = JmRouteManager.currentSpeedTestConfigRevision(),
                 version = JmRouteManager.state.value.remoteVersion,
@@ -181,8 +229,9 @@ internal object DeprecatedEndpointScanner {
                 // Never merge lines2/sources2: one hostname can have different mappings for each role.
                 lineRules = lines.map { it.first }.distinct().associateWith { JmRouteManager.resolveLineIp(it).toList() },
                 imageRules = images.distinct().associateWith { JmRouteManager.resolveImageIp(it).toList() },
-                imageSample = JmSpeedProbeProtocol.IMAGE_PATH,
+                imageSample = JmSpeedProbeProtocol.IMAGE_PATH.takeIf { verifiedImageSampleHost != null },
                 strategy = "${PlatformSpeedTestCoordinator.currentNetworkIdentity()}|${JmRouteManager.sniDomains.sorted()}",
+                imageSampleHost = verifiedImageSampleHost,
             )
         }
     }

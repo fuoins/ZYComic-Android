@@ -15,6 +15,7 @@ class DeprecatedEndpointScannerTest {
         lineIps: List<String> = listOf("192.0.2.1", "192.0.2.2"),
         imageIps: List<String> = listOf("192.0.2.3"),
         sample: String? = "/real.jpg",
+        imageSampleHost: String? = null,
     ) = DeprecatedEndpointScanner.Snapshot(
         revision = 1L,
         version = 1,
@@ -23,6 +24,7 @@ class DeprecatedEndpointScannerTest {
         lineRules = mapOf("shared.example" to lineIps),
         imageRules = mapOf("shared.example" to imageIps),
         imageSample = sample,
+        imageSampleHost = imageSampleHost,
     )
 
     @Test
@@ -139,5 +141,53 @@ class DeprecatedEndpointScannerTest {
         )
         assertTrue(result.configurationChanged)
         assertTrue(result.entries.all { it.state == State.UNDETERMINED })
+    }
+
+    @Test
+    fun `grouping is reported before the first probe and progress identifies the active host`() = runBlocking {
+        val config = configuration(lineIps = listOf("192.0.2.1"), imageIps = listOf("192.0.2.2"))
+        val progress = mutableListOf<DeprecatedEndpointScanner.Progress>()
+        var probes = 0
+        val result = DeprecatedEndpointScanner.scanReadOnly(
+            ContentPlatform.MANWA,
+            { config },
+            probe = { _, _, _, _ ->
+                assertTrue(progress.isNotEmpty())
+                assertEquals("shared.example", progress.last().currentHost)
+                assertEquals(probes, progress.last().completedIps)
+                probes++
+                ProbeResult.SUCCESS
+            },
+            onProgress = { progress += it },
+        )
+
+        assertEquals(2, progress.first().totalTargets)
+        assertEquals(1, progress.first().lineTargets)
+        assertEquals(1, progress.first().imageTargets)
+        assertEquals(listOf(Kind.LINE, Kind.IMAGE), progress.first().groups.map { it.kind })
+        assertEquals(2, progress.last().completedIps)
+        assertEquals(2, result.entries.size)
+    }
+
+    @Test
+    fun `JM image domains are not classified using a sample verified for a different host`() = runBlocking {
+        val config = configuration(
+            imageIps = listOf("192.0.2.3"),
+            sample = "/actual-image.jpg",
+            imageSampleHost = "verified-elsewhere.example",
+        )
+        var imageProbes = 0
+        val result = DeprecatedEndpointScanner.scanReadOnly(
+            ContentPlatform.JM,
+            { config },
+            probe = { _, kind, _, _ ->
+                if (kind == Kind.IMAGE) imageProbes++
+                ProbeResult.EXPLICIT_FAILURE
+            },
+        )
+
+        assertEquals(0, imageProbes)
+        assertEquals(Reason.MISSING_IMAGE_SAMPLE, result.entries.single { it.kind == Kind.IMAGE }.reason)
+        assertEquals(State.UNDETERMINED, result.entries.single { it.kind == Kind.IMAGE }.state)
     }
 }

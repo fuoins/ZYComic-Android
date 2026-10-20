@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -28,6 +29,12 @@ object PlatformSpeedTestCoordinator {
     val running = _running.asStateFlow()
     private val _progressText = MutableStateFlow<String?>(null)
     val progressText = _progressText.asStateFlow()
+    private val _startupSummary = MutableStateFlow<String?>(null)
+    val startupSummary = _startupSummary.asStateFlow()
+    private val _platformStartupStatuses = MutableStateFlow(
+        ContentPlatform.entries.associateWith { PlatformStartupStatus("等待测速") },
+    )
+    val platformStartupStatuses = _platformStartupStatuses.asStateFlow()
     private val _jmProgress = MutableStateFlow<JmSpeedTestProgress?>(null)
     val jmProgress = _jmProgress.asStateFlow()
     /** Structured Picacg stage and per-endpoint progress for startup and settings UI. */
@@ -93,6 +100,8 @@ object PlatformSpeedTestCoordinator {
             _running.value = true
             _progressText.value = null
             _jmProgress.value = null
+            _startupSummary.value = "三平台测速进行中；各平台进度独立显示"
+            var runCompleted = false
             try {
                 // A changed toggle/config starts a new generation; never publish the old generation.
                 while (true) {
@@ -100,6 +109,13 @@ object PlatformSpeedTestCoordinator {
                     _jmProgress.value = null
                     val policy = StartupPlatformPolicy.state.value
                     val key = currentKey()
+                    _platformStartupStatuses.value = ContentPlatform.entries.associateWith { platform ->
+                        when {
+                            !StartupPlatformPolicy.isEnabled(policy, platform) -> PlatformStartupStatus("未启用，已跳过")
+                            onlyPlatform != null && onlyPlatform != platform -> PlatformStartupStatus("本轮未复测")
+                            else -> PlatformStartupStatus("等待测速…", running = true)
+                        }
+                    }
                     // History eligibility is version-only inside each tester. Process-local
                     // revisions/network identity still guard publication and deduplicate runs.
                     val freshConfig = remoteConfigUpdated || (startupConfig.configurationUpdated == true && completedKey == null)
@@ -143,10 +159,14 @@ object PlatformSpeedTestCoordinator {
                                     // Without a real sample there is no new work to perform on a duplicate caller.
                                     if (linesDone && (imagesDone || (platform == ContentPlatform.PICACG && PicacgRouteManager.verifiedImageSampleUrl == null))) {
                                         val cached = completedReports[platform]?.takeIf { it.first == phaseKey }?.second
-                                        if (cached != null) return@async cached
+                                        if (cached != null) {
+                                            publishPlatformStatus(platform, platformCompletionStatus(cached), running = false)
+                                            return@async cached
+                                        }
                                     }
                                     measuredPlatforms.add(platformName(platform))
                                     _progressText.value = "正在检测${platformName(platform)}线路与图源…"
+                                    publishPlatformStatus(platform, "正在检测线路与图源…", running = true)
                                     try {
                                         reason = "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（历史仅核对网络配置版本）"
                                         if (platform == ContentPlatform.MANWA) {
@@ -167,6 +187,7 @@ object PlatformSpeedTestCoordinator {
                                                 onStageProgress = { progress ->
                                                     if (generationIsCurrent()) {
                                                         _progressText.value = manwaProgressMessage(progress)
+                                                        publishManwaProgress(progress)
                                                         onStageProgress?.invoke(progress)
                                                     }
                                                 },
@@ -174,12 +195,14 @@ object PlatformSpeedTestCoordinator {
                                             status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
                                             if (status == "tested") {
                                                 _progressText.value = manwaProgressMessage(SpeedTester.progress.value)
+                                                publishManwaProgress(SpeedTester.progress.value)
                                                 if (SpeedTester.progress.value.fullRetestRecommended) {
                                                     reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
                                                 }
                                             } else if (SpeedTester.progress.value.phase != SpeedTester.Phase.SKIPPED) {
                                                 val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
                                                 _progressText.value = manwaProgressMessage(failed)
+                                                publishManwaProgress(failed)
                                                 onStageProgress?.invoke(failed)
                                             }
                                         } else if (platform == ContentPlatform.PICACG) {
@@ -189,7 +212,10 @@ object PlatformSpeedTestCoordinator {
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
                                                 onProgress = { progress ->
-                                                    if (generationIsCurrent()) _progressText.value = picacgProgressMessage(progress)
+                                                    if (generationIsCurrent()) {
+                                                        _progressText.value = picacgProgressMessage(progress)
+                                                        publishPicacgProgress(progress)
+                                                    }
                                                 },
                                             )
                                             picacgSnapshot = snapshot.takeIf { PicacgSpeedTester.snapshot.value == it && generationIsCurrent() }
@@ -197,7 +223,7 @@ object PlatformSpeedTestCoordinator {
                                             reason = if (snapshot.complete) {
                                                 val apiAvailable = snapshot.apiProbes.count(PicacgSpeedTester.Probe::success)
                                                 val imagesVerified = snapshot.imageProbes.count(PicacgSpeedTester.Probe::success)
-                                                "API 根路径 HTTP 200–499 可用 $apiAvailable/${snapshot.apiProbes.size}；真实图片 GET 200/image 且解码成功 $imagesVerified/${snapshot.imageProbes.size}"
+                                                "API 根路径 HTTP 200–499（不含 3xx）可用 $apiAvailable/${snapshot.apiProbes.size}；真实图片 GET 200/image 且解码成功 $imagesVerified/${snapshot.imageProbes.size}"
                                             } else {
                                                 snapshot.imageBlockedReason ?: "线路或真实图源样本不足，图源状态未确认"
                                             }
@@ -206,11 +232,13 @@ object PlatformSpeedTestCoordinator {
                                             } else {
                                                 "哔咔 API 已检测；图源验证阻塞（无真实图片样本）"
                                             }
+                                            publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {
                                             val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
                                                 if (generationIsCurrent()) {
                                                     _jmProgress.value = progress
                                                     _progressText.value = progress.message()
+                                                    publishJmProgress(progress)
                                                 }
                                             }
                                             status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
@@ -227,11 +255,14 @@ object PlatformSpeedTestCoordinator {
                                         if (platform == ContentPlatform.MANWA) {
                                             val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
                                             _progressText.value = manwaProgressMessage(failed)
+                                            publishManwaProgress(failed)
                                             onStageProgress?.invoke(failed)
                                         }
                                     }
                                 }
-                                report(platform, status, reason, picacgSnapshot)
+                                report(platform, status, reason, picacgSnapshot).also { platformReport ->
+                                    publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
+                                }
                             }
                         }.awaitAll()
                     }
@@ -239,6 +270,7 @@ object PlatformSpeedTestCoordinator {
                     startupConfig.awaitConfigurationUpdated()
                     if (!generationIsCurrent()) continue
                     _reports.value = result
+                    _startupSummary.value = startupSummary(result)
                     listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).forEach { platform ->
                         val platformReport = result.first { it.platform == platformName(platform) }
                         if (platformReport.status != "skipped") {
@@ -255,16 +287,86 @@ object PlatformSpeedTestCoordinator {
                     if (onlyPlatform == null) completedKey = key.takeIf { result.none { it.status == "incomplete" } }
                     persist(result)
                     if (notifyCompletion) result.filter { it.platform in measuredPlatforms && it.status != "skipped" }.forEach { _completions.emit(it) }
+                    runCompleted = true
                     return@withLock result
                 }
                 @Suppress("UNREACHABLE_CODE")
                 emptyList()
             } finally {
+                if (!runCompleted) {
+                    _startupSummary.value = "三平台测速未完成"
+                    _platformStartupStatuses.value = _platformStartupStatuses.value.mapValues { (_, status) ->
+                        if (status.running) status.copy(message = "测速中断", running = false) else status
+                    }
+                }
                 _running.value = false
                 _progressText.value = null
                 _jmProgress.value = null
             }
         }
+    }
+
+    private fun publishPlatformStatus(platform: ContentPlatform, message: String, fraction: Float? = null, running: Boolean) {
+        publishPlatformStatus(platform, PlatformStartupStatus(message = message, fraction = fraction, running = running))
+    }
+
+    private fun publishPlatformStatus(platform: ContentPlatform, status: PlatformStartupStatus) {
+        _platformStartupStatuses.update { current -> updatePlatformStartupStatus(current, platform, status) }
+    }
+
+    private fun publishManwaProgress(progress: SpeedTester.Progress) {
+        publishPlatformStatus(ContentPlatform.MANWA, manwaStartupStatus(progress))
+    }
+
+    internal fun manwaStartupStatus(progress: SpeedTester.Progress): PlatformStartupStatus {
+        val measuring = progress.phase in setOf(SpeedTester.Phase.TESTING_LINES, SpeedTester.Phase.TESTING_IMAGES)
+        val running = progress.phase !in setOf(SpeedTester.Phase.COMPLETE, SpeedTester.Phase.FAILED, SpeedTester.Phase.SKIPPED)
+        return PlatformStartupStatus(
+            message = manwaProgressMessage(progress),
+            fraction = if (measuring) platformStartupProgressFraction(progress.completed, progress.total) else null,
+            running = running,
+        )
+    }
+
+    private fun publishPicacgProgress(progress: PicacgSpeedTester.Progress) {
+        publishPlatformStatus(ContentPlatform.PICACG, picacgStartupStatus(progress))
+    }
+
+    internal fun picacgStartupStatus(progress: PicacgSpeedTester.Progress): PlatformStartupStatus {
+        val measuring = progress.stage in setOf(PicacgSpeedTester.Stage.TESTING_API, PicacgSpeedTester.Stage.TESTING_IMAGES)
+        val running = progress.stage !in setOf(PicacgSpeedTester.Stage.IMAGE_BLOCKED, PicacgSpeedTester.Stage.COMPLETE)
+        return PlatformStartupStatus(
+            message = picacgProgressMessage(progress),
+            fraction = if (measuring) platformStartupProgressFraction(progress.completed, progress.total) else null,
+            running = running,
+        )
+    }
+
+    private fun publishJmProgress(progress: JmSpeedTestProgress) {
+        publishPlatformStatus(ContentPlatform.JM, jmStartupStatus(progress))
+    }
+
+    internal fun jmStartupStatus(progress: JmSpeedTestProgress): PlatformStartupStatus {
+        val measuring = progress.phase in setOf(JmSpeedTestProgress.Phase.TESTING_LINES, JmSpeedTestProgress.Phase.TESTING_IMAGES)
+        val running = progress.phase !in setOf(JmSpeedTestProgress.Phase.COMPLETE, JmSpeedTestProgress.Phase.FAILED)
+        return PlatformStartupStatus(
+            message = progress.message(),
+            fraction = if (measuring) platformStartupProgressFraction(progress.completed, progress.total) else null,
+            running = running,
+        )
+    }
+
+    private fun startupSummary(reports: List<PlatformSpeedTestReport>): String {
+        val tested = reports.count { it.status == "tested" || it.status == "reused" }
+        val blocked = reports.count { it.status == "incomplete" }
+        val skipped = reports.count { it.status == "skipped" }
+        return "三平台测速完成：已完成 $tested，受阻 $blocked，跳过 $skipped"
+    }
+
+    private fun platformCompletionStatus(report: PlatformSpeedTestReport): String = when (report.status) {
+        "skipped" -> "已跳过：${report.reason}"
+        "incomplete" -> "测速受阻：${report.reason}"
+        else -> if (report.reason.contains("前五快测全部失败")) report.reason else "测速完成"
     }
 
     internal fun manwaProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {

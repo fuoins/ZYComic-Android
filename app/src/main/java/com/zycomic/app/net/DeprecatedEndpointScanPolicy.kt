@@ -67,6 +67,7 @@ internal object DeprecatedEndpointScanPolicy {
             var successes = 0
             var failures = 0
             var incompletes = 0
+            onProgress?.invoke(Progress(completedIps, totalIps, target.host))
             ips.forEach { ip ->
                 if (!isConfigurationCurrent()) return targets.map { undetermined(it, Reason.CONFIGURATION_CHANGED) }
                 currentCoroutineContext().ensureActive()

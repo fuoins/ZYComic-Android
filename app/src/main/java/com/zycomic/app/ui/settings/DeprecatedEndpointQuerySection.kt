@@ -32,9 +32,11 @@ internal fun DeprecatedEndpointQuerySection(platform: ContentPlatform, enabled: 
     var scanning by remember(platform) { mutableStateOf(false) }
     var resultText by remember(platform) { mutableStateOf<String?>(null) }
     var report by remember(platform) { mutableStateOf<DeprecatedEndpointScanner.Report?>(null) }
+    var progress by remember(platform) { mutableStateOf<DeprecatedEndpointScanner.Progress?>(null) }
     var scanJob by remember(platform) { mutableStateOf<Job?>(null) }
     val cancelledText = stringResource(KMR.strings.deprecated_endpoint_query_cancelled)
     val failedText = stringResource(KMR.strings.deprecated_endpoint_query_failed)
+    val groupingText = stringResource(KMR.strings.deprecated_endpoint_query_grouping)
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(
@@ -48,9 +50,10 @@ internal fun DeprecatedEndpointQuerySection(platform: ContentPlatform, enabled: 
                 scanning = true
                 resultText = null
                 report = null
+                progress = null
                 scanJob = scope.launch {
                     try {
-                        val result = DeprecatedEndpointScanner.scan(platform)
+                        val result = DeprecatedEndpointScanner.scan(platform) { progress = it }
                         coroutineContext.ensureActive()
                         report = result
                     } catch (cancelled: CancellationException) {
@@ -67,6 +70,32 @@ internal fun DeprecatedEndpointQuerySection(platform: ContentPlatform, enabled: 
             Text(stringResource(if (scanning) KMR.strings.deprecated_endpoint_query_running else KMR.strings.deprecated_endpoint_query_title))
         }
         if (scanning) {
+            val currentProgress = progress
+            Text(
+                currentProgress?.let {
+                    stringResource(
+                        KMR.strings.deprecated_endpoint_query_progress,
+                        it.lineTargets,
+                        it.imageTargets,
+                        it.completedIps,
+                        it.totalIps,
+                        it.currentHost.takeIf(String::isNotBlank)?.let { host -> " · $host" }.orEmpty(),
+                    )
+                } ?: groupingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            currentProgress?.groups?.forEach { group ->
+                val kind = stringResource(
+                    if (group.kind == DeprecatedEndpointScanPolicy.Kind.LINE) KMR.strings.deprecated_endpoint_kind_line else KMR.strings.deprecated_endpoint_kind_image,
+                )
+                Text(
+                    "$kind · ${group.host} · IP ${group.configuredIpCount}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             TextButton(onClick = { scanJob?.cancel() }) {
                 Text(stringResource(KMR.strings.deprecated_endpoint_query_cancel))
             }

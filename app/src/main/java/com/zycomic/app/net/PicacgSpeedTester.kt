@@ -1,7 +1,11 @@
 package com.zycomic.app.net
 
 import android.graphics.BitmapFactory
+import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +22,7 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Independent Picacg API and real-image probes. No endpoint is successful by assumption or synthesis. */
 object PicacgSpeedTester {
@@ -108,18 +113,37 @@ object PicacgSpeedTester {
                 }
                 timings.start(SpeedTestTimings.Phase.PICACG_LINES).use {
                     publishProgress(Progress(Stage.TESTING_API, total = apiEndpoints.size))
-                    apiEndpoints.forEachIndexed { index, (baseUrl, endpoint) ->
-                        if (isCurrent()) apiResults += probeApi(baseUrl, endpoint)
-                        publishProgress(
-                            Progress(
-                                Stage.TESTING_API,
-                                completed = index + 1,
-                                total = apiEndpoints.size,
-                                successful = apiResults.count(Probe::success),
-                                failed = apiResults.count { !it.success },
-                            ),
-                        )
+                    val completed = AtomicInteger(0)
+                    val successful = AtomicInteger(apiResults.count(Probe::success))
+                    val failed = AtomicInteger(apiResults.count { !it.success })
+                    val freshResults = coroutineScope {
+                        apiEndpoints.map { (baseUrl, endpoint) ->
+                            async {
+                                val result = SpeedTestProbeBudget.scheduler.withPermit(
+                                    ContentPlatform.PICACG,
+                                    { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
+                                ) {
+                                    if (isCurrent()) probeApi(baseUrl, endpoint) else null
+                                }
+                                synchronized(apiResults) {
+                                    if (result?.success == true) successful.incrementAndGet()
+                                    if (result != null && !result.success) failed.incrementAndGet()
+                                    val done = completed.incrementAndGet()
+                                    publishProgress(
+                                        Progress(
+                                            Stage.TESTING_API,
+                                            completed = done,
+                                            total = apiEndpoints.size,
+                                            successful = successful.get(),
+                                            failed = failed.get(),
+                                        ),
+                                    )
+                                }
+                                result
+                            }
+                        }.awaitAll().filterNotNull()
                     }
+                    apiResults += freshResults
                 }
 
                 var blockedReason: String? = null
@@ -147,18 +171,37 @@ object PicacgSpeedTester {
                 if (blockedReason != null) publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
                 timings.start(SpeedTestTimings.Phase.PICACG_IMAGES).use {
                     if (imageEndpoints.isNotEmpty()) publishProgress(Progress(Stage.TESTING_IMAGES, total = imageEndpoints.size))
-                    imageEndpoints.forEachIndexed { index, (url, endpoint) ->
-                        if (isCurrent()) imageResults += probeImage(url, endpoint)
-                        publishProgress(
-                            Progress(
-                                Stage.TESTING_IMAGES,
-                                completed = index + 1,
-                                total = imageEndpoints.size,
-                                successful = imageResults.count(Probe::success),
-                                failed = imageResults.count { !it.success },
-                            ),
-                        )
+                    val completed = AtomicInteger(0)
+                    val successful = AtomicInteger(imageResults.count(Probe::success))
+                    val failed = AtomicInteger(imageResults.count { !it.success })
+                    val freshResults = coroutineScope {
+                        imageEndpoints.map { (url, endpoint) ->
+                            async {
+                                val result = SpeedTestProbeBudget.scheduler.withPermit(
+                                    ContentPlatform.PICACG,
+                                    { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
+                                ) {
+                                    if (isCurrent()) probeImage(url, endpoint) else null
+                                }
+                                synchronized(imageResults) {
+                                    if (result?.success == true) successful.incrementAndGet()
+                                    if (result != null && !result.success) failed.incrementAndGet()
+                                    val done = completed.incrementAndGet()
+                                    publishProgress(
+                                        Progress(
+                                            Stage.TESTING_IMAGES,
+                                            completed = done,
+                                            total = imageEndpoints.size,
+                                            successful = successful.get(),
+                                            failed = failed.get(),
+                                        ),
+                                    )
+                                }
+                                result
+                            }
+                        }.awaitAll().filterNotNull()
                     }
+                    imageResults += freshResults
                 }
                 if (imageEndpoints.isEmpty() && imageResults.isEmpty() && blockedReason == null) {
                     blockedReason = "真实图片样本可用，但当前 sources3 图源没有可探测的 IP；图源验证未完成"
@@ -220,6 +263,7 @@ object PicacgSpeedTester {
     private fun probeApi(baseUrl: String, endpoint: DomainIp, clientOverride: OkHttpClient? = null): Probe {
         val start = System.nanoTime()
         var code: Int? = null
+        if (!PicacgNetworkPolicy.apiBaseAllowed(baseUrl)) return Probe(endpoint, false, elapsedMs(start), null)
         val success = runCatching {
             val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
             val request = Request.Builder().url(baseUrl.trimEnd('/') + "/").get().build()

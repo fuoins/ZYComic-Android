@@ -22,6 +22,7 @@ internal class SpeedTestTimings(
         IMAGE_SAMPLE_FETCH_FALLBACK,
         IMAGES,
         IMAGES_INCLUDING_SAMPLE,
+        PROBE_QUEUE_WAIT,
     }
 
     private val started = nanoTime()
@@ -41,6 +42,13 @@ internal class SpeedTestTimings(
     fun start(phase: Phase): Span = Span(phase, nanoTime()).also {
         check(!finished)
         active.add(it)
+    }
+
+    /** Adds accumulated scheduler wait separately; it is never included in endpoint probe latency. */
+    @Synchronized
+    fun record(phase: Phase, elapsedMs: Long) {
+        if (finished || elapsedMs <= 0L) return
+        elapsedNanos[phase] = (elapsedNanos[phase] ?: 0L) + elapsedMs * 1_000_000L
     }
 
     override fun close() = finish()

@@ -14,7 +14,7 @@ class PicacgNetworkPolicyTest {
     }
 
     @Test
-    fun apiRootAcceptsHttp200Through499Including401() {
+    fun apiRootAcceptsHttp200Through499ExceptRedirectsIncluding401() {
         assertTrue(PicacgNetworkPolicy.apiRootReachable(200))
         assertTrue(PicacgNetworkPolicy.apiRootReachable(401))
         assertTrue(PicacgNetworkPolicy.apiRootReachable(499))
@@ -22,6 +22,22 @@ class PicacgNetworkPolicyTest {
         assertFalse(PicacgNetworkPolicy.apiRootReachable(100))
         assertFalse(PicacgNetworkPolicy.apiRootReachable(500))
         assertFalse(PicacgNetworkPolicy.apiRootReachable(503))
+    }
+
+    @Test
+    fun apiProbeNeverTreatsAnyRedirectAsSuccess() {
+        (300..399).forEach { assertFalse("HTTP $it", PicacgNetworkPolicy.apiRootReachable(it)) }
+    }
+
+    @Test
+    fun websiteRootIsExcludedButDocumentedApiAndConfiguredAlternateHostsRemain() {
+        assertFalse(PicacgNetworkPolicy.apiBaseAllowed("https://picacomic.com/"))
+        assertFalse(PicacgNetworkPolicy.apiBaseAllowed("https://PICACOMIC.COM"))
+        assertFalse(PicacgNetworkPolicy.apiBaseAllowed("http://www.picacomic.com/"))
+        assertTrue(PicacgNetworkPolicy.apiBaseAllowed("https://picaapi.picacomic.com/"))
+        assertTrue(PicacgNetworkPolicy.apiBaseAllowed("https://configured-api.example/api/"))
+        assertFalse(PicacgNetworkPolicy.apiBaseAllowed("not a URL"))
+        assertFalse(PicacgNetworkPolicy.apiBaseAllowed("https://user:secret@picaapi.picacomic.com/"))
     }
 
     @Test

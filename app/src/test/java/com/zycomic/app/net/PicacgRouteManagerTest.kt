@@ -43,6 +43,29 @@ class PicacgRouteManagerTest {
         assertFalse(client.retryOnConnectionFailure)
     }
 
+    @Test
+    fun excludesPublicWebsiteWithoutChangingRemoteInputOrDocumentedApiBinding() {
+        val urls = listOf("https://picacomic.com/", "https://picaapi.picacomic.com/")
+        val rules = mapOf(
+            "picacomic.com" to listOf("198.51.100.20"),
+            "picaapi.picacomic.com" to listOf("198.51.100.21"),
+            "cdn.pica.example" to listOf("198.51.100.22"),
+        )
+        PicacgRouteManager.applyRemoteConfig(urls, listOf("cdn.pica.example"), rules, 3)
+
+        assertEquals(listOf("https://picaapi.picacomic.com/"), PicacgRouteManager.apiUrls)
+        assertEquals("https://picaapi.picacomic.com/", PicacgRouteManager.apiBaseUrl)
+        assertFalse(PicacgRouteManager.selectApiUrl("https://picacomic.com/"))
+        assertTrue(PicacgRouteManager.apiRouteRules()["picacomic.com"].isNullOrEmpty())
+        assertEquals(listOf("198.51.100.21"), PicacgRouteManager.resolveIps("picaapi.picacomic.com"))
+        val endpoint = DomainIp("picaapi.picacomic.com", "198.51.100.21")
+        assertTrue(PicacgRouteManager.pinApiEndpoint(endpoint))
+        val client = PicacgRouteManager.newPinnedClient(OkHttpClient(), endpoint)
+        assertEquals(listOf("198.51.100.21"), client.dns.lookup(endpoint.domain).map { it.hostAddress })
+        assertEquals(2, urls.size)
+        assertTrue(rules.containsKey("picacomic.com"))
+    }
+
     private fun installRoutes() = PicacgRouteManager.applyRemoteConfig(
         apiUrls = listOf("https://api.pica.example/v2/root"),
         imageHosts = listOf("cdn.pica.example"),

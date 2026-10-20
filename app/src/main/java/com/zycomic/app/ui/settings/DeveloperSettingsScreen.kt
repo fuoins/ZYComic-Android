@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -27,12 +29,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RouteManager
+import com.zycomic.app.platform.StartupPlatformPolicy
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import kotlinx.coroutines.Dispatchers
@@ -190,6 +194,28 @@ fun DeveloperSettingsScreen(
                 }
             }
             item {
+                val startupPolicy by StartupPlatformPolicy.state.collectAsState()
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(stringResource(KMR.strings.startup_history_controls_title), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        stringResource(KMR.strings.startup_history_controls_summary),
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    StartupHistoryPreference(
+                        title = stringResource(KMR.strings.startup_use_last_speed_test),
+                        checked = startupPolicy.useLastResult,
+                        onCheckedChange = { StartupPlatformPolicy.setUseLastResult(it) },
+                    )
+                    StartupHistoryPreference(
+                        title = stringResource(KMR.strings.startup_use_last_line_speed_test),
+                        checked = startupPolicy.useLastLineResult,
+                        onCheckedChange = { StartupPlatformPolicy.setUseLastLineResult(it) },
+                    )
+                }
+            }
+            item {
                 TextPreferenceWidget(
                     title = stringResource(KMR.strings.manwa_speed_log_title),
                     subtitle = "查看线路与图源域名/IP、导出诊断或重新测速",
@@ -269,5 +295,20 @@ fun DeveloperSettingsScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun StartupHistoryPreference(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

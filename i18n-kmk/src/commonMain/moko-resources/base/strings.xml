@@ -270,6 +270,8 @@
     <string name="startup_enable_jm">开启禁漫天堂</string>
     <string name="startup_use_last_speed_test">默认使用上次图源测速结果</string>
     <string name="startup_use_last_line_speed_test">默认使用上次线路测速结果</string>
+    <string name="startup_history_controls_title">启动测速历史复测</string>
+    <string name="startup_history_controls_summary">开启不是跳过测速，而是分别优先复测历史排名前五的线路或图源候选；前五全部失败时不会自动扩测，可在对应测速日志中手动完整重新测速。</string>
     <string name="startup_platform_settings_title">平台可用性</string>
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">重启软件生效</string>
@@ -360,6 +362,8 @@
     <string name="deprecated_endpoint_query_title">查询废弃线路和图源</string>
     <string name="deprecated_endpoint_query_note">仅检测当前平台配置映射中的 IP；所有 IP 本轮均超时或明确失败才列为全失败。结果只代表本轮及当前网络，不是永久废弃；不会删除配置或切换线路、图源。</string>
     <string name="deprecated_endpoint_query_running">正在查询…</string>
+    <string name="deprecated_endpoint_query_grouping">正在读取当前平台配置并分组…</string>
+    <string name="deprecated_endpoint_query_progress">已分组线路 %1$d 组、图源 %2$d 组；已探测 IP %3$d/%4$d%5$s</string>
     <string name="deprecated_endpoint_query_cancelled">查询已取消：无法判定，请重新查询。</string>
     <string name="deprecated_endpoint_query_failed">查询未完成：无法判定，请重新查询。</string>
     <string name="deprecated_endpoint_query_cancel">取消查询</string>

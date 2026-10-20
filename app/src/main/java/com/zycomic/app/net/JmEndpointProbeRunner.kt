@@ -1,15 +1,12 @@
 package com.zycomic.app.net
 
+import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
-/** JM keeps its local scheduling; only the total endpoint budget is shared. */
-internal class JmEndpointProbeRunner(concurrency: Int = 24) {
-    private val permits = Semaphore(concurrency)
-
+/** JM endpoint probes participate in the same fair platform scheduler and shared cap. */
+internal class JmEndpointProbeRunner {
     suspend fun <T, R> run(
         targets: List<T>,
         probe: suspend (T) -> R,
@@ -18,9 +15,12 @@ internal class JmEndpointProbeRunner(concurrency: Int = 24) {
     ): List<Pair<T, R>> = coroutineScope {
         targets.map { target ->
             async {
-                permits.withPermit {
+                SpeedTestProbeBudget.scheduler.withPermit(
+                    ContentPlatform.JM,
+                    { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.JM, it) },
+                ) {
                     onStarted(target)
-                    val result = SpeedTestProbeBudget.permits.withPermit { probe(target) }
+                    val result = probe(target)
                     onResult(target, result)
                     target to result
                 }
