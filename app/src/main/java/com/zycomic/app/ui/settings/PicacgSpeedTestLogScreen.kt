@@ -312,7 +312,7 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                     val selected = routeState.imageHost.equals(probe.endpoint.domain, true) && routeState.pinnedImage == probe.endpoint
                     val blockedHistoric = !previousRoundOnly && snapshot?.imageBlockedReason != null && !probe.testedThisRound
                     val baseResult = when {
-                        probe.success -> stringResource(KMR.strings.manwa_speed_log_success, probe.elapsedMs) + " · 图片已解码"
+                        probe.success -> stringResource(KMR.strings.manwa_speed_log_success, probe.elapsedMs) + " · 封面瓦片·魔数有效"
                         probe.httpStatus != null -> stringResource(KMR.strings.manwa_speed_log_failed) + " · HTTP ${probe.httpStatus}"
                         else -> stringResource(KMR.strings.manwa_speed_log_failed)
                     }

@@ -433,8 +433,8 @@ object PlatformSpeedTestCoordinator {
             PicacgSpeedTester.Stage.TESTING_IMAGES -> publishMeasuredCheck(StartupCheckPhase.PICACG_IMAGE, progress.completed, progress.total, progress.successful)
             PicacgSpeedTester.Stage.IMAGE_BLOCKED -> publishStartupCheck(
                 StartupCheckPhase.PICACG_IMAGE,
-                if (PicacgRouteManager.verifiedImageSampleUrl == null) StartupCheckResult.NO_SAMPLE else StartupCheckResult.BLOCKED,
-                "无真实图片样本或图源 IP，未验证通过",
+                StartupCheckResult.BLOCKED,
+                "固定封面瓦片探测未通过或图源无可用 IP",
             )
             PicacgSpeedTester.Stage.COMPLETE -> Unit
         }
@@ -457,7 +457,7 @@ object PlatformSpeedTestCoordinator {
         if (snapshot.imageBlockedReason != null) {
             publishStartupCheck(
                 StartupCheckPhase.PICACG_IMAGE,
-                if (PicacgRouteManager.verifiedImageSampleUrl == null) StartupCheckResult.NO_SAMPLE else StartupCheckResult.BLOCKED,
+                StartupCheckResult.BLOCKED,
                 snapshot.imageBlockedReason,
             )
         } else {
