@@ -3,6 +3,7 @@ package com.zycomic.app.picacg
 import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.net.PicacgRouteManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,20 +55,34 @@ object PicacgRepository {
     private fun client(): PicacgClient = api ?: error("PicacgRepository.init(context) must be called first")
 
     suspend fun login(email: String, password: String): String {
-        require(email.isNotBlank() && password.isNotBlank()) { "Email and password are required" }
+        require(email.isNotBlank() && password.isNotBlank()) { "邮箱和密码不能为空。" }
         val startingRevision = PicacgAuthStore.sessionRevision.value
         val payload = JSONObject().put("email", email).put("password", password)
         val token = try {
             client().request("/auth/sign-in", "POST", payload, authenticated = false).data.optString("token")
-        } catch (error: IOException) {
-            throw classifyLoginFailure(error)
+        } catch (error: Exception) {
+            throw loginFailure(error)
         }
-        if (token.isBlank()) throw PicacgLoginException(PicacgLoginFailure.UNKNOWN, "Picacg sign-in response did not include a token")
-        if (!PicacgAuthStore.saveTokenIfRevision(token, startingRevision)) {
-            throw IOException("Picacg session changed while signing in; the stale login result was discarded")
+        if (token.isBlank()) {
+            val reason = PicacgLoginFailure.UNKNOWN
+            throw PicacgLoginException(reason, PicacgLoginErrorPolicy.message(reason))
+        }
+        val saved = try {
+            PicacgAuthStore.saveTokenIfRevision(token, startingRevision)
+        } catch (error: Exception) {
+            throw loginFailure(error)
+        }
+        if (!saved) {
+            throw PicacgLoginException(PicacgLoginFailure.UNKNOWN, "登录状态已变化，请重新登录。")
         }
         synchronized(pageCache) { pageCache.clear() }
         return token
+    }
+
+    private fun loginFailure(error: Exception): PicacgLoginException {
+        if (error is CancellationException) throw error
+        val reason = PicacgLoginErrorPolicy.classify(error)
+        return PicacgLoginException(reason, PicacgLoginErrorPolicy.message(reason))
     }
 
     fun logout() {
@@ -453,27 +468,6 @@ object PicacgRepository {
         val resolved = if (path.isBlank()) "" else PicacgImageUrl.resolve(path, PicacgRouteManager.currentImageHost.orEmpty())
         if (apiPath.isNotBlank() && resolved.isNotBlank()) PicacgRouteManager.setVerifiedImageSampleUrlFromApiResponse(resolved)
         return copy(picx = resolved)
-    }
-
-    private fun classifyLoginFailure(error: IOException): PicacgLoginException {
-        val text = error.message.orEmpty().lowercase()
-        val kind = when {
-            "1023" in text || "too many requests" in text -> PicacgLoginFailure.RATE_LIMITED
-            "banned" in text -> PicacgLoginFailure.BANNED
-            "locked" in text -> PicacgLoginFailure.LOCKED
-            "invalid email" in text || "password" in text -> PicacgLoginFailure.INVALID_CREDENTIALS
-            "unauthorized" in text || "1005" in text -> PicacgLoginFailure.UNAUTHORIZED
-            else -> PicacgLoginFailure.UNKNOWN
-        }
-        val safeMessage = when (kind) {
-            PicacgLoginFailure.INVALID_CREDENTIALS -> "Picacg email or password is invalid"
-            PicacgLoginFailure.RATE_LIMITED -> "Picacg sign-in is rate limited; wait before retrying"
-            PicacgLoginFailure.BANNED -> "Picacg account is banned"
-            PicacgLoginFailure.LOCKED -> "Picacg account is locked"
-            PicacgLoginFailure.UNAUTHORIZED -> "Picacg authorization failed"
-            PicacgLoginFailure.UNKNOWN -> error.message ?: "Picacg sign-in failed"
-        }
-        return PicacgLoginException(kind, safeMessage)
     }
 
     private fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }

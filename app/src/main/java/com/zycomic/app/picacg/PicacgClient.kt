@@ -113,10 +113,10 @@ class PicacgClient(
         val error = json?.optString("error").orEmpty()
         if (response.code == 401 || error == "1005") {
             if (expectedRevision != null) clearSessionIfRevision(expectedRevision) else onUnauthorized()
-            throw IOException(message.ifBlank { "Picacg authorization expired" })
+            throw PicacgResponseException(response.code, code, error, message.ifBlank { "Picacg authorization expired" })
         }
         if (!response.isSuccessful || (code != 200 && code != 0)) {
-            throw IOException("Picacg request failed (${response.code}/$error): ${message.ifBlank { "HTTP error" }}")
+            throw PicacgResponseException(response.code, code, error, message.ifBlank { "HTTP error" })
         }
         val data = json?.optJSONObject("data") ?: if (allowMissingData) JSONObject() else throw IOException("Picacg response has no data; sign in is required")
         return Envelope(code, message, error, data)

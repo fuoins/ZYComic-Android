@@ -245,12 +245,14 @@
     <string name="speed_test_export_no_complete_result">No complete diagnostic result is available</string>
     <string name="speed_test_export_in_progress">A speed test is in progress. Try exporting after it finishes.</string>
     <!-- Content platform switch -->
-    <string name="content_platform_manwa">mw</string>
+    <string name="content_platform_manwa">漫蛙</string>
     <string name="content_platform_picacg">哔咔</string>
     <string name="content_platform_picacg_accent">哔咔对应颜色</string>
-    <string name="zy_platform_manwa_accent">mw对应颜色</string>
-    <string name="zy_platform_jm_accent">jm对应颜色</string>
-    <string name="content_platform_jm">jm</string>
+    <string name="zy_platform_manwa_accent">漫蛙对应颜色</string>
+    <string name="zy_platform_jm_accent">禁漫天堂对应颜色</string>
+    <string name="content_platform_jm">禁漫</string>
+    <string name="content_platform_jm_full">禁漫天堂</string>
+    <string name="zy_network_maintenance_notice">本软件对所有线路和图源进行网络层优化,\n,三个平台晚上会卡顿,我已经把网络配置改成每日早晚各更新一次了.</string>
     <string name="content_platform_switch">平台切换</string>
     <string name="content_platform_section_title">内容平台</string>
     <string name="content_platform_profile_summary">选择此页面默认平台</string>
@@ -266,10 +268,10 @@
     <string name="content_platform_filter_jm">禁漫向</string>
     <string name="startup_disable_manwa">不用漫蛙</string>
     <string name="startup_disable_jm">不用禁漫天堂</string>
-    <string name="startup_enable_manwa">开启mw</string>
+    <string name="startup_enable_manwa">开启漫蛙</string>
     <string name="startup_disable_picacg">不使用哔咔</string>
     <string name="startup_enable_picacg">开启哔咔</string>
-    <string name="startup_enable_jm">开启jm</string>
+    <string name="startup_enable_jm">开启禁漫天堂</string>
     <string name="zy_platform_picacg_restart_required">重启软件生效；由于哔咔的网络层原因，登录后需再次重启软件。</string>
     <string name="zy_platform_picacg_login_restart_note">哔咔需要登录才能查看图片。开启哔咔并重启软件后，请先登录；由于哔咔的网络层原因，登录后仍需再次重启软件。</string>
     <string name="startup_use_last_speed_test">默认使用上次图源测速结果</string>
@@ -362,7 +364,7 @@
     <string name="platform_speed_log_export">导出三平台选择日志</string>
     <string name="platform_speed_log_export_success">三平台测速日志已导出</string>
     <string name="platform_speed_log_export_failed">三平台测速日志导出失败</string>
-    <string name="library_history_platform_jm_short">jm</string>
+    <string name="library_history_platform_jm_short">禁漫</string>
     <string name="deprecated_endpoint_query_title">查询废弃线路和图源</string>
     <string name="deprecated_endpoint_query_note">仅检测当前平台配置映射中的 IP；所有 IP 本轮均超时或明确失败才列为全失败。结果只代表本轮及当前网络，不是永久废弃；不会删除配置或切换线路、图源。</string>
     <string name="deprecated_endpoint_query_running">正在查询…</string>

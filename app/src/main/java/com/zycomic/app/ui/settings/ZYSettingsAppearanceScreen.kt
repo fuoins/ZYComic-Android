@@ -416,7 +416,7 @@ private fun PlatformAccentDialog(platform: ContentPlatform, onDismiss: () -> Uni
     val platformName = when (platform) {
         ContentPlatform.MANWA -> stringResource(KMR.strings.content_platform_manwa)
         ContentPlatform.PICACG -> stringResource(KMR.strings.content_platform_picacg)
-        ContentPlatform.JM -> stringResource(KMR.strings.content_platform_jm)
+        ContentPlatform.JM -> stringResource(KMR.strings.content_platform_jm_full)
     }
 
     AlertDialog(

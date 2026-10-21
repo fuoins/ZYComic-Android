@@ -105,20 +105,23 @@ fun LoginScreen(vm: LoginViewModel = remember { LoginViewModel() }, onClose: () 
         if (platform == ContentPlatform.MANWA && mode == 0) vm.refreshCaptcha()
     }
     if (platform == ContentPlatform.PICACG) {
-        Column(Modifier.fillMaxSize()) {
-            ContentPlatformSelector(
-                selected = platform,
-                onSelect = {
-                    if (StartupPlatformPolicy.checkSelection(context, it)) {
-                        platform = it
-                        ContentPlatformPrefs.save("profile", it)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                compact = true,
-            )
-            com.zycomic.app.ui.picacg.PicacgLoginScreen(onClose)
-        }
+        com.zycomic.app.ui.picacg.PicacgLoginScreen(
+            onClose = onClose,
+            insetContent = false,
+            platformSwitch = { picacgLoading ->
+                ContentPlatformSelector(
+                    selected = platform,
+                    compact = true,
+                    onSelect = {
+                        if (!picacgLoading && it != platform && StartupPlatformPolicy.checkSelection(context, it)) {
+                            vm.resetForPlatform()
+                            platform = it
+                            ContentPlatformPrefs.save("profile", it)
+                        }
+                    },
+                )
+            },
+        )
         return
     }
 

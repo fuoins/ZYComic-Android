@@ -95,10 +95,6 @@ internal class PicacgPageCache<T>(private val maxSize: Int = 32) {
     @Synchronized fun clear() = entries.clear()
 }
 
-enum class PicacgLoginFailure { INVALID_CREDENTIALS, RATE_LIMITED, BANNED, LOCKED, UNAUTHORIZED, UNKNOWN }
-
-class PicacgLoginException(val reason: PicacgLoginFailure, message: String) : java.io.IOException(message)
-
 /** Signing omits the leading slash only; query ordering/encoding and the request itself stay intact. */
 object PicacgSigner {
     const val API_KEY = "C69BAF41DA5ABD1FFEDC6D2FEA56B"

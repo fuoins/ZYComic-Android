@@ -45,6 +45,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.ui.browse.BrowseGuideContent
 import com.zycomic.app.ui.browse.GuideActionButton
 import com.zycomic.app.ui.browse.GuideButtonTone
@@ -147,6 +149,7 @@ private fun GuidePage(
     val blocked by settingsVm.blockedTags.collectAsState()
     val toast by settingsVm.toast.collectAsState()
     var busy by remember { mutableStateOf(false) }
+    var guidePlatform by remember { mutableStateOf(ContentPlatform.MANWA) }
 
     LaunchedEffect(Unit) {
         if (UserRepository.isLoggedIn) settingsVm.loadBlockedTags()
@@ -171,43 +174,53 @@ private fun GuidePage(
                 tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.size(8.dp))
-            Text("使用说明", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("使用说明", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            ContentPlatformSelector(
+                selected = guidePlatform,
+                onSelect = { guidePlatform = it },
+                compact = true,
+            )
         }
         BrowseGuideContent(
+            platform = guidePlatform,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp),
             maxHeight = null,
-            gayBlockSlot = {
-                Spacer(Modifier.height(6.dp))
-                when {
-                    gayDone -> GuideActionButton(
-                        text = "已开启gay标签屏蔽",
-                        icon = GuideIcon.Vec(Icons.Filled.DoneAll),
-                        onClick = {},
-                        tone = GuideButtonTone.Success,
-                    )
-                    !isLoggedIn -> GuideActionButton(
-                        text = "登录后一键屏蔽gay标签",
-                        icon = GuideIcon.Vec(Icons.Outlined.Login),
-                        onClick = {
-                            // 未登录：统一 Toast 并跳回登录页，不执行屏蔽
-                            if (!LoginGate.ensureLogin(context)) onRequireLogin()
-                        },
-                        tone = GuideButtonTone.Neutral,
-                    )
-                    else -> GuideActionButton(
-                        text = "一键屏蔽gay标签（${SettingsViewModel.GAY_TAGS.size}个）",
-                        icon = GuideIcon.Vec(Icons.Outlined.Block),
-                        onClick = {
-                            busy = true
-                            settingsVm.blockGayTags()
-                        },
-                        tone = GuideButtonTone.Primary,
-                        loading = busy,
-                    )
+            gayBlockSlot = if (guidePlatform == ContentPlatform.MANWA) {
+                {
+                    Spacer(Modifier.height(6.dp))
+                    when {
+                        gayDone -> GuideActionButton(
+                            text = "已开启gay标签屏蔽",
+                            icon = GuideIcon.Vec(Icons.Filled.DoneAll),
+                            onClick = {},
+                            tone = GuideButtonTone.Success,
+                        )
+                        !isLoggedIn -> GuideActionButton(
+                            text = "登录后一键屏蔽gay标签",
+                            icon = GuideIcon.Vec(Icons.Outlined.Login),
+                            onClick = {
+                                // 未登录：统一 Toast 并跳回登录页，不执行屏蔽
+                                if (!LoginGate.ensureLogin(context)) onRequireLogin()
+                            },
+                            tone = GuideButtonTone.Neutral,
+                        )
+                        else -> GuideActionButton(
+                            text = "一键屏蔽gay标签（${SettingsViewModel.GAY_TAGS.size}个）",
+                            icon = GuideIcon.Vec(Icons.Outlined.Block),
+                            onClick = {
+                                busy = true
+                                settingsVm.blockGayTags()
+                            },
+                            tone = GuideButtonTone.Primary,
+                            loading = busy,
+                        )
+                    }
                 }
+            } else {
+                null
             },
         )
     }
@@ -237,8 +250,11 @@ private fun OnboardingBottomBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 repeat(3) { i ->
-                    val color = if (i == page) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant
+                    val color = if (i == page) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    }
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 4.dp)

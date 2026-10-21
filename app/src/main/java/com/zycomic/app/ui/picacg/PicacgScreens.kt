@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.picacg.PicacgAuthStore
+import com.zycomic.app.picacg.PicacgLoginException
 import com.zycomic.app.picacg.PicacgRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -51,7 +52,11 @@ internal fun sessionIsCurrent(revision: Long): Boolean =
     PicacgAuthStore.loggedIn.value && revision == PicacgAuthStore.sessionRevision.value
 
 @Composable
-fun PicacgLoginScreen(onClose: () -> Unit) {
+fun PicacgLoginScreen(
+    onClose: () -> Unit,
+    insetContent: Boolean = true,
+    platformSwitch: @Composable (loading: Boolean) -> Unit = {},
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -60,7 +65,9 @@ fun PicacgLoginScreen(onClose: () -> Unit) {
     val loginFailed = stringResource(KMR.strings.picacg_login_failed)
     Surface(Modifier.fillMaxSize()) {
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp).verticalScroll(rememberScrollState()),
+            Modifier.fillMaxSize()
+                .then(if (insetContent) Modifier.statusBarsPadding().navigationBarsPadding().padding(24.dp) else Modifier)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -68,7 +75,14 @@ fun PicacgLoginScreen(onClose: () -> Unit) {
                     Icon(Icons.Default.ArrowBack, contentDescription = stringResource(KMR.strings.picacg_back), tint = MaterialTheme.colorScheme.onSurface)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(KMR.strings.picacg_login_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(KMR.strings.picacg_login_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                platformSwitch(loading)
             }
             OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(KMR.strings.zy_account_picacg_username)) }, singleLine = true, enabled = !loading, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text), shape = MaterialTheme.shapes.small)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(KMR.strings.picacg_password)) }, singleLine = true, enabled = !loading, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), shape = MaterialTheme.shapes.small)
@@ -85,7 +99,7 @@ fun PicacgLoginScreen(onClose: () -> Unit) {
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {
-                            error = failure.message ?: loginFailed
+                            error = (failure as? PicacgLoginException)?.message ?: loginFailed
                         } finally {
                             loading = false
                         }
