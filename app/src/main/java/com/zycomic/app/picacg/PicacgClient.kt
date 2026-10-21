@@ -88,7 +88,7 @@ class PicacgClient(
             if (authenticated) builder.header("authorization", capturedToken.orEmpty())
             if (method.equals("POST", true)) {
                 builder.post((body?.toString() ?: "{}").toRequestBody(JSON_MEDIA_TYPE))
-                builder.header("Content-Type", "application/json")
+                builder.header("Content-Type", "application/json; charset=UTF-8")
             } else {
                 require(body == null) { "Only POST Picacg requests may have a body" }
                 builder.get()
@@ -154,7 +154,7 @@ class PicacgClient(
     }
 
     companion object {
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private val JSON_MEDIA_TYPE = "application/json; charset=UTF-8".toMediaType()
         private val random = SecureRandom()
         private const val NONCE_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
         private fun newNonce(): String = buildString(32) {

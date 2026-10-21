@@ -37,6 +37,10 @@ class PicacgClientRedirectTest {
         assertEquals(listOf("http", "https"), requests.map { it.url.scheme })
         assertEquals(listOf("POST", "POST"), requests.map { it.method })
         assertEquals(listOf(body.toString(), body.toString()), bodies)
+        assertEquals(
+            listOf("application/json; charset=UTF-8", "application/json; charset=UTF-8"),
+            requests.map { it.header("Content-Type") },
+        )
         assertEquals(requests[0].header("signature"), requests[1].header("signature"))
         assertEquals(requests[0].url.encodedPath, requests[1].url.encodedPath)
         assertEquals(requests[0].url.encodedQuery, requests[1].url.encodedQuery)
