@@ -43,6 +43,9 @@ object PicacgSpeedTester {
         val httpStatus: Int?,
         val contentType: String? = null,
         val imageDecoded: Boolean? = null,
+        val measuredAtEpochMs: Long? = null,
+        val testedThisRound: Boolean = false,
+        val quickSelected: Boolean = false,
     )
 
     data class Snapshot(
@@ -147,8 +150,9 @@ object PicacgSpeedTester {
                     apiReconcile -> apiTargets.filter { target -> storedApi.measurements.none { it.identity == target.identity } }
                     else -> apiTargets
                 }
+                val apiQuickIdentities = apiQuickSelection.mapTo(linkedSetOf()) { it.identity }
                 val apiResults = when {
-                    cachedApi.isNotEmpty() -> cachedApi.toMutableList()
+                    cachedApi.isNotEmpty() -> cachedApi.map { it.copy(testedThisRound = false, quickSelected = false) }.toMutableList()
                     apiQuick -> storedApi.measurements.filter { old -> apiQuickSelection.none { it.identity == old.identity } }
                         .map { it.toProbe() }.toMutableList()
                     apiReconcile -> storedApi.measurements.filter { old -> apiTargets.any { it.identity == old.identity } }
@@ -169,7 +173,11 @@ object PicacgSpeedTester {
                                     { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
                                 ) {
                                     if (isCurrent()) probeApi(target.url, target.endpoint) else null
-                                }
+                                }?.copy(
+                                    measuredAtEpochMs = System.currentTimeMillis(),
+                                    testedThisRound = true,
+                                    quickSelected = target.identity in apiQuickIdentities,
+                                )
                                 synchronized(apiResults) {
                                     if (result?.success == true) successful.incrementAndGet()
                                     if (result != null && !result.success) failed.incrementAndGet()
@@ -190,7 +198,7 @@ object PicacgSpeedTester {
                     }
                     apiResults += freshResults.mapNotNull { it.second }
                     freshApiHistory = freshResults.mapNotNull { (target, result) ->
-                        result?.let { target.identity.toMeasurement(it, System.currentTimeMillis()) }
+                        result?.let { target.identity.toMeasurement(it, it.measuredAtEpochMs ?: System.currentTimeMillis()) }
                     }
                 }
 
@@ -232,8 +240,9 @@ object PicacgSpeedTester {
                     }
                     else -> imageTargets
                 }
+                val imageQuickIdentities = imageQuickSelection.mapTo(linkedSetOf()) { it.identity }
                 val imageResults = when {
-                    cachedImages.isNotEmpty() -> cachedImages.toMutableList()
+                    cachedImages.isNotEmpty() -> cachedImages.map { it.copy(testedThisRound = false, quickSelected = false) }.toMutableList()
                     imageQuick -> storedImages.measurements.filter { old -> imageQuickSelection.none { it.identity == old.identity } }
                         .map { it.toProbe() }.toMutableList()
                     canReconcileImages ->
@@ -256,7 +265,11 @@ object PicacgSpeedTester {
                                     { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
                                 ) {
                                     if (isCurrent()) probeImage(target.url, target.endpoint) else null
-                                }
+                                }?.copy(
+                                    measuredAtEpochMs = System.currentTimeMillis(),
+                                    testedThisRound = true,
+                                    quickSelected = target.identity in imageQuickIdentities,
+                                )
                                 synchronized(imageResults) {
                                     if (result?.success == true) successful.incrementAndGet()
                                     if (result != null && !result.success) failed.incrementAndGet()
@@ -277,7 +290,7 @@ object PicacgSpeedTester {
                     }
                     imageResults += freshResults.mapNotNull { it.second }
                     freshImageHistory = freshResults.mapNotNull { (target, result) ->
-                        result?.let { target.identity.toMeasurement(it, System.currentTimeMillis()) }
+                        result?.let { target.identity.toMeasurement(it, it.measuredAtEpochMs ?: System.currentTimeMillis()) }
                     }
                 }
                 if (imageTargets.isEmpty() && imageResults.isEmpty() && blockedReason == null) {
@@ -374,6 +387,7 @@ object PicacgSpeedTester {
         httpStatus = httpStatus,
         contentType = contentType,
         imageDecoded = imageDecoded,
+        measuredAtEpochMs = measuredAtEpochMs,
     )
 
     private fun PicacgSpeedTestHistoryPolicy.Identity.toMeasurement(probe: Probe, measuredAt: Long) =
@@ -524,6 +538,9 @@ object PicacgSpeedTester {
         put("httpStatus", httpStatus ?: JSONObject.NULL)
         put("contentType", contentType ?: JSONObject.NULL)
         put("imageDecoded", imageDecoded ?: JSONObject.NULL)
+        put("measuredAtEpochMs", measuredAtEpochMs ?: JSONObject.NULL)
+        put("testedThisRound", testedThisRound)
+        put("quickSelected", quickSelected)
     }
 
     private const val MAX_IMAGE_BYTES = 24 * 1024 * 1024

@@ -3,8 +3,6 @@ package com.zycomic.app.ui.settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Download
@@ -34,12 +31,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.net.PicacgSpeedTester
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import com.zycomic.app.net.StartupCheckPhase
+import com.zycomic.app.net.StartupCheckResult
 import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -55,7 +53,11 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
     val snapshot by PicacgSpeedTester.snapshot.collectAsState()
     val progress by PicacgSpeedTester.progress.collectAsState()
     val platformTestRunning by PlatformSpeedTestCoordinator.running.collectAsState()
+    val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
+    val startupCheckStatuses by PlatformSpeedTestCoordinator.startupCheckStatuses.collectAsState()
     val running = remember { mutableStateOf(false) }
+    val localRunFailed = remember { mutableStateOf(false) }
+    val failedRunSnapshot = remember { mutableStateOf<PicacgSpeedTester.Snapshot?>(null) }
     val status = remember { mutableStateOf<String?>(null) }
     val pendingExport = remember { mutableStateOf<Pair<PicacgSpeedTester.Snapshot, String>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -75,8 +77,47 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
         }
     }
 
-    val apiRows = snapshot?.apiProbes.orEmpty().sortedWith(compareBy({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip }))
-    val imageRows = snapshot?.imageProbes.orEmpty().sortedWith(compareBy({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip }))
+    val picacgPhases = setOf(StartupCheckPhase.PICACG_LINE, StartupCheckPhase.PICACG_IMAGE)
+    val picacgPhaseRunning = startupCheckStatuses.any { it.phase in picacgPhases && it.result == StartupCheckResult.RUNNING }
+    val picacgInterrupted = startupCheckStatuses.any { it.phase in picacgPhases && it.result == StartupCheckResult.INTERRUPTED }
+    val picacgPlatformRunning = platformStatuses[ContentPlatform.PICACG]?.running == true
+    val picacgImageBlocked = startupCheckStatuses.any {
+        it.phase == StartupCheckPhase.PICACG_IMAGE && it.result == StartupCheckResult.BLOCKED
+    }
+    val picacgActiveStage = progress?.stage in setOf(
+        PicacgSpeedTester.Stage.PREPARING_API,
+        PicacgSpeedTester.Stage.TESTING_API,
+        PicacgSpeedTester.Stage.PREPARING_IMAGES,
+        PicacgSpeedTester.Stage.TESTING_IMAGES,
+        PicacgSpeedTester.Stage.IMAGE_BLOCKED,
+    )
+    val picacgActuallyTesting = running.value ||
+        (!picacgInterrupted && picacgPlatformRunning && picacgActiveStage && (picacgPhaseRunning || picacgImageBlocked))
+    val picacgCoordinatorLocked = running.value || platformTestRunning
+    val previousRoundOnly = picacgInterrupted || (localRunFailed.value && snapshot === failedRunSnapshot.value) ||
+        running.value || (!picacgInterrupted && (picacgPlatformRunning || picacgPhaseRunning))
+    val apiProbesForDisplay = snapshot?.apiProbes.orEmpty().map { probe ->
+        if (previousRoundOnly) probe.copy(testedThisRound = false, quickSelected = false) else probe
+    }
+    val imageProbesForDisplay = snapshot?.imageProbes.orEmpty().map { probe ->
+        if (previousRoundOnly) probe.copy(testedThisRound = false, quickSelected = false) else probe
+    }
+    val apiRows = orderSpeedTestLogRows(
+        apiProbesForDisplay,
+        testedThisRound = { it.testedThisRound },
+        successful = { it.success },
+        elapsedMs = { it.elapsedMs },
+        domain = { it.endpoint.domain },
+        ip = { it.endpoint.ip },
+    )
+    val imageRows = orderSpeedTestLogRows(
+        imageProbesForDisplay,
+        testedThisRound = { it.testedThisRound },
+        successful = { it.success },
+        elapsedMs = { it.elapsedMs },
+        domain = { it.endpoint.domain },
+        ip = { it.endpoint.ip },
+    )
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -95,24 +136,35 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
-                        snapshot?.let { "测速完成：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(it.completedAtEpochMs))}" }
-                            ?: "暂无哔咔测速结果",
+                        snapshot?.let { stringResource(KMR.strings.picacg_speed_log_completed_at, formatSpeedTestLogTime(it.completedAtEpochMs)) }
+                            ?: stringResource(KMR.strings.picacg_speed_log_empty),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("当前线路：${routeState.apiUrls.getOrNull(routeState.apiIndex).orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                    Text("当前图源：${routeState.imageHost.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                    routeState.remoteVersion?.let { Text("远程配置版本：$it", style = MaterialTheme.typography.bodySmall) }
+                    Text(
+                        stringResource(KMR.strings.picacg_speed_log_current_line, routeState.apiUrls.getOrNull(routeState.apiIndex).orEmpty()),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        stringResource(KMR.strings.picacg_speed_log_current_image, routeState.imageHost.orEmpty()),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    routeState.remoteVersion?.let { Text(stringResource(KMR.strings.picacg_speed_log_remote_version, it), style = MaterialTheme.typography.bodySmall) }
                     snapshot?.imageBlockedReason?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
+                    if (picacgInterrupted) {
+                        platformStatuses[ContentPlatform.PICACG]?.let {
+                            Text(it.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                     status.value?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    if (running.value) {
+                    if (picacgActuallyTesting) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                             CircularProgressIndicator()
                             val current = progress
                             Text(
-                                if (current != null && current.total > 0) {
+                                if (current != null && current.total > 0 && (running.value || picacgPhaseRunning)) {
                                     stringResource(KMR.strings.picacg_speed_progress, current.completed, current.total)
                                 } else {
                                     stringResource(KMR.strings.picacg_speed_log_progress)
@@ -123,22 +175,41 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                         Button(
-                            enabled = !running.value && routeState.apiUrls.isNotEmpty(),
+                            enabled = !picacgCoordinatorLocked && routeState.apiUrls.isNotEmpty(),
                             onClick = {
                                 running.value = true
+                                localRunFailed.value = false
                                 status.value = "测速中；结果将在本轮检测结束后更新。"
                                 scope.launch {
                                     runCatching { PicacgSpeedTester.run() }
                                         .onSuccess { result ->
-                                            status.value = "完成：线路 ${result.apiProbes.count { it.success }}/${result.apiProbes.size} 可用；图源 ${result.imageProbes.count { it.success }}/${result.imageProbes.size} 验证成功。"
+                                            status.value = "完成：线路 ${result.apiProbes.count { it.success }}/${result.apiProbes.size} 可用；" +
+                                                (
+                                                    result.imageBlockedReason?.let { "图源受阻：$it" }
+                                                        ?: "图源 ${result.imageProbes.count { it.success }}/${result.imageProbes.size} 验证成功。"
+                                                    )
                                         }
-                                        .onFailure { error -> status.value = "测速失败：${error.message ?: "未知错误"}" }
+                                        .onFailure { error ->
+                                            localRunFailed.value = true
+                                            failedRunSnapshot.value = PicacgSpeedTester.snapshot.value
+                                            status.value = "测速失败：${error.message ?: "未知错误"}"
+                                        }
                                     running.value = false
                                 }
                             },
-                        ) { Text(if (running.value) "测速中…" else "完整重新测速") }
+                        ) {
+                            Text(
+                                stringResource(
+                                    when {
+                                        picacgActuallyTesting -> KMR.strings.picacg_speed_log_running
+                                        platformTestRunning -> KMR.strings.speed_log_waiting_other_test
+                                        else -> KMR.strings.picacg_speed_log_start
+                                    },
+                                ),
+                            )
+                        }
                         Button(
-                            enabled = snapshot != null && !running.value,
+                            enabled = snapshot != null && !picacgActuallyTesting,
                             onClick = {
                                 val current = snapshot ?: return@Button
                                 val json = runCatching { PicacgSpeedTester.exportJson(current) }.getOrNull()
@@ -156,14 +227,27 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                     }
                 }
             }
-            item { DeprecatedEndpointQuerySection(ContentPlatform.PICACG, enabled = !running.value && !platformTestRunning) }
-            item { Text("线路端点（域名 · IP；点击选择API线路）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            item { DeprecatedEndpointQuerySection(ContentPlatform.PICACG, enabled = !picacgCoordinatorLocked) }
+            item {
+                Text(
+                    stringResource(KMR.strings.picacg_speed_log_line_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             if (apiRows.isEmpty()) {
+                if (routeState.apiUrls.isEmpty()) {
+                    item { Text(stringResource(KMR.strings.speed_log_no_line_records), modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+                }
                 items(routeState.apiUrls) { url ->
+                    val host = runCatching { java.net.URI(url).host }.getOrNull().orEmpty()
                     val selected = routeState.apiUrls.getOrNull(routeState.apiIndex) == url
-                    EndpointRow(
-                        label = "${java.net.URI(url).host.orEmpty()} · 尚未测速",
-                        selected = selected,
+                    SpeedTestEndpointRow(
+                        label = host,
+                        result = stringResource(KMR.strings.manwa_speed_log_untested),
+                        measuredAtEpochMs = null,
+                        testedThisRound = false,
+                        selectionLabel = stringResource(KMR.strings.manwa_speed_log_selected_line).takeIf { selected },
                         onClick = {
                             PicacgRouteManager.selectApiUrl(url)
                             status.value = "已选择API线路"
@@ -174,9 +258,20 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                 items(apiRows) { probe ->
                     val selected = routeState.apiUrls.getOrNull(routeState.apiIndex)?.let { runCatching { java.net.URI(it).host.equals(probe.endpoint.domain, true) }.getOrDefault(false) } == true &&
                         routeState.pinnedApi == probe.endpoint
-                    EndpointRow(
-                        label = "${probe.endpoint.domain} · ${probe.endpoint.ip}    ${if (probe.success) "${probe.elapsedMs}ms" else "失败${probe.httpStatus?.let { " · HTTP $it" }.orEmpty()}"}",
-                        selected = selected,
+                    val result = if (probe.success) {
+                        stringResource(KMR.strings.manwa_speed_log_success, probe.elapsedMs)
+                    } else {
+                        stringResource(KMR.strings.manwa_speed_log_failed) + probe.httpStatus?.let { " · HTTP $it" }.orEmpty()
+                    }
+                    SpeedTestEndpointRow(
+                        label = "${probe.endpoint.domain} · ${probe.endpoint.ip}",
+                        result = result,
+                        measuredAtEpochMs = probe.measuredAtEpochMs,
+                        testedThisRound = probe.testedThisRound,
+                        hasPreviousResult = !probe.testedThisRound && probe.measuredAtEpochMs != null,
+                        quickSelected = probe.quickSelected,
+                        selectionLabel = stringResource(KMR.strings.manwa_speed_log_selected_line).takeIf { selected },
+                        failed = probe.testedThisRound && !probe.success,
                         onClick = {
                             routeState.apiUrls.firstOrNull { runCatching { java.net.URI(it).host.equals(probe.endpoint.domain, true) }.getOrDefault(false) }?.let { PicacgRouteManager.selectApiUrl(it) }
                             PicacgRouteManager.pinApiEndpoint(probe.endpoint)
@@ -185,12 +280,26 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                     )
                 }
             }
-            item { Text("图源端点（域名 · IP；点击选择图源）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            item {
+                Text(
+                    stringResource(KMR.strings.picacg_speed_log_image_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             if (imageRows.isEmpty()) {
+                if (routeState.imageHosts.isEmpty()) {
+                    item { Text(stringResource(KMR.strings.speed_log_no_image_records), modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+                }
                 items(routeState.imageHosts) { host ->
-                    EndpointRow(
-                        label = "$host · 尚未测速",
-                        selected = routeState.imageHost.equals(host, true),
+                    val selected = routeState.imageHost.equals(host, true)
+                    SpeedTestEndpointRow(
+                        label = host,
+                        result = stringResource(KMR.strings.manwa_speed_log_untested),
+                        measuredAtEpochMs = null,
+                        testedThisRound = false,
+                        blocked = !previousRoundOnly && snapshot?.imageBlockedReason != null,
+                        selectionLabel = stringResource(KMR.strings.manwa_speed_log_selected_image).takeIf { selected },
                         onClick = {
                             PicacgRouteManager.selectImageHost(host)
                             status.value = "已选择图源 $host"
@@ -200,14 +309,23 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
             } else {
                 items(imageRows) { probe ->
                     val selected = routeState.imageHost.equals(probe.endpoint.domain, true) && routeState.pinnedImage == probe.endpoint
-                    val result = when {
-                        probe.success -> "${probe.elapsedMs}ms · 图片已解码"
-                        probe.httpStatus != null -> "失败 · HTTP ${probe.httpStatus}"
-                        else -> "失败"
+                    val blockedHistoric = !previousRoundOnly && snapshot?.imageBlockedReason != null && !probe.testedThisRound
+                    val baseResult = when {
+                        probe.success -> stringResource(KMR.strings.manwa_speed_log_success, probe.elapsedMs) + " · 图片已解码"
+                        probe.httpStatus != null -> stringResource(KMR.strings.manwa_speed_log_failed) + " · HTTP ${probe.httpStatus}"
+                        else -> stringResource(KMR.strings.manwa_speed_log_failed)
                     }
-                    EndpointRow(
-                        label = "${probe.endpoint.domain} · ${probe.endpoint.ip}    $result",
-                        selected = selected,
+                    val result = if (blockedHistoric) "$baseResult · ${stringResource(KMR.strings.manwa_speed_log_reused)}" else baseResult
+                    SpeedTestEndpointRow(
+                        label = "${probe.endpoint.domain} · ${probe.endpoint.ip}",
+                        result = result,
+                        measuredAtEpochMs = probe.measuredAtEpochMs,
+                        testedThisRound = probe.testedThisRound,
+                        hasPreviousResult = !probe.testedThisRound && probe.measuredAtEpochMs != null,
+                        blocked = blockedHistoric,
+                        quickSelected = probe.quickSelected,
+                        selectionLabel = stringResource(KMR.strings.manwa_speed_log_selected_image).takeIf { selected },
+                        failed = probe.testedThisRound && !probe.success,
                         onClick = {
                             PicacgRouteManager.selectImageHost(probe.endpoint.domain)
                             PicacgRouteManager.pinImageEndpoint(probe.endpoint)
@@ -217,21 +335,5 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun EndpointRow(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(
-                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background,
-                shape = RoundedCornerShape(8.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }

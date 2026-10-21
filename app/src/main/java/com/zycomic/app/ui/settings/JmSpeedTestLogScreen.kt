@@ -3,14 +3,11 @@ package com.zycomic.app.ui.settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -29,12 +26,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.JmRouteManager
+import com.zycomic.app.net.JmSpeedTestProgress
 import com.zycomic.app.net.JmSpeedTester
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import com.zycomic.app.net.StartupCheckPhase
+import com.zycomic.app.net.StartupCheckResult
 import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,6 +58,15 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
     val routeLogs by JmRouteManager.logs.collectAsState()
     val endpointSelection by JmRouteManager.endpointSelection.collectAsState()
     val running by PlatformSpeedTestCoordinator.running.collectAsState()
+    val jmProgress by PlatformSpeedTestCoordinator.jmProgress.collectAsState()
+    val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
+    val checks by PlatformSpeedTestCoordinator.startupCheckStatuses.collectAsState()
+    val jmPlatformRunning = platformStatuses[ContentPlatform.JM]?.running == true
+    val jmInterrupted = checks.any {
+        it.phase in setOf(StartupCheckPhase.JM_LINE, StartupCheckPhase.JM_IMAGE) && it.result == StartupCheckResult.INTERRUPTED
+    }
+    val snapshotIsCurrentRun = !jmInterrupted && jmProgress?.phase != JmSpeedTestProgress.Phase.FAILED &&
+        (!jmPlatformRunning || jmProgress?.phase == JmSpeedTestProgress.Phase.COMPLETE)
     val status = remember { mutableStateOf<String?>(null) }
     val pendingExport = remember { mutableStateOf<Pair<JmRouteManager.SpeedTestSnapshot, String>?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -83,12 +91,33 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
     val selectedLineEndpoint = endpointSelection.line
     val selectedImageDomain = routeState.imageDomain
     val selectedImageEndpoint = endpointSelection.image?.takeIf { it.domain.equals(selectedImageDomain, true) }
-    val lineRows = JmSpeedTestLogPolicy.rankEndpoints(snapshot.lineIpDelaysMs) + snapshot.untestedLineIpDelaysMs.keys
+    val lineRows = orderSpeedTestLogRows(
+        rows = JmSpeedTestLogPolicy.rankEndpoints(snapshot.lineIpDelaysMs) + snapshot.untestedLineIpDelaysMs.keys,
+        testedThisRound = { snapshotIsCurrentRun && it in snapshot.testedLineEndpoints },
+        successful = { endpoint ->
+            val delay = snapshot.lineIpDelaysMs[endpoint] ?: snapshot.untestedLineIpDelaysMs.getValue(endpoint)
+            delay >= 0L && delay < Long.MAX_VALUE
+        },
+        elapsedMs = { endpoint -> snapshot.lineIpDelaysMs[endpoint] ?: snapshot.untestedLineIpDelaysMs.getValue(endpoint) },
+        domain = { it.domain },
+        ip = { it.ip },
+    )
     val failedImageEndpoints = snapshot.imageIpDelaysMs.keys.filterTo(mutableSetOf()) { endpoint ->
         snapshot.imageIpDelaysMs.getValue(endpoint) == Long.MAX_VALUE ||
             snapshot.imageIpVerdicts[endpoint] != JmSpeedTester.ImgVerdict.OK
     }
-    val imageRows = JmSpeedTestLogPolicy.rankEndpoints(snapshot.imageIpDelaysMs, failedImageEndpoints) + snapshot.untestedImageIpDelaysMs.keys
+    val imageRows = orderSpeedTestLogRows(
+        rows = JmSpeedTestLogPolicy.rankEndpoints(snapshot.imageIpDelaysMs, failedImageEndpoints) + snapshot.untestedImageIpDelaysMs.keys,
+        testedThisRound = { snapshotIsCurrentRun && it in snapshot.testedImageEndpoints },
+        successful = { endpoint ->
+            val delay = snapshot.imageIpDelaysMs[endpoint] ?: snapshot.untestedImageIpDelaysMs.getValue(endpoint)
+            val verdict = snapshot.imageIpVerdicts[endpoint] ?: snapshot.untestedImageIpVerdicts[endpoint]
+            delay >= 0L && delay < Long.MAX_VALUE && verdict == JmSpeedTester.ImgVerdict.OK
+        },
+        elapsedMs = { endpoint -> snapshot.imageIpDelaysMs[endpoint] ?: snapshot.untestedImageIpDelaysMs.getValue(endpoint) },
+        domain = { it.domain },
+        ip = { it.ip },
+    )
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -107,13 +136,13 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
-                        snapshot.completedAtEpochMs?.let { "最近完成：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(it))}" }
+                        snapshot.completedAtEpochMs?.let { stringResource(KMR.strings.manwa_speed_log_recently_completed, formatSpeedTestLogTime(it)) }
                             ?: "暂无完整禁漫测速结果",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     snapshot.remoteVersion?.let { Text("远程配置版本：$it", style = MaterialTheme.typography.bodySmall) }
-                    if (snapshot.lineQuickTest || snapshot.imageQuickTest) {
+                    if (snapshotIsCurrentRun && (snapshot.lineQuickTest || snapshot.imageQuickTest)) {
                         Text(
                             "本次快速复测：线路 ${if (snapshot.lineQuickTest) "前五历史端点" else "完整检测"}；图源 ${if (snapshot.imageQuickTest) "前五历史端点" else "完整检测"}",
                             style = MaterialTheme.typography.bodySmall,
@@ -131,7 +160,22 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                         "当前实际图源端点：${selectedImageEndpoint?.let { "${it.domain} · ${it.ip}" } ?: "暂无已确认端点"}",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    if (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed) {
+                    jmProgress?.let {
+                        Text(it.message(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (jmProgress == null && jmInterrupted) {
+                        platformStatuses[ContentPlatform.JM]?.let {
+                            Text(it.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    if (jmPlatformRunning && jmProgress?.phase != JmSpeedTestProgress.Phase.COMPLETE) {
+                        Text(
+                            stringResource(KMR.strings.speed_log_pending_results),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (snapshotIsCurrentRun && (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed)) {
                         Text(
                             "前五个历史端点本轮全部失败，未扩展到第六项；请点击“完整重新测速”检测全部端点。",
                             style = MaterialTheme.typography.bodySmall,
@@ -176,7 +220,15 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                                 }
                             }
                         },
-                    ) { Text(if (running) "测速中…" else "完整重新测速") }
+                    ) {
+                        Text(
+                            when {
+                                jmPlatformRunning -> "测速中…"
+                                running -> stringResource(KMR.strings.speed_log_waiting_other_test)
+                                else -> "完整重新测速"
+                            },
+                        )
+                    }
                 }
             }
             item { DeprecatedEndpointQuerySection(ContentPlatform.JM, enabled = !running) }
@@ -191,78 +243,76 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                 }
             }
             if (lineRows.isEmpty()) {
-                item { Text("暂无线路端点记录", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+                item {
+                    Text(
+                        stringResource(KMR.strings.speed_log_no_line_records),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             items(lineRows) { endpoint ->
                 val delay = snapshot.lineIpDelaysMs[endpoint] ?: snapshot.untestedLineIpDelaysMs.getValue(endpoint)
-                val isSelectedEndpoint = JmSpeedTestLogPolicy.isSelectedEndpoint(endpoint, selectedLineEndpoint)
-                val testedThisRound = endpoint in snapshot.testedLineEndpoints
+                val testedThisRound = snapshotIsCurrentRun && endpoint in snapshot.testedLineEndpoints
                 val time = snapshot.lineIpTestedAtEpochMs[endpoint] ?: snapshot.untestedLineIpTestedAtEpochMs[endpoint]
-                EndpointLogRow(
-                    endpoint = endpoint,
-                    delay = delay,
-                    verdict = null,
-                    marker = when {
-                        isSelectedEndpoint -> "当前实际 API 端点"
-                        !testedThisRound -> "本轮未测${time?.let { " · ${formatEndpointTime(it)}" }.orEmpty()}"
-                        else -> null
+                SpeedTestEndpointRow(
+                    label = "${endpoint.domain} · ${endpoint.ip}",
+                    result = if (delay == Long.MAX_VALUE || delay < 0L) {
+                        stringResource(KMR.strings.manwa_speed_log_failed)
+                    } else {
+                        stringResource(KMR.strings.manwa_speed_log_success, delay)
                     },
+                    measuredAtEpochMs = time,
+                    testedThisRound = testedThisRound,
+                    hasPreviousResult = !testedThisRound,
+                    quickSelected = snapshotIsCurrentRun && snapshot.lineQuickTest && endpoint in snapshot.testedLineEndpoints,
+                    selectionLabel = "当前实际 API 端点".takeIf {
+                        JmSpeedTestLogPolicy.isSelectedEndpoint(endpoint, selectedLineEndpoint)
+                    },
+                    failed = delay == Long.MAX_VALUE || delay < 0L,
                     onClick = { JmRouteManager.selectLineEndpoint(endpoint.domain, endpoint.ip) },
                 )
             }
             item { Text("图源端点（域名 · IP）", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
             if (imageRows.isEmpty()) {
-                item { Text("暂无图源端点记录", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+                item {
+                    Text(
+                        stringResource(KMR.strings.speed_log_no_image_records),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             items(imageRows) { endpoint ->
                 val delay = snapshot.imageIpDelaysMs[endpoint] ?: snapshot.untestedImageIpDelaysMs.getValue(endpoint)
-                val isSelected = selectedImageEndpoint == endpoint
-                val testedThisRound = endpoint in snapshot.testedImageEndpoints
+                val testedThisRound = snapshotIsCurrentRun && endpoint in snapshot.testedImageEndpoints
+                val verdict = snapshot.imageIpVerdicts[endpoint] ?: snapshot.untestedImageIpVerdicts[endpoint]
                 val time = snapshot.imageIpTestedAtEpochMs[endpoint] ?: snapshot.untestedImageIpTestedAtEpochMs[endpoint]
-                EndpointLogRow(
-                    endpoint = endpoint,
-                    delay = delay,
-                    verdict = snapshot.imageIpVerdicts[endpoint] ?: snapshot.untestedImageIpVerdicts[endpoint],
-                    marker = when {
-                        isSelected -> "当前实际图源端点"
-                        !testedThisRound -> "本轮未测${time?.let { " · ${formatEndpointTime(it)}" }.orEmpty()}"
-                        else -> null
+                val failed = delay == Long.MAX_VALUE || delay < 0L || verdict != JmSpeedTester.ImgVerdict.OK
+                val result = when (verdict) {
+                    JmSpeedTester.ImgVerdict.NO_IMAGE -> stringResource(KMR.strings.manwa_speed_log_no_image)
+                    JmSpeedTester.ImgVerdict.UNREACHABLE -> stringResource(KMR.strings.manwa_speed_log_unreachable)
+                    else -> if (failed) {
+                        stringResource(KMR.strings.manwa_speed_log_failed)
+                    } else {
+                        stringResource(KMR.strings.manwa_speed_log_success, delay)
+                    }
+                }
+                SpeedTestEndpointRow(
+                    label = "${endpoint.domain} · ${endpoint.ip}",
+                    result = result,
+                    measuredAtEpochMs = time,
+                    testedThisRound = testedThisRound,
+                    hasPreviousResult = !testedThisRound,
+                    quickSelected = snapshotIsCurrentRun && snapshot.imageQuickTest && endpoint in snapshot.testedImageEndpoints,
+                    selectionLabel = "当前实际图源端点".takeIf {
+                        JmSpeedTestLogPolicy.isSelectedEndpoint(endpoint, selectedImageEndpoint)
                     },
+                    failed = failed,
                 )
             }
         }
     }
-}
-
-private fun formatEndpointTime(epochMs: Long): String =
-    java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(epochMs))
-
-@Composable
-private fun EndpointLogRow(endpoint: DomainIp, delay: Long, verdict: JmSpeedTester.ImgVerdict?, marker: String?, onClick: (() -> Unit)? = null) {
-    val result = when {
-        verdict == JmSpeedTester.ImgVerdict.NO_IMAGE -> "无图"
-        verdict == JmSpeedTester.ImgVerdict.UNREACHABLE -> "不可达"
-        delay == Long.MAX_VALUE -> "失败"
-        else -> "${delay}ms"
-    }
-    Text(
-        "${endpoint.domain} · ${endpoint.ip}    $result${marker?.let { "    [$it]" }.orEmpty()}",
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                color = if (marker != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background,
-                shape = RoundedCornerShape(8.dp),
-            )
-            .clickable(enabled = onClick != null) { onClick?.invoke() }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        style = MaterialTheme.typography.bodyMedium,
-        color = when {
-            delay == Long.MAX_VALUE -> MaterialTheme.colorScheme.error
-            marker != null -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.onSurface
-        },
-        fontWeight = if (marker != null) FontWeight.SemiBold else FontWeight.Normal,
-    )
 }
 
 private fun encodeJmSpeedTestLog(
