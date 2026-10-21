@@ -122,8 +122,8 @@ object PicacgBuiltinNetwork {
     private fun isWithinDomain(host: String, root: String): Boolean =
         host.equals(root, ignoreCase = true) || host.endsWith(".$root", ignoreCase = true)
 
-    private fun normalizeHost(host: String): String? {
-        val trimmed = host.trim()
+    private fun normalizeHost(host: String?): String? {
+        val trimmed = host?.trim() ?: return null
         val withoutFinalDot = if (trimmed.endsWith('.')) trimmed.dropLast(1) else trimmed
         val normalized = withoutFinalDot.lowercase(Locale.ROOT)
         if (normalized.isEmpty() || normalized.length > 253) return null
