@@ -15,6 +15,7 @@ object BrowseTabStore {
     private const val LEGACY_KEY_SEED = "seed_version"
     private const val SEED_VERSION = 5
     private const val JM_ALL_HOT_SEEDED_KEY = "jm_all_hot_seeded_v1"
+    private const val PICACG_DEFAULT_TABS_SEEDED_KEY = "picacg_default_tabs_seeded_v1"
     private lateinit var prefs: android.content.SharedPreferences
 
     fun init(context: Context) {
@@ -87,6 +88,9 @@ object BrowseTabStore {
         platformId = ContentPlatform.PICACG,
     )
 
+    /** The legacy homepage identity is retained for existing users, but now represents the 24-hour ranking. */
+    fun picacgRankingDefaultTab() = picacgHomeTab().copy(name = PICACG_RANKING_NAME)
+
     fun picacgRankingTab() = BrowseTabItem(
         id = ID_PICACG_RANKING,
         name = PICACG_RANKING_NAME,
@@ -105,7 +109,7 @@ object BrowseTabStore {
 
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
         if (platform == ContentPlatform.JM) return listOf(jmHomeTab(), jmAllHotTab())
-        if (platform == ContentPlatform.PICACG) return listOf(picacgHomeTab())
+        if (platform == ContentPlatform.PICACG) return listOf(picacgRankingDefaultTab(), picacgCategoryTab())
         return listOf(
             specialYuzong(),
             BrowseTabItem(
@@ -193,19 +197,23 @@ object BrowseTabStore {
                     if (item.platformId == ContentPlatform.JM && item.filter != null) item.copy(filter = null) else item
                 }
                 val selectedIdentity = loadSelectedTabOrNull()?.let { normalized.getOrNull(it) }?.let(BrowseTabPolicy::identity)
-                if (!prefs.getBoolean(JM_ALL_HOT_SEEDED_KEY, false)) {
-                    val migrated = BrowseTabPolicy.addMissingJmDefaults(normalized, defaultTabs(ContentPlatform.JM))
-                    val withPicacg = BrowseTabPolicy.addMissingPicacgHome(migrated, picacgHomeTab())
-                    val normalizedDefaults = migrateCompleteDefaultPreset(withPicacg)
-                    val selectedIndex = selectedIdentity?.let { selected -> normalizedDefaults.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
-                    saveAll(normalizedDefaults, selectedIndex)
-                    prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
-                    return normalizedDefaults
+                val seedJmDefaults = !prefs.getBoolean(JM_ALL_HOT_SEEDED_KEY, false)
+                val seedPicacgDefaults = !prefs.getBoolean(PICACG_DEFAULT_TABS_SEEDED_KEY, false)
+                var next = normalized
+                if (seedJmDefaults) next = BrowseTabPolicy.addMissingJmDefaults(next, defaultTabs(ContentPlatform.JM))
+                if (next.none { it.platformId == ContentPlatform.PICACG && it.id == ID_PICACG_RANKING }) {
+                    next = BrowseTabPolicy.addMissingPicacgHome(next, picacgRankingDefaultTab())
                 }
-                val withPicacg = BrowseTabPolicy.addMissingPicacgHome(normalized, picacgHomeTab())
-                val normalizedDefaults = migrateCompleteDefaultPreset(withPicacg)
+                if (seedPicacgDefaults) next = addMissingPicacgCategory(next)
+                val normalizedDefaults = renameLegacyPicacgHome(
+                    if (seedJmDefaults || seedPicacgDefaults) migrateCompleteDefaultPreset(next) else next,
+                )
                 val selectedIndex = selectedIdentity?.let { selected -> normalizedDefaults.indexOfFirst { BrowseTabPolicy.identity(it) == selected } }
                 saveAll(normalizedDefaults, selectedIndex)
+                val editor = prefs.edit()
+                if (seedJmDefaults) editor.putBoolean(JM_ALL_HOT_SEEDED_KEY, true)
+                if (seedPicacgDefaults) editor.putBoolean(PICACG_DEFAULT_TABS_SEEDED_KEY, true)
+                editor.apply()
                 return normalizedDefaults
             }
         }
@@ -214,13 +222,19 @@ object BrowseTabStore {
         if (!legacyTabsExist) {
             val defaults = defaultSharedTabs()
             saveAll(defaults)
-            prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
+            prefs.edit()
+                .putBoolean(JM_ALL_HOT_SEEDED_KEY, true)
+                .putBoolean(PICACG_DEFAULT_TABS_SEEDED_KEY, true)
+                .apply()
             return defaults
         }
-        val migrated = load(ContentPlatform.MANWA) + picacgHomeTab() + load(ContentPlatform.JM)
-        val normalizedDefaults = migrateCompleteDefaultPreset(migrated)
+        val migrated = addMissingPicacgCategory(load(ContentPlatform.MANWA) + picacgHomeTab() + load(ContentPlatform.JM))
+        val normalizedDefaults = renameLegacyPicacgHome(migrateCompleteDefaultPreset(migrated))
         saveAll(normalizedDefaults)
-        prefs.edit().putBoolean(JM_ALL_HOT_SEEDED_KEY, true).apply()
+        prefs.edit()
+            .putBoolean(JM_ALL_HOT_SEEDED_KEY, true)
+            .putBoolean(PICACG_DEFAULT_TABS_SEEDED_KEY, true)
+            .apply()
         return normalizedDefaults
     }
 
@@ -230,14 +244,15 @@ object BrowseTabStore {
             specialYuzong(),
             jmHomeTab(),
             jmAllHotTab(),
-            picacgHomeTab(),
+            picacgRankingDefaultTab(),
+            picacgCategoryTab(),
             manwa.getValue(ID_GENERAL),
             manwa.getValue(ID_JINMAN),
             manwa.getValue(ID_REXUE),
         )
     }
 
-    /** Convert only the exact, untouched prior default sequence; preserve every item's other data. */
+    /** Convert only exact, untouched prior default sequences; customized names/order remain user-owned. */
     private fun migrateCompleteDefaultPreset(tabs: List<BrowseTabItem>): List<BrowseTabItem> {
         val manwa = defaultTabs(ContentPlatform.MANWA).associateBy { it.id }
         val previousDefaults = listOf(
@@ -249,8 +264,44 @@ object BrowseTabStore {
             jmHomeTab().copy(name = PREVIOUS_JM_HOME_NAME),
             jmAllHotTab().copy(name = "全部热门"),
         )
-        return BrowseTabPolicy.migrateCompleteDefaultPreset(tabs, previousDefaults, defaultSharedTabs()) ?: tabs
+        val previousCurrentDefaults = listOf(
+            specialYuzong(),
+            jmHomeTab(),
+            jmAllHotTab(),
+            picacgHomeTab(),
+            manwa.getValue(ID_GENERAL),
+            manwa.getValue(ID_JINMAN),
+            manwa.getValue(ID_REXUE),
+        )
+        val defaults = defaultSharedTabs()
+        return listOf(previousDefaults, previousCurrentDefaults).asSequence()
+            .map(::withPicacgCategoryAfterHome)
+            .mapNotNull { BrowseTabPolicy.migrateCompleteDefaultPreset(tabs, it, defaults) }
+            .firstOrNull() ?: tabs
     }
+
+    private fun renameLegacyPicacgHome(tabs: List<BrowseTabItem>): List<BrowseTabItem> =
+        tabs.map { item ->
+            if (item.platformId == ContentPlatform.PICACG && item.id == ID_PICACG_HOME && item.name == PICACG_HOME_NAME) {
+                item.copy(name = PICACG_RANKING_NAME)
+            } else {
+                item
+            }
+        }
+
+    private fun addMissingPicacgCategory(tabs: List<BrowseTabItem>): List<BrowseTabItem> {
+        val rankingId = if (tabs.any { it.platformId == ContentPlatform.PICACG && it.id == ID_PICACG_RANKING }) {
+            ID_PICACG_RANKING
+        } else {
+            ID_PICACG_HOME
+        }
+        return BrowseTabPolicy.addFixedPicacgTab(tabs, picacgCategoryTab(), rankingId) ?: tabs
+    }
+
+    private fun withPicacgCategoryAfterHome(tabs: List<BrowseTabItem>): List<BrowseTabItem> =
+        tabs.flatMap { item ->
+            if (item.platformId == ContentPlatform.PICACG && item.id == ID_PICACG_HOME) listOf(item, picacgCategoryTab()) else listOf(item)
+        }
 
     fun saveAll(tabs: List<BrowseTabItem>, selectedTabIndex: Int? = null) {
         val array = JSONArray()

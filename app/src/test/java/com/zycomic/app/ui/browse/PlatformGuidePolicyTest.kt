@@ -32,7 +32,7 @@ class PlatformGuidePolicyTest {
         val jm = PlatformGuidePolicy.sections(PlatformGuidePolicy.JM_ID).joinToString(" ") { it.body }
 
         assertTrue(manwa.contains("一般向热门") && manwa.contains("热血热门"))
-        assertTrue(picacg.contains("哔咔首页") && picacg.contains("关键词搜索"))
+        assertTrue(picacg.contains("哔咔排行") && picacg.contains("哔咔分类") && picacg.contains("24小时") && picacg.contains("关键词搜索"))
         assertTrue(jm.contains("jm首页") && jm.contains("禁漫搜索"))
     }
 

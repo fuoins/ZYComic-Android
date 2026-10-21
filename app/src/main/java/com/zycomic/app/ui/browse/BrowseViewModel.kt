@@ -769,7 +769,7 @@ class BrowseViewModel {
      * 故当前没有受保护 tab。
      */
     fun isProtected(item: BrowseTabItem): Boolean =
-        item.platformId == ContentPlatform.PICACG && item.id == BrowseTabStore.ID_PICACG_HOME
+        item.platformId == ContentPlatform.PICACG && item.id in setOf(BrowseTabStore.ID_PICACG_HOME, BrowseTabStore.ID_PICACG_RANKING)
 
     /** Persists one complete drag draft and restores selection by stable platform-qualified identity. */
     fun reorderTabs(draft: List<BrowseTabItem>): Boolean {
@@ -808,6 +808,16 @@ class BrowseViewModel {
         tabs.addAll(addition.first)
         persist()
         goTo(addition.second)
+        return true
+    }
+
+    private fun addFixedManwaPreset(item: BrowseTabItem): Boolean {
+        if (item.platformId != ContentPlatform.MANWA || tabs.any { BrowseTabPolicy.identity(it) == BrowseTabPolicy.identity(item) }) return false
+        val (next, index) = BrowseTabPolicy.insertNewTab(tabs.toList(), item)
+        tabs.clear()
+        tabs.addAll(next)
+        persist()
+        goTo(index)
         return true
     }
 
@@ -971,7 +981,21 @@ class BrowseViewModel {
     /** Adds the fixed-ID JM all-hot tab once; deleting it makes it available to add again. */
     fun addJmAllHotTab(): Boolean = addFixedJmTab(BrowseTabStore.jmAllHotTab())
 
-    fun canAddPicacgRanking(): Boolean = tabs.none { it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_RANKING }
+    private val manwaPresetIds = setOf(BrowseTabStore.ID_GENERAL, BrowseTabStore.ID_JINMAN, BrowseTabStore.ID_REXUE)
+
+    fun canAddManwaPreset(id: String): Boolean =
+        id in manwaPresetIds && StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) &&
+            tabs.none { it.platformId == ContentPlatform.MANWA && it.id == id }
+
+    fun addManwaPreset(id: String): Boolean {
+        if (!canAddManwaPreset(id)) return false
+        val item = BrowseTabStore.defaultTabs(ContentPlatform.MANWA).firstOrNull { it.id == id } ?: return false
+        return addFixedManwaPreset(item)
+    }
+
+    fun canAddPicacgRanking(): Boolean = tabs.none {
+        it.platformId == ContentPlatform.PICACG && it.id in setOf(BrowseTabStore.ID_PICACG_HOME, BrowseTabStore.ID_PICACG_RANKING)
+    }
 
     fun addPicacgRankingTab(): Boolean = addFixedPicacgTab(
         BrowseTabStore.picacgRankingTab(),
@@ -982,7 +1006,11 @@ class BrowseViewModel {
 
     fun addPicacgCategoryTab(): Boolean = addFixedPicacgTab(
         BrowseTabStore.picacgCategoryTab(),
-        afterId = BrowseTabStore.ID_PICACG_RANKING,
+        afterId = if (tabs.any { it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_RANKING }) {
+            BrowseTabStore.ID_PICACG_RANKING
+        } else {
+            BrowseTabStore.ID_PICACG_HOME
+        },
     )
 
     private fun addFixedPicacgTab(item: BrowseTabItem, afterId: String): Boolean {

@@ -347,6 +347,25 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
+                    listOf(
+                        BrowseTabStore.ID_GENERAL to "mw一般向热门",
+                        BrowseTabStore.ID_JINMAN to "mw禁漫向热门",
+                        BrowseTabStore.ID_REXUE to "mw热血热门",
+                    ).forEach { (id, name) ->
+                        SpecialAddButton(
+                            label = if (vm.canAddManwaPreset(id)) name else "$name（已添加）",
+                            enabled = vm.canAddManwaPreset(id),
+                            onClick = { vm.addManwaPreset(id) },
+                            info = "$name，漫蛙热门筛选预设。",
+                            platform = ContentPlatform.MANWA,
+                        )
+                    }
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
                     SpecialAddButton(
                         label = if (vm.canAddPicacgRanking()) "哔咔排行" else "哔咔排行（已添加）",
                         enabled = vm.canAddPicacgRanking(),

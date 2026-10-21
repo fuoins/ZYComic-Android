@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -52,6 +50,8 @@ import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
 import com.zycomic.app.ui.components.DisplaySettingsSection
+import com.zycomic.app.ui.components.FilterChip
+import com.zycomic.app.ui.components.FilterSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
 import com.zycomic.app.ui.components.PicacgCollectionPolicy
 import com.zycomic.app.ui.components.PicacgImageLoader
@@ -70,18 +70,6 @@ private enum class PicacgFeedMode(val timeframe: String? = null) {
     LATEST,
     FILTERED,
 }
-
-@Composable
-private fun PicacgFeedMode.label(): String = stringResource(
-    when (this) {
-        PicacgFeedMode.LATEST -> KMR.strings.picacg_latest
-        PicacgFeedMode.RANDOM -> KMR.strings.picacg_random
-        PicacgFeedMode.LEADERBOARD_24H -> KMR.strings.picacg_rank_24h
-        PicacgFeedMode.LEADERBOARD_7D -> KMR.strings.picacg_rank_7d
-        PicacgFeedMode.LEADERBOARD_30D -> KMR.strings.picacg_rank_30d
-        PicacgFeedMode.FILTERED -> KMR.strings.picacg_filtered
-    },
-)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -112,10 +100,8 @@ fun PicacgBrowseScreen(
         mutableStateOf(
             if (pageMode == PicacgBrowsePageMode.CATEGORY) {
                 PicacgFeedMode.FILTERED
-            } else if (pageMode == PicacgBrowsePageMode.RANKING) {
-                PicacgFeedMode.LEADERBOARD_24H
             } else {
-                PicacgFeedMode.LATEST
+                PicacgFeedMode.LEADERBOARD_24H
             },
         )
     }
@@ -218,51 +204,6 @@ fun PicacgBrowseScreen(
             Text(stringResource(KMR.strings.picacg_session_required))
             Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
         } else {
-            if (pageMode != PicacgBrowsePageMode.CATEGORY) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(PicacgFeedMode.entries.filter { it != PicacgFeedMode.FILTERED }, key = { it.name }) { item ->
-                        val title = when (item) {
-                            PicacgFeedMode.LEADERBOARD_24H -> if (pageMode == PicacgBrowsePageMode.RANKING) "日榜" else item.label()
-                            PicacgFeedMode.LEADERBOARD_7D -> if (pageMode == PicacgBrowsePageMode.RANKING) "周榜" else item.label()
-                            PicacgFeedMode.LEADERBOARD_30D -> if (pageMode == PicacgBrowsePageMode.RANKING) "月榜" else item.label()
-                            else -> item.label()
-                        }
-                        val onSelect = { selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter) }
-                        if (pageMode == PicacgBrowsePageMode.RANKING) {
-                            com.zycomic.app.ui.browse.CompactBrowseFilterChip(selected = mode == item, onClick = onSelect, label = { Text(title) })
-                        } else {
-                            FilterChip(selected = mode == item, onClick = onSelect, label = { Text(title) })
-                        }
-                    }
-                    if (pageMode == PicacgBrowsePageMode.HOME) {
-                        items(presets.value, key = { it.id }) { preset ->
-                            FilterChip(
-                                selected = mode == PicacgFeedMode.FILTERED && filter.normalized() == preset.filter,
-                                onClick = { selectMode(PicacgFeedMode.FILTERED, preset.filter) },
-                                label = { Text(preset.name) },
-                            )
-                        }
-                    }
-                }
-            }
-            if (pageMode == PicacgBrowsePageMode.HOME) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    item {
-                        FilterChip(
-                            selected = filter.category.isBlank(),
-                            onClick = { selectMode(modeForCurrentFilter(), filter.copy(category = "")) },
-                            label = { Text(stringResource(KMR.strings.picacg_all)) },
-                        )
-                    }
-                    items(PicacgThemes.titles, key = { it }) { theme ->
-                        FilterChip(
-                            selected = filter.category == theme,
-                            onClick = { selectMode(modeForCurrentFilter(), filter.copy(category = theme)) },
-                            label = { Text(theme) },
-                        )
-                    }
-                }
-            }
             if (loading && mangas.isEmpty()) {
                 if (displayMode == 3) {
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -338,7 +279,7 @@ fun PicacgBrowseScreen(
                 draftSort = filter.sort
             }
         }
-        val displayOnly = pageMode == PicacgBrowsePageMode.RANKING
+        val displayOnly = pageMode != PicacgBrowsePageMode.CATEGORY
         TabbedDialog(
             onDismissRequest = { showFilters = false },
             tabTitles = if (displayOnly) persistentListOf("显示") else persistentListOf("重新筛选", "显示"),
@@ -348,21 +289,21 @@ fun PicacgBrowseScreen(
                     displayMode = displayMode,
                     gridColumns = gridColumns,
                     orientation = orientation,
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(TabbedDialogPaddings.Horizontal),
                     onSetDisplayMode = onSetDisplayMode,
                     onSetGridColumns = onSetGridColumns,
                     modes = listOf(0 to "紧凑网格", 1 to "舒适网格", 2 to "仅封面网格", 3 to "列表"),
                 )
             } else {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(TabbedDialogPaddings.Horizontal), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("主题")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterSection("主题") {
                         FilterChip(
                             selected = draftCategory.isBlank(),
                             onClick = {
                                 draftCategory = ""
                                 draftFilter = draftFilter.copy(category = "")
                             },
-                            label = { Text(stringResource(KMR.strings.picacg_all)) },
+                            text = stringResource(KMR.strings.picacg_all),
                         )
                         PicacgThemes.titles.forEach { title ->
                             FilterChip(
@@ -371,7 +312,7 @@ fun PicacgBrowseScreen(
                                     draftCategory = title
                                     draftFilter = draftFilter.copy(category = title)
                                 },
-                                label = { Text(title) },
+                                text = title,
                             )
                         }
                     }
@@ -381,13 +322,12 @@ fun PicacgBrowseScreen(
                         OutlinedTextField(draftFilter.creatorId, { draftFilter = draftFilter.copy(creatorId = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_creator)) }, singleLine = true)
                         OutlinedTextField(draftFilter.chineseTeam, { draftFilter = draftFilter.copy(chineseTeam = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_team)) }, singleLine = true)
                     }
-                    Text(stringResource(KMR.strings.picacg_sort))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterSection(stringResource(KMR.strings.picacg_sort)) {
                         listOf("新到旧" to "dd", "旧到新" to "da", "最多喜欢" to "ld", "最多浏览" to "vd").forEach { (label, code) ->
-                            FilterChip(draftSort == code, onClick = {
+                            FilterChip(text = label, selected = draftSort == code, onClick = {
                                 draftSort = code
                                 draftFilter = draftFilter.copy(sort = code)
-                            }, label = { Text(label) })
+                            })
                         }
                     }
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
@@ -463,8 +403,6 @@ fun PicacgBrowseScreen(
         )
     }
 }
-
-private fun modeForCurrentFilter(): PicacgFeedMode = PicacgFeedMode.FILTERED
 
 private fun PicacgBrowseFilter.summary(): String = listOf(category, tag, author, creatorId, chineseTeam)
     .filter(String::isNotBlank)

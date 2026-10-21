@@ -29,7 +29,7 @@ internal object PlatformGuidePolicy {
         PICACG_ID -> listOf(
             Section(
                 title = "浏览漫画",
-                body = "分类页提供独立的“哔咔首页”标签。选中该标签浏览哔咔内容，点漫画卡片进入详情。",
+                body = "分类页提供“哔咔排行”和“哔咔分类”标签。排行默认展示24小时榜单，分类可重新筛选主题和排序，点漫画卡片进入详情。",
             ),
             Section(
                 title = "搜索与筛选",

@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -153,9 +156,9 @@ private fun PlatformChipRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
+            .padding(horizontal = 12.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         PlatformCatalog.platforms.forEach { p ->
             CompactBrowseFilterChip(
@@ -180,10 +183,22 @@ private fun SubChipRow(
     selectedSub: String,
     onSelect: (String) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    val scrollFraction by remember(listState) {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val maxIndex = (layout.totalItemsCount - layout.visibleItemsInfo.size).coerceAtLeast(1)
+            val firstItem = layout.visibleItemsInfo.firstOrNull()
+            (
+                listState.firstVisibleItemIndex.toFloat() / maxIndex +
+                    (firstItem?.let { listState.firstVisibleItemScrollOffset.toFloat() / it.size / maxIndex } ?: 0f)
+                ).coerceIn(0f, 1f)
+        }
+    }
     LazyRow(
+        state = listState,
         contentPadding = PaddingValues(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items(platform.subs.size) { i ->
             val sub = platform.subs[i]
@@ -192,6 +207,25 @@ private fun SubChipRow(
                 onClick = { onSelect(sub.id) },
                 label = { Text(sub.label) },
             )
+        }
+    }
+    if (listState.canScrollBackward || listState.canScrollForward) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier.width(32.dp).height(2.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+            ) {
+                Box(
+                    modifier = Modifier.offset(x = 19.dp * scrollFraction)
+                        .width(13.dp).height(2.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)),
+                )
+            }
         }
     }
 }

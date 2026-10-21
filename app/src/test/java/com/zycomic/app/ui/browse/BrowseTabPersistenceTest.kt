@@ -59,7 +59,10 @@ class BrowseTabPersistenceTest {
         val selected = 4
         BrowseTabStore.saveAll(customOrder, selectedTabIndex = selected)
         val customized = BrowseTabStore.loadAll()
-        assertEquals(customOrder.map(BrowseTabPolicy::identity), customized.map(BrowseTabPolicy::identity))
+        val expectedCustomOrder = customOrder.flatMap { item ->
+            if (item.id == BrowseTabStore.ID_PICACG_HOME) listOf(item, BrowseTabStore.picacgCategoryTab()) else listOf(item)
+        }
+        assertEquals(expectedCustomOrder.map(BrowseTabPolicy::identity), customized.map(BrowseTabPolicy::identity))
         assertEquals("我的首页", customized.first { it.id == BrowseTabStore.ID_JM_HOME }.name)
         assertEquals(BrowseTabPolicy.identity(customOrder[selected]), BrowseTabPolicy.identity(customized[BrowseTabStore.loadSelectedTab()]))
     }
@@ -70,7 +73,7 @@ class BrowseTabPersistenceTest {
         val loaded = BrowseTabStore.loadAll()
         assertEquals(defaultIdentityOrder(), loaded.map(BrowseTabPolicy::identity))
         assertEquals(
-            listOf("宇总排行", "jm首页", "jm热门", "哔咔首页", "mw一般向热门", "mw禁漫向热门", "mw热血热门"),
+            listOf("宇总排行", "jm首页", "jm热门", "哔咔排行", "哔咔分类", "mw一般向热门", "mw禁漫向热门", "mw热血热门"),
             loaded.map { it.name },
         )
 
@@ -87,9 +90,47 @@ class BrowseTabPersistenceTest {
         BrowseTabStore.saveAll(legacy, selectedTabIndex = 1)
 
         val loaded = BrowseTabStore.loadAll()
-        assertEquals(legacy.map(BrowseTabPolicy::identity), loaded.map(BrowseTabPolicy::identity))
-        assertEquals(changedFilter, loaded[1].filter)
-        assertEquals(1, BrowseTabStore.loadSelectedTab())
+        val expected = legacy.flatMap { item ->
+            if (item.id == BrowseTabStore.ID_PICACG_HOME) listOf(item, BrowseTabStore.picacgCategoryTab()) else listOf(item)
+        }
+        assertEquals(expected.map(BrowseTabPolicy::identity), loaded.map(BrowseTabPolicy::identity))
+        assertEquals(changedFilter, loaded.first { it.id == BrowseTabStore.ID_GENERAL }.filter)
+        assertEquals(BrowseTabPolicy.identity(legacy[1]), BrowseTabPolicy.identity(loaded[BrowseTabStore.loadSelectedTab()]))
+    }
+
+    @Test
+    fun `Picacg ranking and category migrate into old defaults without changing customized order or labels`() {
+        installMemoryPreferences()
+        val manwa = BrowseTabStore.defaultTabs(ContentPlatform.MANWA).associateBy { it.id }
+        val previousDefaults = listOf(
+            manwa.getValue(BrowseTabStore.ID_YUZONG),
+            BrowseTabStore.jmHomeTab(),
+            BrowseTabStore.jmAllHotTab(),
+            BrowseTabStore.picacgHomeTab(),
+            manwa.getValue(BrowseTabStore.ID_GENERAL),
+            manwa.getValue(BrowseTabStore.ID_JINMAN),
+            manwa.getValue(BrowseTabStore.ID_REXUE),
+        )
+        BrowseTabStore.saveAll(previousDefaults, selectedTabIndex = 3)
+
+        val migrated = BrowseTabStore.loadAll()
+        assertEquals(defaultIdentityOrder(), migrated.map(BrowseTabPolicy::identity))
+        assertEquals(BrowseTabStore.PICACG_RANKING_NAME, migrated.first { it.id == BrowseTabStore.ID_PICACG_HOME }.name)
+        assertEquals(BrowseTabStore.ID_PICACG_CATEGORY, migrated[BrowseTabStore.loadSelectedTab() + 1].id)
+        assertEquals(BrowseTabStore.ID_PICACG_HOME, migrated[BrowseTabStore.loadSelectedTab()].id)
+
+        installMemoryPreferences()
+        val customized = previousDefaults.reversed().map { item ->
+            if (item.id == BrowseTabStore.ID_PICACG_HOME) item.copy(name = "我的哔咔") else item
+        }
+        BrowseTabStore.saveAll(customized, selectedTabIndex = 2)
+        val preserved = BrowseTabStore.loadAll()
+        val expectedOrder = customized.flatMap { item ->
+            if (item.id == BrowseTabStore.ID_PICACG_HOME) listOf(item, BrowseTabStore.picacgCategoryTab()) else listOf(item)
+        }
+        assertEquals(expectedOrder.map(BrowseTabPolicy::identity), preserved.map(BrowseTabPolicy::identity))
+        assertEquals("我的哔咔", preserved.first { it.id == BrowseTabStore.ID_PICACG_HOME }.name)
+        assertEquals(BrowseTabPolicy.identity(customized[2]), BrowseTabPolicy.identity(preserved[BrowseTabStore.loadSelectedTab()]))
     }
 
     @Test
@@ -126,6 +167,7 @@ class BrowseTabPersistenceTest {
         BrowseTabStore.saveAll(existing, selectedTabIndex = 1)
         val migrated = BrowseTabStore.loadAll()
         assertEquals(BrowseTabPolicy.identity(BrowseTabStore.picacgHomeTab()), BrowseTabPolicy.identity(migrated[1]))
+        assertEquals(BrowseTabStore.ID_PICACG_CATEGORY, migrated[2].id)
         assertEquals(BrowseTabPolicy.identity(jm), BrowseTabPolicy.identity(migrated[BrowseTabStore.loadSelectedTab()]))
 
         val reordered = BrowseTabPolicy.reorder(migrated, migrated.reversed(), BrowseTabStore.loadSelectedTab())!!
@@ -171,7 +213,8 @@ class BrowseTabPersistenceTest {
 
         val loaded = BrowseTabStore.loadAll()
         assertEquals(
-            listOf(draft[0], draft[1], BrowseTabStore.picacgHomeTab(), draft[2], draft[3]).map { BrowseTabPolicy.identity(it) },
+            listOf(draft[0], draft[1], BrowseTabStore.picacgRankingDefaultTab(), BrowseTabStore.picacgCategoryTab(), draft[2], draft[3])
+                .map(BrowseTabPolicy::identity),
             loaded.map { BrowseTabPolicy.identity(it) },
         )
         assertEquals(BrowseTabPolicy.identity(jmHot), BrowseTabPolicy.identity(loaded[BrowseTabStore.loadSelectedTab()]))
@@ -191,7 +234,8 @@ class BrowseTabPersistenceTest {
         val draft = current.reversed()
         BrowseTabPolicy.reorder(current, draft, 1)
         assertEquals(
-            listOf(current[0], BrowseTabStore.picacgHomeTab(), current[1], current[2]).map { BrowseTabPolicy.identity(it) },
+            listOf(current[0], BrowseTabStore.picacgRankingDefaultTab(), BrowseTabStore.picacgCategoryTab(), current[1], current[2])
+                .map(BrowseTabPolicy::identity),
             BrowseTabStore.loadAll().map { BrowseTabPolicy.identity(it) },
         )
         assertEquals(BrowseTabPolicy.identity(home), BrowseTabPolicy.identity(BrowseTabStore.loadAll()[BrowseTabStore.loadSelectedTab()]))
@@ -263,6 +307,32 @@ class BrowseTabPersistenceTest {
         assertEquals(manwaSnapshot, BrowseTabItem.fromJson(JSONObject(manwaTab.toJson().toString())).filter)
     }
 
+    @Test
+    fun `renaming legacy homepage does not reorder a customized list`() {
+        installMemoryPreferences()
+        val custom = BrowseTabItem(id = "my-theme", name = "自定义主题", kind = TabKind.FILTER, filter = FilterSnapshot())
+        val current = listOf(custom, BrowseTabStore.picacgHomeTab(), BrowseTabStore.jmHomeTab())
+        BrowseTabStore.saveAll(current, selectedTabIndex = 0)
+        val loaded = BrowseTabStore.loadAll()
+        assertEquals(custom, loaded.first())
+        assertEquals(BrowseTabStore.PICACG_RANKING_NAME, loaded.first { it.id == BrowseTabStore.ID_PICACG_HOME }.name)
+        assertEquals(current.map(BrowseTabPolicy::identity), loaded.filterNot { it.id == BrowseTabStore.ID_PICACG_CATEGORY || it.id == JmBrowsePolicy.ALL_HOT_TAB_ID }.map(BrowseTabPolicy::identity))
+        assertEquals(custom, loaded[BrowseTabStore.loadSelectedTab()])
+    }
+
+    @Test
+    fun `existing explicit ranking does not acquire a duplicate legacy ranking`() {
+        installMemoryPreferences()
+        val current = listOf(BrowseTabStore.jmHomeTab(), BrowseTabStore.jmAllHotTab(), BrowseTabStore.picacgRankingTab())
+        BrowseTabStore.saveAll(current, selectedTabIndex = 2)
+        val loaded = BrowseTabStore.loadAll()
+        assertFalse(loaded.any { it.id == BrowseTabStore.ID_PICACG_HOME })
+        assertEquals(1, loaded.count { it.id == BrowseTabStore.ID_PICACG_RANKING })
+        assertEquals(BrowseTabStore.ID_PICACG_CATEGORY, loaded.last().id)
+        assertEquals(loaded, BrowseTabStore.loadAll())
+        assertEquals(BrowseTabStore.ID_PICACG_RANKING, loaded[BrowseTabStore.loadSelectedTab()].id)
+    }
+
     private fun legacyDefaultTabs(): List<BrowseTabItem> {
         val manwa = BrowseTabStore.defaultTabs(ContentPlatform.MANWA).associateBy { it.id }
         return listOf(
@@ -280,7 +350,8 @@ class BrowseTabPersistenceTest {
         BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_YUZONG },
         BrowseTabStore.jmHomeTab(),
         BrowseTabStore.jmAllHotTab(),
-        BrowseTabStore.picacgHomeTab(),
+        BrowseTabStore.picacgRankingDefaultTab(),
+        BrowseTabStore.picacgCategoryTab(),
         BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_GENERAL },
         BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_JINMAN },
         BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first { it.id == BrowseTabStore.ID_REXUE },

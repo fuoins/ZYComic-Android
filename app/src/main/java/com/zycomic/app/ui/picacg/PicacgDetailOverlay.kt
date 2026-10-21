@@ -5,13 +5,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -24,8 +32,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -136,10 +147,10 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
             }
         }
     }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onClose) { Text(stringResource(KMR.strings.picacg_back)) }
                     TextButton(onClick = {
                         state = null
@@ -147,10 +158,10 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
                     }, enabled = !busy) { Text(stringResource(KMR.strings.picacg_profile_refresh)) }
                 }
                 if (!loggedIn) {
-                    Text(stringResource(KMR.strings.picacg_session_required))
-                    Button(onClick = { login = true }) { Text(stringResource(KMR.strings.picacg_login_action)) }
+                    Text(stringResource(KMR.strings.picacg_session_required), modifier = Modifier.padding(horizontal = 16.dp))
+                    Button(onClick = { login = true }, modifier = Modifier.padding(horizontal = 16.dp)) { Text(stringResource(KMR.strings.picacg_login_action)) }
                 } else {
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
                     val detail = manga
                     if (detail == null && error == null) CircularProgressIndicator()
                     if (detail != null) {
@@ -188,10 +199,27 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                 )
                                 HorizontalDivider()
-                                Row {
-                                    TextButton(onClick = { changeInteraction(true) }, enabled = metadata != null && !busy) { Text(stringResource(if (metadata?.isFavourite == true) KMR.strings.picacg_favourited else KMR.strings.picacg_favourite)) }
-                                    TextButton(onClick = { changeInteraction(false) }, enabled = metadata != null && !busy) { Text(stringResource(if (metadata?.isLiked == true) KMR.strings.picacg_liked else KMR.strings.picacg_like) + " · ${metadata?.likesCount ?: 0}") }
-                                    TextButton(onClick = { comments = true }, enabled = metadata != null && !busy) { Text(stringResource(KMR.strings.picacg_comments_title) + " · ${metadata?.commentsCount ?: 0}") }
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { changeInteraction(true) }, enabled = metadata != null && !busy, modifier = Modifier.weight(1f)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Icon(if (metadata?.isFavourite == true) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder, contentDescription = null)
+                                            Text(stringResource(if (metadata?.isFavourite == true) KMR.strings.picacg_favourited else KMR.strings.picacg_favourite), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                    TextButton(onClick = { changeInteraction(false) }, enabled = metadata != null && !busy, modifier = Modifier.weight(1f)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Icon(if (metadata?.isLiked == true) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder, contentDescription = null)
+                                            Text(stringResource(if (metadata?.isLiked == true) KMR.strings.picacg_liked else KMR.strings.picacg_like), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text("${metadata?.likesCount ?: 0}", modifier = Modifier.height(20.dp), textAlign = TextAlign.Center, softWrap = false, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                    TextButton(onClick = { comments = true }, enabled = metadata != null && !busy, modifier = Modifier.weight(1f)) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Icon(Icons.Default.ChatBubbleOutline, contentDescription = null)
+                                            Text(stringResource(KMR.strings.picacg_comments_title), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text("${metadata?.commentsCount ?: 0}", modifier = Modifier.height(20.dp), textAlign = TextAlign.Center, softWrap = false, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
                                 }
                                 if (busy) CircularProgressIndicator()
                             }
@@ -202,7 +230,6 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
                                     MangaDetailChapterGrid(
                                         chapters = detail.chapterList,
                                         onChapterClick = { chapter -> openChapter(detail, chapter.id) },
-                                        modifier = Modifier.padding(horizontal = 16.dp),
                                     )
                                 }
                             }

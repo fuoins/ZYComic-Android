@@ -135,47 +135,56 @@ fun PicacgAccountProfileContent(
                 onPreferenceClick = onRequireLogin,
             )
         } else {
-            profile?.let { user ->
+            val user = profile
+            if (user == null) {
+                TextPreferenceWidget(
+                    title = stringResource(KMR.strings.picacg_profile_email, "资料加载中…"),
+                    subtitle = "账户资料正在加载",
+                    icon = Icons.Outlined.Info,
+                    onPreferenceClick = {},
+                )
+            } else {
                 TextPreferenceWidget(
                     title = stringResource(KMR.strings.picacg_profile_email, user.email.ifBlank { user.name }),
                     subtitle = stringResource(KMR.strings.picacg_profile_level_exp, user.level, user.exp),
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = {},
                 )
-                TextPreferenceWidget(
-                    title = stringResource(
-                        KMR.strings.picacg_profile_punched,
-                        when (user.isPunched) {
-                            true -> stringResource(KMR.strings.picacg_profile_punched_yes)
-                            false -> stringResource(KMR.strings.picacg_profile_punched_no)
-                            null -> punchUnknown
-                        },
-                    ),
-                    icon = Icons.Outlined.EventAvailable,
-                    onPreferenceClick = {
-                        if (user.isPunched != true && !busy) {
-                            busy = true
-                            error = null
-                            message = null
-                            scope.launch {
-                                try {
-                                    val refreshed = PicacgRepository.punchIn(session)
-                                    if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) {
-                                        profile = refreshed
-                                        message = if (refreshed.isPunched == true) punchSuccess else punchUnconfirmed
-                                    }
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (failure: Exception) {
-                                    if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) error = failure.message
-                                } finally {
-                                    busy = false
+            }
+            TextPreferenceWidget(
+                title = stringResource(
+                    KMR.strings.picacg_profile_punched,
+                    when (user?.isPunched) {
+                        true -> stringResource(KMR.strings.picacg_profile_punched_yes)
+                        false -> stringResource(KMR.strings.picacg_profile_punched_no)
+                        null -> punchUnknown
+                    },
+                ),
+                icon = Icons.Outlined.EventAvailable,
+                onPreferenceClick = {
+                    val loadedUser = profile
+                    if (loadedUser != null && loadedUser.isPunched != true && !busy) {
+                        busy = true
+                        error = null
+                        message = null
+                        scope.launch {
+                            try {
+                                val refreshed = PicacgRepository.punchIn(session)
+                                if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) {
+                                    profile = refreshed
+                                    message = if (refreshed.isPunched == true) punchSuccess else punchUnconfirmed
                                 }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) error = failure.message
+                            } finally {
+                                busy = false
                             }
                         }
-                    },
-                )
-            }
+                    }
+                },
+            )
             SwitchPreferenceWidget(
                 title = stringResource(KMR.strings.picacg_auto_punch_in),
                 subtitle = stringResource(KMR.strings.picacg_auto_punch_in_summary),

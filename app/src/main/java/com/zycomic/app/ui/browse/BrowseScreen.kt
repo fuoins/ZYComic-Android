@@ -528,13 +528,13 @@ private fun LegacyBrowseScreen(
                                     )
                                 }
                             }
-                            if (index == pagerState.currentPage && (item.platformId != ContentPlatform.PICACG || item.id == BrowseTabStore.ID_PICACG_RANKING || item.id == BrowseTabStore.ID_PICACG_CATEGORY)) {
+                            if (index == pagerState.currentPage && (item.platformId != ContentPlatform.PICACG || item.id == BrowseTabStore.ID_PICACG_HOME || item.id == BrowseTabStore.ID_PICACG_RANKING || item.id == BrowseTabStore.ID_PICACG_CATEGORY)) {
                                 item(key = "filter_affordance") {
                                     TabBarIcon(
                                         icon = Icons.Outlined.FilterList,
                                         contentDescription = when {
                                             item.platformId == ContentPlatform.JM -> "JM 筛选"
-                                            item.platformId == ContentPlatform.PICACG && item.id == BrowseTabStore.ID_PICACG_RANKING -> "显示"
+                                            item.platformId == ContentPlatform.PICACG && item.id in setOf(BrowseTabStore.ID_PICACG_HOME, BrowseTabStore.ID_PICACG_RANKING) -> "显示"
                                             else -> "重新筛选"
                                         },
                                         tint = MaterialTheme.colorScheme.primary,
@@ -626,7 +626,7 @@ private fun LegacyBrowseScreen(
             onOpenTagDialog = { showTagDialog = true },
             displayOnly = vm.tabs.getOrNull(mainTab)?.let {
                 it.isUngatedYuzongRank() || (it.platformId == ContentPlatform.JM && it.id == BrowseTabStore.ID_JM_HOME) ||
-                    (it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_RANKING)
+                    (it.platformId == ContentPlatform.PICACG && it.id in setOf(BrowseTabStore.ID_PICACG_HOME, BrowseTabStore.ID_PICACG_RANKING))
             } ?: false,
         )
     }
@@ -737,7 +737,7 @@ private fun BrowseTabContent(
                 pageMode = when (item?.pageType) {
                     BrowsePageType.PICACG_RANKING -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
                     BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
-                    else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.HOME
+                    else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
                 },
                 displayMode = displayMode,
                 gridColumns = gridColumns,
@@ -968,6 +968,28 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                 }
             }
             JmBrowsePolicy.MODE_WEEK -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    JmBrowseSelector(
+                        title = "期数",
+                        selected = weekIssues.firstOrNull { it.id == filters.weekId }?.title
+                            ?: weekIssues.firstOrNull()?.title
+                            ?: when {
+                                weekIssuesLoading -> "加载中…"
+                                weekIssuesError != null -> "加载失败"
+                                else -> "选择期数"
+                            },
+                        options = weekIssues.map { it.title to it.id },
+                        onSelected = { vm.updateJmFilters(page, weekId = it) },
+                        modifier = Modifier.weight(2.3f),
+                    )
+                    JmBrowseSelector(
+                        title = "类型",
+                        selected = JmWeekTypes.firstOrNull { it.second == filters.weekType }?.first ?: "选择类型",
+                        options = JmWeekTypes,
+                        onSelected = { vm.updateJmFilters(page, weekType = it) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 if (weekIssuesError != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(weekIssuesError ?: "周榜期数加载失败", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -982,24 +1004,6 @@ private fun JmBrowseControls(vm: BrowseViewModel, page: Int) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("暂无有效周榜期数", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                         TextButton(onClick = { vm.loadJmWeekIssues(retry = true) }) { Text("重试") }
-                    }
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        JmBrowseSelector(
-                            title = "期数",
-                            selected = weekIssues.firstOrNull { it.id == filters.weekId }?.title
-                                ?: if (filters.weekId.isBlank()) weekIssues.firstOrNull()?.title ?: "选择期数" else "选择期数",
-                            options = weekIssues.map { it.title to it.id },
-                            onSelected = { vm.updateJmFilters(page, weekId = it) },
-                            modifier = Modifier.weight(2.3f),
-                        )
-                        JmBrowseSelector(
-                            title = "类型",
-                            selected = JmWeekTypes.firstOrNull { it.second == filters.weekType }?.first ?: "选择类型",
-                            options = JmWeekTypes,
-                            onSelected = { vm.updateJmFilters(page, weekType = it) },
-                            modifier = Modifier.weight(1f),
-                        )
                     }
                 }
             }
