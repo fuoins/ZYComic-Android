@@ -51,4 +51,14 @@ class LibraryHistoryToolbarPolicyTest {
         assertEquals(3, history.size)
         assertEquals(3, favorites.size)
     }
+
+    @Test
+    fun `expanded search keeps existing action and platform selector behavior`() {
+        for (history in listOf(false, true)) {
+            assertEquals(emptyList<LibraryHistoryToolbarPolicy.Action>(), LibraryHistoryToolbarPolicy.visibleActions(history, searchExpanded = true))
+            assertEquals(LibraryHistoryToolbarPolicy.leadingActions(history), LibraryHistoryToolbarPolicy.visibleActions(history, searchExpanded = false))
+        }
+        assertEquals(false, LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = true))
+        assertEquals(true, LibraryHistoryToolbarPolicy.showPlatformSelector(searchExpanded = false))
+    }
 }

@@ -48,6 +48,14 @@ class PicacgLocalHistoryPolicyTest {
         assertEquals(1L, PicacgLocalHistoryPolicy.lastReadPageNumber(-1L))
     }
 
+    @Test
+    fun `selection toggle removes a long-pressed row when it is tapped again`() {
+        val selectedAfterLongPress = PicacgLocalHistoryPolicy.toggleSelection(emptySet(), 12L)
+
+        assertEquals(setOf(12L), selectedAfterLongPress)
+        assertEquals(emptySet<Long>(), PicacgLocalHistoryPolicy.toggleSelection(selectedAfterLongPress, 12L))
+    }
+
     private fun historyEntry(id: Long, sourceId: Long, lastPageRead: Long = 0L) = HistoryWithRelations(
         id = id,
         chapterId = id,

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -328,14 +329,14 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     SpecialAddButton(
-                        label = if (vm.canAddJmHome()) "首页" else "首页（已添加）",
+                        label = "首页",
                         enabled = vm.canAddJmHome(),
                         onClick = { vm.addJmHomeTab() },
                         info = "禁漫天堂首页推荐内容。",
                         platform = ContentPlatform.JM,
                     )
                     SpecialAddButton(
-                        label = if (vm.canAddJmAllHot()) "全部热门" else "全部热门（已添加）",
+                        label = "全部热门",
                         enabled = vm.canAddJmAllHot(),
                         onClick = { vm.addJmAllHotTab() },
                         info = "禁漫天堂全部分类内容，默认按最多喜欢排序。",
@@ -353,11 +354,12 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                         BrowseTabStore.ID_REXUE to "mw热血热门",
                     ).forEach { (id, name) ->
                         SpecialAddButton(
-                            label = if (vm.canAddManwaPreset(id)) name else "$name（已添加）",
+                            label = name,
                             enabled = vm.canAddManwaPreset(id),
                             onClick = { vm.addManwaPreset(id) },
                             info = "$name，漫蛙热门筛选预设。",
                             platform = ContentPlatform.MANWA,
+                            isAdded = vm.tabs.any { it.platformId == ContentPlatform.MANWA && it.id == id },
                         )
                     }
                 }
@@ -367,35 +369,35 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
                     SpecialAddButton(
-                        label = if (vm.canAddPicacgRanking()) "哔咔排行" else "哔咔排行（已添加）",
+                        label = "哔咔排行",
                         enabled = vm.canAddPicacgRanking(),
                         onClick = { vm.addPicacgRankingTab() },
                         info = "Picacg 日榜、周榜、月榜、随机和最新漫画。",
                         platform = ContentPlatform.PICACG,
                     )
                     SpecialAddButton(
-                        label = if (vm.canAddPicacgCategory()) "哔咔分类" else "哔咔分类（已添加）",
+                        label = "哔咔分类",
                         enabled = vm.canAddPicacgCategory(),
                         onClick = { vm.addPicacgCategoryTab() },
                         info = "使用 Picacg 配置中的40个静态主题筛选漫画。",
                         platform = ContentPlatform.PICACG,
                     )
                     SpecialAddButton(
-                        label = if (vm.canAddLatest()) "增加最新更新" else "最新更新（已添加）",
+                        label = "增加最新更新",
                         enabled = vm.canAddLatest(),
                         onClick = { vm.addLatestTab() },
                         info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
                         platform = ContentPlatform.MANWA,
                     )
                     SpecialAddButton(
-                        label = if (vm.canAddRanking()) "增加 gay排行" else "gay排行（已添加）",
+                        label = "增加 gay排行",
                         enabled = vm.canAddRanking(),
                         onClick = { vm.addRankingTab() },
                         info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
                         platform = ContentPlatform.MANWA,
                     )
                     SpecialAddButton(
-                        label = if (vm.canAddYuzong()) "增加宇总排行" else "宇总排行（已添加）",
+                        label = "增加宇总排行",
                         enabled = vm.canAddYuzong(),
                         onClick = { vm.addYuzongTab() },
                         info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
@@ -988,8 +990,10 @@ private fun SpecialAddButton(
     info: String,
     platform: ContentPlatform,
     isYuzongRank: Boolean = false,
+    isAdded: Boolean = !enabled,
 ) {
     var showInfo by remember { mutableStateOf(false) }
+    val presentation = BrowseTabPresetPresentationPolicy.present(label, isAdded = isAdded)
     val accent = if (isYuzongRank) MaterialTheme.colorScheme.primary else rememberContentPlatformAccent(platform)
     Surface(
         shape = CircleShape,
@@ -1003,12 +1007,17 @@ private fun SpecialAddButton(
                     .clickable(enabled = enabled, onClick = onClick)
                     .padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = accent)
+                Icon(
+                    if (presentation.isAdded) Icons.Outlined.Check else Icons.Outlined.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = accent,
+                )
                 Spacer(Modifier.width(4.dp))
-                Text(label, fontSize = 12.sp, color = accent, fontWeight = FontWeight.Medium)
+                Text(presentation.label, fontSize = 12.sp, color = accent, fontWeight = FontWeight.Medium)
             }
             IconButton(onClick = { showInfo = true }, modifier = Modifier.size(30.dp)) {
-                Icon(Icons.Outlined.Info, contentDescription = "${label}说明", tint = accent, modifier = Modifier.size(16.dp))
+                Icon(Icons.Outlined.Info, contentDescription = "${presentation.label}说明", tint = accent, modifier = Modifier.size(16.dp))
             }
         }
     }

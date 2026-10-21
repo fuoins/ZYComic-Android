@@ -33,6 +33,9 @@ internal object PicacgLocalHistoryPolicy {
 
     fun allVisibleIds(visibleIds: List<Long>): Set<Long> = visibleIds.toSet()
 
+    fun toggleSelection(selectedIds: Set<Long>, id: Long): Set<Long> =
+        if (id in selectedIds) selectedIds - id else selectedIds + id
+
     fun lastReadPageNumber(lastPageRead: Long): Long =
         lastPageRead.coerceIn(0L, Int.MAX_VALUE.toLong() - 1L) + 1L
 }

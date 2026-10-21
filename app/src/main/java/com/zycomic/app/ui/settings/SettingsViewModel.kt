@@ -485,6 +485,7 @@ class SettingsViewModel {
         autoSelecting.value = true
         try {
             val reports = PlatformSpeedTestCoordinator.run(
+                isStartupRun = true,
                 onProgress = { l, i, v ->
                     lineDelays.value = l
                     imgDelays.value = i

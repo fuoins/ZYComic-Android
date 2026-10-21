@@ -312,9 +312,16 @@ object PicacgRepository {
         return result
     }
 
-    suspend fun favourites(page: Int, sort: String = "dd"): PicacgPage<Manga> {
+    suspend fun favourites(
+        page: Int,
+        sort: String = "dd",
+        expectedSessionRevision: Long? = null,
+    ): PicacgPage<Manga> {
         require(page >= 1 && sort in SORT_VALUES) { "Invalid Picacg favorites page/sort" }
-        val data = client().request("/users/favourite?page=$page&s=${encode(sort)}").data
+        val data = client().request(
+            "/users/favourite?page=$page&s=${encode(sort)}",
+            expectedSessionRevision = expectedSessionRevision,
+        ).data
         val paged = data.optJSONObject("comics") ?: data.optJSONObject("favourites") ?: data
         return comicList(paged, page)
     }

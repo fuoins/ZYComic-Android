@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.picacg
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -16,7 +17,16 @@ class PicacgBrowsePresentationContractTest {
         val initialMode = source.substringAfter("var mode by remember").substringBefore("var filter by remember")
         assertTrue(initialMode.contains("PicacgFeedMode.LEADERBOARD_24H"))
         assertFalse(initialMode.contains("PicacgFeedMode.LATEST"))
-        assertFalse(source.contains("LazyRow("))
+        assertEquals(1, Regex("LazyRow\\(").findAll(source).count())
+        val rankingRow = source.substringAfter("if (pageMode == PicacgBrowsePageMode.RANKING)").substringBefore("if (loading")
+        assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_24H"))
+        assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_7D"))
+        assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_30D"))
+        assertTrue(rankingRow.contains("PicacgFeedMode.RANDOM"))
+        assertTrue(rankingRow.contains("PicacgFeedMode.LATEST"))
+        assertTrue(rankingRow.contains("\"日榜\""))
+        assertTrue(rankingRow.contains("\"周榜\""))
+        assertTrue(rankingRow.contains("\"月榜\""))
         assertTrue(source.contains("val displayOnly = pageMode != PicacgBrowsePageMode.CATEGORY"))
     }
 

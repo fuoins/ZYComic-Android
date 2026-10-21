@@ -26,6 +26,9 @@ internal object SpeedTestUiTextPolicy {
     fun startupNoAddressToast(hasLineAddress: Boolean): String? =
         if (hasLineAddress) null else "启动自动选线未解析到线路地址，已保留当前线路"
 
+    fun shouldShowCompletionToast(isStartupRun: Boolean, status: String): Boolean =
+        status != "skipped" && (!isStartupRun || status !in setOf("tested", "reused"))
+
     fun imageSourceDescription(kind: ImageSourceDisplayPolicy.Kind, inSuccessfulList: Boolean): String = buildString {
         append(kind.label).append("：当前选择")
         if (!inSuccessfulList) append("（当前项不在测速成功列表中，不代表测速成功）")

@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.picacg.PicacgAuthStore
+import com.zycomic.app.picacg.PicacgLibraryCache
+import com.zycomic.app.picacg.PicacgLibraryCacheEntry
+import com.zycomic.app.picacg.PicacgLibraryCacheKey
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.CancellationException
@@ -82,12 +86,14 @@ fun PicacgLibraryScreen(
     val favouritesRevision by PicacgRepository.favouritesRevision.collectAsState()
     var comics by remember(session) { mutableStateOf<List<Manga>>(emptyList()) }
     var page by remember(session) { mutableIntStateOf(1) }
+    var loadedPage by remember(session) { mutableIntStateOf(0) }
     var hasMore by remember(session) { mutableStateOf(false) }
     var loading by remember(session) { mutableStateOf(false) }
     var error by remember(session) { mutableStateOf<String?>(null) }
     var query by remember(session) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
     var loadedFavouritesRevision by remember(session) { mutableLongStateOf(favouritesRevision) }
+    var loadGeneration by remember(session) { mutableLongStateOf(0L) }
     var sort by remember(session) {
         mutableStateOf(
             if (history) {
@@ -129,31 +135,72 @@ fun PicacgLibraryScreen(
     val scope = rememberCoroutineScope()
     val loadFailed = stringResource(KMR.strings.picacg_library_load_failed)
 
-    LaunchedEffect(session, loggedIn, page, refresh, history, favouritesRevision, sort, removingSelected) {
+    val cacheKey = PicacgLibraryCacheKey(
+        sessionRevision = session,
+        favouritesRevision = favouritesRevision,
+        sort = PicacgCollectionPolicy.normalizeSort(sort),
+        query = query?.trim()?.lowercase().orEmpty(),
+    )
+    val latestCacheKey by rememberUpdatedState(cacheKey)
+    val latestPage by rememberUpdatedState(page)
+    LaunchedEffect(session, loggedIn, page, refresh, history, favouritesRevision, sort, query, removingSelected) {
+        PicacgLibraryCache.activateSession(session, favouritesRevision, loggedIn)
         if (!loggedIn || history || removingSelected) return@LaunchedEffect
         if (loadedFavouritesRevision != favouritesRevision) {
             loadedFavouritesRevision = favouritesRevision
             comics = emptyList()
             hasMore = false
+            loadedPage = 0
             page = 1
             refresh++
             return@LaunchedEffect
         }
         val startedSession = session
+        val startedFavouritesRevision = favouritesRevision
+        val requestKey = cacheKey
         val requestedPage = page
+        if (requestedPage == 1) {
+            val snapshot = PicacgLibraryCache.get(requestKey)
+            if (snapshot != null) {
+                comics = snapshot.items
+                hasMore = snapshot.hasMore
+                loadedPage = snapshot.page
+            }
+        }
+        val requestGeneration = loadGeneration + 1L
+        loadGeneration = requestGeneration
         loading = true
         error = null
         try {
-            val result = PicacgRepository.favourites(page = requestedPage, sort = PicacgCollectionPolicy.normalizeSort(sort))
-            if (!PicacgCollectionPolicy.acceptsResult(startedSession, PicacgAuthStore.sessionRevision.value, PicacgAuthStore.loggedIn.value)) return@LaunchedEffect
-            comics = PicacgCollectionPolicy.merge(comics, result.items, firstPage = requestedPage == 1) { it.id }
+            val result = PicacgRepository.favourites(
+                page = requestedPage,
+                sort = requestKey.sort,
+                expectedSessionRevision = startedSession,
+            )
+            if (!PicacgCollectionPolicy.acceptsResult(startedSession, PicacgAuthStore.sessionRevision.value, PicacgAuthStore.loggedIn.value) ||
+                PicacgRepository.favouritesRevision.value != startedFavouritesRevision ||
+                loadGeneration != requestGeneration ||
+                latestCacheKey != requestKey || latestPage != requestedPage
+            ) {
+                return@LaunchedEffect
+            }
+            val nextComics = PicacgCollectionPolicy.merge(comics, result.items, firstPage = requestedPage == 1) { it.id }
+            comics = nextComics
             hasMore = result.hasMore
+            loadedPage = requestedPage
+            PicacgLibraryCache.put(requestKey, PicacgLibraryCacheEntry(nextComics, requestedPage, result.hasMore))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            if (PicacgAuthStore.sessionRevision.value == startedSession) error = failure.message ?: loadFailed
+            if (PicacgAuthStore.sessionRevision.value == startedSession &&
+                PicacgRepository.favouritesRevision.value == startedFavouritesRevision &&
+                loadGeneration == requestGeneration &&
+                latestCacheKey == requestKey && latestPage == requestedPage
+            ) {
+                error = failure.message ?: loadFailed
+            }
         } finally {
-            loading = false
+            if (loadGeneration == requestGeneration) loading = false
         }
     }
 
@@ -171,6 +218,7 @@ fun PicacgLibraryScreen(
                 preferences.edit().putString("picacg_favorites_sort", nextSort).apply()
                 comics = emptyList()
                 hasMore = false
+                loadedPage = 0
                 page = 1
                 refresh++
             }
@@ -193,7 +241,8 @@ fun PicacgLibraryScreen(
                 onChangeSearchQuery = { query = it },
                 titleContent = { Text(stringResource(if (history) KMR.strings.picacg_history_title else KMR.strings.picacg_library_title)) },
                 searchSupported = !history && loggedIn,
-                refreshSupported = !history && loggedIn && !loading,
+                refreshSupported = !history && loggedIn,
+                refreshBusy = loading || removingSelected,
                 filterSupported = !history && loggedIn,
                 onRefresh = {
                     page = 1
@@ -317,7 +366,7 @@ fun PicacgLibraryScreen(
                     Column {
                         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         if (hasMore) {
-                            TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) {
+                            TextButton(onClick = { if (error == null) page = loadedPage + 1 else refresh++ }, enabled = !loading) {
                                 Text(
                                     stringResource(
                                         if (loading) {
@@ -358,7 +407,7 @@ fun PicacgLibraryScreen(
                     Column {
                         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         if (hasMore) {
-                            TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) {
+                            TextButton(onClick = { if (error == null) page = loadedPage + 1 else refresh++ }, enabled = !loading) {
                                 Text(
                                     stringResource(
                                         if (loading) {

@@ -51,7 +51,7 @@ object PlatformSpeedTestCoordinator {
 
     /** Splash requests share one full test even while waiting behind the automatic startup run. */
     suspend fun retestAllEnabled(): List<PlatformSpeedTestReport> = fullTestRequest.run {
-        run(forceFresh = true)
+        run(forceFresh = true, isStartupRun = true)
     }
 
     internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
@@ -96,6 +96,7 @@ object PlatformSpeedTestCoordinator {
         remoteConfigUpdated: Boolean = false,
         onlyPlatform: ContentPlatform? = null,
         notifyCompletion: Boolean = true,
+        isStartupRun: Boolean = false,
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
     ): List<PlatformSpeedTestReport> = withContext(Dispatchers.IO) {
@@ -329,7 +330,11 @@ object PlatformSpeedTestCoordinator {
                     if (onlyPlatform == null) completedKey = key.takeIf { result.none { it.status == "incomplete" } }
                     checkedConfigurationVersion = version
                     persist(result)
-                    if (notifyCompletion) result.filter { it.platform in measuredPlatforms && it.status != "skipped" }.forEach { _completions.emit(it) }
+                    if (notifyCompletion) {
+                        result.filter {
+                            it.platform in measuredPlatforms && SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun, it.status)
+                        }.forEach { _completions.emit(it) }
+                    }
                     runCompleted = true
                     return@withLock result
                 }

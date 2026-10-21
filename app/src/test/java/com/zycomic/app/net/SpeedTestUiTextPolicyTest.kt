@@ -29,6 +29,17 @@ class SpeedTestUiTextPolicyTest {
     }
 
     @Test
+    fun `startup suppresses success and skipped completion toasts but shows failures and manual runs`() {
+        assertFalse(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = true, status = "tested"))
+        assertFalse(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = true, status = "reused"))
+        assertFalse(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = true, status = "skipped"))
+        assertTrue(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = true, status = "incomplete"))
+        assertTrue(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = true, status = "failed"))
+        assertTrue(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = false, status = "tested"))
+        assertFalse(SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun = false, status = "skipped"))
+    }
+
+    @Test
     fun `platform stage progress keeps real counters without endpoint identities`() {
         val line = SpeedTestUiTextPolicy.platformEndpointProgress(
             platform = "漫蛙",

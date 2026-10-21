@@ -149,7 +149,10 @@ class MainActivity : BaseActivity() {
                                 if (result.configurationUpdated) {
                                     com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
                                     try {
-                                        com.zycomic.app.net.PlatformSpeedTestCoordinator.run(remoteConfigUpdated = result.configurationUpdated)
+                                        com.zycomic.app.net.PlatformSpeedTestCoordinator.run(
+                                            remoteConfigUpdated = result.configurationUpdated,
+                                            isStartupRun = true,
+                                        )
                                     } finally {
                                         com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
                                     }

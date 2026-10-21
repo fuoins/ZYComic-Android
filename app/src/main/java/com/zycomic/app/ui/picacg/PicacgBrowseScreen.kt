@@ -204,6 +204,36 @@ fun PicacgBrowseScreen(
             Text(stringResource(KMR.strings.picacg_session_required))
             Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
         } else {
+            if (pageMode == PicacgBrowsePageMode.RANKING) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(
+                        items = listOf(
+                            PicacgFeedMode.LEADERBOARD_24H,
+                            PicacgFeedMode.LEADERBOARD_7D,
+                            PicacgFeedMode.LEADERBOARD_30D,
+                            PicacgFeedMode.RANDOM,
+                            PicacgFeedMode.LATEST,
+                        ),
+                        key = { it.name },
+                    ) { item ->
+                        val title = when (item) {
+                            PicacgFeedMode.LEADERBOARD_24H -> "日榜"
+                            PicacgFeedMode.LEADERBOARD_7D -> "周榜"
+                            PicacgFeedMode.LEADERBOARD_30D -> "月榜"
+                            PicacgFeedMode.RANDOM -> stringResource(KMR.strings.picacg_random)
+                            PicacgFeedMode.LATEST -> stringResource(KMR.strings.picacg_latest)
+                            else -> error("Unexpected Picacg ranking mode: $item")
+                        }
+                        com.zycomic.app.ui.browse.CompactBrowseFilterChip(
+                            selected = mode == item,
+                            onClick = {
+                                selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter)
+                            },
+                            label = { Text(title) },
+                        )
+                    }
+                }
+            }
             if (loading && mangas.isEmpty()) {
                 if (displayMode == 3) {
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {

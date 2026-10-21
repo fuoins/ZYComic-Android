@@ -6,14 +6,17 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
@@ -32,12 +35,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.reader.PicacgSource
-import eu.kanade.presentation.manga.components.MangaCover
-import eu.kanade.presentation.manga.components.MangaCover.Size
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -132,6 +137,10 @@ fun PicacgLocalHistoryScreen(
         selectedIds = emptySet()
     }
 
+    fun toggleSelection(id: Long) {
+        selectedIds = PicacgLocalHistoryPolicy.toggleSelection(selectedIds, id)
+    }
+
     BackHandler(enabled = selectionMode) { exitSelection() }
     BackHandler(enabled = searchQuery != null && !selectionMode) { searchQuery = null }
 
@@ -215,14 +224,14 @@ fun PicacgLocalHistoryScreen(
                             selectionMode = selectionMode,
                             onClick = {
                                 if (selectionMode) {
-                                    selectedIds = if (row.history.id in selectedIds) selectedIds - row.history.id else selectedIds + row.history.id
+                                    toggleSelection(row.history.id)
                                 } else {
                                     row.comicId?.let { onOpenManga("picacg:$it") }
                                 }
                             },
                             onLongClick = {
-                                if (!selectionMode) selectionMode = true
-                                selectedIds = selectedIds + row.history.id
+                                selectionMode = true
+                                toggleSelection(row.history.id)
                             },
                         )
                     }
@@ -321,11 +330,10 @@ private fun PicacgLocalHistoryItem(
                 onCheckedChange = { onClick() },
             )
         }
-        MangaCover.Book(
-            data = history.coverData,
+        PicacgLocalHistoryCover(
+            url = history.coverData.url,
             modifier = Modifier.width(68.dp),
             contentDescription = history.title,
-            size = Size.Medium,
         )
         Column(
             modifier = Modifier.weight(1f).padding(start = 12.dp),
@@ -361,10 +369,6 @@ private fun PicacgLocalHistoryItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val labels = row.categories.distinct().joinToString(" · ")
-            if (labels.isNotBlank()) {
-                Text(stringResource(KMR.strings.picacg_local_history_labels, labels), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
             history.readAt?.let {
                 Text(
                     text = readTime ?: dateFormat.format(it),
@@ -372,6 +376,32 @@ private fun PicacgLocalHistoryItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PicacgLocalHistoryCover(
+    url: String?,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = modifier
+            .aspectRatio(2f / 3f)
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        if (!url.isNullOrBlank()) {
+            SubcomposeAsyncImage(
+                model = url,
+                imageLoader = PicacgImageLoader.get(context),
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                error = { CoverError(Modifier.fillMaxSize()) },
+            )
         }
     }
 }

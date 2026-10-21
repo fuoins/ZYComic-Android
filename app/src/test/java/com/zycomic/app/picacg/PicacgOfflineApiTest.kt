@@ -159,6 +159,18 @@ class PicacgOfflineApiTest {
     }
 
     @Test
+    fun `favorites rejects a stale expected session before making any network request`() {
+        PicacgRepository.installClientForTests(client)
+        val staleSession = PicacgAuthStore.sessionRevision.value
+        PicacgAuthStore.clear()
+
+        assertThrows(IOException::class.java) {
+            runBlocking { PicacgRepository.favourites(1, expectedSessionRevision = staleSession) }
+        }
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
     fun `favorites maps records that identify comics with either id or underscore id`() = runBlocking {
         PicacgRepository.installClientForTests(client)
         responses += 200 to """{"code":200,"data":{"comics":{"docs":[{"_id":"wire-id","title":"Underscore"},{"id":"plain-id","title":"Plain"}],"pages":1}}}"""
@@ -166,6 +178,25 @@ class PicacgOfflineApiTest {
         val result = PicacgRepository.favourites(1)
 
         assertEquals(listOf("wire-id", "plain-id"), result.items.map { it.id })
+    }
+
+    @Test
+    fun `favorites and detail resolve the same API thumbnail through the same Picacg host`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        for (path in listOf("covers/same.jpg", "/static/covers/same.jpg")) {
+            val comic = """{"_id":"same-comic","title":"Same comic","thumb":{"path":"$path","fileServer":"https://api-image.example"}}"""
+            responses += 200 to """{"code":200,"data":{"comics":{"docs":[$comic],"pages":1}}}"""
+            responses += 200 to """{"code":200,"data":{"comic":$comic}}"""
+            responses += 200 to """{"code":200,"data":{"eps":{"docs":[],"pages":0}}}"""
+
+            val listed = PicacgRepository.favourites(1).items.single()
+            val detail = PicacgRepository.detail("same-comic")
+
+            assertEquals("same-comic", listed.id)
+            assertEquals(detail.id, listed.id)
+            assertEquals("https://img.example/static/covers/same.jpg", listed.picx)
+            assertEquals(detail.picx, listed.picx)
+        }
     }
 
     @Test

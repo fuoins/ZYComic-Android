@@ -3,6 +3,7 @@ package com.zycomic.app.ui.components
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Checklist
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -50,6 +52,7 @@ fun LibraryHistoryToolbar(
     scrollBehavior: TopAppBarScrollBehavior?,
     history: Boolean = false,
     selectionSupported: Boolean = true,
+    refreshBusy: Boolean = false,
 ) {
     val slotWidth = LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP.dp
     val platformSelectorWidth = LibraryHistoryToolbarPolicy.COMPACT_PLATFORM_SELECTOR_WIDTH_DP.dp
@@ -76,6 +79,8 @@ fun LibraryHistoryToolbar(
                         description = "刷新",
                         icon = Icons.Outlined.Refresh,
                         width = slotWidth,
+                        enabled = !refreshBusy,
+                        busy = refreshBusy,
                     )
                     LibraryHistoryToolbarPolicy.Action.FILTER -> ToolbarSlot(
                         onClick = onFilter.takeIf { filterSupported },
@@ -136,14 +141,20 @@ private fun ToolbarSlot(
     description: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     width: androidx.compose.ui.unit.Dp = 48.dp,
+    enabled: Boolean = true,
+    busy: Boolean = false,
 ) {
     Box(
         modifier = Modifier.width(width).height(48.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (onClick != null && icon != null) {
-            IconButton(onClick = onClick, modifier = Modifier.width(width)) {
-                Icon(imageVector = icon, contentDescription = description)
+            IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.width(width)) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(imageVector = icon, contentDescription = description)
+                }
             }
         }
     }
