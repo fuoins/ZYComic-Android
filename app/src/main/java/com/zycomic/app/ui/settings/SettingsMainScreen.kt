@@ -75,7 +75,6 @@ fun SettingsMainScreen(
     val topBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
     val restartMessage = stringResource(KMR.strings.startup_platform_restart_toast)
-    val picacgRestartMessage = stringResource(KMR.strings.zy_platform_picacg_restart_required)
     val keepOneMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
 
     fun updatePlatform(platform: ContentPlatform, enabled: Boolean) {
@@ -84,9 +83,9 @@ fun SettingsMainScreen(
             ContentPlatform.PICACG -> StartupPlatformPolicy.setSettingsPicacgEnabled(enabled)
             ContentPlatform.JM -> StartupPlatformPolicy.setSettingsJmEnabled(enabled)
         }
+        if (accepted && platform == ContentPlatform.PICACG && enabled) return
         val message = when {
             !accepted -> keepOneMessage
-            platform == ContentPlatform.PICACG -> picacgRestartMessage
             else -> restartMessage
         }
         Toast.makeText(context, message, if (accepted) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
@@ -131,12 +130,6 @@ fun SettingsMainScreen(
                     SettingsPlatformSwitch(stringResource(KMR.strings.startup_enable_picacg), !platformPolicy.disablePicacg, ContentPlatform.PICACG) {
                         updatePlatform(ContentPlatform.PICACG, it)
                     }
-                    Text(
-                        text = stringResource(KMR.strings.zy_platform_picacg_login_restart_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
                     SettingsPlatformSwitch(stringResource(KMR.strings.startup_enable_jm), !platformPolicy.disableJm, ContentPlatform.JM) {
                         updatePlatform(ContentPlatform.JM, it)
                     }

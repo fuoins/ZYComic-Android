@@ -5,6 +5,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -101,6 +102,18 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
                 if (revision != picacgRevision) {
                     picacgRevision = revision
                     if (provider.value == SearchProvider.PICACG) {
+                        clearSearchResults()
+                        if (PicacgAuthStore.loggedIn.value && keyword.value.isNotBlank()) doSearch()
+                    }
+                }
+            }
+        }
+        var observedBlockKeywords = PicacgBlockKeywordStore.keywords.value
+        scope.launch {
+            PicacgBlockKeywordStore.keywords.collect { keywords ->
+                if (keywords != observedBlockKeywords) {
+                    observedBlockKeywords = keywords
+                    if (provider.value == SearchProvider.PICACG && hasSearched) {
                         clearSearchResults()
                         if (PicacgAuthStore.loggedIn.value && keyword.value.isNotBlank()) doSearch()
                     }

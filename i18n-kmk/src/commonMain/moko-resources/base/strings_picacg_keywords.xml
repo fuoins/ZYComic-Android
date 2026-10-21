@@ -1,0 +1,22 @@
+<resources>
+    <string name="picacg_block_keyword_title">哔咔关键词屏蔽</string>
+    <string name="picacg_block_keyword_description">只在本机生效，使用标题、作者、标签和分类的普通子串匹配；不会影响收藏、详情或阅读历史。</string>
+    <string name="picacg_block_keyword_input">添加关键词（最多50字符）</string>
+    <string name="picacg_block_keyword_add">添加</string>
+    <string name="picacg_block_keyword_invalid">关键词不能为空且不能超过50个字符</string>
+    <string name="picacg_block_keyword_duplicate">该关键词已添加</string>
+    <string name="picacg_block_keyword_added">关键词已添加</string>
+    <string name="picacg_block_keyword_presets">预设组（快速添加全部词条）</string>
+    <string name="picacg_block_keyword_preset_bl">耽美/伪娘</string>
+    <string name="picacg_block_keyword_preset_ai">AI作画</string>
+    <string name="picacg_block_keyword_preset_ntr">NTR</string>
+    <string name="picacg_block_keyword_preset_heavy">重口</string>
+    <string name="picacg_block_keyword_preset_added">已新增 %1$d 个关键词</string>
+    <string name="picacg_block_keyword_preset_exists">这些关键词均已添加</string>
+    <string name="picacg_block_keyword_list">已添加关键词</string>
+    <string name="picacg_block_keyword_search">搜索已添加关键词</string>
+    <string name="picacg_block_keyword_empty">没有匹配的关键词</string>
+    <string name="picacg_block_keyword_delete">删除</string>
+    <string name="picacg_block_keyword_back">返回我的页面</string>
+    <string name="picacg_block_keyword_entry">关键词屏蔽</string>
+</resources>

@@ -3,6 +3,8 @@ package com.zycomic.app.picacg
 import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.net.PicacgRouteManager
+import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
+import com.zycomic.app.picacg.filter.PicacgKeywordFilter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +24,7 @@ object PicacgRepository {
 
     /** Application startup hook; can be invoked repeatedly. */
     fun init(context: Context) {
+        PicacgBlockKeywordStore.initialize(context)
         PicacgAuthStore.initialize(context)
         if (api == null) {
             synchronized(this) {
@@ -141,7 +144,7 @@ object PicacgRepository {
             addFilter("ct", chineseTeam)
             add("s=${encode(sort)}")
         }.joinToString("&")
-        return comicList(client().request("/comics?$query").data, page)
+        return comicList(client().request("/comics?$query").data, page, applyKeywordFilter = true)
     }
 
     suspend fun search(keyword: String, page: Int, sort: String = "ld", categories: List<String> = emptyList()): PicacgPage<Manga> {
@@ -152,16 +155,16 @@ object PicacgRepository {
             .put("sort", sort)
             .put("categories", JSONArray(categories))
         val data = client().request("/comics/advanced-search?page=$page", "POST", body).data
-        return comicList(data, page)
+        return comicList(data, page, applyKeywordFilter = true)
     }
 
     suspend fun leaderboard(timeframe: String = "H24"): List<Manga> {
         require(timeframe in LEADERBOARD_TIMEFRAMES) { "Unsupported Picacg leaderboard timeframe" }
         val data = client().request("/comics/leaderboard?tt=$timeframe&ct=VC").data
-        return data.comicArray("leaderboard")
+        return filterDiscovery(data.comicArray("leaderboard"))
     }
 
-    suspend fun random(): List<Manga> = client().request("/comics/random").data.comicArray("random")
+    suspend fun random(): List<Manga> = filterDiscovery(client().request("/comics/random").data.comicArray("random"))
 
     /** Returns the existing application Manga DTO, with chapter IDs and order from the confirmed API schema. */
     suspend fun detail(id: String): Manga {
@@ -204,8 +207,9 @@ object PicacgRepository {
         )
     }
 
-    suspend fun recommendations(id: String): List<Manga> = client()
-        .request("/comics/${encodePathSegment(id)}/recommendation").data.comicArray("recommendations")
+    suspend fun recommendations(id: String): List<Manga> = filterDiscovery(
+        client().request("/comics/${encodePathSegment(id)}/recommendation").data.comicArray("recommendations"),
+    )
 
     /** Toggle POST responses contain no action/state evidence; a same-session detail GET is authoritative. */
     suspend fun toggleFavourite(id: String): Boolean = toggleAndReadState(id, "favourite", "isFavourite", refreshFavourites = true)
@@ -366,14 +370,18 @@ object PicacgRepository {
         return loadProfile(requestSessionRevision)
     }
 
-    private fun comicList(data: JSONObject, page: Int = 1): PicacgPage<Manga> {
+    private fun comicList(data: JSONObject, page: Int = 1, applyKeywordFilter: Boolean = false): PicacgPage<Manga> {
         val container = data.optJSONObject("comics") ?: data.optJSONObject("favourite") ?: data
         val docs = container.optJSONArray("docs") ?: container.optJSONArray("comics")
             ?: throw IOException("Picacg comic list response has no docs array")
         val items = docs.objects().map { it.toMap().toPicacgManga().withResolvedCover(it.optJSONObject("thumb")) }
         val pages = pageCount(container, "comic list")
-        return PicacgPage(items, page < pages, page)
+        return PicacgPage(if (applyKeywordFilter) filterDiscovery(items) else items, page < pages, page)
     }
+
+    /** Applies the current local policy at call time; pagination metadata deliberately remains server-derived. */
+    private fun filterDiscovery(items: List<Manga>): List<Manga> =
+        PicacgKeywordFilter.filterManga(items, PicacgBlockKeywordStore.keywords.value)
 
     private suspend fun loadComicJson(id: String, expectedSessionRevision: Long? = null): JSONObject {
         require(id.isNotBlank() && !id.contains('/') && !id.contains('?')) { "Invalid Picacg comic id" }

@@ -64,6 +64,15 @@ fun PicacgLibraryScreen(
     onOpenManga: (String) -> Unit,
     onSelectPlatform: (ContentPlatform) -> Unit,
 ) {
+    if (history) {
+        PicacgLocalHistoryScreen(
+            onOpenManga = onOpenManga,
+            onSelectPlatform = onSelectPlatform,
+            modifier = Modifier.fillMaxSize(),
+        )
+        return
+    }
+
     val context = LocalContext.current
     val preferences = remember(context) {
         context.getSharedPreferences("picacg_collection_ui", android.content.Context.MODE_PRIVATE)
@@ -259,7 +268,6 @@ fun PicacgLibraryScreen(
         },
     ) { contentPadding ->
         when {
-            history -> PicacgLocalHistoryScreen(onOpenManga = onOpenManga, modifier = Modifier.padding(contentPadding))
             PicacgCollectionPolicy.requiresLogin(history, loggedIn) -> Column(
                 modifier = Modifier.fillMaxSize().padding(contentPadding).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,

@@ -25,6 +25,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
 import com.zycomic.app.ui.components.PicacgCollectionPolicy
 import kotlinx.coroutines.CancellationException
 import tachiyomi.i18n.kmk.KMR
@@ -34,13 +35,14 @@ import tachiyomi.presentation.core.i18n.stringResource
 internal fun PicacgFilteredComicsDialog(filter: PicacgBrowseFilter, onOpen: (String) -> Unit, onClose: () -> Unit) {
     val session by PicacgAuthStore.sessionRevision.collectAsState()
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
-    var comics by remember(session, filter) { mutableStateOf<List<Manga>>(emptyList()) }
-    var page by remember(session, filter) { mutableStateOf(1) }
-    var more by remember(session, filter) { mutableStateOf(false) }
-    var loading by remember(session, filter) { mutableStateOf(false) }
-    var error by remember(session, filter) { mutableStateOf<String?>(null) }
+    val blockKeywords by PicacgBlockKeywordStore.keywords.collectAsState()
+    var comics by remember(session, filter, blockKeywords) { mutableStateOf<List<Manga>>(emptyList()) }
+    var page by remember(session, filter, blockKeywords) { mutableStateOf(1) }
+    var more by remember(session, filter, blockKeywords) { mutableStateOf(false) }
+    var loading by remember(session, filter, blockKeywords) { mutableStateOf(false) }
+    var error by remember(session, filter, blockKeywords) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
-    LaunchedEffect(session, loggedIn, filter, page, refresh) {
+    LaunchedEffect(session, loggedIn, filter, page, refresh, blockKeywords) {
         if (!loggedIn) return@LaunchedEffect
         loading = true
         error = null

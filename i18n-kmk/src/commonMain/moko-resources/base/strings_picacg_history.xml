@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="picacg_local_history_search_empty">没有匹配的本地阅读记录</string>
+    <string name="picacg_local_history_delete_selected">删除所选（%1$d）</string>
+    <string name="picacg_local_history_delete_title">删除本地阅读历史？</string>
+    <string name="picacg_local_history_delete_message">将从历史列表中移除所选的 %1$d 本漫画记录；不会删除收藏、漫画、章节或续读页码。</string>
+    <string name="picacg_local_history_delete_action">删除</string>
+    <string name="picacg_local_history_cancel">取消</string>
+    <string name="picacg_local_history_author">作者：%1$s</string>
+    <string name="picacg_local_history_progress">已读 %1$d / %2$d 话（%3$d%%）</string>
+    <string name="picacg_local_history_labels">分类 / 标签：%1$s</string>
+</resources>

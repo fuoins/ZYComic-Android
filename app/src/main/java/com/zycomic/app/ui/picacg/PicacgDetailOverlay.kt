@@ -33,6 +33,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgComicState
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
 import com.zycomic.app.reader.PicacgSource
 import com.zycomic.app.reader.ReaderLauncher
 import com.zycomic.app.ui.components.PicacgImageLoader
@@ -53,10 +54,11 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
     val context = LocalContext.current
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val session by PicacgAuthStore.sessionRevision.collectAsState()
+    val blockKeywords by PicacgBlockKeywordStore.keywords.collectAsState()
     var selectedId by remember(bookId) { mutableStateOf(bookId.removePrefix("picacg:")) }
     var manga by remember(selectedId, session) { mutableStateOf<Manga?>(null) }
     var state by remember(selectedId, session) { mutableStateOf<PicacgComicState?>(null) }
-    var related by remember(selectedId, session) { mutableStateOf<List<Manga>>(emptyList()) }
+    var related by remember(selectedId, session, blockKeywords) { mutableStateOf<List<Manga>>(emptyList()) }
     var relatedError by remember(selectedId, session) { mutableStateOf<String?>(null) }
     var error by remember(selectedId, session) { mutableStateOf<String?>(null) }
     var busy by remember(selectedId, session) { mutableStateOf(false) }
@@ -86,7 +88,7 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
         }
     }
     // Recommendations may fail independently: they must never block chapters or reading.
-    LaunchedEffect(selectedId, session, loggedIn, refresh) {
+    LaunchedEffect(selectedId, session, loggedIn, refresh, blockKeywords) {
         if (!loggedIn || selectedId.isBlank()) return@LaunchedEffect
         relatedError = null
         try {

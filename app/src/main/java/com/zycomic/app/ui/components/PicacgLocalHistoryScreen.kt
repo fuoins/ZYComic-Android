@@ -1,6 +1,10 @@
 package com.zycomic.app.ui.components
 
-import androidx.compose.foundation.clickable
+import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,14 +14,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.reader.PicacgSource
@@ -25,111 +40,337 @@ import eu.kanade.presentation.manga.components.MangaCover
 import eu.kanade.presentation.manga.components.MangaCover.Size
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import tachiyomi.domain.chapter.interactor.GetChapter
 import tachiyomi.domain.history.interactor.GetHistory
+import tachiyomi.domain.history.interactor.RemoveHistory
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
+import tachiyomi.presentation.core.util.selectedBackground
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.DateFormat
 
 /**
- * Displays only reader history persisted for Picacg's source ID. This intentionally uses the
- * shared local history interactor, not Picacg's online account or any cloud-history endpoint.
+ * Shows Picacg reader history from the shared on-device history database only. Search, refresh,
+ * and deletion operate on that local data; no Picacg history/account endpoint is called here.
  */
 @Composable
 fun PicacgLocalHistoryScreen(
     onOpenManga: (String) -> Unit,
+    onSelectPlatform: (com.zycomic.app.platform.ContentPlatform) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val getHistory = remember { Injekt.get<GetHistory>() }
     val getManga = remember { Injekt.get<GetManga>() }
-    val historyFlow = remember(getHistory, getManga) {
+    val getChapter = remember { Injekt.get<GetChapter>() }
+    val removeHistory = remember { Injekt.get<RemoveHistory>() }
+    var searchQuery by remember { mutableStateOf<String?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val historyFlow = remember(getHistory, getManga, getChapter, refreshKey) {
         getHistory.subscribe(
             query = "",
             unfinishedManga = null,
             unfinishedChapter = null,
             nonLibraryEntries = null,
-        ).map<List<HistoryWithRelations>, List<Pair<HistoryWithRelations, String>>?> { entries ->
+        ).map { entries ->
             withContext(Dispatchers.IO) {
-                PicacgLocalHistoryPolicy.onlyPicacg(entries, PicacgSource.id).mapNotNull { entry ->
-                    val manga = getManga.await(entry.mangaId) ?: return@mapNotNull null
-                    val comicId = PicacgLocalHistoryPolicy.comicId(manga.url, manga.source, PicacgSource.id) ?: return@mapNotNull null
-                    entry to comicId
+                PicacgLocalHistoryPolicy.newestFirst(
+                    PicacgLocalHistoryPolicy.onlyPicacg(entries, PicacgSource.id),
+                ).map { history ->
+                    val manga = getManga.await(history.mangaId)
+                    val comicId = manga?.let {
+                        PicacgLocalHistoryPolicy.comicId(it.url, it.source, PicacgSource.id)
+                    }
+                    val chapter = getChapter.await(history.chapterId)
+                    PicacgLocalHistoryRow(
+                        history = history,
+                        comicId = comicId,
+                        author = manga?.author.orEmpty(),
+                        categories = manga?.genre.orEmpty(),
+                        tags = manga?.genre.orEmpty(),
+                        chapterTitle = chapter?.name.orEmpty(),
+                    )
                 }
             }
         }
     }
-    val picacgHistory by historyFlow.collectAsState(initial = null)
-
-    when {
-        picacgHistory == null -> LoadingScreen(modifier = modifier)
-        picacgHistory?.isEmpty() == true -> EmptyScreen(
-            message = stringResource(KMR.strings.picacg_local_history_empty),
-            modifier = modifier,
+    val allRows by historyFlow.collectAsState(initial = null)
+    val rows = allRows.orEmpty().filter { row ->
+        PicacgLocalHistoryPolicy.matchesSearch(
+            query = searchQuery.orEmpty(),
+            title = row.history.title,
+            author = row.author,
+            categories = row.categories,
+            tags = row.tags,
         )
-        else -> {
-            val dateTimeFormat = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
-            LazyColumn(modifier = modifier.fillMaxSize()) {
-                items(picacgHistory.orEmpty(), key = { it.first.id }) { (history, comicId) ->
-                    val chapterLabel = history.chapterNumber.takeIf { it > 0 }?.let { number ->
-                        val formattedNumber = if (number % 1.0 == 0.0) number.toLong().toString() else number.toString()
-                        stringResource(KMR.strings.picacg_local_history_chapter, formattedNumber)
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenManga("picacg:$comicId") }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+    }
+    val visibleIds = rows.map { it.history.id }.toSet()
+
+    LaunchedEffect(refreshKey, allRows) {
+        if (refreshKey > 0 && allRows != null) isRefreshing = false
+    }
+    LaunchedEffect(visibleIds, selectedIds) {
+        selectedIds = selectedIds.intersect(visibleIds)
+    }
+
+    fun exitSelection() {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+
+    BackHandler(enabled = selectionMode) { exitSelection() }
+    BackHandler(enabled = searchQuery != null && !selectionMode) { searchQuery = null }
+
+    Scaffold(
+        modifier = modifier,
+        topBar = { scrollBehavior ->
+            LibraryHistoryToolbar(
+                platform = com.zycomic.app.platform.ContentPlatform.PICACG,
+                onSelectPlatform = onSelectPlatform,
+                searchQuery = searchQuery,
+                onChangeSearchQuery = { searchQuery = it },
+                titleContent = { Text(stringResource(KMR.strings.picacg_history_title)) },
+                searchSupported = true,
+                refreshSupported = !isRefreshing && !deleting,
+                filterSupported = false,
+                onRefresh = {
+                    isRefreshing = true
+                    refreshKey++
+                },
+                onFilter = {},
+                onEnterSelection = { if (rows.isNotEmpty()) selectionMode = true },
+                selectionMode = selectionMode,
+                selectionCount = selectedIds.size,
+                onExitSelection = ::exitSelection,
+                onSelectAll = { selectedIds = PicacgLocalHistoryPolicy.allVisibleIds(rows.map { it.history.id }) },
+                onInvertSelection = {
+                    selectedIds = visibleIds - selectedIds
+                },
+                scrollBehavior = scrollBehavior,
+                history = true,
+                selectionSupported = rows.isNotEmpty(),
+            )
+        },
+        bottomBar = {
+            if (selectionMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    TextButton(
+                        enabled = selectedIds.isNotEmpty() && !deleting,
+                        onClick = { showDeleteConfirmation = true },
                     ) {
-                        MangaCover.Book(
-                            data = history.coverData,
-                            modifier = Modifier.width(68.dp),
-                            contentDescription = history.title,
-                            size = Size.Medium,
+                        Text(
+                            text = stringResource(KMR.strings.picacg_local_history_delete_selected, selectedIds.size),
+                            color = MaterialTheme.colorScheme.error,
                         )
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = history.title,
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            chapterLabel?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Text(
-                                text = stringResource(
-                                    KMR.strings.picacg_local_history_last_page,
-                                    PicacgLocalHistoryPolicy.lastReadPageNumber(history.lastPageRead).toInt(),
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            history.readAt?.let { readAt ->
-                                Text(
-                                    text = dateTimeFormat.format(readAt),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
                     }
                 }
+            }
+        },
+    ) { contentPadding ->
+        when {
+            allRows == null -> LoadingScreen(modifier = Modifier.padding(contentPadding))
+            rows.isEmpty() -> EmptyScreen(
+                message = stringResource(
+                    if (searchQuery.isNullOrBlank()) {
+                        KMR.strings.picacg_local_history_empty
+                    } else {
+                        KMR.strings.picacg_local_history_search_empty
+                    },
+                ),
+                modifier = Modifier.padding(contentPadding),
+            )
+            else -> PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    refreshKey++
+                },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = contentPadding,
+                ) {
+                    items(rows, key = { it.history.id }) { row ->
+                        PicacgLocalHistoryItem(
+                            row = row,
+                            selected = row.history.id in selectedIds,
+                            selectionMode = selectionMode,
+                            onClick = {
+                                if (selectionMode) {
+                                    selectedIds = if (row.history.id in selectedIds) selectedIds - row.history.id else selectedIds + row.history.id
+                                } else {
+                                    row.comicId?.let { onOpenManga("picacg:$it") }
+                                }
+                            },
+                            onLongClick = {
+                                if (!selectionMode) selectionMode = true
+                                selectedIds = selectedIds + row.history.id
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { if (!deleting) showDeleteConfirmation = false },
+            title = { Text(stringResource(KMR.strings.picacg_local_history_delete_title)) },
+            text = { Text(stringResource(KMR.strings.picacg_local_history_delete_message, selectedIds.size)) },
+            confirmButton = {
+                TextButton(
+                    enabled = !deleting,
+                    onClick = {
+                        // One visible row represents a manga, not every historical chapter.
+                        // Reset all its history timestamps without touching chapter read/page state.
+                        val mangaIdsToRemove = rows.filter { it.history.id in selectedIds }
+                            .map { it.history.mangaId }.distinct()
+                        deleting = true
+                        scope.launch {
+                            try {
+                                removeHistory.awaitManga(mangaIdsToRemove)
+                                selectedIds = emptySet()
+                                selectionMode = false
+                            } finally {
+                                deleting = false
+                                showDeleteConfirmation = false
+                                refreshKey++
+                            }
+                        }
+                    },
+                ) { Text(stringResource(KMR.strings.picacg_local_history_delete_action), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }, enabled = !deleting) { Text(stringResource(KMR.strings.picacg_local_history_cancel)) }
+            },
+        )
+    }
+}
+
+private data class PicacgLocalHistoryRow(
+    val history: HistoryWithRelations,
+    val comicId: String?,
+    val author: String,
+    val categories: List<String>,
+    val tags: List<String>,
+    val chapterTitle: String,
+)
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PicacgLocalHistoryItem(
+    row: PicacgLocalHistoryRow,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val history = row.history
+    val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
+    val readTime = history.readAt?.let { readAt ->
+        DateUtils.getRelativeTimeSpanString(
+            readAt.time,
+            System.currentTimeMillis(),
+            DateUtils.MINUTE_IN_MILLIS,
+            DateUtils.FORMAT_ABBREV_RELATIVE,
+        ).toString()
+    }
+    val chapter = row.chapterTitle.takeIf { it.isNotBlank() }
+        ?: history.chapterNumber.takeIf { it > 0 }?.let { number ->
+            val value = if (number % 1.0 == 0.0) number.toLong().toString() else number.toString()
+            stringResource(KMR.strings.picacg_local_history_chapter, value)
+        }
+    val totalChapters = history.totalCountCalculated.coerceAtLeast(0)
+    val readChapters = history.readCountCalculated.coerceIn(0, totalChapters)
+    val progress = if (totalChapters > 0) readChapters.toFloat() / totalChapters else 0f
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectedBackground(selected)
+            .combinedClickable(
+                enabled = true,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selectionMode) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onClick() },
+            )
+        }
+        MangaCover.Book(
+            data = history.coverData,
+            modifier = Modifier.width(68.dp),
+            contentDescription = history.title,
+            size = Size.Medium,
+        )
+        Column(
+            modifier = Modifier.weight(1f).padding(start = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = history.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (row.author.isNotBlank()) {
+                Text(stringResource(KMR.strings.picacg_local_history_author, row.author), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            chapter?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            val pageNumber = PicacgLocalHistoryPolicy.lastReadPageNumber(history.lastPageRead)
+            Text(
+                text = stringResource(KMR.strings.picacg_local_history_last_page, pageNumber.toInt()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (totalChapters > 0) {
+                LinearProgressIndicator(
+                    { progress },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = stringResource(KMR.strings.picacg_local_history_progress, readChapters, totalChapters, (progress * 100).toInt()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            val labels = row.categories.distinct().joinToString(" · ")
+            if (labels.isNotBlank()) {
+                Text(stringResource(KMR.strings.picacg_local_history_labels, labels), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            history.readAt?.let {
+                Text(
+                    text = readTime ?: dateFormat.format(it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

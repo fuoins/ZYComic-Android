@@ -2,8 +2,11 @@ package com.zycomic.app.ui.picacg
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.EventRepeat
@@ -11,6 +14,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.picacg.AndroidPicacgAutoPunchBooleanStore
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgAutoPunchCoordinator
@@ -50,6 +56,7 @@ fun PicacgAccountProfileContent(
     var error by remember(session) { mutableStateOf<String?>(null) }
     var message by remember(session) { mutableStateOf<String?>(null) }
     var busy by remember(session) { mutableStateOf(false) }
+    var showBlockKeywordScreen by remember { mutableStateOf(false) }
     val autoPunchPreference = remember(context) {
         StoredPicacgAutoPunchPreference(AndroidPicacgAutoPunchBooleanStore(context))
     }
@@ -105,6 +112,17 @@ fun PicacgAccountProfileContent(
             if (session == PicacgAuthStore.sessionRevision.value && PicacgAuthStore.loggedIn.value) error = failure.message
         } finally {
             busy = false
+        }
+    }
+
+    if (showBlockKeywordScreen) {
+        Dialog(
+            onDismissRequest = { showBlockKeywordScreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                PicacgBlockKeywordScreen(onBack = { showBlockKeywordScreen = false })
+            }
         }
     }
 
@@ -176,5 +194,10 @@ fun PicacgAccountProfileContent(
                 onPreferenceClick = { if (!busy) PicacgRepository.logout() },
             )
         }
+        TextPreferenceWidget(
+            title = stringResource(KMR.strings.picacg_block_keyword_entry),
+            icon = Icons.Outlined.Info,
+            onPreferenceClick = { showBlockKeywordScreen = true },
+        )
     }
 }

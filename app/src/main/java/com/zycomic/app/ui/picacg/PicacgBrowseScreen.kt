@@ -50,6 +50,7 @@ import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
 import com.zycomic.app.ui.components.PicacgCollectionPolicy
@@ -105,6 +106,7 @@ fun PicacgBrowseScreen(
     val effectiveGridColumns = (gridColumns.takeIf { it > 0 } ?: 3).coerceIn(1, 10)
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val session by PicacgAuthStore.sessionRevision.collectAsState()
+    val blockKeywords by PicacgBlockKeywordStore.keywords.collectAsState()
     val presets = remember { mutableStateOf(PicacgBrowsePrefs.load(context)) }
     var mode by remember(session, tabId, initialFilter, pageMode) {
         mutableStateOf(
@@ -118,11 +120,12 @@ fun PicacgBrowseScreen(
         )
     }
     var filter by remember(session, tabId, initialFilter) { mutableStateOf(initialFilter?.normalized() ?: PicacgBrowseFilter()) }
-    var page by remember(session, tabId, initialFilter) { mutableStateOf(1) }
-    var mangas by remember(session, tabId, initialFilter) { mutableStateOf<List<Manga>>(emptyList()) }
-    var hasMore by remember(session, tabId, initialFilter) { mutableStateOf(false) }
-    var loading by remember(session, tabId, initialFilter) { mutableStateOf(false) }
-    var error by remember(session, tabId, initialFilter) { mutableStateOf<String?>(null) }
+    // Reload from page one so removing a rule can restore items previously filtered at the facade.
+    var page by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(1) }
+    var mangas by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf<List<Manga>>(emptyList()) }
+    var hasMore by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(false) }
+    var loading by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(false) }
+    var error by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
     var showFilters by remember { mutableStateOf(false) }
     var showPresets by remember { mutableStateOf(false) }
@@ -149,7 +152,7 @@ fun PicacgBrowseScreen(
         }
     }
 
-    LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode) {
+    LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords) {
         if (!loggedIn) return@LaunchedEffect
         loading = true
         error = null
@@ -211,12 +214,6 @@ fun PicacgBrowseScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (pageMode == PicacgBrowsePageMode.HOME) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { showFilters = true }) { Text(stringResource(KMR.strings.picacg_filter)) }
-                TextButton(onClick = { showPresets = true }) { Text(stringResource(KMR.strings.picacg_presets)) }
-            }
-        }
         if (!loggedIn) {
             Text(stringResource(KMR.strings.picacg_session_required))
             Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
