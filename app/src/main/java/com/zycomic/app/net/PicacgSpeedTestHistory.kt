@@ -15,7 +15,7 @@ internal object PicacgSpeedTestHistoryPolicy {
     const val API_PHASE = "api"
     const val IMAGE_PHASE = "image"
     const val API_ROUTE_CONDITION = "pinned-ip;configured-route-rules-or-system-dns;https;GET-root;redirects-disabled;non-redirect-http-response"
-    const val IMAGE_ROUTE_CONDITION = "pinned-ip;configured-route-rules-or-system-dns;https;GET-real-sample;redirects-disabled;200-image-decodes"
+    const val IMAGE_ROUTE_CONDITION = "pinned-ip;configured-route-rules-or-system-dns;https;GET-imgproxy-tile;redirects-disabled;200-image-magic"
 
     data class Identity(
         val platform: String,
@@ -201,12 +201,21 @@ internal object PicacgSpeedTestHistoryStorage {
             return false
         }
         val uri = runCatching { URI(identity.url) }.getOrNull() ?: return false
-        if (uri.scheme !in setOf("http", "https") || !uri.host.equals(identity.domain, ignoreCase = true)) return false
+        if (uri.scheme !in setOf("http", "https")) return false
+        // Image probes are served by the img.{root} mirror, which is the same-root anycast mirror of the
+        // recorded storage-b.{root} source; both hosts are acceptable for an image identity.
+        val hostMatches = if (expectedPhase == PicacgSpeedTestHistoryPolicy.IMAGE_PHASE) {
+            uri.host.equals(identity.domain, ignoreCase = true) ||
+                uri.host.equals(PicacgBuiltinNetwork.coverHostFor(identity.domain), ignoreCase = true)
+        } else {
+            uri.host.equals(identity.domain, ignoreCase = true)
+        }
+        if (!hostMatches) return false
         return when (expectedPhase) {
             PicacgSpeedTestHistoryPolicy.API_PHASE -> hasRouteSource(identity.routeCondition, PicacgSpeedTestHistoryPolicy.API_ROUTE_CONDITION) &&
                 identity.probeCondition == "GET-root;redirects-disabled;accept-non-redirect-http-status"
             PicacgSpeedTestHistoryPolicy.IMAGE_PHASE -> hasRouteSource(identity.routeCondition, PicacgSpeedTestHistoryPolicy.IMAGE_ROUTE_CONDITION) &&
-                identity.probeCondition == "GET-full-real-sample;status-200;image-content-type;bitmap-decodes"
+                identity.probeCondition == "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic"
             else -> false
         }
     }

@@ -98,14 +98,21 @@ class PicacgNetworkGenerationTest {
     }
 
     @Test
-    fun onlyStorageRolesCanBeSelectedAndRawImagePathIsUnchanged() {
+    fun onlyStorageRolesCanBeSelectedAndCoversRouteToImgproxyMirror() {
         assertFalse(PicacgRouteManager.selectImageHost("img.safedataplj.com"))
-        assertFalse(PicacgRouteManager.selectImageHost("storage-b.safedataplj.com"))
+        assertTrue(PicacgRouteManager.selectImageHost("storage-b.safedataplj.com"))
         assertTrue(PicacgRouteManager.selectImageHost("storage-b.go2778.com"))
+        // Cover thumbnails bypass storage-b's cross-domain 301 and go straight to the img mirror, prefix removed.
         assertEquals(
-            "https://storage-b.go2778.com/static/tobeimg/a%2Fb.jpg?x=%2F",
+            "https://img.go2778.com/a%2Fb.jpg?x=%2F",
             PicacgRouteManager.rewriteImageUrl("https://storage-b.picacomic.com/static/tobeimg/a%2Fb.jpg?x=%2F"),
         )
+        // Content pages keep the selected storage bucket and their raw path.
+        assertEquals(
+            "https://storage-b.go2778.com/static/tobs/sub_storage_1/x.jpg",
+            PicacgRouteManager.rewriteImageUrl("https://storage-b.picacomic.com/static/tobs/sub_storage_1/x.jpg"),
+        )
+        // Already an imgproxy URL and out-of-pool avatars are left untouched.
         val redirect = "https://img.safedataplj.com/signature/rs:fill:300:400/image.jpg"
         assertEquals(redirect, PicacgRouteManager.rewriteImageUrl(redirect))
         val avatar = "https://storage1.picacomic.com/static/avatar.jpg"

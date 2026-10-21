@@ -1,6 +1,5 @@
 package com.zycomic.app.net
 
-import android.graphics.BitmapFactory
 import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -13,6 +12,7 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -206,35 +206,32 @@ object PicacgSpeedTester {
                 }
 
                 var blockedReason: String? = null
-                val actualSampleUrl = PicacgRouteManager.verifiedImageSampleUrl
+                // Sources are ranked with a fixed, auth-free imgproxy cover tile (same root/IP as the
+                // storage bucket), so a cold or unauthenticated start can still measure them.
                 val imageTargets = timings.start(SpeedTestTimings.Phase.PICACG_IMAGE_PREPARATION).use {
                     publishProgress(Progress(Stage.PREPARING_IMAGES, total = PicacgRouteManager.imageHosts.size))
                     when {
                         cachedImages.isNotEmpty() || imageQuick -> emptyList()
-                        actualSampleUrl == null -> {
-                            blockedReason = "没有来自真实 Picacg 封面/章节图片 API 响应的样本 URL；图源验证未运行（不可仅探测根路径或伪造成功）"
+                        PicacgRouteManager.imageHosts.isEmpty() -> {
+                            blockedReason = "哔咔未配置任何正文图源（storage-b）；图源验证未运行"
                             emptyList()
                         }
-                        else -> {
-                            val sample = runCatching { URI(actualSampleUrl) }.getOrNull()
-                            if (sample?.host == null || PicacgRouteManager.imageHosts.none { it.equals(sample.host, true) }) {
-                                blockedReason = "实际图片样本不属于当前配置图源池；图源验证未运行"
+                        else -> PicacgRouteManager.imageHosts.flatMap { contentHost ->
+                            val coverHost = PicacgBuiltinNetwork.coverHostFor(contentHost)
+                            if (coverHost == null) {
                                 emptyList()
                             } else {
-                                PicacgRouteManager.imageHosts.flatMap { imageHost ->
-                                    val candidateUrl = replaceHost(actualSampleUrl, imageHost)
-                                    resolve(imageHost).map { ip ->
-                                        val endpoint = DomainIp(imageHost, ip)
-                                        ImageTarget(candidateUrl, endpoint, imageIdentity(candidateUrl, endpoint))
-                                    }
+                                val tileUrl = PicacgBuiltinNetwork.speedTileUrl(coverHost)
+                                resolve(contentHost).map { ip ->
+                                    val endpoint = DomainIp(contentHost, ip)
+                                    ImageTarget(tileUrl, endpoint, imageIdentity(endpoint))
                                 }
                             }
                         }
                     }
                 }
                 if (blockedReason != null) publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
-                val canReconcileImages = imageReconcile &&
-                    ((actualSampleUrl != null && blockedReason == null) || PicacgRouteManager.imageHosts.isEmpty())
+                val canReconcileImages = imageReconcile && PicacgRouteManager.imageHosts.isNotEmpty()
                 val targetsToProbeImages = when {
                     cachedImages.isNotEmpty() -> emptyList()
                     imageQuick -> imageQuickSelection.map { it.toImageTarget() }
@@ -297,7 +294,7 @@ object PicacgSpeedTester {
                     }
                 }
                 if (imageTargets.isEmpty() && imageResults.isEmpty() && blockedReason == null) {
-                    blockedReason = "真实图片样本可用，但当前哔咔图源没有可探测的 IP；图源验证未完成"
+                    blockedReason = "哔咔图源没有可探测的 IP；图源验证未完成"
                     publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
                 }
 
@@ -350,8 +347,8 @@ object PicacgSpeedTester {
                             imageCanUseHistory -> PicacgSpeedTestHistoryPolicy.mergeFull(storedImages, freshImageHistory)
                             else -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshImageHistory)
                         }
-                        // Missing or invalid real sample never creates an image success. forceFresh intentionally clears stale image rows.
-                        if (forceFresh || canReconcileImages || (actualSampleUrl != null && blockedReason == null) || imageTargets.isNotEmpty()) {
+                        // forceFresh intentionally clears stale image rows; a configured pool records this round.
+                        if (forceFresh || canReconcileImages || PicacgRouteManager.imageHosts.isNotEmpty()) {
                             PicacgSpeedTestHistoryStorage.saveImages(imageHistory)
                         }
                     }
@@ -392,15 +389,20 @@ object PicacgSpeedTester {
         probeCondition = "GET-root;redirects-disabled;accept-non-redirect-http-status",
     )
 
-    private fun imageIdentity(url: String, endpoint: DomainIp) = PicacgSpeedTestHistoryPolicy.Identity(
-        platform = PicacgSpeedTestHistoryPolicy.PLATFORM,
-        phase = PicacgSpeedTestHistoryPolicy.IMAGE_PHASE,
-        url = url,
-        domain = endpoint.domain,
-        ip = endpoint.ip,
-        routeCondition = routeCondition(PicacgSpeedTestHistoryPolicy.IMAGE_ROUTE_CONDITION, endpoint),
-        probeCondition = "GET-full-real-sample;status-200;image-content-type;bitmap-decodes",
-    )
+    private fun imageIdentity(endpoint: DomainIp): PicacgSpeedTestHistoryPolicy.Identity {
+        val tileUrl = PicacgBuiltinNetwork.coverHostFor(endpoint.domain)
+            ?.let(PicacgBuiltinNetwork::speedTileUrl)
+            .orEmpty()
+        return PicacgSpeedTestHistoryPolicy.Identity(
+            platform = PicacgSpeedTestHistoryPolicy.PLATFORM,
+            phase = PicacgSpeedTestHistoryPolicy.IMAGE_PHASE,
+            url = tileUrl,
+            domain = endpoint.domain,
+            ip = endpoint.ip,
+            routeCondition = routeCondition(PicacgSpeedTestHistoryPolicy.IMAGE_ROUTE_CONDITION, endpoint),
+            probeCondition = "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic",
+        )
+    }
 
     private fun PicacgSpeedTestHistoryPolicy.Measurement.toProbe() = Probe(
         endpoint = endpoint,
@@ -478,13 +480,25 @@ object PicacgSpeedTester {
         val start = System.nanoTime()
         var code: Int? = null
         var contentType: String? = null
-        var decoded: Boolean? = false
+        var validImage: Boolean? = false
         val success = runCatching {
-            // Follow the actual storage-b -> safedataplj chain; never turn redirect targets into selectable origins.
-            val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint).newBuilder()
-                .followRedirects(true)
-                .followSslRedirects(false)
-                .build()
+            // Main test hits the fixed auth-free tile on the img.{root} mirror; pin both the bucket and
+            // its mirror to the measured IP and never follow redirects so only that concrete IP is timed.
+            // The diagnostic caller supplies a client pinned to the storage bucket and a real sample URL.
+            val client = clientOverride
+                ?: PicacgBuiltinNetwork.coverHostFor(endpoint.domain)?.let { coverHost ->
+                    PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint).newBuilder()
+                        .dns(object : Dns {
+                            override fun lookup(hostname: String): List<InetAddress> =
+                                if (hostname.equals(endpoint.domain, true) || hostname.equals(coverHost, true)) {
+                                    listOf(InetAddress.getByName(endpoint.ip))
+                                } else {
+                                    PicacgRouteManager.dns().lookup(hostname)
+                                }
+                        })
+                        .build()
+                }
+                ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
             val request = Request.Builder().url(url).header("User-Agent", "okhttp/3.8.1").get().build()
             client.newCall(request).execute().use { response ->
                 code = response.code
@@ -493,54 +507,43 @@ object PicacgSpeedTester {
                     response.closeBodyQuietly()
                     false
                 } else {
-                    val bytes = response.body?.byteStream()?.use(::readBounded) ?: throw IOException("Empty image body")
-                    decoded = decodeImage(bytes)
-                    PicacgNetworkPolicy.imageSampleVerified(response.code, contentType, decoded == true)
+                    val bytes = response.body?.byteStream()?.use { readImageHead(it, MAX_IMAGE_HEAD_BYTES) }
+                        ?: throw IOException("Empty image body")
+                    validImage = hasImageMagic(bytes)
+                    PicacgNetworkPolicy.imageTileVerified(response.code, contentType, validImage == true)
                 }
             }
         }.getOrDefault(false)
-        return Probe(endpoint, success, elapsedMs(start), code, contentType, decoded)
+        return Probe(endpoint, success, elapsedMs(start), code, contentType, validImage)
     }
 
-    private fun readBounded(input: java.io.InputStream): ByteArray {
+    /** Reads at most [maxBytes] — the header needed to validate the image — and never buffers the whole picture. */
+    private fun readImageHead(input: java.io.InputStream, maxBytes: Int): ByteArray {
         val output = ByteArrayOutputStream()
-        val buffer = ByteArray(16 * 1024)
+        val buffer = ByteArray(8 * 1024)
         var total = 0
-        while (true) {
-            val count = input.read(buffer)
+        while (total < maxBytes) {
+            val count = input.read(buffer, 0, minOf(buffer.size, maxBytes - total))
             if (count < 0) break
-            total += count
-            if (total > MAX_IMAGE_BYTES) throw IOException("Image sample exceeds safe decode limit")
             output.write(buffer, 0, count)
+            total += count
         }
         if (total == 0) throw IOException("Empty image body")
         return output.toByteArray()
     }
 
-    private fun decodeImage(bytes: ByteArray): Boolean {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
-        var sampleSize = 1
-        while (bounds.outWidth / sampleSize.toLong() * (bounds.outHeight / sampleSize.toLong()) > MAX_DECODED_PIXELS) sampleSize *= 2
-        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize.coerceAtMost(64) }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return false
-        return try {
-            bitmap.width > 0 && bitmap.height > 0
-        } finally {
-            bitmap.recycle()
-        }
-    }
-
-    private fun replaceHost(url: String, host: String): String {
-        val uri = URI(url)
-        return buildString {
-            append(uri.scheme).append("://").append(host)
-            if (uri.port != -1) append(':').append(uri.port)
-            append(uri.rawPath.orEmpty())
-            uri.rawQuery?.let { append('?').append(it) }
-            uri.rawFragment?.let { append('#').append(it) }
-        }.let(::URI).toASCIIString()
+    /** Magic-byte recognition for JPEG / PNG / GIF / WEBP; cheaper than decoding pixels and enough to rank sources. */
+    private fun hasImageMagic(bytes: ByteArray): Boolean {
+        if (bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
+        if (bytes.size >= 8 &&
+            bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()
+        ) return true
+        if (bytes.size >= 6 && bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte()) return true
+        if (bytes.size >= 12 &&
+            bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
+            bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() && bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
+        ) return true
+        return false
     }
 
     private fun elapsedMs(startNanos: Long): Long = ((System.nanoTime() - startNanos) / 1_000_000L).coerceAtLeast(0L)
@@ -575,6 +578,6 @@ object PicacgSpeedTester {
         put("quickSelected", quickSelected)
     }
 
-    private const val MAX_IMAGE_BYTES = 24 * 1024 * 1024
-    private const val MAX_DECODED_PIXELS = 4_000_000L
+    /** Only the first 32KB of a tile/image is buffered for magic-byte validation; the rest is not downloaded. */
+    private const val MAX_IMAGE_HEAD_BYTES = 32 * 1024
 }

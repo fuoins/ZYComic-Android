@@ -29,7 +29,7 @@ class PicacgSpeedTestHistoryPolicyTest {
         probeCondition = if (phase == PicacgSpeedTestHistoryPolicy.API_PHASE) {
             "GET-root;redirects-disabled;accept-non-redirect-http-status"
         } else {
-            "GET-full-real-sample;status-200;image-content-type;bitmap-decodes"
+            "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic"
         },
     )
 

@@ -9,8 +9,9 @@ class JmSpeedProbeProtocolTest {
 
     @Test
     fun `uses the expected signed API and image paths`() {
-        assertEquals("/promote?page=0", JmSpeedProbeProtocol.LINE_PATH)
+        assertEquals("/setting?app_img_shunt=1&express=&lang=TW", JmSpeedProbeProtocol.LINE_PATH)
         assertEquals("/media/albums/553653_3x4.jpg", JmSpeedProbeProtocol.IMAGE_PATH)
+        assertEquals(128L, JmSpeedProbeProtocol.IMAGE_PROBE_BYTES)
     }
 
     @Test

@@ -31,10 +31,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * 连接失败也可能来自 DNS、TLS、HTTP 状态或源站，不应仅凭失败结果归因于 SNI。
  *
  * 两类探活都打"真实业务数据"，避免假 200 蒙混：
- * - 线路探活：[NetworkModule.newLineProbeClient]（挂 [ManwaInterceptor]）打分类接口
- *   `/api/classes/index`，完整经过 追加通用参数 → 签 devid/X-Token → gzip → AES 解密，
+ * - 线路探活：[NetworkModule.newLineProbeClient]（挂 [ManwaInterceptor]）打匿名用户信息接口
+ *   `/api/users/info`（约 41B），完整经过 追加通用参数 → 签 devid/X-Token → gzip → AES 解密，
  *   仅当 2xx **且解密后是合法 JSON** 才计成功；
- * - 图域探活：先打固定真实封面（[PROBE_COVER_PATH]，带 Range 只取前 2KB），
+ * - 图域探活：先打固定真实封面（[PROBE_COVER_PATH]，带 Range 只取文件头 128B），
  *   仅当 200/206 且确为图片/非文本二进制才计成功：VPN 下返回 403/HTML 挑战页的图域会被自然淘汰。
  *
  * 线程约束（重要）：本对象所有对外方法都是 suspend 且**整体在 [Dispatchers.IO] 上执行**。
@@ -49,16 +49,20 @@ object SpeedTester {
     private const val MAX = Long.MAX_VALUE
     private val probeScheduler = SpeedTestProbeBudget.scheduler
 
-    /** 探活只取前 2KB，避免逐域拉整张图/整个 JSON。 */
-    private const val PROBE_BYTES = 2048L
+    /**
+     * 图域探活只取文件头：图片魔数最多需 12B（WEBP），取 128B 留 10 倍余量；
+     * 线路 JSON 判定只看首字节 `{`，同样够用。响应体真正的下载量由 Range/接口体积决定。
+     */
+    private const val PROBE_BYTES = 128L
 
     /**
-     * 线路探活路径：分类接口首页（与抓包、[ApiService.classes] 一致）。
+     * 线路探活路径：匿名用户信息接口（与抓包、[ApiService.userInfo] 同源）。
+     * 匿名固定返回 `{"code":0,"data":{"img_host":N},"msg":""}`（约 41B），仍经过
+     * [ManwaInterceptor] 完整签名 + AES 解密，能验证真实链路；比分类首页（约 12KB）轻量。
      * `facility/deviceid/timestamp` 与 `devid/X-Token` 头由 [ManwaInterceptor] 追加，
      * **不要在这里手写**，否则会出现重复 query 且时间戳与签名不一致。
      */
-    private const val LINE_PROBE_PATH =
-        "/api/classes/index?page=1&gender=2&tag=&area=0&end=0&has_full=0&level=0&st=2&orderBy=0"
+    private const val LINE_PROBE_PATH = "/api/users/info"
 
     /**
      * 图域探活路径：固定真实封面（抓包证实 `newmwtuyuan8.cc` 上返回
@@ -108,7 +112,7 @@ object SpeedTester {
             .build()
 
     /**
-     * 图域探活请求：[probePath] 为封面/样本相对路径时打该 URL（带 Range 只取前 2KB），
+     * 图域探活请求：[probePath] 为封面/样本相对路径时打该 URL（带 Range 只取文件头 128B），
      * 传 null 表示根路径兜底（仍按图片/非文本严格判负）。
      *
      * Referer 用**固定 canonical 域** [ManwaInterceptor.REFERER]，不用"当前线路 origin"：
@@ -321,7 +325,7 @@ object SpeedTester {
         measureLine(client, lineRequest(lineUrl))
 
     /**
-     * 通用单次探活。计时口径：从发起请求到**读完响应头 2KB**——线路探活时
+     * 通用单次探活。计时口径：从发起请求到**读完响应头（图域 128B / 线路即接口全文）**——线路探活时
      * [ManwaInterceptor] 是应用拦截器，`execute()` 返回前已完成 gzip 解压与 AES 解密，
      * 所以这个耗时天然包含"解密完成"，反映的是真实 API 链路。
      */
@@ -881,10 +885,10 @@ object SpeedTester {
                     )
                 }
                 val reconciliationLineIdentities = reconciliationLineTargets.associate { target ->
-                    target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v1")
+                    target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v2")
                 }
                 val reconciliationImageIdentities = reconciliationImageTargets.associate { endpoint ->
-                    endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-2048-fallback-v1")
+                    endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2")
                 }
                 val reconciledHistory = if (shouldReconcile) {
                     RouteManager.reconcileSpeedTestHistory(
@@ -1196,8 +1200,8 @@ object SpeedTester {
                         },
                         lineMeasuredAtEpochMs = if (configReconciled) compatibleHistory?.lineMeasuredAtEpochMs.orEmpty() else emptyMap(),
                         imageMeasuredAtEpochMs = if (configReconciled) compatibleHistory?.imageMeasuredAtEpochMs.orEmpty() else emptyMap(),
-                        lineIdentities = if (configReconciled) reconciliationLineIdentities else lineProbeTargets.associate { target -> target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v1") },
-                        imageIdentities = if (configReconciled) reconciliationImageIdentities else imageProbeTargets.associate { endpoint -> endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-2048-fallback-v1") },
+                        lineIdentities = if (configReconciled) reconciliationLineIdentities else lineProbeTargets.associate { target -> target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v2") },
+                        imageIdentities = if (configReconciled) reconciliationImageIdentities else imageProbeTargets.associate { endpoint -> endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2") },
                         sortMergedHistory = configReconciled,
                     )
                 ) {
@@ -1243,8 +1247,8 @@ object SpeedTester {
                             completeSnapshot = true,
                             expectedPlatformRevision = platformRevisionAtStart,
                             imageCacheNetworkIdentity = imageCacheNetworkIdentityAtStart,
-                            lineIdentities = if (configReconciled) reconciliationLineIdentities else lineProbeTargets.associate { target -> target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v1") },
-                            imageIdentities = if (configReconciled) reconciliationImageIdentities else imageProbeTargets.associate { endpoint -> endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-2048-fallback-v1") },
+                            lineIdentities = if (configReconciled) reconciliationLineIdentities else lineProbeTargets.associate { target -> target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v2") },
+                            imageIdentities = if (configReconciled) reconciliationImageIdentities else imageProbeTargets.associate { endpoint -> endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2") },
                             sortMergedHistory = configReconciled,
                         )
                     ) {

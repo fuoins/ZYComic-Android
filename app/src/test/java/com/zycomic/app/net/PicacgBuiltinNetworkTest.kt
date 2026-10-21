@@ -12,10 +12,28 @@ class PicacgBuiltinNetworkTest {
             PicacgBuiltinNetwork.apiUrls,
         )
         assertEquals(
-            listOf("storage-b.go2778.com", "storage-b.picacomic.com"),
+            listOf("storage-b.safedataplj.com", "storage-b.go2778.com", "storage-b.picacomic.com"),
             PicacgBuiltinNetwork.imageHosts,
         )
-        assertTrue(PicacgBuiltinNetwork.imageHosts.none { it.endsWith("safedataplj.com") })
+        assertEquals(
+            listOf("img.safedataplj.com", "img.go2778.com", "img.picacomic.com"),
+            PicacgBuiltinNetwork.coverHosts,
+        )
+    }
+
+    @Test
+    fun `content and cover mirrors map within the same root and tile url is auth free`() {
+        assertEquals("img.safedataplj.com", PicacgBuiltinNetwork.coverHostFor("storage-b.safedataplj.com"))
+        assertEquals("img.go2778.com", PicacgBuiltinNetwork.coverHostFor("storage-b.go2778.com"))
+        assertEquals("img.picacomic.com", PicacgBuiltinNetwork.coverHostFor("storage-b.picacomic.com"))
+        assertEquals("storage-b.safedataplj.com", PicacgBuiltinNetwork.contentHostFor("img.safedataplj.com"))
+        assertTrue(PicacgBuiltinNetwork.isCoverHost("img.go2778.com"))
+        assertEquals(null, PicacgBuiltinNetwork.coverHostFor("picaapi.picacomic.com"))
+        assertEquals(null, PicacgBuiltinNetwork.coverHostFor("storage1.picacomic.com"))
+        assertEquals(null, PicacgBuiltinNetwork.contentHostFor("storage-b.evil.example"))
+        val tile = PicacgBuiltinNetwork.speedTileUrl("img.safedataplj.com")
+        assertTrue(tile.startsWith("https://img.safedataplj.com/insecure/rs:fill:50:67:0/"))
+        assertEquals(listOf("104.21.75.42", "172.67.213.2"), PicacgBuiltinNetwork.builtInLookup("img.safedataplj.com"))
     }
 
     @Test

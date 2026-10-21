@@ -41,12 +41,12 @@ class PicacgNetworkPolicyTest {
     }
 
     @Test
-    fun imageRequires200ImageContentTypeAndSuccessfulDecodeTogether() {
-        assertTrue(PicacgNetworkPolicy.imageSampleVerified(200, "image/jpeg", true))
-        assertTrue(PicacgNetworkPolicy.imageSampleVerified(200, "IMAGE/WEBP; charset=binary", true))
-        assertFalse(PicacgNetworkPolicy.imageSampleVerified(200, "text/html", true))
-        assertFalse(PicacgNetworkPolicy.imageSampleVerified(404, "image/jpeg", true))
-        assertFalse(PicacgNetworkPolicy.imageSampleVerified(200, "image/png", false))
-        assertFalse(PicacgNetworkPolicy.imageSampleVerified(200, null, true))
+    fun imageRequires200ImageContentTypeAndMagicHeaderTogether() {
+        assertTrue(PicacgNetworkPolicy.imageTileVerified(200, "image/jpeg", true))
+        assertTrue(PicacgNetworkPolicy.imageTileVerified(200, "IMAGE/WEBP; charset=binary", true))
+        assertFalse(PicacgNetworkPolicy.imageTileVerified(200, "text/html", true))
+        assertFalse(PicacgNetworkPolicy.imageTileVerified(404, "image/jpeg", true))
+        assertFalse(PicacgNetworkPolicy.imageTileVerified(200, "image/png", false))
+        assertFalse(PicacgNetworkPolicy.imageTileVerified(200, null, true))
     }
 }

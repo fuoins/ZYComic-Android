@@ -16,7 +16,7 @@ internal object PicacgNetworkPolicy {
     /** An API-root response may prove reachability, but a redirect never validates this endpoint. */
     fun apiRootReachable(statusCode: Int): Boolean = statusCode in 200..499 && statusCode !in 300..399
 
-    /** A source passes only after the real sample GET is HTTP 200, image-typed, and successfully decoded. */
-    fun imageSampleVerified(statusCode: Int, contentType: String?, decoded: Boolean): Boolean =
-        statusCode == 200 && contentType.orEmpty().substringBefore(';').trim().startsWith("image/", ignoreCase = true) && decoded
+    /** A source passes only after the cover-tile GET is HTTP 200, image-typed, and carries an image magic header. */
+    fun imageTileVerified(statusCode: Int, contentType: String?, imageMagic: Boolean): Boolean =
+        statusCode == 200 && contentType.orEmpty().substringBefore(';').trim().startsWith("image/", ignoreCase = true) && imageMagic
 }

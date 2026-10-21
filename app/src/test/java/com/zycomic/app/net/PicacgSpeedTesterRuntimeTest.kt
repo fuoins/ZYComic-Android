@@ -68,7 +68,7 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(0, progress.successful, "historical successes are not current-round progress")
         assertEquals(5, progress.failed, "progress counts only the five fresh failures")
         assertEquals(emptyList<PicacgSpeedTester.Probe>(), snapshot.imageProbes)
-        assertTrue(snapshot.imageBlockedReason.orEmpty().contains("真实 Picacg"), "without an actual sample image verification is skipped")
+        assertTrue(snapshot.imageBlockedReason.orEmpty().contains("正文图源"), "with no configured content source the image stage is blocked")
         assertEquals(emptyList<String>(), values("runtimeTestApiSelections"), "stale success and untested sixth row must not be selected")
 
         val refreshed = PicacgSpeedTestHistoryStorage.loadApi()
@@ -83,7 +83,7 @@ class PicacgSpeedTesterRuntimeTest {
             assertEquals(measuredAt.getValue(index), row.measuredAtEpochMs, "untested history retains its timestamp")
         }
         assertEquals(snapshot.apiProbes.size, snapshot.apiProbes.map { it.endpoint }.distinct().size)
-        assertFalse(snapshot.complete, "no authentic image sample is configured")
+        assertFalse(snapshot.complete, "with no configured content source the image stage is incomplete")
     }
 
     @Test

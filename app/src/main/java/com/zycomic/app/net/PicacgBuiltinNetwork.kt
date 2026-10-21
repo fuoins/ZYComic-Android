@@ -9,11 +9,66 @@ object PicacgBuiltinNetwork {
         "https://picaapi.picacomic.com/",
     )
 
-    /** The only selectable image origins; DNS-only aliases are deliberately not image sources. */
+    /**
+     * Content (page) storage buckets serving `/static/tobs` and `/static/sub_storage_*`.
+     * The speed test selects the fastest root and pins it to a concrete IP; order only seeds
+     * the first default and probe order, so the directly-reachable domestic mirror comes first.
+     */
     val imageHosts: List<String> = listOf(
+        "storage-b.safedataplj.com",
         "storage-b.go2778.com",
         "storage-b.picacomic.com",
     )
+
+    /**
+     * Cover/thumbnail imgproxy nodes. These are exactly the hosts that a storage-b bucket 301-redirects
+     * `/static/tobeimg/...` to; each `img.{root}` mirrors `storage-b.{root}` and shares the same
+     * Cloudflare anycast IPs. They serve thumbnails only — `/static/tobs` returns 502 on img nodes,
+     * so they must never be mixed into [imageHosts]. They are not user-selectable: the chosen content
+     * root determines the cover mirror automatically.
+     */
+    val coverHosts: List<String> = listOf(
+        "img.safedataplj.com",
+        "img.go2778.com",
+        "img.picacomic.com",
+    )
+
+    /**
+     * Fixed 50x67 imgproxy speed tile (base64url of a permanent storage-b origin JPEG). The insecure
+     * form needs no signature, token, auth or redirect; the response is ~1.9KB JPEG and is reused for
+     * every root/IP probe so a cold/unauthenticated start can still rank sources.
+     */
+    private const val SPEED_TILE_ORIGIN_BASE64 =
+        "aHR0cHM6Ly9zdG9yYWdlLWIucGljYWNvbWljLmNvbS9zdGF0aWMvOWYyNmUxYTMtZmQyMC00MzMzLTg1YjgtZmM2ZjVmZTA4ODZmLmpwZw"
+
+    /** Probe URL for a cover mirror; the returned tile is a stable ~1.9KB JPEG. */
+    fun speedTileUrl(coverHost: String): String =
+        "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/rs:fill:50:67:0/$SPEED_TILE_ORIGIN_BASE64"
+
+    /** Maps a content bucket `storage-b.{root}` to its cover mirror `img.{root}`; null if no mirror exists. */
+    fun coverHostFor(contentHost: String?): String? {
+        val host = normalizeHost(contentHost) ?: return null
+        if (!host.startsWith("storage-b.")) return null
+        val candidate = host.replaceFirst("storage-b.", "img.")
+        return candidate.takeIf { c -> coverHosts.any { it.equals(c, ignoreCase = true) } }
+    }
+
+    /** Maps a cover mirror `img.{root}` back to its content bucket `storage-b.{root}`; null otherwise. */
+    fun contentHostFor(coverHost: String?): String? {
+        val host = normalizeHost(coverHost) ?: return null
+        if (!host.startsWith("img.")) return null
+        val candidate = host.replaceFirst("img.", "storage-b.")
+        return candidate.takeIf { c -> imageHosts.any { it.equals(c, ignoreCase = true) } }
+    }
+
+    /** True when [host] is one of the cover imgproxy mirrors. */
+    fun isCoverHost(host: String?): Boolean {
+        val normalized = normalizeHost(host) ?: return false
+        return coverHosts.any { it.equals(normalized, ignoreCase = true) }
+    }
+
+    /** Resolves a host against the built-in root rules; used as a last-resort DNS fallback for mirrors. */
+    fun builtInLookup(host: String): List<String> = lookup(rootRules, host)
 
     private val rootRules = linkedMapOf(
         "go2778.com" to listOf("104.21.42.75", "172.67.159.59"),

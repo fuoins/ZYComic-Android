@@ -175,8 +175,8 @@ object PlatformSpeedTestCoordinator {
                                     val linesDone = completedPhases.canReuse(phaseKey, CompletedSpeedTestPhases.Phase.LINES, forceFresh, onlyPlatform != null)
                                     val imagesDone = completedPhases.canReuse(phaseKey, CompletedSpeedTestPhases.Phase.IMAGES, forceFresh, onlyPlatform != null)
                                     // Incomplete Picacg images must not invalidate other platforms or its API results.
-                                    // Without a real sample there is no new work to perform on a duplicate caller.
-                                    if (linesDone && (imagesDone || (platform == ContentPlatform.PICACG && PicacgRouteManager.verifiedImageSampleUrl == null))) {
+                                    // Image ranking uses a fixed auth-free tile, so there is no longer a sample gate.
+                                    if (linesDone && imagesDone) {
                                         val cached = completedReports[platform]?.takeIf { it.first == phaseKey }?.second
                                         if (cached != null) {
                                             publishPlatformStatus(platform, platformCompletionStatus(cached), running = false)
@@ -256,14 +256,14 @@ object PlatformSpeedTestCoordinator {
                                             reason = if (snapshot.complete) {
                                                 val apiAvailable = snapshot.apiProbes.count(PicacgSpeedTester.Probe::success)
                                                 val imagesVerified = snapshot.imageProbes.count(PicacgSpeedTester.Probe::success)
-                                                "API 根路径 HTTP 200–499（不含 3xx）可用 $apiAvailable/${snapshot.apiProbes.size}；真实图片 GET 200/image 且解码成功 $imagesVerified/${snapshot.imageProbes.size}"
+                                                "API 根路径 HTTP 200–499（不含 3xx）可用 $apiAvailable/${snapshot.apiProbes.size}；封面瓦片 GET 200/image 且魔数有效 $imagesVerified/${snapshot.imageProbes.size}"
                                             } else {
-                                                snapshot.imageBlockedReason ?: "线路或真实图源样本不足，图源状态未确认"
+                                                snapshot.imageBlockedReason ?: "线路或图源探测不足，图源状态未确认"
                                             }
                                             _progressText.value = if (snapshot.complete) {
-                                                "哔咔线路与真实图源测速完成"
+                                                "哔咔线路与图源测速完成"
                                             } else {
-                                                "哔咔 API 已检测；图源验证阻塞（无真实图片样本）"
+                                                "哔咔 API 已检测；图源验证阻塞"
                                             }
                                             publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {

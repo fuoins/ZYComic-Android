@@ -7,8 +7,13 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Request paths and response validation shared by JM speed probes. */
 internal object JmSpeedProbeProtocol {
-    const val LINE_PATH = "/promote?page=0"
+    // /setting 是客户端配置接口（version/store_link/img_host 等扁平键值），解密后约 2KB 且 code=200；
+    // 相比首页推荐聚合页 /promote（解密后约 43KB）更轻量，同时仍走完整签名+AES 解密链路，适合线路探活。
+    const val LINE_PATH = "/setting?app_img_shunt=1&express=&lang=TW"
     const val IMAGE_PATH = "/media/albums/553653_3x4.jpg"
+
+    /** 图片探活只需读取文件头魔数（JPEG 3B / PNG 8B / GIF 6B / WEBP 12B），128B 已留 10 倍余量。 */
+    const val IMAGE_PROBE_BYTES = 128L
 
     /** Accepts only a complete, decrypted JSON object or array—not an API envelope or scalar. */
     fun isValidDecryptedJson(payload: String): Boolean {

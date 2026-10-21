@@ -521,7 +521,7 @@ object JmSpeedTester {
         domain = endpoint.domain.lowercase(Locale.ROOT),
         ip = endpoint.ip.trim().lowercase(Locale.ROOT),
         routeCondition = routeCondition(endpoint, image = true),
-        probeCondition = "GET-image;range=bytes-0-2047;status=200-or-206;valid-image-response;redirects-disabled",
+        probeCondition = "GET-image;range=bytes-0-${JmSpeedProbeProtocol.IMAGE_PROBE_BYTES - 1};status=200-or-206;valid-image-response;redirects-disabled",
     )
 
     private fun routeCondition(endpoint: DomainIp, image: Boolean): String {
@@ -652,7 +652,7 @@ object JmSpeedTester {
             .header("Referer", JmApiInterceptor.REFERER)
             .header("X-Requested-With", JmApiInterceptor.PACKAGE_NAME)
             .header("Accept", if (image) "image/*,*/*;q=0.8" else "application/json")
-            .apply { if (image) header("Range", "bytes=0-2047") }
+            .apply { if (image) header("Range", "bytes=0-${JmSpeedProbeProtocol.IMAGE_PROBE_BYTES - 1}") }
             .build()
         val started = System.nanoTime()
         fun elapsed() = (System.nanoTime() - started) / 1_000_000L
@@ -670,8 +670,8 @@ object JmSpeedTester {
                         // API bodies are already signed/decrypted by JmApiInterceptor; never inspect the raw envelope.
                         val body = if (image) {
                             response.body?.source()?.let { source ->
-                                source.request(2048)
-                                source.buffer.clone().readByteArray(minOf(source.buffer.size, 2048L))
+                                source.request(JmSpeedProbeProtocol.IMAGE_PROBE_BYTES)
+                                source.buffer.clone().readByteArray(minOf(source.buffer.size, JmSpeedProbeProtocol.IMAGE_PROBE_BYTES))
                             } ?: ByteArray(0)
                         } else {
                             response.body?.bytes() ?: ByteArray(0)

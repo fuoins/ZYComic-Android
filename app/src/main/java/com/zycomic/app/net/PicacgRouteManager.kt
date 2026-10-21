@@ -229,14 +229,23 @@ object PicacgRouteManager {
     fun routeRules(): Map<String, List<String>> = apiRouteRules + imageRouteRules
     fun apiRouteRules(): Map<String, List<String>> = apiRouteRules.toMap()
     fun imageRouteRules(): Map<String, List<String>> = imageRouteRules.toMap()
-    fun resolveIps(host: String): List<String> = PicacgBuiltinNetwork.lookup(dnsFallbackRules + apiRouteRules + imageRouteRules, host)
+    fun resolveIps(host: String): List<String> =
+        PicacgBuiltinNetwork.lookup(dnsFallbackRules + apiRouteRules + imageRouteRules, host)
+            .ifEmpty { PicacgBuiltinNetwork.builtInLookup(host) }
 
-    /** DNS policy for Picacg clients; applies only Picacg's remote rules and endpoint pins. */
+    /**
+     * DNS policy for Picacg clients; applies only Picacg's remote rules and endpoint pins.
+     * A cover mirror (`img.{root}`) shares the pinned content bucket (`storage-b.{root}`) IP because
+     * the two are same-root anycast mirrors, so the cover request follows the measured fastest IP too.
+     */
     fun dns(): Dns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
             val pin = _state.value.let { state ->
                 state.pinnedApi?.takeIf { it.domain.equals(hostname, true) }?.ip
                     ?: state.pinnedImage?.takeIf { it.domain.equals(hostname, true) }?.ip
+                    ?: state.pinnedImage?.takeIf {
+                        it.domain.equals(PicacgBuiltinNetwork.contentHostFor(hostname), true)
+                    }?.ip
             }
             val addresses = pin?.let(::listOf) ?: resolveIps(hostname)
             if (addresses.isNotEmpty()) return addresses.map(InetAddress::getByName)
@@ -287,22 +296,42 @@ object PicacgRouteManager {
             .build()
     }
 
-    /** Rewrites only a configured source host. Credentials, paths, query and fragment are preserved verbatim. */
-    fun rewriteImageUrl(url: String): String {
+    /** Prefix that identifies a cover/thumbnail request served by the imgproxy mirrors. */
+    private const val COVER_PROXY_PREFIX = "/static/tobeimg/"
+
+    /**
+     * Rewrites only a configured source host. Credentials, query and fragment are preserved verbatim.
+     *
+     * Cover thumbnails (`/static/tobeimg/...`) are rewritten straight to the selected content root's
+     * imgproxy mirror with the `/static/tobeimg` prefix removed, which is exactly the URL the official
+     * client reaches after storage-b's cross-domain 301 — saving one extra TLS round-trip. Content
+     * pages (`/static/tobs`, `/static/sub_storage_*`) and avatars stay on the selected storage bucket.
+     */
+    fun rewriteImageUrl(url: String): String = runCatching {
+        val original = URI(url)
+        if (original.scheme !in setOf("http", "https") || original.host.isNullOrBlank() || original.rawUserInfo != null) return url
+        // Already an imgproxy direct URL, or a host outside the content pool (storage1 avatars, third-party signed URLs): leave as-is.
+        if (PicacgBuiltinNetwork.isCoverHost(original.host)) return url
+        if (_state.value.imageHosts.none { it.equals(original.host, true) }) return url
+        val rawPath = original.rawPath.orEmpty()
+        if (rawPath.startsWith(COVER_PROXY_PREFIX, ignoreCase = true)) {
+            val coverHost = PicacgBuiltinNetwork.coverHostFor(currentImageHost)
+            if (coverHost != null) {
+                val mirrorPath = rawPath.substring(COVER_PROXY_PREFIX.length).let { if (it.startsWith("/")) it else "/$it" }
+                return@runCatching rebuildImageUrl(original, coverHost, mirrorPath)
+            }
+        }
         val target = currentImageHost ?: return url
-        return runCatching {
-            val original = URI(url)
-            if (original.scheme !in setOf("http", "https") || original.host.isNullOrBlank() || original.rawUserInfo != null) return url
-            if (_state.value.imageHosts.none { it.equals(original.host, true) }) return url
-            buildString {
-                append(original.scheme).append("://").append(target)
-                if (original.port != -1) append(':').append(original.port)
-                append(original.rawPath.orEmpty())
-                original.rawQuery?.let { append('?').append(it) }
-                original.rawFragment?.let { append('#').append(it) }
-            }.let(::URI).toASCIIString()
-        }.getOrDefault(url)
-    }
+        rebuildImageUrl(original, target, rawPath)
+    }.getOrDefault(url)
+
+    private fun rebuildImageUrl(original: URI, host: String, path: String): String = buildString {
+        append(original.scheme).append("://").append(host)
+        if (original.port != -1) append(':').append(original.port)
+        append(path)
+        original.rawQuery?.let { append('?').append(it) }
+        original.rawFragment?.let { append('#').append(it) }
+    }.let(::URI).toASCIIString()
 
     /** A verified sample may be supplied only from an actual authenticated API response by the Picacg repository. */
     @Volatile private var _verifiedImageSampleUrl: String? = null
