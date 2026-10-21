@@ -55,6 +55,7 @@ object JmRouteManager {
         /** Endpoint selected when this round was published; not a live route value. */
         val roundSelectedLine: DomainIp? = null,
         val roundSelectedImage: DomainIp? = null,
+        val runId: String? = null,
     )
 
     data class LogEntry(
@@ -940,9 +941,7 @@ object JmRouteManager {
             roundSelectedLine = roundSelectedLine,
             roundSelectedImage = roundSelectedImage,
         )
-        persistSnapshot()
-        record("speed", "JM", "JM 独立线路/图床测速完成")
-        return true
+        return persistSnapshot(durable = true)
     }
 
     /** Persist separated endpoint history only while the exact run generation remains active. */
@@ -961,8 +960,7 @@ object JmRouteManager {
         ) {
             return false
         }
-        JmSpeedTestHistoryStorage.saveLines(lineHistory)
-        JmSpeedTestHistoryStorage.saveImages(imageHistory)
+        if (!JmSpeedTestHistoryStorage.saveLines(lineHistory) || !JmSpeedTestHistoryStorage.saveImages(imageHistory)) return false
         return isCurrent() && StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
             StartupPlatformPolicy.state.value.revision == expectedPlatformRevision && configRevision == expectedConfigRevision &&
             currentSpeedTestConfigFingerprint() == expectedConfigFingerprint
@@ -976,12 +974,17 @@ object JmRouteManager {
         publishEndpointSelection()
     }
 
-    private fun persistSnapshot() {
-        prefs()?.edit()
+    private fun persistSnapshot(durable: Boolean = false): Boolean {
+        val editor = prefs()?.edit()
             ?.putString(KEY_SNAPSHOT, encodeSnapshot(_speedTestSnapshot.value))
             ?.putString("failed_line_endpoints", encodeFailedEndpoints(failedLineEndpoints))
-            ?.putString("failed_image_endpoints", encodeFailedEndpoints(failedImageEndpoints))
-            ?.apply()
+            ?.putString("failed_image_endpoints", encodeFailedEndpoints(failedImageEndpoints)) ?: return false
+        return if (durable) {
+            editor.commit()
+        } else {
+            editor.apply()
+            true
+        }
     }
 
     private fun encodeFailedEndpoints(endpoints: Set<DomainIp>): String = JSONArray().apply {
@@ -1077,6 +1080,7 @@ object JmRouteManager {
     private fun encodeSnapshot(snapshot: SpeedTestSnapshot): String = JSONObject().apply {
         put("started", snapshot.startedAtEpochMs ?: JSONObject.NULL)
         put("completed", snapshot.completedAtEpochMs ?: JSONObject.NULL)
+        put("runId", snapshot.runId ?: JSONObject.NULL)
         put("version", snapshot.remoteVersion ?: JSONObject.NULL)
         put("configFingerprint", snapshot.configFingerprint ?: JSONObject.NULL)
         put("imageConfigFingerprint", snapshot.imageConfigFingerprint ?: JSONObject.NULL)
@@ -1201,6 +1205,7 @@ object JmRouteManager {
             imageNetworkPolicy = root.optString("imageNetworkPolicy").takeIf { it.isNotBlank() && it != "null" },
             roundSelectedLine = selectedEndpoint("roundSelectedLine"),
             roundSelectedImage = selectedEndpoint("roundSelectedImage"),
+            runId = root.optString("runId").takeIf { it.isNotBlank() && it != "null" },
         )
     }.getOrDefault(SpeedTestSnapshot(remoteVersion = _state.value.remoteVersion))
 

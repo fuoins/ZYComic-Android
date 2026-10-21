@@ -18,6 +18,8 @@ class JmSpeedTestHistoryStorageIntegrationTest {
     @BeforeEach
     fun setUp() {
         DevConfig.appContext = context
+        context.commitsSucceed = true
+        context.commitThrows = false
         StartupPlatformPolicy.load(context)
         StartupPlatformPolicy.setJmEnabled(true)
         JmSpeedTestHistoryStorage.saveLines(JmSpeedTestHistoryPolicy.PhaseHistory(null))
@@ -112,6 +114,26 @@ class JmSpeedTestHistoryStorageIntegrationTest {
         assertEquals(JmSpeedTestHistoryPolicy.PhaseHistory(4, listOf(priorImage)), JmSpeedTestHistoryStorage.loadImages())
     }
 
+    @Test
+    fun `history commit rejection or exception is returned to the tester`() {
+        context.commitsSucceed = false
+        assertFalse(persist(emptyList(), emptyList()))
+        context.commitsSucceed = true
+        context.commitThrows = true
+        assertFalse(persist(emptyList(), emptyList()))
+    }
+
+    @Test
+    fun `history cannot be reported saved without an application context`() {
+        DevConfig.appContext = null
+        try {
+            assertFalse(JmSpeedTestHistoryStorage.saveLines(JmSpeedTestHistoryPolicy.PhaseHistory(7)))
+            assertFalse(JmSpeedTestHistoryStorage.saveImages(JmSpeedTestHistoryPolicy.PhaseHistory(7)))
+        } finally {
+            DevConfig.appContext = context
+        }
+    }
+
     /** Compile-only analogue of the actual coordinator call, including its named arguments and trailing lambda. */
     @Suppress("unused")
     private suspend fun coordinatorCallShape() {
@@ -162,6 +184,8 @@ class JmSpeedTestHistoryStorageIntegrationTest {
     )
 
     private class HistoryTestContext : ContextWrapper(null) {
+        var commitsSucceed = true
+        var commitThrows = false
         private val stores = ConcurrentHashMap<String, MutableMap<String, Any?>>()
         override fun getApplicationContext(): Context = this
 
@@ -206,8 +230,9 @@ class JmSpeedTestHistoryStorageIntegrationTest {
                     }
                     "clear" -> editor
                     "apply", "commit" -> {
+                        if (method.name == "commit" && commitThrows) error("simulated storage failure")
                         synchronized(values) { updates.forEach { (key, value) -> if (value == null) values.remove(key) else values[key] = value } }
-                        if (method.name == "commit") true else null
+                        if (method.name == "commit") commitsSucceed else null
                     }
                     else -> null
                 }

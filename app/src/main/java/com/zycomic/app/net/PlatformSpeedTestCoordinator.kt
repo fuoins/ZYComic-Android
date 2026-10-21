@@ -267,7 +267,7 @@ object PlatformSpeedTestCoordinator {
                                             }
                                             publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {
-                                            val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
+                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
                                                 if (generationIsCurrent()) {
                                                     _jmProgress.value = progress
                                                     _progressText.value = progress.message()
@@ -275,8 +275,14 @@ object PlatformSpeedTestCoordinator {
                                                     publishJmCheckProgress(progress)
                                                 }
                                             }
-                                            status = if (snapshot.completedAtEpochMs != null && JmRouteManager.speedTestSnapshot.value == snapshot) "tested" else "incomplete"
-                                            if (status == "incomplete") reason = "本轮结果未完整提交，保留当前选择"
+                                            val snapshot = run.snapshot
+                                            val submission = run.submission
+                                            val complete = submission?.isComplete(
+                                                JmRouteManager.speedTestSnapshot.value.runId,
+                                                submission.identity.takeIf { generationIsCurrent() },
+                                            ) == true
+                                            status = if (complete) "tested" else "incomplete"
+                                            if (!complete) reason = "本轮结果未完整提交：${submission?.state?.reason ?: "未启用或未返回提交结果"}"
                                             if (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed) {
                                                 reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
                                             }

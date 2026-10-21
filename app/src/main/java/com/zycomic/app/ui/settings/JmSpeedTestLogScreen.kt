@@ -30,11 +30,14 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.JmRouteManager
 import com.zycomic.app.net.JmSpeedTestProgress
+import com.zycomic.app.net.JmSpeedTestSubmission
 import com.zycomic.app.net.JmSpeedTester
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.StartupCheckPhase
 import com.zycomic.app.net.StartupCheckResult
+import com.zycomic.app.net.jmSpeedTestIsComplete
 import com.zycomic.app.platform.ContentPlatform
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,6 +47,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.i18n.stringResource
@@ -54,6 +58,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snapshot by JmRouteManager.speedTestSnapshot.collectAsState()
+    val lastSubmission by JmSpeedTester.lastSubmission.collectAsState()
     val routeState by JmRouteManager.state.collectAsState()
     val routeLogs by JmRouteManager.logs.collectAsState()
     val endpointSelection by JmRouteManager.endpointSelection.collectAsState()
@@ -65,7 +70,13 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
     val jmInterrupted = checks.any {
         it.phase in setOf(StartupCheckPhase.JM_LINE, StartupCheckPhase.JM_IMAGE) && it.result == StartupCheckResult.INTERRUPTED
     }
-    val snapshotIsCurrentRun = !jmInterrupted && jmProgress?.phase != JmSpeedTestProgress.Phase.FAILED &&
+    val snapshotSubmissionFailed = lastSubmission?.let {
+        it.identity.runId == snapshot.runId && it.state != JmSpeedTestSubmission.State.COMPLETE
+    } == true
+    val snapshotMatchesLastSubmission = lastSubmission?.let {
+        it.identity.runId == snapshot.runId && it.state == JmSpeedTestSubmission.State.COMPLETE
+    } ?: true
+    val snapshotIsCurrentRun = snapshotMatchesLastSubmission && !jmInterrupted && jmProgress?.phase != JmSpeedTestProgress.Phase.FAILED &&
         (!jmPlatformRunning || jmProgress?.phase == JmSpeedTestProgress.Phase.COMPLETE)
     val status = remember { mutableStateOf<String?>(null) }
     val pendingExport = remember { mutableStateOf<Pair<JmRouteManager.SpeedTestSnapshot, String>?>(null) }
@@ -136,11 +147,19 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
-                        snapshot.completedAtEpochMs?.let { stringResource(KMR.strings.manwa_speed_log_recently_completed, formatSpeedTestLogTime(it)) }
+                        snapshot.completedAtEpochMs?.takeUnless { snapshotSubmissionFailed }
+                            ?.let { stringResource(KMR.strings.manwa_speed_log_recently_completed, formatSpeedTestLogTime(it)) }
                             ?: "暂无完整禁漫测速结果",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    lastSubmission?.takeIf { it.state != JmSpeedTestSubmission.State.COMPLETE }?.let {
+                        Text(
+                            stringResource(KMR.strings.jm_speed_test_incomplete, it.state.reason),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     snapshot.remoteVersion?.let { Text("远程配置版本：$it", style = MaterialTheme.typography.bodySmall) }
                     if (snapshotIsCurrentRun && (snapshot.lineQuickTest || snapshot.imageQuickTest)) {
                         Text(
@@ -189,6 +208,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                             val json = runCatching {
                                 encodeJmSpeedTestLog(
                                     snapshot = snapshot,
+                                    lastSubmission = lastSubmission,
                                     routeLogs = routeLogs,
                                     selectedLine = selectedLine,
                                     selectedLineEndpoint = selectedLineEndpoint,
@@ -213,9 +233,21 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                             scope.launch {
                                 runCatching {
                                     PlatformSpeedTestCoordinator.run(forceFresh = true, onlyPlatform = ContentPlatform.JM)
-                                }.onSuccess {
-                                    status.value = "禁漫测速完成"
+                                }.onSuccess { reports ->
+                                    val report = reports.firstOrNull { it.platform == "禁漫天堂" }
+                                    status.value = if (jmSpeedTestIsComplete(report?.status)) {
+                                        context.stringResource(KMR.strings.jm_speed_test_complete)
+                                    } else {
+                                        context.stringResource(
+                                            KMR.strings.jm_speed_test_incomplete,
+                                            report?.reason ?: context.stringResource(KMR.strings.jm_speed_test_missing_result),
+                                        )
+                                    }
                                 }.onFailure {
+                                    if (it is CancellationException) {
+                                        status.value = context.stringResource(KMR.strings.jm_speed_test_cancelled)
+                                        throw it
+                                    }
                                     status.value = "禁漫测速失败：${it.message ?: "未知错误"}"
                                 }
                             }
@@ -317,8 +349,9 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
     }
 }
 
-private fun encodeJmSpeedTestLog(
+internal fun encodeJmSpeedTestLog(
     snapshot: JmRouteManager.SpeedTestSnapshot,
+    lastSubmission: JmSpeedTestSubmission?,
     routeLogs: List<JmRouteManager.LogEntry>,
     selectedLine: String,
     selectedLineEndpoint: DomainIp?,
@@ -326,7 +359,25 @@ private fun encodeJmSpeedTestLog(
     selectedImageEndpoint: DomainIp?,
     autoSelect: Boolean,
 ): String = buildJsonObject {
+    val snapshotIsCurrentRun = lastSubmission?.isComplete(snapshot.runId, lastSubmission.identity) ?: true
+    val snapshotSubmission = lastSubmission?.takeIf { it.identity.runId == snapshot.runId }
     put("platform", JsonPrimitive("禁漫天堂"))
+    put("runId", snapshot.runId?.let(::JsonPrimitive) ?: JsonNull)
+    put("snapshotSubmissionComplete", snapshotSubmission?.let { JsonPrimitive(it.isComplete(snapshot.runId, it.identity)) } ?: JsonNull)
+    put(
+        "lastSubmission",
+        lastSubmission?.let {
+            buildJsonObject {
+                put("runId", it.identity.runId)
+                put("matchesSnapshot", it.identity.runId == snapshot.runId)
+                put("state", it.state.name)
+                put("snapshotSubmitted", it.snapshotSubmitted)
+                put("historiesSaved", it.historiesSaved)
+                put("complete", it.isComplete(it.identity.runId, it.identity))
+                put("reason", it.state.reason)
+            }
+        } ?: JsonNull,
+    )
     put("startedAtEpochMs", snapshot.startedAtEpochMs?.let(::JsonPrimitive) ?: JsonNull)
     put("completedAtEpochMs", snapshot.completedAtEpochMs?.let(::JsonPrimitive) ?: JsonNull)
     put("remoteConfigVersion", snapshot.remoteVersion?.let(::JsonPrimitive) ?: JsonNull)
@@ -384,7 +435,7 @@ private fun encodeJmSpeedTestLog(
                     endpoint = endpoint,
                     delay = delay,
                     verdict = null,
-                    testedThisRound = endpoint in snapshot.testedLineEndpoints,
+                    testedThisRound = snapshotIsCurrentRun && endpoint in snapshot.testedLineEndpoints,
                     testedAtEpochMs = snapshot.lineIpTestedAtEpochMs[endpoint] ?: snapshot.untestedLineIpTestedAtEpochMs[endpoint],
                 )
             },
@@ -404,7 +455,7 @@ private fun encodeJmSpeedTestLog(
                 ).map { endpoint ->
                 val delay = snapshot.imageIpDelaysMs[endpoint] ?: snapshot.untestedImageIpDelaysMs.getValue(endpoint)
                 val verdict = snapshot.imageIpVerdicts[endpoint] ?: snapshot.untestedImageIpVerdicts[endpoint]
-                val tested = endpoint in snapshot.testedImageEndpoints
+                val tested = snapshotIsCurrentRun && endpoint in snapshot.testedImageEndpoints
                 endpointJson(
                     endpoint = endpoint,
                     delay = delay,

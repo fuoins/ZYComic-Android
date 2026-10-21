@@ -5,7 +5,11 @@ import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -24,6 +28,7 @@ import java.net.InetAddress
 import java.net.Proxy
 import java.net.URI
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -39,6 +44,10 @@ object JmSpeedTester {
     private val running = AtomicBoolean(false)
     private val dnsResolver = JmProbeDnsResolver()
     val isRunning: Boolean get() = running.get()
+    private val _lastSubmission = MutableStateFlow<JmSpeedTestSubmission?>(null)
+    val lastSubmission = _lastSubmission.asStateFlow()
+
+    data class RunResult(val snapshot: JmRouteManager.SpeedTestSnapshot, val submission: JmSpeedTestSubmission?)
 
     /** Optionally retest the five best historical endpoints independently for API lines and images. */
     suspend fun run(
@@ -48,20 +57,32 @@ object JmSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
-    ): JmRouteManager.SpeedTestSnapshot = lock.withLock {
+    ): RunResult = lock.withLock {
         check(running.compareAndSet(false, true)) { "JM 测速已在运行" }
+        _lastSubmission.value = null
         try {
             withContext(Dispatchers.IO) {
                 coroutineScope {
                     val platformRevision = StartupPlatformPolicy.state.value.revision
                     if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM)) {
-                        return@coroutineScope JmRouteManager.SpeedTestSnapshot()
+                        return@coroutineScope RunResult(JmRouteManager.SpeedTestSnapshot(), null)
                     }
                     val configVersion = JmRouteManager.state.value.remoteVersion
                     val configRevision = JmRouteManager.currentSpeedTestConfigRevision()
                     val configFingerprint = JmRouteManager.currentSpeedTestConfigFingerprint()
                     val imageConfigFingerprint = JmRouteManager.currentImageConfigFingerprint()
                     val imageNetworkPolicy = JmRouteManager.currentImageNetworkPolicy()
+                    val runContext = currentCoroutineContext()
+                    val identity = JmSpeedTestRunIdentity(
+                        UUID.randomUUID().toString(),
+                        platformRevision,
+                        configRevision,
+                        configVersion,
+                        configFingerprint,
+                        imageConfigFingerprint,
+                        imageNetworkPolicy,
+                        PlatformSpeedTestCoordinator.currentNetworkIdentity(),
+                    )
                     val linesToTest = JmRouteManager.lineHosts.toList()
                     val imagesToTest = JmRouteManager.imageDomains.toList()
                     val prior = JmRouteManager.speedTestSnapshot.value
@@ -125,7 +146,8 @@ object JmSpeedTester {
                     val reconcileLines = !quickLines && requestedLineReconciliation
                     val reconcileImages = !quickImages && requestedImageReconciliation
                     fun stillCurrent(): Boolean =
-                        isCurrent() && StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
+                        runContext.isActive && isCurrent() && StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
+                            PlatformSpeedTestCoordinator.currentNetworkIdentity() == identity.networkIdentity &&
                             StartupPlatformPolicy.state.value.revision == platformRevision &&
                             JmRouteManager.state.value.remoteVersion == configVersion &&
                             JmRouteManager.currentSpeedTestConfigRevision() == configRevision &&
@@ -138,6 +160,21 @@ object JmSpeedTester {
                     val startedNanos = System.nanoTime()
                     val progressGuard = Any()
                     var progress = JmSpeedTestProgress()
+                    var lineCount = 0
+                    var imageCount = 0
+                    var snapshotSubmitted = false
+                    var historiesSaved = false
+                    fun diagnose(submission: JmSpeedTestSubmission) {
+                        _lastSubmission.value = submission
+                        JmRouteManager.record(
+                            "speed_submission",
+                            "JM",
+                            "runId=${identity.runId}; state=${submission.state}; phase=${progress.phase}; " +
+                                "snapshotSubmitted=${submission.snapshotSubmitted}; historiesSaved=${submission.historiesSaved}; " +
+                                "complete=${submission.state == JmSpeedTestSubmission.State.COMPLETE}; reason=${submission.state.reason}; " +
+                                "lineQuick=$quickLines; imageQuick=$quickImages; lineCount=$lineCount; imageCount=$imageCount",
+                        )
+                    }
                     val pendingLogs = java.util.concurrent.ConcurrentLinkedQueue<Triple<String, String, String>>()
                     fun publish(next: (JmSpeedTestProgress) -> JmSpeedTestProgress) = synchronized(progressGuard) {
                         progress = next(progress).copy(elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L)
@@ -230,6 +267,7 @@ object JmSpeedTester {
                                 }
                             },
                         )
+                        lineCount = lineResults.size
                         lineTiming.close()
                         val measuredLineHistory = lineResults.map { (target, result) ->
                             JmSpeedTestHistoryPolicy.Measurement(
@@ -403,12 +441,22 @@ object JmSpeedTester {
                             remoteVersion = configVersion,
                             configFingerprint = configFingerprint, imageConfigFingerprint = imageConfigFingerprint,
                             imageNetworkPolicy = imageNetworkPolicy, imageResultsReused = false,
+                            runId = identity.runId,
                         )
-                        if (timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { beforeApply() } && stillCurrent()) {
-                            pendingLogs.forEach { (kind, host, message) ->
-                                if (stillCurrent()) JmRouteManager.record(kind, host, message)
-                            }
-                            if (JmRouteManager.recordSpeedTest(snapshot, platformRevision)) {
+                        imageCount = testedImageEndpoints.size
+                        val beforeApplyAccepted = timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { beforeApply() }
+                        runContext.ensureActive()
+                        val submission = JmSpeedTestSubmission.commit(
+                            identity = identity,
+                            beforeApplyAccepted = beforeApplyAccepted,
+                            isCurrent = ::stillCurrent,
+                            submitSnapshot = {
+                                pendingLogs.forEach { (kind, host, message) ->
+                                    if (stillCurrent()) JmRouteManager.record(kind, host, message)
+                                }
+                                (stillCurrent() && JmRouteManager.recordSpeedTest(snapshot, platformRevision)).also { snapshotSubmitted = it }
+                            },
+                            saveHistories = {
                                 JmRouteManager.persistSpeedTestHistories(
                                     lineHistoryAfterRun,
                                     imageHistoryAfterRun,
@@ -416,14 +464,21 @@ object JmSpeedTester {
                                     configRevision,
                                     configFingerprint,
                                     ::stillCurrent,
-                                )
-                            }
-                            publish { it.copy(phase = JmSpeedTestProgress.Phase.COMPLETE) }
+                                ).also { historiesSaved = it }
+                            },
+                            publishedRunId = { JmRouteManager.speedTestSnapshot.value.runId },
+                        )
+                        runContext.ensureActive()
+                        diagnose(submission)
+                        publish {
+                            it.copy(phase = if (submission.state == JmSpeedTestSubmission.State.COMPLETE) JmSpeedTestProgress.Phase.COMPLETE else JmSpeedTestProgress.Phase.FAILED)
                         }
-                        snapshot
+                        RunResult(snapshot, submission)
                     } catch (error: CancellationException) {
+                        diagnose(JmSpeedTestSubmission(identity, JmSpeedTestSubmission.State.CANCELLED, snapshotSubmitted, historiesSaved))
                         throw error
                     } catch (error: Exception) {
+                        diagnose(JmSpeedTestSubmission(identity, JmSpeedTestSubmission.State.FAILED, snapshotSubmitted, historiesSaved))
                         publish { it.copy(phase = JmSpeedTestProgress.Phase.FAILED) }
                         throw error
                     } finally {

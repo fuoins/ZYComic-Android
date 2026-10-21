@@ -142,7 +142,7 @@ internal object JmSpeedTestHistoryStorage {
         }.getOrDefault(JmSpeedTestHistoryPolicy.PhaseHistory(null))
     }
 
-    private fun save(key: String, history: JmSpeedTestHistoryPolicy.PhaseHistory, expectedPhase: String) {
+    private fun save(key: String, history: JmSpeedTestHistoryPolicy.PhaseHistory, expectedPhase: String): Boolean {
         val root = JSONObject()
             .put("remoteVersion", history.remoteVersion ?: JSONObject.NULL)
             .put(
@@ -166,6 +166,6 @@ internal object JmSpeedTestHistoryStorage {
                     }
                 },
             ).toString()
-        runCatching { preferences()?.edit()?.putString(key, root)?.apply() }
+        return runCatching { preferences()?.edit()?.putString(key, root)?.commit() == true }.getOrDefault(false)
     }
 }

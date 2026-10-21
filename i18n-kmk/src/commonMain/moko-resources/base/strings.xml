@@ -636,4 +636,8 @@
     <string name="picacg_filtered">筛选结果</string>
     <string name="picacg_preset_invalid">名称不能为空且不能重复</string>
     <string name="picacg_settings">设置</string>
+    <string name="jm_speed_test_complete">禁漫测速完成</string>
+    <string name="jm_speed_test_incomplete">禁漫测速未完成：%1$s</string>
+    <string name="jm_speed_test_missing_result">本轮未返回完整提交结果</string>
+    <string name="jm_speed_test_cancelled">禁漫测速已取消</string>
 </resources>
