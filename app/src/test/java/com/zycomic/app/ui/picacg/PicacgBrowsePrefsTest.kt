@@ -32,6 +32,15 @@ class PicacgBrowsePrefsTest {
     }
 
     @Test
+    fun `static Picacg themes contain the configured forty unique titles`() {
+        assertEquals(40, PicacgThemes.titles.size)
+        assertEquals(40, PicacgThemes.titles.toSet().size)
+        assertEquals("大家都在看", PicacgThemes.titles.first())
+        assertEquals("重口地帶", PicacgThemes.titles.last())
+        assertEquals(setOf("dd", "da", "ld", "vd"), PicacgBrowseFilter.SORT_CODES)
+    }
+
+    @Test
     fun `nonactive web categories are filtered and duplicate titles collapse`() {
         val visible = PicacgBrowsePolicy.visibleCategories(
             listOf(

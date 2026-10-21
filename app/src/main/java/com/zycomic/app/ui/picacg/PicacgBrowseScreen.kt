@@ -1,13 +1,19 @@
 package com.zycomic.app.ui.picacg
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -15,9 +21,11 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -30,25 +38,35 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.picacg.PicacgAuthStore
-import com.zycomic.app.picacg.PicacgCategory
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.ui.components.DisplaySettingsSection
+import com.zycomic.app.ui.components.MangaGridSkeleton
 import com.zycomic.app.ui.components.PicacgCollectionPolicy
-import com.zycomic.app.ui.components.PicacgMangaCard
+import com.zycomic.app.ui.components.PicacgImageLoader
+import eu.kanade.presentation.components.TabbedDialog
+import eu.kanade.presentation.components.TabbedDialogPaddings
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
 private enum class PicacgFeedMode(val timeframe: String? = null) {
-    LATEST,
-    RANDOM,
     LEADERBOARD_24H("H24"),
     LEADERBOARD_7D("D7"),
     LEADERBOARD_30D("D30"),
+    RANDOM,
+    LATEST,
     FILTERED,
 }
 
@@ -70,30 +88,57 @@ fun PicacgBrowseScreen(
     pendingTag: String? = null,
     onPendingTagConsumed: () -> Unit = {},
     onOpenManga: (String) -> Unit,
-    onOpenSearch: (String) -> Unit,
     onRequireLogin: () -> Unit,
+    tabId: String = "",
+    initialFilter: PicacgBrowseFilter? = null,
+    pageMode: PicacgBrowsePageMode = PicacgBrowsePageMode.HOME,
+    displayMode: Int = 1,
+    gridColumns: Int = 3,
+    orientation: Int = 1,
+    filterDialogRequest: Int = 0,
+    onSetDisplayMode: (Int) -> Unit = {},
+    onSetGridColumns: (Int) -> Unit = {},
 ) {
     val loadFailed = stringResource(KMR.strings.picacg_library_load_failed)
     val invalidPreset = stringResource(KMR.strings.picacg_preset_invalid)
     val context = LocalContext.current
+    val effectiveGridColumns = (gridColumns.takeIf { it > 0 } ?: 3).coerceIn(1, 10)
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val session by PicacgAuthStore.sessionRevision.collectAsState()
     val presets = remember { mutableStateOf(PicacgBrowsePrefs.load(context)) }
-    var mode by remember(session) { mutableStateOf(PicacgFeedMode.LATEST) }
-    var filter by remember(session) { mutableStateOf(PicacgBrowseFilter()) }
-    var categories by remember(session) { mutableStateOf<List<PicacgCategory>>(emptyList()) }
-    var page by remember(session) { mutableStateOf(1) }
-    var mangas by remember(session) { mutableStateOf<List<Manga>>(emptyList()) }
-    var hasMore by remember(session) { mutableStateOf(false) }
-    var loading by remember(session) { mutableStateOf(false) }
-    var error by remember(session) { mutableStateOf<String?>(null) }
+    var mode by remember(session, tabId, initialFilter, pageMode) {
+        mutableStateOf(
+            if (pageMode == PicacgBrowsePageMode.CATEGORY) {
+                PicacgFeedMode.FILTERED
+            } else if (pageMode == PicacgBrowsePageMode.RANKING) {
+                PicacgFeedMode.LEADERBOARD_24H
+            } else {
+                PicacgFeedMode.LATEST
+            },
+        )
+    }
+    var filter by remember(session, tabId, initialFilter) { mutableStateOf(initialFilter?.normalized() ?: PicacgBrowseFilter()) }
+    var page by remember(session, tabId, initialFilter) { mutableStateOf(1) }
+    var mangas by remember(session, tabId, initialFilter) { mutableStateOf<List<Manga>>(emptyList()) }
+    var hasMore by remember(session, tabId, initialFilter) { mutableStateOf(false) }
+    var loading by remember(session, tabId, initialFilter) { mutableStateOf(false) }
+    var error by remember(session, tabId, initialFilter) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
     var showFilters by remember { mutableStateOf(false) }
     var showPresets by remember { mutableStateOf(false) }
     var draftFilter by remember { mutableStateOf(filter) }
-    var keyword by remember(session) { mutableStateOf("") }
+    var draftCategory by remember(filter) { mutableStateOf(filter.category) }
+    var draftSort by remember(filter) { mutableStateOf(filter.sort) }
     var presetName by remember { mutableStateOf("") }
     var presetError by remember { mutableStateOf<String?>(null) }
+    var handledFilterRequest by remember { mutableStateOf(filterDialogRequest) }
+
+    LaunchedEffect(filterDialogRequest) {
+        if (filterDialogRequest != handledFilterRequest) {
+            handledFilterRequest = filterDialogRequest
+            showFilters = true
+        }
+    }
 
     LaunchedEffect(pendingTag) {
         if (pendingTag != null) {
@@ -104,18 +149,7 @@ fun PicacgBrowseScreen(
         }
     }
 
-    LaunchedEffect(session, loggedIn, refresh) {
-        if (!loggedIn) return@LaunchedEffect
-        try {
-            categories = PicacgBrowsePolicy.visibleCategories(PicacgRepository.categories())
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Browsing remains usable with manually entered category names if category lookup fails.
-        }
-    }
-
-    LaunchedEffect(session, loggedIn, mode, filter, page, refresh) {
+    LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode) {
         if (!loggedIn) return@LaunchedEffect
         loading = true
         error = null
@@ -177,39 +211,44 @@ fun PicacgBrowseScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                modifier = Modifier.weight(1f),
-                label = { Text(stringResource(KMR.strings.picacg_browse_search)) },
-                singleLine = true,
-            )
-            TextButton(onClick = { onOpenSearch(keyword) }, enabled = keyword.isNotBlank()) { Text(stringResource(KMR.strings.picacg_search_action)) }
-            TextButton(onClick = { showFilters = true }) { Text(stringResource(KMR.strings.picacg_filter)) }
-            TextButton(onClick = { showPresets = true }) { Text(stringResource(KMR.strings.picacg_presets)) }
+        if (pageMode == PicacgBrowsePageMode.HOME) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { showFilters = true }) { Text(stringResource(KMR.strings.picacg_filter)) }
+                TextButton(onClick = { showPresets = true }) { Text(stringResource(KMR.strings.picacg_presets)) }
+            }
         }
         if (!loggedIn) {
             Text(stringResource(KMR.strings.picacg_session_required))
             Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
         } else {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(PicacgFeedMode.entries.filter { it != PicacgFeedMode.FILTERED }, key = { it.name }) { item ->
-                    FilterChip(
-                        selected = mode == item,
-                        onClick = { selectMode(item, if (item == PicacgFeedMode.LATEST) filter.copy(sort = "dd") else filter) },
-                        label = { Text(item.label()) },
-                    )
-                }
-                items(presets.value, key = { it.id }) { preset ->
-                    FilterChip(
-                        selected = mode == PicacgFeedMode.FILTERED && filter.normalized() == preset.filter,
-                        onClick = { selectMode(PicacgFeedMode.FILTERED, preset.filter) },
-                        label = { Text(preset.name) },
-                    )
+            if (pageMode != PicacgBrowsePageMode.CATEGORY) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(PicacgFeedMode.entries.filter { it != PicacgFeedMode.FILTERED }, key = { it.name }) { item ->
+                        val title = when (item) {
+                            PicacgFeedMode.LEADERBOARD_24H -> if (pageMode == PicacgBrowsePageMode.RANKING) "日榜" else item.label()
+                            PicacgFeedMode.LEADERBOARD_7D -> if (pageMode == PicacgBrowsePageMode.RANKING) "周榜" else item.label()
+                            PicacgFeedMode.LEADERBOARD_30D -> if (pageMode == PicacgBrowsePageMode.RANKING) "月榜" else item.label()
+                            else -> item.label()
+                        }
+                        val onSelect = { selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter) }
+                        if (pageMode == PicacgBrowsePageMode.RANKING) {
+                            com.zycomic.app.ui.browse.CompactBrowseFilterChip(selected = mode == item, onClick = onSelect, label = { Text(title) })
+                        } else {
+                            FilterChip(selected = mode == item, onClick = onSelect, label = { Text(title) })
+                        }
+                    }
+                    if (pageMode == PicacgBrowsePageMode.HOME) {
+                        items(presets.value, key = { it.id }) { preset ->
+                            FilterChip(
+                                selected = mode == PicacgFeedMode.FILTERED && filter.normalized() == preset.filter,
+                                onClick = { selectMode(PicacgFeedMode.FILTERED, preset.filter) },
+                                label = { Text(preset.name) },
+                            )
+                        }
+                    }
                 }
             }
-            if (categories.isNotEmpty()) {
+            if (pageMode == PicacgBrowsePageMode.HOME) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     item {
                         FilterChip(
@@ -218,39 +257,76 @@ fun PicacgBrowseScreen(
                             label = { Text(stringResource(KMR.strings.picacg_all)) },
                         )
                     }
-                    items(categories, key = { it.id.ifBlank { it.title } }) { category ->
+                    items(PicacgThemes.titles, key = { it }) { theme ->
                         FilterChip(
-                            selected = filter.category == category.title,
-                            onClick = { selectMode(modeForCurrentFilter(), filter.copy(category = category.title)) },
-                            label = { Text(category.title) },
+                            selected = filter.category == theme,
+                            onClick = { selectMode(modeForCurrentFilter(), filter.copy(category = theme)) },
+                            label = { Text(theme) },
                         )
                     }
                 }
             }
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(112.dp),
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (loading && mangas.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { CircularProgressIndicator() }
-                error?.let { failure ->
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Column {
-                            Text(failure, color = MaterialTheme.colorScheme.error)
-                            TextButton(onClick = { refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
+            if (loading && mangas.isEmpty()) {
+                if (displayMode == 3) {
+                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(8) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                                Box(Modifier.width(68.dp).aspectRatio(0.72f).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Box(Modifier.fillMaxWidth(0.75f).height(16.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)))
+                                    Box(Modifier.fillMaxWidth(0.45f).height(12.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    MangaGridSkeleton(columns = effectiveGridColumns, displayMode = displayMode, modifier = Modifier.weight(1f))
+                }
+            } else if (displayMode == 3) {
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    error?.let { failure ->
+                        item {
+                            Column {
+                                Text(failure, color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = { refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
+                            }
+                        }
+                    }
+                    items(mangas, key = { it.id }) { manga ->
+                        PicacgBrowseComicListItem(manga) { onOpenManga("picacg:${manga.id}") }
+                    }
+                    if (!loading && error == null && mangas.isEmpty()) item { Text(stringResource(KMR.strings.picacg_search_empty)) }
+                    if (hasMore) {
+                        item {
+                            TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
                         }
                     }
                 }
-                items(mangas, key = { it.id }) { manga ->
-                    PicacgMangaCard(manga = manga, onClick = { onOpenManga("picacg:${manga.id}") })
-                }
-                if (!loading && error == null && mangas.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { Text(stringResource(KMR.strings.picacg_search_empty)) }
-                }
-                if (hasMore) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
+            } else {
+                LazyVerticalGrid(
+                    columns = if (gridColumns == 0) GridCells.Adaptive(128.dp) else GridCells.Fixed(effectiveGridColumns),
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(if (displayMode == 0) 6.dp else 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (displayMode == 0) 8.dp else 12.dp),
+                ) {
+                    error?.let { failure ->
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Column {
+                                Text(failure, color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = { refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
+                            }
+                        }
+                    }
+                    items(mangas, key = { it.id }) { manga ->
+                        PicacgBrowseComicGridItem(manga = manga, displayMode = displayMode) { onOpenManga("picacg:${manga.id}") }
+                    }
+                    if (!loading && error == null && mangas.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) { Text(stringResource(KMR.strings.picacg_search_empty)) }
+                    }
+                    if (hasMore) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
+                        }
                     }
                 }
             }
@@ -258,45 +334,75 @@ fun PicacgBrowseScreen(
     }
 
     if (showFilters) {
-        LaunchedEffect(showFilters) { if (showFilters) draftFilter = filter }
-        AlertDialog(
+        LaunchedEffect(showFilters) {
+            if (showFilters) {
+                draftFilter = filter
+                draftCategory = filter.category
+                draftSort = filter.sort
+            }
+        }
+        val displayOnly = pageMode == PicacgBrowsePageMode.RANKING
+        TabbedDialog(
             onDismissRequest = { showFilters = false },
-            title = { Text(stringResource(KMR.strings.picacg_filter_title)) },
-            text = {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item {
-                        OutlinedTextField(draftFilter.category, { draftFilter = draftFilter.copy(category = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_category)) }, singleLine = true)
-                    }
-                    item {
-                        OutlinedTextField(draftFilter.tag, { draftFilter = draftFilter.copy(tag = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_tag)) }, singleLine = true)
-                    }
-                    item {
-                        OutlinedTextField(draftFilter.author, { draftFilter = draftFilter.copy(author = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_author)) }, singleLine = true)
-                    }
-                    item {
-                        OutlinedTextField(draftFilter.creatorId, { draftFilter = draftFilter.copy(creatorId = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_creator)) }, singleLine = true)
-                    }
-                    item {
-                        OutlinedTextField(draftFilter.chineseTeam, { draftFilter = draftFilter.copy(chineseTeam = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_team)) }, singleLine = true)
-                    }
-                    item { Text(stringResource(KMR.strings.picacg_sort)) }
-                    item {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(stringResource(KMR.strings.picacg_latest) to "dd", stringResource(KMR.strings.picacg_oldest) to "da", stringResource(KMR.strings.picacg_most_likes) to "ld", stringResource(KMR.strings.picacg_most_views) to "vd").forEach { (label, code) ->
-                                FilterChip(draftFilter.sort == code, onClick = { draftFilter = draftFilter.copy(sort = code) }, label = { Text(label) })
-                            }
+            tabTitles = if (displayOnly) persistentListOf("显示") else persistentListOf("重新筛选", "显示"),
+        ) { dialogPage ->
+            if (displayOnly || dialogPage == 1) {
+                DisplaySettingsSection(
+                    displayMode = displayMode,
+                    gridColumns = gridColumns,
+                    orientation = orientation,
+                    onSetDisplayMode = onSetDisplayMode,
+                    onSetGridColumns = onSetGridColumns,
+                    modes = listOf(0 to "紧凑网格", 1 to "舒适网格", 2 to "仅封面网格", 3 to "列表"),
+                )
+            } else {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(TabbedDialogPaddings.Horizontal), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("主题")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FilterChip(
+                            selected = draftCategory.isBlank(),
+                            onClick = {
+                                draftCategory = ""
+                                draftFilter = draftFilter.copy(category = "")
+                            },
+                            label = { Text(stringResource(KMR.strings.picacg_all)) },
+                        )
+                        PicacgThemes.titles.forEach { title ->
+                            FilterChip(
+                                selected = draftCategory == title,
+                                onClick = {
+                                    draftCategory = title
+                                    draftFilter = draftFilter.copy(category = title)
+                                },
+                                label = { Text(title) },
+                            )
                         }
                     }
+                    if (pageMode != PicacgBrowsePageMode.CATEGORY) {
+                        OutlinedTextField(draftFilter.tag, { draftFilter = draftFilter.copy(tag = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_tag)) }, singleLine = true)
+                        OutlinedTextField(draftFilter.author, { draftFilter = draftFilter.copy(author = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_author)) }, singleLine = true)
+                        OutlinedTextField(draftFilter.creatorId, { draftFilter = draftFilter.copy(creatorId = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_creator)) }, singleLine = true)
+                        OutlinedTextField(draftFilter.chineseTeam, { draftFilter = draftFilter.copy(chineseTeam = it) }, label = { Text(stringResource(KMR.strings.picacg_filter_team)) }, singleLine = true)
+                    }
+                    Text(stringResource(KMR.strings.picacg_sort))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("新到旧" to "dd", "旧到新" to "da", "最多喜欢" to "ld", "最多浏览" to "vd").forEach { (label, code) ->
+                            FilterChip(draftSort == code, onClick = {
+                                draftSort = code
+                                draftFilter = draftFilter.copy(sort = code)
+                            }, label = { Text(label) })
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = {
+                            val next = draftFilter.copy(category = draftCategory, sort = draftSort).normalized()
+                            selectMode(if (next.category.isBlank() && pageMode == PicacgBrowsePageMode.HOME) PicacgFeedMode.LATEST else PicacgFeedMode.FILTERED, next)
+                            showFilters = false
+                        }) { Text(stringResource(KMR.strings.picacg_apply)) }
+                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    selectMode(PicacgFeedMode.FILTERED, draftFilter.normalized())
-                    showFilters = false
-                }) { Text(stringResource(KMR.strings.picacg_apply)) }
-            },
-            dismissButton = { TextButton(onClick = { showFilters = false }) { Text(stringResource(KMR.strings.picacg_cancel)) } },
-        )
+            }
+        }
     }
 
     if (showPresets) {
@@ -367,3 +473,60 @@ private fun PicacgBrowseFilter.summary(): String = listOf(category, tag, author,
     .filter(String::isNotBlank)
     .joinToString(" · ")
     .ifBlank { sort }
+
+@Composable
+private fun PicacgBrowseComicGridItem(manga: Manga, displayMode: Int, onClick: () -> Unit) {
+    if (displayMode == 1) {
+        com.zycomic.app.ui.components.PicacgMangaCard(manga = manga, onClick = onClick)
+        return
+    }
+    val context = LocalContext.current
+    Box(
+        Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick),
+    ) {
+        val cover = manga.picx.ifBlank { manga.pic }
+        if (cover.isNotBlank()) {
+            SubcomposeAsyncImage(
+                model = cover,
+                contentDescription = manga.name,
+                imageLoader = PicacgImageLoader.get(context),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (displayMode == 0) {
+            Text(
+                text = manga.name,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.62f)).padding(6.dp),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PicacgBrowseComicListItem(manga: Manga, onClick: () -> Unit) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SubcomposeAsyncImage(
+            model = manga.picx.ifBlank { manga.pic },
+            contentDescription = manga.name,
+            imageLoader = PicacgImageLoader.get(context),
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.width(68.dp).aspectRatio(0.72f).clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(manga.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(manga.author.ifBlank { manga.categoryName }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}

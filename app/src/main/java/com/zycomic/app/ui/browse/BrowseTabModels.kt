@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.browse
 
 import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.ui.picacg.PicacgBrowseFilter
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -13,7 +14,7 @@ enum class TabKind { FILTER, SPECIAL }
  * - RANKING：整体排行（api/rank，展示名「gay排行」，默认不内置、可在管理面板添加）
  * 后续如需「宇总排行」，在此新增 pageType 即可，本期不实现。
  */
-enum class BrowsePageType { LATEST, RANKING, YUZONG_RANK }
+enum class BrowsePageType { LATEST, RANKING, YUZONG_RANK, PICACG_RANKING, PICACG_CATEGORY }
 
 /** 一个筛选型 tab 的完整筛选快照（对应 getClasses 的全部可调参数）。 */
 data class FilterSnapshot(
@@ -55,6 +56,7 @@ data class BrowseTabItem(
     val filter: FilterSnapshot? = null,
     val pageType: BrowsePageType? = null,
     val platformId: ContentPlatform = ContentPlatform.MANWA,
+    val picacgFilter: PicacgBrowseFilter? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -63,6 +65,7 @@ data class BrowseTabItem(
         put("builtin", builtin)
         put("platformId", platformId.id)
         if (platformId == ContentPlatform.MANWA) filter?.let { put("filter", it.toJson()) }
+        if (platformId == ContentPlatform.PICACG) picacgFilter?.normalized()?.let { put("picacgFilter", it.toJson()) }
         pageType?.let { put("pageType", it.name) }
     }
 
@@ -78,6 +81,11 @@ data class BrowseTabItem(
             } else {
                 null
             }
+            val picacgFilter = if (kind == TabKind.FILTER && platformId == ContentPlatform.PICACG && !o.optBoolean("builtin", false)) {
+                o.optJSONObject("picacgFilter")?.let { PicacgBrowseFilter.fromJson(it) } ?: PicacgBrowseFilter()
+            } else {
+                null
+            }
             return BrowseTabItem(
                 id = o.optString("id"),
                 name = o.optString("name"),
@@ -86,6 +94,7 @@ data class BrowseTabItem(
                 filter = filter,
                 pageType = pageType,
                 platformId = platformId,
+                picacgFilter = picacgFilter,
             )
         }
     }

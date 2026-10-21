@@ -547,7 +547,14 @@
     <string name="picacg_profile_default_name">哔咔用户</string>
     <string name="picacg_profile_avatar">头像</string>
     <string name="picacg_profile_user_id">用户 ID：%1$s</string>
-    <string name="picacg_profile_email">邮箱：%1$s</string>
+    <string name="picacg_profile_email">账号：%1$s</string>
+    <string name="picacg_collection_display_mode">显示模式</string>
+    <string name="picacg_collection_grid">网格</string>
+    <string name="picacg_collection_list">列表</string>
+    <string name="picacg_collection_grid_columns">每行数量</string>
+    <string name="picacg_collection_grid_columns_option">%1$d 列</string>
+    <string name="picacg_favorites_recent">最近收藏</string>
+    <string name="picacg_favorites_oldest">最早收藏</string>
     <string name="picacg_profile_member_title">称号：%1$s</string>
     <string name="picacg_profile_slogan">签名：%1$s</string>
     <string name="picacg_profile_gender">性别：%1$s</string>

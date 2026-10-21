@@ -286,6 +286,56 @@ class PicacgOfflineApiTest {
     }
 
     @Test
+    fun `search defaults to most likes without changing browse latest default`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        repeat(2) { responses += 200 to """{"code":200,"data":{"comics":{"docs":[],"pages":1}}}""" }
+
+        PicacgRepository.search("title or author", 1)
+        PicacgRepository.browse(1)
+
+        val payload = org.json.JSONObject(Buffer().also { requests[0].body!!.writeTo(it) }.readUtf8())
+        assertEquals("ld", payload.getString("sort"))
+        assertEquals("title or author", payload.getString("keyword"))
+        assertEquals(0, payload.getJSONArray("categories").length())
+        assertEquals("dd", requests[1].url.queryParameter("s"))
+    }
+
+    @Test
+    fun `all four favourite sorts are forwarded without altering pagination`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        for (sort in listOf("dd", "da", "ld", "vd")) {
+            responses += 200 to """{"code":200,"data":{"comics":{"docs":[{"_id":"$sort","title":"Saved"}],"pages":3}}}"""
+            val page = PicacgRepository.favourites(2, sort)
+            assertEquals(2, page.page)
+            assertTrue(page.hasMore)
+            assertEquals(sort, page.items.single().id)
+            assertEquals("2", requests.last().url.queryParameter("page"))
+            assertEquals(sort, requests.last().url.queryParameter("s"))
+        }
+        assertEquals(4, requests.size)
+    }
+
+    @Test
+    fun `ranking tabs use H24 D7 D30 and random while latest remains paginated`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        for (timeframe in listOf("H24", "D7", "D30")) {
+            responses += 200 to """{"code":200,"data":{"comics":[{"_id":"$timeframe","title":"Ranked"}]}}"""
+            assertEquals(timeframe, PicacgRepository.leaderboard(timeframe).single().id)
+            assertEquals("/api/v2/comics/leaderboard", requests.last().url.encodedPath)
+            assertEquals(timeframe, requests.last().url.queryParameter("tt"))
+            assertEquals("VC", requests.last().url.queryParameter("ct"))
+        }
+        responses += 200 to """{"code":200,"data":{"comics":[]}}"""
+        assertTrue(PicacgRepository.random().isEmpty())
+        assertEquals("/api/v2/comics/random", requests.last().url.encodedPath)
+        responses += 200 to """{"code":200,"data":{"comics":{"docs":[],"pages":3}}}"""
+        assertTrue(PicacgRepository.browse(2, sort = "dd").hasMore)
+        assertEquals("/api/v2/comics", requests.last().url.encodedPath)
+        assertEquals("dd", requests.last().url.queryParameter("s"))
+        assertEquals("2", requests.last().url.queryParameter("page"))
+    }
+
+    @Test
     fun `favourite and comic like return state from a same-session detail read`() = runBlocking {
         PicacgRepository.installClientForTests(client)
         val favoritesBefore = PicacgRepository.favouritesRevision.value

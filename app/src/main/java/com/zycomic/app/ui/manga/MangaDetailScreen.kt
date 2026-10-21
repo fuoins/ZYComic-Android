@@ -903,32 +903,7 @@ private fun ExpandableSummary(text: String) {
 /** 相关推荐单项：封面 96dp + 标题最多 2 行。 */
 @Composable
 private fun RelatedItem(manga: Manga, imageLoader: coil3.ImageLoader, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .width(96.dp)
-            .height(180.dp)
-            .clickable(onClick = onClick),
-    ) {
-        SubcomposeAsyncImage(
-            model = coverUrl(manga),
-            contentDescription = manga.name,
-            imageLoader = imageLoader,
-            modifier = Modifier
-                .width(96.dp)
-                .height(144.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentScale = ContentScale.Crop,
-            error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            manga.name,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    MangaDetailRecommendationCard(manga = manga, imageLoader = imageLoader, onClick = onClick)
 }
 
 /** 封面点击弹出的简化操作 Dialog。 */

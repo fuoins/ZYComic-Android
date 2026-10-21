@@ -144,7 +144,7 @@ object PicacgRepository {
         return comicList(client().request("/comics?$query").data, page)
     }
 
-    suspend fun search(keyword: String, page: Int, sort: String = "dd", categories: List<String> = emptyList()): PicacgPage<Manga> {
+    suspend fun search(keyword: String, page: Int, sort: String = "ld", categories: List<String> = emptyList()): PicacgPage<Manga> {
         require(page >= 1) { "Picacg pages are one-based" }
         require(sort in SORT_VALUES) { "Unsupported Picacg sort value" }
         val body = JSONObject()

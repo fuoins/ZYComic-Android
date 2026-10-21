@@ -1,10 +1,16 @@
 package com.zycomic.app.ui.search
 
+import com.zycomic.app.ui.picacg.PicacgThemes
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
 
 class SearchPolicyPicacgTest {
+    @Test fun picacgSearchThemesAreStaticAndUnique() {
+        assertEquals(40, PicacgThemes.titles.size)
+        assertEquals(40, PicacgThemes.titles.distinct().size)
+    }
+
     @Test fun categoryTitlesAreNormalizedAndSnapshotted() {
         assertEquals(listOf("恋爱", "校园"), normalizedPicacgSearchCategories(listOf(" 恋爱 ", "", "校园", "恋爱")))
         val request = SearchRequest("test", SearchProvider.PICACG, "dd", 1, 1, listOf("恋爱"))
@@ -13,9 +19,14 @@ class SearchPolicyPicacgTest {
     }
 
     @Test fun picacgSortIsValidatedAndHasStableDefault() {
-        assertEquals("dd", picacgSearchSortCode(null))
+        assertEquals("ld", PICACG_DEFAULT_SEARCH_SORT_CODE)
+        assertEquals("ld", picacgSearchSortCode(null))
         assertEquals("ld", picacgSearchSortCode("ld"))
-        assertEquals("dd", picacgSearchSortCode("unknown"))
+        assertEquals("ld", picacgSearchSortCode("unknown"))
+        assertEquals(
+            listOf("最新" to "dd", "最旧" to "da", "最多喜欢" to "ld", "最多浏览" to "vd"),
+            PicacgSearchSortOptions,
+        )
     }
 
     @Test fun detailIdsAreNamespacedByProvider() {

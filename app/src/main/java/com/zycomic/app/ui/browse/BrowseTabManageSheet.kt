@@ -64,6 +64,8 @@ import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
+import com.zycomic.app.ui.picacg.PicacgBrowseFilter
+import com.zycomic.app.ui.picacg.PicacgThemes
 import eu.kanade.presentation.components.AdaptiveSheet
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -346,6 +348,20 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
                     SpecialAddButton(
+                        label = if (vm.canAddPicacgRanking()) "哔咔排行" else "哔咔排行（已添加）",
+                        enabled = vm.canAddPicacgRanking(),
+                        onClick = { vm.addPicacgRankingTab() },
+                        info = "Picacg 日榜、周榜、月榜、随机和最新漫画。",
+                        platform = ContentPlatform.PICACG,
+                    )
+                    SpecialAddButton(
+                        label = if (vm.canAddPicacgCategory()) "哔咔分类" else "哔咔分类（已添加）",
+                        enabled = vm.canAddPicacgCategory(),
+                        onClick = { vm.addPicacgCategoryTab() },
+                        info = "使用 Picacg 配置中的40个静态主题筛选漫画。",
+                        platform = ContentPlatform.PICACG,
+                    )
+                    SpecialAddButton(
                         label = if (vm.canAddLatest()) "增加最新更新" else "最新更新（已添加）",
                         enabled = vm.canAddLatest(),
                         onClick = { vm.addLatestTab() },
@@ -430,6 +446,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = stringResource(KMR.strings.browse_tab_edit_title),
             initialName = item.name,
             initial = item.filter ?: FilterSnapshot(),
+            initialPicacgFilter = item.picacgFilter ?: PicacgBrowseFilter(),
             initialJmFilters = vm.defaultJmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).let {
                 if (item.id == JmBrowsePolicy.ALL_HOT_TAB_ID) it.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "") else it
             },
@@ -440,8 +457,10 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             onDismiss = { editing = null },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, item.id, platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, jmFilters, platform ->
-                if (platform == ContentPlatform.JM) {
+            onSave = { nm, snap, jmFilters, platform, picacgFilter ->
+                if (platform == ContentPlatform.PICACG) {
+                    vm.updateTabDefaultPicacgFilter(item.id, picacgFilter)
+                } else if (platform == ContentPlatform.JM) {
                     vm.updateTabDefaultJmFilters(item.id, jmFilters)
                 } else if (snap != null) {
                     vm.updateTabDefaultFilter(item.id, snap)
@@ -458,6 +477,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = "新增筛选 tab",
             initialName = "",
             initial = FilterSnapshot(),
+            initialPicacgFilter = PicacgBrowseFilter(),
             initialJmFilters = JmBrowsePolicy.customCategoryFilters(),
             jmHome = false,
             jmCategoryOnly = true,
@@ -466,8 +486,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             onDismiss = { adding = false },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, platform = platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, jmFilters, platform ->
-                if (vm.addFilterTab(nm, snap, platform, jmFilters)) {
+            onSave = { nm, snap, jmFilters, platform, picacgFilter ->
+                if (vm.addFilterTab(nm, snap, platform, jmFilters, picacgFilter)) {
                     adding = false
                     onDismiss()
                 }
@@ -674,13 +694,14 @@ private fun FilterTabFormDialog(
     title: String,
     initialName: String,
     initial: FilterSnapshot,
+    initialPicacgFilter: PicacgBrowseFilter,
     initialJmFilters: JmBrowsePolicy.Filters,
     jmHome: Boolean,
     jmCategoryOnly: Boolean,
     initialPlatform: ContentPlatform,
     allowPlatformSelect: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform) -> Unit,
+    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform, PicacgBrowseFilter) -> Unit,
     onOpenTagDialog: (Set<String>, (Set<String>) -> Unit) -> Unit,
     checkNameTaken: (String, ContentPlatform) -> Boolean,
 ) {
@@ -688,6 +709,7 @@ private fun FilterTabFormDialog(
     var name by remember(title) { mutableStateOf(initialName) }
     var draft by remember(title) { mutableStateOf(initial) }
     var jmDraft by remember(title) { mutableStateOf(initialJmFilters) }
+    var picacgDraft by remember(title) { mutableStateOf(initialPicacgFilter.normalized()) }
     var targetPlatform by remember(title) { mutableStateOf(initialPlatform) }
 
     val trimmed = name.trim()
@@ -736,16 +758,11 @@ private fun FilterTabFormDialog(
 
                     if (allowPlatformSelect) {
                         Text(stringResource(KMR.strings.content_platform_custom_tab_target), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                        val picacgPresetNotice = stringResource(KMR.strings.picacg_presets_pending)
                         ContentPlatformSelector(
                             selected = targetPlatform,
                             onSelect = {
                                 if (StartupPlatformPolicy.checkSelection(context, it)) {
-                                    if (it == ContentPlatform.PICACG) {
-                                        android.widget.Toast.makeText(context, picacgPresetNotice, android.widget.Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        targetPlatform = it
-                                    }
+                                    targetPlatform = it
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -766,7 +783,9 @@ private fun FilterTabFormDialog(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
                         Text(
-                            if (targetPlatform == ContentPlatform.JM) {
+                            if (targetPlatform == ContentPlatform.PICACG) {
+                                "${picacgDraft.category.ifBlank { "全部主题" }} · ${picacgSortLabel(picacgDraft.sort)}"
+                            } else if (targetPlatform == ContentPlatform.JM) {
                                 when {
                                     jmHome -> BrowseTabStore.JM_HOME_NAME
                                     jmDraft.mode == JmBrowsePolicy.MODE_RECOMMENDATIONS -> "首页推荐"
@@ -795,7 +814,9 @@ private fun FilterTabFormDialog(
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                     ) {
-                        if (targetPlatform == ContentPlatform.JM) {
+                        if (targetPlatform == ContentPlatform.PICACG) {
+                            PicacgTabFilterEditor(picacgDraft) { picacgDraft = it }
+                        } else if (targetPlatform == ContentPlatform.JM) {
                             JmTabFilterEditor(
                                 filters = jmDraft,
                                 home = jmHome,
@@ -839,12 +860,37 @@ private fun FilterTabFormDialog(
                                         else -> JmBrowsePolicy.effectiveFilters(JmBrowsePolicy.ALL_HOT_TAB_ID, jmDraft)
                                     },
                                     targetPlatform,
+                                    picacgDraft.normalized(),
                                 )
                             },
                         ) { Text("保存") }
                     }
                 }
             }
+        }
+    }
+}
+
+private fun picacgSortLabel(code: String): String = when (code) {
+    "dd" -> "新到旧"
+    "da" -> "旧到新"
+    "ld" -> "最多喜欢"
+    "vd" -> "最多浏览"
+    else -> "新到旧"
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PicacgTabFilterEditor(filter: PicacgBrowseFilter, onChange: (PicacgBrowseFilter) -> Unit) {
+    FilterSection("主题") {
+        FilterChip(text = "全部", selected = filter.category.isBlank(), onClick = { onChange(filter.copy(category = "")) })
+        PicacgThemes.titles.forEach { theme ->
+            FilterChip(text = theme, selected = filter.category == theme, onClick = { onChange(filter.copy(category = theme)) })
+        }
+    }
+    FilterSection("排序") {
+        listOf("dd" to "新到旧", "da" to "旧到新", "ld" to "最多喜欢", "vd" to "最多浏览").forEach { (code, label) ->
+            FilterChip(text = label, selected = filter.sort == code, onClick = { onChange(filter.copy(sort = code)) })
         }
     }
 }

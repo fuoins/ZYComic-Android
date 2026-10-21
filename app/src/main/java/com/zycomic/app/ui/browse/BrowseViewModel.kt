@@ -12,6 +12,7 @@ import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.reader.JmSource
+import com.zycomic.app.ui.picacg.PicacgBrowseFilter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -834,6 +835,13 @@ class BrowseViewModel {
         }
     }
 
+    /** Persist a Picacg filter tab's independent theme/sort defaults. */
+    internal fun updateTabDefaultPicacgFilter(id: String, filter: PicacgBrowseFilter) {
+        val i = tabs.indexOfFirst { it.id == id && it.platformId == ContentPlatform.PICACG }
+        if (i < 0 || tabs[i].kind != TabKind.FILTER || tabs[i].builtin) return
+        tabs[i] = tabs[i].copy(picacgFilter = filter.normalized())
+        persist()
+    }
     /** Save a JM tab's own category/order state, never converting it to a Manwa FilterSnapshot. */
     internal fun updateTabDefaultJmFilters(id: String, filters: JmBrowsePolicy.Filters) {
         val i = tabs.indexOfFirst { it.id == id && it.platformId == ContentPlatform.JM }
@@ -877,6 +885,7 @@ class BrowseViewModel {
         snapshot: FilterSnapshot?,
         platform: ContentPlatform = currentPlatform.value,
         jmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.customCategoryFilters(),
+        picacgFilter: PicacgBrowseFilter = PicacgBrowseFilter(),
     ): Boolean {
         if (!StartupPlatformPolicy.isEnabled(platform)) return false
         val n = name.trim()
@@ -888,6 +897,7 @@ class BrowseViewModel {
             builtin = false,
             filter = snapshot.takeIf { platform == ContentPlatform.MANWA },
             platformId = platform,
+            picacgFilter = picacgFilter.normalized().takeIf { platform == ContentPlatform.PICACG },
         )
         if (platform == ContentPlatform.JM) BrowseTabStore.saveJmFilters(item.id, JmBrowsePolicy.customCategoryFilters(jmFilters))
         addNewTab(item)
@@ -960,6 +970,30 @@ class BrowseViewModel {
 
     /** Adds the fixed-ID JM all-hot tab once; deleting it makes it available to add again. */
     fun addJmAllHotTab(): Boolean = addFixedJmTab(BrowseTabStore.jmAllHotTab())
+
+    fun canAddPicacgRanking(): Boolean = tabs.none { it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_RANKING }
+
+    fun addPicacgRankingTab(): Boolean = addFixedPicacgTab(
+        BrowseTabStore.picacgRankingTab(),
+        afterId = JmBrowsePolicy.ALL_HOT_TAB_ID,
+    )
+
+    fun canAddPicacgCategory(): Boolean = tabs.none { it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_CATEGORY }
+
+    fun addPicacgCategoryTab(): Boolean = addFixedPicacgTab(
+        BrowseTabStore.picacgCategoryTab(),
+        afterId = BrowseTabStore.ID_PICACG_RANKING,
+    )
+
+    private fun addFixedPicacgTab(item: BrowseTabItem, afterId: String): Boolean {
+        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.PICACG)) return false
+        val next = BrowseTabPolicy.addFixedPicacgTab(tabs.toList(), item, afterId) ?: return false
+        tabs.clear()
+        tabs.addAll(next)
+        persist()
+        goTo(tabs.indexOfFirst { it.platformId == ContentPlatform.PICACG && it.id == item.id })
+        return true
+    }
 
     fun resetToDefaults() {
         tabs.clear()

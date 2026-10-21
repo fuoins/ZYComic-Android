@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -39,8 +40,10 @@ import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCompact
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -76,6 +79,7 @@ import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import com.zycomic.app.ui.picacg.PicacgThemes
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
@@ -239,7 +243,6 @@ fun SearchScreen(
                 }
             } else if (provider == SearchProvider.PICACG) {
                 Spacer(modifier = Modifier.weight(1f))
-                var showPicacgSortMenu by remember { mutableStateOf(false) }
                 Box {
                     TextButton(onClick = { showPicacgSortMenu = true }) {
                         val label = PicacgSearchSortOptions.firstOrNull { it.second == picacgSortCode }?.first ?: "最新"
@@ -257,7 +260,7 @@ fun SearchScreen(
             }
         }
         if (provider == SearchProvider.PICACG) {
-            TextButton(onClick = { showPicacgCategories = true }, enabled = picacgLoggedIn) {
+            TextButton(onClick = { showPicacgCategories = true }) {
                 Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_search_categories) + " · ${picacgCategories.size}")
             }
         }
@@ -393,7 +396,7 @@ fun SearchScreen(
         }
     }
     if (showPicacgCategories && provider == SearchProvider.PICACG) {
-        com.zycomic.app.ui.picacg.PicacgSearchCategoriesDialog(
+        PicacgCategoryPickerDialog(
             selected = picacgCategories,
             onApply = {
                 vm.setPicacgCategories(it)
@@ -403,6 +406,41 @@ fun SearchScreen(
         )
     }
     if (showPicacgLogin) com.zycomic.app.ui.picacg.PicacgLoginDialog { showPicacgLogin = false }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PicacgCategoryPickerDialog(
+    selected: List<String>,
+    onApply: (List<String>) -> Unit,
+    onClose: () -> Unit,
+) {
+    var chosen by remember(selected) { mutableStateOf(selected.toSet()) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("选择分类") },
+        text = {
+            Column {
+                Text("选择要包含在搜索结果中的主题")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PicacgThemes.titles.forEach { title ->
+                        FilterChip(
+                            selected = title in chosen,
+                            onClick = { chosen = if (title in chosen) chosen - title else chosen + title },
+                            label = { Text(title) },
+                            shape = RoundedCornerShape(50),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onApply(PicacgThemes.titles.filter { it in chosen }) }) { Text("应用") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("取消") } },
+    )
 }
 
 /**

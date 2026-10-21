@@ -72,6 +72,22 @@ internal object BrowseTabPolicy {
         return insertNewTab(tabs, home).first
     }
 
+    /** Adds a fixed Picacg page immediately after its predecessor without disturbing custom order. */
+    fun addFixedPicacgTab(tabs: List<BrowseTabItem>, item: BrowseTabItem, afterId: String): List<BrowseTabItem>? {
+        if (item.platformId != ContentPlatform.PICACG || tabs.any { identity(it) == identity(item) }) return null
+        val result = tabs.toMutableList()
+        val predecessorPlatform = if (afterId == JmBrowsePolicy.ALL_HOT_TAB_ID) ContentPlatform.JM else ContentPlatform.PICACG
+        val predecessor = result.indexOfFirst { it.platformId == predecessorPlatform && it.id == afterId }
+        val home = result.indexOfFirst { it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_HOME }
+        val index = when {
+            predecessor >= 0 -> predecessor + 1
+            home >= 0 -> home + 1
+            else -> result.indexOfFirst { it.platformId != ContentPlatform.PICACG }.takeIf { it >= 0 } ?: result.size
+        }
+        result.add(index, item)
+        return result
+    }
+
     /**
      * Migrate only a complete, canonical previous default sequence. Names, custom ordering, filters and
      * any extra/missing tabs make the list user-owned and therefore ineligible for this migration.

@@ -120,6 +120,9 @@ fun ProfileScreen(
     val user by UserRepository.userFlow.collectAsState()
     val manwaSessionStatus by UserRepository.sessionStatusFlow.collectAsState()
     val jmProfile by JmAuthStore.profileFlow.collectAsState()
+    val picacgLoggedIn by com.zycomic.app.picacg.PicacgAuthStore.loggedIn.collectAsState()
+    var picacgProfileRefresh by remember { mutableStateOf(0) }
+    var picacgRefreshing by remember { mutableStateOf(false) }
     val jmSnapshotNotice = stringResource(KMR.strings.jm_account_snapshot_notice)
     val manwaRefreshSuccess = stringResource(KMR.strings.manwa_profile_refresh_verified)
     val manwaRefreshUnknown = stringResource(KMR.strings.manwa_session_unknown)
@@ -294,31 +297,30 @@ fun ProfileScreen(
         ScrollbarLazyColumn(contentPadding = contentPadding) {
             item {
                 LogoHeader {
-                    if (platform != ContentPlatform.PICACG) {
-                        TextButton(
-                            enabled = when (platform) {
-                                ContentPlatform.MANWA -> user != null && !manwaRefreshing
-                                ContentPlatform.PICACG -> false // Refresh is owned by the embedded Picacg content.
-                                ContentPlatform.JM -> jmLoggedIn && !jmRefreshing
-                            },
-                            onClick = {
-                                when (platform) {
-                                    ContentPlatform.MANWA -> if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
-                                    ContentPlatform.PICACG -> Unit
-                                    ContentPlatform.JM -> if (!jmRefreshing) scope.launch { refreshJm() }
-                                }
-                            },
-                        ) {
-                            if ((platform == ContentPlatform.MANWA && manwaRefreshing) ||
-                                (platform == ContentPlatform.JM && jmRefreshing)
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    TextButton(
+                        enabled = when (platform) {
+                            ContentPlatform.MANWA -> user != null && !manwaRefreshing
+                            ContentPlatform.PICACG -> picacgLoggedIn && !picacgRefreshing
+                            ContentPlatform.JM -> jmLoggedIn && !jmRefreshing
+                        },
+                        onClick = {
+                            when (platform) {
+                                ContentPlatform.MANWA -> if (!manwaRefreshing) scope.launch { refreshManwa(showResult = true) }
+                                ContentPlatform.PICACG -> picacgProfileRefresh++
+                                ContentPlatform.JM -> if (!jmRefreshing) scope.launch { refreshJm() }
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(KMR.strings.profile_refresh))
+                        },
+                    ) {
+                        if ((platform == ContentPlatform.MANWA && manwaRefreshing) ||
+                            (platform == ContentPlatform.PICACG && picacgRefreshing) ||
+                            (platform == ContentPlatform.JM && jmRefreshing)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                         }
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(KMR.strings.profile_refresh))
                     }
                 }
             }
@@ -343,7 +345,11 @@ fun ProfileScreen(
             // ---- 用户信息 ----
             item {
                 if (platform == ContentPlatform.PICACG) {
-                    com.zycomic.app.ui.picacg.PicacgAccountProfileContent(onRequireLogin)
+                    com.zycomic.app.ui.picacg.PicacgAccountProfileContent(
+                        onRequireLogin = onRequireLogin,
+                        refreshRequest = picacgProfileRefresh,
+                        onBusyChanged = { picacgRefreshing = it },
+                    )
                 } else if (platform == ContentPlatform.JM) {
                     TextPreferenceWidget(
                         title = jmAccount.takeIf { jmLoggedIn } ?: stringResource(KMR.strings.jm_account_title),
@@ -534,12 +540,6 @@ fun ProfileScreen(
                 }
             }
 
-            // ---- 设置入口 ----
-            if (platform == ContentPlatform.PICACG) {
-                item {
-                    com.zycomic.app.ui.picacg.PicacgProfileExtras(onOpenSettings = { onNavigateToTab(4) })
-                }
-            }
             if (platform == ContentPlatform.MANWA) {
                 item {
                     TextPreferenceWidget(

@@ -2,6 +2,7 @@ package com.zycomic.app.ui.browse
 
 import android.content.SharedPreferences
 import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.ui.picacg.PicacgBrowseFilter
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,6 +12,30 @@ import org.junit.jupiter.api.Test
 import java.lang.reflect.Proxy
 
 class BrowseTabPersistenceTest {
+    @Test
+    fun `Picacg custom filters persist separately and never leak into other platforms`() {
+        val tab = BrowseTabItem(
+            id = "picacg-custom",
+            name = "主题",
+            kind = TabKind.FILTER,
+            platformId = ContentPlatform.PICACG,
+            picacgFilter = PicacgBrowseFilter(category = " 纯爱 ", sort = "vd"),
+        )
+        val encoded = tab.toJson()
+        assertEquals(PicacgBrowseFilter(category = "纯爱", sort = "vd"), BrowseTabItem.fromJson(encoded).picacgFilter)
+        assertFalse(encoded.has("filter"))
+        val jm = tab.copy(platformId = ContentPlatform.JM).toJson()
+        assertFalse(jm.has("picacgFilter"))
+        jm.put("picacgFilter", encoded.getJSONObject("picacgFilter"))
+        assertNull(BrowseTabItem.fromJson(jm).picacgFilter)
+    }
+
+    @Test
+    fun `legacy Picacg custom tab without theme fields loads compatible defaults`() {
+        val legacy = BrowseTabItem(id = "old", name = "旧主题", kind = TabKind.FILTER, platformId = ContentPlatform.PICACG).toJson()
+        assertEquals(PicacgBrowseFilter(), BrowseTabItem.fromJson(legacy).picacgFilter)
+    }
+
     @Test
     fun `complete legacy default preset migrates names and order while customized presets stay untouched`() {
         installMemoryPreferences()
@@ -105,6 +130,23 @@ class BrowseTabPersistenceTest {
 
         val reordered = BrowseTabPolicy.reorder(migrated, migrated.reversed(), BrowseTabStore.loadSelectedTab())!!
         assertEquals(jm.id, reordered.tabs[reordered.selectedIndex].id)
+    }
+
+    @Test
+    fun `Picacg ranking follows JM all hot and category follows ranking`() {
+        val manwa = BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first()
+        val allHot = BrowseTabStore.jmAllHotTab()
+        val home = BrowseTabStore.picacgHomeTab()
+        val jmHome = BrowseTabStore.jmHomeTab()
+        val base = listOf(jmHome, allHot, home, manwa)
+        val withRanking = BrowseTabPolicy.addFixedPicacgTab(base, BrowseTabStore.picacgRankingTab(), JmBrowsePolicy.ALL_HOT_TAB_ID)!!
+        val withCategory = BrowseTabPolicy.addFixedPicacgTab(withRanking, BrowseTabStore.picacgCategoryTab(), BrowseTabStore.ID_PICACG_RANKING)!!
+
+        assertEquals(
+            listOf(jmHome.id, allHot.id, BrowseTabStore.ID_PICACG_RANKING, BrowseTabStore.ID_PICACG_CATEGORY, home.id, manwa.id),
+            withCategory.map { it.id },
+        )
+        assertNull(BrowseTabPolicy.addFixedPicacgTab(withCategory, BrowseTabStore.picacgRankingTab(), JmBrowsePolicy.ALL_HOT_TAB_ID))
     }
 
     @Test

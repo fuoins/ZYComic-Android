@@ -204,7 +204,13 @@ private fun RankGrid(
     displayMode: Int,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(gridColumns.coerceIn(2, 6)),
+        columns = if (displayMode == 3) {
+            GridCells.Fixed(1)
+        } else if (gridColumns == 0) {
+            GridCells.Adaptive(128.dp)
+        } else {
+            GridCells.Fixed(gridColumns.coerceIn(1, 10))
+        },
         contentPadding = PaddingValues(start = 12.dp, top = 0.dp, end = 12.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -217,6 +223,20 @@ private fun RankGrid(
 
 @Composable
 private fun RankCell(item: PlatformRankItem, displayMode: Int, onClick: () -> Unit) {
+    if (displayMode == 3) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(68.dp, 96.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                if (item.coverUrl.isNotEmpty()) PlatformCoverImage(url = item.coverUrl, contentDescription = item.title, modifier = Modifier.fillMaxSize())
+                RankBadge(rank = item.rank, modifier = Modifier.align(Alignment.TopStart))
+            }
+            Text(item.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -237,8 +257,18 @@ private fun RankCell(item: PlatformRankItem, displayMode: Int, onClick: () -> Un
                 )
             }
             RankBadge(rank = item.rank, modifier = Modifier.align(Alignment.TopStart))
+            if (displayMode == 0) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color.Black.copy(alpha = 0.62f)).padding(6.dp),
+                )
+            }
         }
-        if (displayMode != 2) {
+        if (displayMode == 1) {
             Spacer(Modifier.height(4.dp))
             Text(
                 text = item.title,

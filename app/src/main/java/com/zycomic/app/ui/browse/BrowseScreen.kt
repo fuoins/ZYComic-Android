@@ -189,6 +189,8 @@ private fun LegacyBrowseScreen(
     androidx.compose.runtime.LaunchedEffect(orientation) { vm.loadGridColumnsForOrientation(orientation) }
 
     var showFilterDialog by remember { mutableStateOf(false) }
+    var picacgFilterDialogRequest by remember { mutableStateOf(0) }
+    LaunchedEffect(mainTab) { picacgFilterDialogRequest = 0 }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
@@ -526,13 +528,23 @@ private fun LegacyBrowseScreen(
                                     )
                                 }
                             }
-                            if (index == pagerState.currentPage && item.platformId != ContentPlatform.PICACG) {
+                            if (index == pagerState.currentPage && (item.platformId != ContentPlatform.PICACG || item.id == BrowseTabStore.ID_PICACG_RANKING || item.id == BrowseTabStore.ID_PICACG_CATEGORY)) {
                                 item(key = "filter_affordance") {
                                     TabBarIcon(
                                         icon = Icons.Outlined.FilterList,
-                                        contentDescription = if (item.platformId == ContentPlatform.JM) "JM 筛选" else "重新筛选",
+                                        contentDescription = when {
+                                            item.platformId == ContentPlatform.JM -> "JM 筛选"
+                                            item.platformId == ContentPlatform.PICACG && item.id == BrowseTabStore.ID_PICACG_RANKING -> "显示"
+                                            else -> "重新筛选"
+                                        },
                                         tint = MaterialTheme.colorScheme.primary,
-                                        onClick = { showFilterDialog = true },
+                                        onClick = {
+                                            if (item.platformId == ContentPlatform.PICACG && item.id == BrowseTabStore.ID_PICACG_CATEGORY) {
+                                                picacgFilterDialogRequest++
+                                            } else {
+                                                showFilterDialog = true
+                                            }
+                                        },
                                     )
                                 }
                             }
@@ -586,6 +598,7 @@ private fun LegacyBrowseScreen(
                     bottomPadding = contentPadding.calculateBottomPadding(),
                     onOpenSearch = { keyword, provider -> onOpenSearch(keyword, provider) },
                     onRequireLogin = onRequireLogin,
+                    picacgFilterDialogRequest = picacgFilterDialogRequest,
                 )
             }
         }
@@ -612,7 +625,8 @@ private fun LegacyBrowseScreen(
             onDismiss = { showFilterDialog = false },
             onOpenTagDialog = { showTagDialog = true },
             displayOnly = vm.tabs.getOrNull(mainTab)?.let {
-                it.isUngatedYuzongRank() || (it.platformId == ContentPlatform.JM && it.id == BrowseTabStore.ID_JM_HOME)
+                it.isUngatedYuzongRank() || (it.platformId == ContentPlatform.JM && it.id == BrowseTabStore.ID_JM_HOME) ||
+                    (it.platformId == ContentPlatform.PICACG && it.id == BrowseTabStore.ID_PICACG_RANKING)
             } ?: false,
         )
     }
@@ -708,15 +722,29 @@ private fun BrowseTabContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenSearch: (String, SearchProvider?) -> Unit,
     onRequireLogin: () -> Unit,
+    picacgFilterDialogRequest: Int,
 ) {
     val item = vm.tabs.getOrNull(page)
     val tabPlatform = item?.platformId ?: platform
+    val picacgOrientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     if (tabPlatform == ContentPlatform.PICACG) {
         if (page == vm.mainTab.value) {
             com.zycomic.app.ui.picacg.PicacgBrowseScreen(
                 onOpenManga = onOpenManga,
-                onOpenSearch = { onOpenSearch(it, SearchProvider.PICACG) },
                 onRequireLogin = onRequireLogin,
+                tabId = item?.id.orEmpty(),
+                initialFilter = item?.picacgFilter,
+                pageMode = when (item?.pageType) {
+                    BrowsePageType.PICACG_RANKING -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
+                    BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
+                    else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.HOME
+                },
+                displayMode = displayMode,
+                gridColumns = gridColumns,
+                orientation = picacgOrientation,
+                filterDialogRequest = picacgFilterDialogRequest,
+                onSetDisplayMode = vm::setDisplayMode,
+                onSetGridColumns = { vm.setGridColumns(it, picacgOrientation) },
             )
         } else {
             Box(Modifier.fillMaxSize())
@@ -727,7 +755,7 @@ private fun BrowseTabContent(
         com.zycomic.app.platform.YuzongRankContent(
             onSearchTitle = { title -> onOpenSearch(title, null) },
             modifier = Modifier.fillMaxSize(),
-            gridColumns = if (gridColumns > 0) gridColumns else 3,
+            gridColumns = gridColumns,
             displayMode = displayMode,
         )
         return
@@ -804,7 +832,13 @@ private fun BrowseTabContent(
                                 if (!loading) isRefreshing = false
                             }
                             LazyVerticalGrid(
-                                columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                                columns = if (displayMode == 3) {
+                                    GridCells.Fixed(1)
+                                } else if (gridColumns == 0) {
+                                    GridCells.Adaptive(128.dp)
+                                } else {
+                                    GridCells.Fixed(gridColumns)
+                                },
                                 state = gridState,
                                 contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1055,6 +1089,27 @@ private fun MangaGridItem(
     } else {
         androidx.compose.ui.platform.LocalContext.current.imageLoader
     }
+    if (displayMode == 3) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+                .then(if (selected) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)) else Modifier)
+                .padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SubcomposeAsyncImage(
+                model = com.zycomic.app.ui.components.coverUrl(manga),
+                contentDescription = manga.name,
+                imageLoader = imageLoader,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.width(68.dp).aspectRatio(0.72f).clip(RoundedCornerShape(8.dp)),
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(manga.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(manga.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1238,6 +1293,7 @@ private fun DisplayFilter(vm: BrowseViewModel, orientation: Int) {
         orientation = orientation,
         onSetDisplayMode = vm::setDisplayMode,
         onSetGridColumns = { vm.setGridColumns(it, orientation) },
+        modes = listOf(0 to "紧凑网格", 1 to "舒适网格", 2 to "仅封面网格", 3 to "列表"),
     )
 }
 

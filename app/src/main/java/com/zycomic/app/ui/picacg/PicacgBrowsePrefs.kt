@@ -6,6 +6,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+enum class PicacgBrowsePageMode { HOME, RANKING, CATEGORY }
+
 internal object PicacgBrowsePolicy {
     data class LeaderboardPreset(val name: String, val timeframe: String)
 

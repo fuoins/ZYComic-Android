@@ -188,7 +188,11 @@ private fun RemoteConfigGate(
             Spacer(modifier = Modifier.height(20.dp))
             when (state) {
                 com.zycomic.app.net.RouteConfigState.Loading -> {
-                    CircularProgressIndicator()
+                    com.zycomic.app.ui.components.MangaGridSkeleton(
+                        columns = 3,
+                        displayMode = 1,
+                        modifier = Modifier.fillMaxWidth().height(220.dp),
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("正在从网络加载线路与图源配置…", style = MaterialTheme.typography.bodyMedium)
                 }

@@ -77,7 +77,7 @@ val JmSearchSortOptions: List<Pair<String, String>> = listOf(
     "最多喜欢" to "tf",
 )
 
-const val PICACG_DEFAULT_SEARCH_SORT_CODE = "dd"
+const val PICACG_DEFAULT_SEARCH_SORT_CODE = "ld"
 
 fun picacgSearchSortCode(saved: String?): String =
     saved?.takeIf { code -> PicacgSearchSortOptions.any { it.second == code } } ?: PICACG_DEFAULT_SEARCH_SORT_CODE
@@ -85,7 +85,7 @@ fun picacgSearchSortCode(saved: String?): String =
 val PicacgSearchSortOptions: List<Pair<String, String>> = listOf(
     "最新" to "dd",
     "最旧" to "da",
-    "最多点赞" to "ld",
+    "最多喜欢" to "ld",
     "最多浏览" to "vd",
 )
 

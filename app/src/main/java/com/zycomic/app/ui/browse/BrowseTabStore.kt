@@ -53,6 +53,10 @@ object BrowseTabStore {
     const val PREVIOUS_JM_HOME_NAME = "首页"
     const val ID_PICACG_HOME = "picacg_home"
     const val PICACG_HOME_NAME = "哔咔首页"
+    const val ID_PICACG_RANKING = "picacg_ranking"
+    const val PICACG_RANKING_NAME = "哔咔排行"
+    const val ID_PICACG_CATEGORY = "picacg_category"
+    const val PICACG_CATEGORY_NAME = "哔咔分类"
     const val JM_ALL_HOT_NAME = "jm热门"
     val LEGACY_JM_ALL_HOT_NAMES = setOf("JM 全部热门", "JM全部热门")
 
@@ -80,6 +84,22 @@ object BrowseTabStore {
         name = PICACG_HOME_NAME,
         kind = TabKind.FILTER,
         builtin = true,
+        platformId = ContentPlatform.PICACG,
+    )
+
+    fun picacgRankingTab() = BrowseTabItem(
+        id = ID_PICACG_RANKING,
+        name = PICACG_RANKING_NAME,
+        kind = TabKind.SPECIAL,
+        pageType = BrowsePageType.PICACG_RANKING,
+        platformId = ContentPlatform.PICACG,
+    )
+
+    fun picacgCategoryTab() = BrowseTabItem(
+        id = ID_PICACG_CATEGORY,
+        name = PICACG_CATEGORY_NAME,
+        kind = TabKind.SPECIAL,
+        pageType = BrowsePageType.PICACG_CATEGORY,
         platformId = ContentPlatform.PICACG,
     )
 
