@@ -264,6 +264,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     },
                     measuredAtEpochMs = time,
                     testedThisRound = testedThisRound,
+                    roundSelected = snapshotIsCurrentRun && endpoint == snapshot.roundSelectedLine,
                     hasPreviousResult = !testedThisRound,
                     quickSelected = snapshotIsCurrentRun && snapshot.lineQuickTest && endpoint in snapshot.testedLineEndpoints,
                     selectionLabel = "当前实际 API 端点".takeIf {
@@ -303,6 +304,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     result = result,
                     measuredAtEpochMs = time,
                     testedThisRound = testedThisRound,
+                    roundSelected = snapshotIsCurrentRun && endpoint == snapshot.roundSelectedImage,
                     hasPreviousResult = !testedThisRound,
                     quickSelected = snapshotIsCurrentRun && snapshot.imageQuickTest && endpoint in snapshot.testedImageEndpoints,
                     selectionLabel = "当前实际图源端点".takeIf {

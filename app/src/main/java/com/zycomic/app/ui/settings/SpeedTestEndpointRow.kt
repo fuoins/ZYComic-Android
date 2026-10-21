@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.zycomic.app.net.SpeedTestLogSelectionPolicy
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
@@ -25,6 +26,7 @@ internal fun SpeedTestEndpointRow(
     hasPreviousResult: Boolean = false,
     blocked: Boolean = false,
     quickSelected: Boolean = false,
+    roundSelected: Boolean = false,
     selectionLabel: String? = null,
     failed: Boolean = false,
     onClick: (() -> Unit)? = null,
@@ -39,7 +41,9 @@ internal fun SpeedTestEndpointRow(
     val time = measuredAtEpochMs?.takeIf { it > 0L }?.let {
         stringResource(KMR.strings.speed_log_measured_at, formatSpeedTestLogTime(it))
     } ?: stringResource(KMR.strings.speed_log_time_unknown)
-    val quickMarker = if (quickSelected) stringResource(KMR.strings.manwa_speed_log_quick_selected) else null
+    val markers = SpeedTestLogSelectionPolicy.markers(testedThisRound, blocked, roundSelected, quickSelected)
+    val quickMarker = if (markers.quickCandidate) stringResource(KMR.strings.manwa_speed_log_quick_selected) else null
+    val roundMarker = if (markers.roundSelected) stringResource(KMR.strings.speed_log_round_selected) else null
     Column(
         modifier = Modifier.fillMaxWidth()
             .background(
@@ -64,9 +68,9 @@ internal fun SpeedTestEndpointRow(
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
-        if (quickMarker != null || selectionLabel != null) {
+        if (quickMarker != null || roundMarker != null || selectionLabel != null) {
             Text(
-                text = listOfNotNull(quickMarker, selectionLabel).joinToString(" · "),
+                text = listOfNotNull(roundMarker, selectionLabel, quickMarker).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )

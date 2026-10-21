@@ -213,6 +213,9 @@ object SpeedTester {
         val imageTopFiveAllFailed: Boolean = false,
         val lineQuickTest: Boolean = false,
         val imageQuickTest: Boolean = false,
+        // Frozen log metadata, independent of subsequent manual selection or runtime recovery.
+        val roundSelectedLine: DomainIp? = null,
+        val roundSelectedImage: DomainIp? = null,
     )
 
     private val _progress = MutableStateFlow(Progress())
@@ -1271,6 +1274,14 @@ object SpeedTester {
                     (bestImg?.let { RouteManager.imgDomains.indexOfFirst { domain -> domain.equals(it.domain, true) } } ?: -1)
                 lastCompletedConfigRevision = configRevisionAtStart
                 lastConfigRunResult = result
+                val roundSelectedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
+                    RouteManager.selectedLineIp?.let { ip -> lineDomain(RouteManager.baseUrl)?.let { DomainIp(it, ip) } },
+                    freshLines.keys,
+                ) { endpoint -> freshLines[endpoint]?.let { it >= 0L && it < MAX } == true }
+                val roundSelectedImage = SpeedTestLogSelectionPolicy.selectedEndpoint(
+                    RouteManager.selectedImgIp?.let { DomainIp(RouteManager.imgRewriteTarget ?: RouteManager.imgHost, it) },
+                    freshImages.keys,
+                ) { endpoint -> freshImages[endpoint]?.let { it >= 0L && it < MAX } == true && freshVerdictAcc[endpoint] == ImgVerdict.OK }
                 reportStage(
                     Progress(
                         phase = Phase.COMPLETE,
@@ -1287,6 +1298,8 @@ object SpeedTester {
                         imageTopFiveAllFailed = imageQuickAllFailed,
                         lineQuickTest = quickLineRetest,
                         imageQuickTest = quickImageRetest,
+                        roundSelectedLine = roundSelectedLine,
+                        roundSelectedImage = roundSelectedImage,
                     ),
                 )
                 result

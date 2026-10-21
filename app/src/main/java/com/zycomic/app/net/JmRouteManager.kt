@@ -52,6 +52,9 @@ object JmRouteManager {
         val imageQuickTest: Boolean = false,
         val lineQuickTestAllFailed: Boolean = false,
         val imageQuickTestAllFailed: Boolean = false,
+        /** Endpoint selected when this round was published; not a live route value. */
+        val roundSelectedLine: DomainIp? = null,
+        val roundSelectedImage: DomainIp? = null,
     )
 
     data class LogEntry(
@@ -918,6 +921,26 @@ object JmRouteManager {
         ) {
             return false
         }
+        val testedLines = snapshot.testedLineEndpoints.mapTo(hashSetOf()) { it.normalizedForComparison() }
+        val testedImages = snapshot.testedImageEndpoints.mapTo(hashSetOf()) { it.normalizedForComparison() }
+        val roundSelectedLine = selectedLineEndpoint?.takeIf { selected ->
+            selected.normalizedForComparison() in testedLines &&
+                snapshot.lineIpDelaysMs.any { (endpoint, delay) ->
+                    endpoint.normalizedForComparison() == selected.normalizedForComparison() && delay >= 0L && delay < Long.MAX_VALUE
+                }
+        }
+        val roundSelectedImage = currentImageEndpoint()?.takeIf { selected ->
+            selected.normalizedForComparison() in testedImages &&
+                snapshot.imageIpDelaysMs.any { (endpoint, delay) ->
+                    endpoint.normalizedForComparison() == selected.normalizedForComparison() &&
+                        delay >= 0L && delay < Long.MAX_VALUE && snapshot.imageIpVerdicts[endpoint] == JmSpeedTester.ImgVerdict.OK
+                }
+        }
+        _speedTestSnapshot.value = _speedTestSnapshot.value.copy(
+            roundSelectedLine = roundSelectedLine,
+            roundSelectedImage = roundSelectedImage,
+        )
+        persistSnapshot()
         record("speed", "JM", "JM 独立线路/图床测速完成")
         return true
     }
@@ -1090,6 +1113,11 @@ object JmRouteManager {
         put("imageQuickTest", snapshot.imageQuickTest)
         put("lineQuickTestAllFailed", snapshot.lineQuickTestAllFailed)
         put("imageQuickTestAllFailed", snapshot.imageQuickTestAllFailed)
+        fun endpoint(endpoint: DomainIp?) = endpoint?.let {
+            JSONObject().put("host", it.domain).put("ip", it.ip)
+        } ?: JSONObject.NULL
+        put("roundSelectedLine", endpoint(snapshot.roundSelectedLine))
+        put("roundSelectedImage", endpoint(snapshot.roundSelectedImage))
     }.toString()
 
     private fun decodeSnapshot(raw: String?): SpeedTestSnapshot = runCatching {
@@ -1125,6 +1153,10 @@ object JmRouteManager {
                 val item = array.optJSONObject(index) ?: return@mapNotNull null
                 runCatching { DomainIp(item.getString("host"), item.getString("ip")) }.getOrNull()
             }.toSet()
+        }
+        fun selectedEndpoint(key: String): DomainIp? {
+            val item = root.optJSONObject(key) ?: return null
+            return runCatching { DomainIp(item.getString("host"), item.getString("ip")) }.getOrNull()
         }
         val completedAt = root.optLong("completed").takeIf { it > 0 }
         val imageIps = root.optJSONArray("imageIps")
@@ -1167,6 +1199,8 @@ object JmRouteManager {
             configFingerprint = root.optString("configFingerprint").takeIf { it.isNotBlank() && it != "null" },
             imageConfigFingerprint = root.optString("imageConfigFingerprint").takeIf { it.isNotBlank() && it != "null" },
             imageNetworkPolicy = root.optString("imageNetworkPolicy").takeIf { it.isNotBlank() && it != "null" },
+            roundSelectedLine = selectedEndpoint("roundSelectedLine"),
+            roundSelectedImage = selectedEndpoint("roundSelectedImage"),
         )
     }.getOrDefault(SpeedTestSnapshot(remoteVersion = _state.value.remoteVersion))
 

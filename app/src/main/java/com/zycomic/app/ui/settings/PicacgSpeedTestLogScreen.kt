@@ -270,6 +270,7 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                         testedThisRound = probe.testedThisRound,
                         hasPreviousResult = !probe.testedThisRound && probe.measuredAtEpochMs != null,
                         quickSelected = probe.quickSelected,
+                        roundSelected = !previousRoundOnly && probe.endpoint == snapshot?.roundSelectedLine,
                         selectionLabel = stringResource(KMR.strings.manwa_speed_log_selected_line).takeIf { selected },
                         failed = probe.testedThisRound && !probe.success,
                         onClick = {
@@ -324,6 +325,7 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                         hasPreviousResult = !probe.testedThisRound && probe.measuredAtEpochMs != null,
                         blocked = blockedHistoric,
                         quickSelected = probe.quickSelected,
+                        roundSelected = !previousRoundOnly && probe.endpoint == snapshot?.roundSelectedImage,
                         selectionLabel = stringResource(KMR.strings.manwa_speed_log_selected_image).takeIf { selected },
                         failed = probe.testedThisRound && !probe.success,
                         onClick = {

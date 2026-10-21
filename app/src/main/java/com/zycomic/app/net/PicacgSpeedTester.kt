@@ -56,6 +56,9 @@ object PicacgSpeedTester {
         val imageProbes: List<Probe>,
         val imageBlockedReason: String?,
         val revision: Long,
+        // Published selection is log metadata, not the mutable current route.
+        val roundSelectedLine: DomainIp? = null,
+        val roundSelectedImage: DomainIp? = null,
     ) {
         val apiComplete: Boolean get() = apiProbes.isNotEmpty()
         val imageComplete: Boolean get() = imageProbes.isNotEmpty()
@@ -300,7 +303,7 @@ object PicacgSpeedTester {
 
                 val finished = System.currentTimeMillis()
                 val probeOrder = compareBy<Probe>({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip })
-                val result = Snapshot(started, finished, activeVersion, apiResults.sortedWith(probeOrder), imageResults.sortedWith(probeOrder), blockedReason, revision)
+                var result = Snapshot(started, finished, activeVersion, apiResults.sortedWith(probeOrder), imageResults.sortedWith(probeOrder), blockedReason, revision)
                 if (beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
                     val apiSelection = if (apiQuick) freshApiHistory.map { it.toProbe() } else apiResults
                     val fastest = apiSelection.filter(Probe::success).minByOrNull(Probe::elapsedMs)
@@ -352,6 +355,16 @@ object PicacgSpeedTester {
                             PicacgSpeedTestHistoryStorage.saveImages(imageHistory)
                         }
                     }
+                    result = result.copy(
+                        roundSelectedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
+                            PicacgRouteManager.selectedApiEndpoint,
+                            apiResults.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
+                        ) { endpoint -> apiResults.any { it.endpoint == endpoint && it.testedThisRound && it.success } },
+                        roundSelectedImage = SpeedTestLogSelectionPolicy.selectedEndpoint(
+                            PicacgRouteManager.selectedImageEndpoint,
+                            imageResults.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
+                        ) { endpoint -> blockedReason == null && imageResults.any { it.endpoint == endpoint && it.testedThisRound && it.success } },
+                    )
                     _snapshot.value = result
                 }
                 val measuredApiResults = apiResults.filter(Probe::testedThisRound)

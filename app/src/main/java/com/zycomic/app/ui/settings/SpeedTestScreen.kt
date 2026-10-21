@@ -88,7 +88,7 @@ fun SpeedTestScreen(
     val manwaInterrupted = checks.any {
         it.phase in setOf(StartupCheckPhase.MANWA_LINE, StartupCheckPhase.MANWA_IMAGE) && it.result == StartupCheckResult.INTERRUPTED
     }
-    val showingPreviousRound = manwaTestActive || manwaInterrupted || speedTestProgress.phase in setOf(SpeedTester.Phase.FAILED, SpeedTester.Phase.SKIPPED)
+    val showingPreviousRound = manwaTestActive || manwaInterrupted || speedTestProgress.phase != SpeedTester.Phase.COMPLETE
     val canExport = fullSnapshot.canExport && !speedTestActive
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
@@ -293,6 +293,7 @@ fun SpeedTestScreen(
                         isImage = false,
                         isSelected = index == currentLineIdx && endpoint.ip == currentLineIp,
                         isQuickTestEndpoint = endpoint in lineQuickTestEndpoints,
+                        isRoundSelected = !showingPreviousRound && endpoint == speedTestProgress.roundSelectedLine,
                         isUntested = showingPreviousRound || endpoint in currentSpeedSnapshot.lineUntestedEndpoints,
                         measuredAtEpochMs = currentSpeedSnapshot.lineMeasuredAtEpochMs[endpoint],
                         onClick = { if (index >= 0) vm.selectLine(index, endpoint.ip) },
@@ -313,6 +314,7 @@ fun SpeedTestScreen(
                         delay = entry.value,
                         verdict = imgVerdicts[endpoint],
                         isQuickTestEndpoint = endpoint in imageQuickTestEndpoints,
+                        isRoundSelected = !showingPreviousRound && endpoint == speedTestProgress.roundSelectedImage,
                         isUntested = showingPreviousRound || endpoint in currentSpeedSnapshot.imageUntestedEndpoints,
                         measuredAtEpochMs = currentSpeedSnapshot.imageMeasuredAtEpochMs[endpoint],
                         isSelected = currentImageSource.matchesEndpoint(endpoint),
@@ -400,6 +402,7 @@ private fun SpeedRow(
     verdict: SpeedTester.ImgVerdict? = null,
     selectionLabel: String? = null,
     isQuickTestEndpoint: Boolean = false,
+    isRoundSelected: Boolean = false,
     isUntested: Boolean = false,
     measuredAtEpochMs: Long? = null,
     onClick: () -> Unit,
@@ -422,6 +425,7 @@ private fun SpeedRow(
         testedThisRound = !isUntested && delay != null,
         hasPreviousResult = isUntested && delay != null,
         quickSelected = isQuickTestEndpoint,
+        roundSelected = isRoundSelected,
         selectionLabel = marker,
         failed = delay == Long.MAX_VALUE || verdict == SpeedTester.ImgVerdict.UNREACHABLE || verdict == SpeedTester.ImgVerdict.NO_IMAGE,
         onClick = onClick,
