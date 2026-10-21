@@ -41,9 +41,10 @@ internal fun SpeedTestEndpointRow(
     val time = measuredAtEpochMs?.takeIf { it > 0L }?.let {
         stringResource(KMR.strings.speed_log_measured_at, formatSpeedTestLogTime(it))
     } ?: stringResource(KMR.strings.speed_log_time_unknown)
-    val markers = SpeedTestLogSelectionPolicy.markers(testedThisRound, blocked, roundSelected, quickSelected)
+    val markers = SpeedTestLogSelectionPolicy.markers(testedThisRound, blocked, roundSelected, quickSelected, failed)
     val quickMarker = if (markers.quickCandidate) stringResource(KMR.strings.manwa_speed_log_quick_selected) else null
     val roundMarker = if (markers.roundSelected) stringResource(KMR.strings.speed_log_round_selected) else null
+    val failedMarker = if (markers.retestFailed) stringResource(KMR.strings.speed_log_retest_failed) else null
     Column(
         modifier = Modifier.fillMaxWidth()
             .background(
@@ -70,7 +71,7 @@ internal fun SpeedTestEndpointRow(
         )
         if (quickMarker != null || roundMarker != null || selectionLabel != null) {
             Text(
-                text = listOfNotNull(roundMarker, selectionLabel, quickMarker).joinToString(" · "),
+                text = listOfNotNull(roundMarker, selectionLabel, quickMarker, failedMarker).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )

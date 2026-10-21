@@ -255,11 +255,12 @@ object PlatformSpeedTestCoordinator {
                                             }
                                             status = if (picacgSnapshot?.complete == true) "tested" else "incomplete"
                                             reason = if (snapshot.complete) {
-                                                val apiAvailable = snapshot.apiProbes.count(PicacgSpeedTester.Probe::success)
-                                                val imagesVerified = snapshot.imageProbes.count(PicacgSpeedTester.Probe::success)
-                                                "API 根路径 HTTP 200–499（不含 3xx）可用 $apiAvailable/${snapshot.apiProbes.size}；封面瓦片 GET 200/image 且魔数有效 $imagesVerified/${snapshot.imageProbes.size}"
+                                                "API 根路径 HTTP 200–499（不含 3xx）：${PicacgSpeedTester.logSummary(snapshot.apiProbes)}；" +
+                                                    "封面瓦片 GET 200/image 且魔数有效：${PicacgSpeedTester.logSummary(snapshot.imageProbes)}"
                                             } else {
-                                                snapshot.imageBlockedReason ?: "线路或图源探测不足，图源状态未确认"
+                                                "线路：${PicacgSpeedTester.logSummary(snapshot.apiProbes)}；" +
+                                                    "图源：${PicacgSpeedTester.logSummary(snapshot.imageProbes)}；" +
+                                                    (snapshot.imageBlockedReason ?: "线路或图源探测不足，图源状态未确认")
                                             }
                                             _progressText.value = if (snapshot.complete) {
                                                 "哔咔线路与图源测速完成"

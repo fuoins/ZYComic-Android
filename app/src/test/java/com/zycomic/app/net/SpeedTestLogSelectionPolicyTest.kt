@@ -18,21 +18,40 @@ class SpeedTestLogSelectionPolicyTest {
 
         assertTrue(markers.roundSelected)
         assertFalse(markers.quickCandidate)
+        assertFalse(markers.retestFailed)
     }
 
     @Test
     fun `fresh quick candidate may be marked even when its probe failed and it was not chosen`() {
-        val probeSucceeded = false
         val markers = SpeedTestLogSelectionPolicy.markers(
             testedThisRound = true,
             blocked = false,
             roundSelected = false,
             quickCandidate = true,
+            failed = true,
         )
 
-        assertFalse(probeSucceeded)
         assertFalse(markers.roundSelected)
         assertTrue(markers.quickCandidate)
+        assertTrue(markers.retestFailed)
+    }
+
+    @Test
+    fun `failed endpoint cannot claim round selection even with stale selected metadata`() {
+        val markers = SpeedTestLogSelectionPolicy.markers(true, false, true, true, failed = true)
+
+        assertFalse(markers.roundSelected)
+        assertTrue(markers.quickCandidate)
+        assertTrue(markers.retestFailed)
+    }
+
+    @Test
+    fun `successful quick object is not selected unless explicitly chosen`() {
+        val markers = SpeedTestLogSelectionPolicy.markers(true, false, false, true)
+
+        assertFalse(markers.roundSelected)
+        assertTrue(markers.quickCandidate)
+        assertFalse(markers.retestFailed)
     }
 
     @Test
@@ -42,10 +61,12 @@ class SpeedTestLogSelectionPolicyTest {
             blocked = false,
             roundSelected = true,
             quickCandidate = true,
+            failed = true,
         )
 
         assertFalse(markers.roundSelected)
         assertFalse(markers.quickCandidate)
+        assertFalse(markers.retestFailed)
     }
 
     @Test
@@ -55,10 +76,12 @@ class SpeedTestLogSelectionPolicyTest {
             blocked = true,
             roundSelected = true,
             quickCandidate = true,
+            failed = true,
         )
 
         assertFalse(markers.roundSelected)
         assertFalse(markers.quickCandidate)
+        assertFalse(markers.retestFailed)
     }
 
     @Test

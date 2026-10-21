@@ -358,9 +358,9 @@
     <string name="manwa_speed_log_selected_image">当前实际图源</string>
     <string name="manwa_speed_log_untested">本轮未测</string>
     <string name="manwa_speed_log_reused">本轮未测，沿用上次结果</string>
-    <string name="manwa_speed_log_quick_selected">本轮前五快测候选</string>
-    <string name="manwa_speed_log_quick_line">本轮线路前五快测候选：%1$d 个端点（见下方标记）</string>
-    <string name="manwa_speed_log_quick_image">本轮图源前五快测候选：%1$d 个端点（见下方标记）</string>
+    <string name="manwa_speed_log_quick_selected">本轮快测对象</string>
+    <string name="manwa_speed_log_quick_line">本轮线路快测对象：%1$d 个端点（见下方标记）</string>
+    <string name="manwa_speed_log_quick_image">本轮图源快测对象：%1$d 个端点（见下方标记）</string>
     <string name="manwa_speed_log_previous_test">上次 %1$s</string>
     <string name="manwa_speed_log_success">成功 · %1$dms</string>
     <string name="manwa_speed_log_failed">失败</string>
@@ -369,6 +369,7 @@
     <string name="platform_speed_log_title">三平台测速与实际选择</string>
     <string name="speed_log_source_fresh">本轮实测</string>
     <string name="speed_log_round_selected">本轮测速入选</string>
+    <string name="speed_log_retest_failed">复测失败</string>
     <string name="speed_log_source_blocked">本轮受阻，未测速</string>
     <string name="speed_log_measured_at">测速时间：%1$s</string>
     <string name="speed_log_time_unknown">测速时间：暂无记录</string>

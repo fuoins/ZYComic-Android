@@ -150,6 +150,10 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                     )
                     routeState.remoteVersion?.let { Text(stringResource(KMR.strings.picacg_speed_log_remote_version, it), style = MaterialTheme.typography.bodySmall) }
+                    if (snapshot != null) {
+                        Text("线路：${PicacgSpeedTester.logSummary(apiProbesForDisplay)}", style = MaterialTheme.typography.bodySmall)
+                        Text("图源：${PicacgSpeedTester.logSummary(imageProbesForDisplay)}", style = MaterialTheme.typography.bodySmall)
+                    }
                     snapshot?.imageBlockedReason?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
@@ -183,10 +187,10 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
                                 scope.launch {
                                     runCatching { PicacgSpeedTester.run() }
                                         .onSuccess { result ->
-                                            status.value = "完成：线路 ${result.apiProbes.count { it.success }}/${result.apiProbes.size} 可用；" +
+                                            status.value = "完成：线路 ${PicacgSpeedTester.logSummary(result.apiProbes)}；" +
                                                 (
                                                     result.imageBlockedReason?.let { "图源受阻：$it" }
-                                                        ?: "图源 ${result.imageProbes.count { it.success }}/${result.imageProbes.size} 验证成功。"
+                                                        ?: "图源 ${PicacgSpeedTester.logSummary(result.imageProbes)}。"
                                                     )
                                         }
                                         .onFailure { error ->

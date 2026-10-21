@@ -732,7 +732,7 @@ class ReaderActivity : BaseActivity() {
                                                     }
                                                     Toast.makeText(
                                                         this@ReaderActivity,
-                                                        report.imageBlockedReason ?: "Picacg 测速完成：API ${report.apiProbes.count { it.success }}/${report.apiProbes.size}，图源 ${report.imageProbes.count { it.success }}/${report.imageProbes.size}",
+                                                        report.imageBlockedReason ?: "Picacg 测速完成：API ${com.zycomic.app.net.PicacgSpeedTester.logSummary(report.apiProbes)}；图源 ${com.zycomic.app.net.PicacgSpeedTester.logSummary(report.imageProbes)}",
                                                         Toast.LENGTH_SHORT,
                                                     ).show()
                                                 }
