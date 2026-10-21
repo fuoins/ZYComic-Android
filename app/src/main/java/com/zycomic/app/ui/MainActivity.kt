@@ -303,7 +303,9 @@ fun AppContent(
     val platformTestSummary by PlatformSpeedTestCoordinator.startupSummary.collectAsState()
     val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
-    val blockingSpeedTest = speedTesting || configRetest?.duringStartup == true
+    var fullSpeedTestRequested by remember { mutableStateOf(false) }
+    val speedTestScope = rememberCoroutineScope()
+    val blockingSpeedTest = speedTesting || fullSpeedTestRequested || configRetest?.duringStartup == true
 
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
     var onboardingDone by remember {
@@ -507,6 +509,28 @@ fun AppContent(
                 Text("ZYComic", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(24.dp))
                 StartupPlatformSwitches()
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !fullSpeedTestRequested,
+                    onClick = {
+                        // Set synchronously so repeated taps cannot enqueue extra coroutines.
+                        fullSpeedTestRequested = true
+                        speedTestScope.launch {
+                            try {
+                                PlatformSpeedTestCoordinator.retestAllEnabled()
+                            } catch (error: kotlinx.coroutines.CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                fullSpeedTestRequested = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(KMR.strings.startup_retest_all))
+                }
                 Spacer(modifier = Modifier.height(24.dp))
                 if (configRetest?.duringStartup == true) {
                     Text(

@@ -87,4 +87,20 @@ class SpeedTestHistoryPolicyTest {
             SpeedTestHistoryPolicy.rankAfterRun(previous, fresh),
         )
     }
+
+    @Test
+    fun reconciliationMatchesOnlyExactPersistedEndpointIdentity() {
+        val retained = endpoint("same.example", "192.0.2.1")
+        val changedRoute = endpoint("same.example", "192.0.2.2")
+        val added = endpoint("new.example", "192.0.2.3")
+        val values = linkedMapOf(retained to 20L, changedRoute to 30L)
+        val oldIdentity = "identity-a"
+        val result = SpeedTestHistoryPolicy.matchingHistory(
+            values,
+            mapOf(retained to oldIdentity, changedRoute to "old-route"),
+            mapOf(retained to oldIdentity, changedRoute to "new-route", added to "new"),
+        )
+        assertEquals(linkedMapOf(retained to 20L), result)
+        assertEquals(emptyMap<DomainIp, Long>(), SpeedTestHistoryPolicy.matchingHistory(values, emptyMap(), mapOf(retained to oldIdentity)))
+    }
 }

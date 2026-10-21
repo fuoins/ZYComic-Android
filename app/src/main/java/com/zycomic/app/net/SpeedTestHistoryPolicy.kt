@@ -4,6 +4,35 @@ package com.zycomic.app.net
 internal object SpeedTestHistoryPolicy {
     const val RETEST_LIMIT = 5
 
+    /** Stable, compact identity for one probe target. Callers supply all transport/probe inputs. */
+    fun endpointIdentity(
+        platform: String,
+        kind: String,
+        endpoint: DomainIp,
+        request: String,
+        route: String,
+        conditions: String,
+    ): String {
+        val input = listOf(platform, kind, endpoint.domain.lowercase(java.util.Locale.ROOT), endpoint.ip, request, route, conditions)
+            .joinToString("\u0000")
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(input.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    /** Reuse only exact endpoint identities; missing identities from legacy records never match. */
+    fun <T> matchingHistory(
+        values: Map<DomainIp, T>,
+        savedIdentities: Map<DomainIp, String>,
+        currentIdentities: Map<DomainIp, String>,
+    ): LinkedHashMap<DomainIp, T> = LinkedHashMap<DomainIp, T>().apply {
+        values.forEach { (endpoint, value) ->
+            if (savedIdentities[endpoint]?.let { it.isNotBlank() && it == currentIdentities[endpoint] } == true) {
+                put(endpoint, value)
+            }
+        }
+    }
+
     fun isVersionCompatible(historyVersion: Int?, activeVersion: Int?): Boolean =
         historyVersion == activeVersion
 

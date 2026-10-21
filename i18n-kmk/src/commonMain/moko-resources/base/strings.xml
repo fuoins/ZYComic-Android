@@ -282,6 +282,7 @@
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">重启软件生效</string>
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
+    <string name="startup_retest_all">整体重新测速</string>
 
     <string name="manwa_detail_login_title">漫蛙账号登录</string>
     <string name="jm_album_jump_button">禁漫号跳转</string>

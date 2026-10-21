@@ -922,6 +922,29 @@ object JmRouteManager {
         return true
     }
 
+    /** Persist separated endpoint history only while the exact run generation remains active. */
+    @Synchronized
+    internal fun persistSpeedTestHistories(
+        lineHistory: JmSpeedTestHistoryPolicy.PhaseHistory,
+        imageHistory: JmSpeedTestHistoryPolicy.PhaseHistory,
+        expectedPlatformRevision: Long,
+        expectedConfigRevision: Long,
+        expectedConfigFingerprint: String,
+        isCurrent: () -> Boolean,
+    ): Boolean {
+        if (!isCurrent() || !StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+            StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
+            configRevision != expectedConfigRevision || currentSpeedTestConfigFingerprint() != expectedConfigFingerprint
+        ) {
+            return false
+        }
+        JmSpeedTestHistoryStorage.saveLines(lineHistory)
+        JmSpeedTestHistoryStorage.saveImages(imageHistory)
+        return isCurrent() && StartupPlatformPolicy.isEnabled(ContentPlatform.JM) &&
+            StartupPlatformPolicy.state.value.revision == expectedPlatformRevision && configRevision == expectedConfigRevision &&
+            currentSpeedTestConfigFingerprint() == expectedConfigFingerprint
+    }
+
     @Synchronized
     fun record(kind: String, host: String, message: String) {
         val next = (_logs.value + LogEntry(System.currentTimeMillis(), kind, host, message)).takeLast(MAX_LOGS)

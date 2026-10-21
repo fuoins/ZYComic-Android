@@ -44,8 +44,15 @@ object PlatformSpeedTestCoordinator {
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
     private var completedKey: SpeedTestRunKey? = null
+    private var checkedConfigurationVersion: Int? = null
     private val completedPhases = CompletedSpeedTestPhases()
     private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
+    private val fullTestRequest = FullSpeedTestRequest<List<PlatformSpeedTestReport>>()
+
+    /** Splash requests share one full test even while waiting behind the automatic startup run. */
+    suspend fun retestAllEnabled(): List<PlatformSpeedTestReport> = fullTestRequest.run {
+        run(forceFresh = true)
+    }
 
     internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
         startupConfig.complete(configurationUpdated)
@@ -126,9 +133,11 @@ object PlatformSpeedTestCoordinator {
                             else -> check
                         }
                     }
-                    // History eligibility is version-only inside each tester. Process-local
-                    // revisions/network identity still guard publication and deduplicate runs.
-                    val freshConfig = remoteConfigUpdated || (startupConfig.configurationUpdated == true && completedKey == null)
+                    // Equal versions retain the existing version-only fast test. Each tester
+                    // reconciles endpoint identities only against a strictly older history.
+                    // Process-local revisions/network identity still guard publication.
+                    val freshConfig = remoteConfigUpdated ||
+                        (startupConfig.configurationUpdated == true && checkedConfigurationVersion != key.remoteVersion)
                     val reuseLines = SpeedTestRunPolicy.canFastTest(
                         policy.useLastLineResult,
                         forceFresh,
@@ -178,7 +187,11 @@ object PlatformSpeedTestCoordinator {
                                     _progressText.value = "正在检测${platformName(platform)}线路与图源…"
                                     publishPlatformStatus(platform, "正在检测线路与图源…", running = true)
                                     try {
-                                        reason = "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（历史仅核对网络配置版本）"
+                                        reason = if (freshConfig && !forceFresh) {
+                                            "新版本配置增量测速：保留身份未变的结果，新增端点测速，移除已删除端点"
+                                        } else {
+                                            "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（同版本历史仅核对网络配置版本）"
+                                        }
                                         if (platform == ContentPlatform.MANWA) {
                                             SpeedTester.runAndApply(
                                                 onProgress = if (onProgress == null) {
@@ -192,6 +205,7 @@ object PlatformSpeedTestCoordinator {
                                                 },
                                                 reuseLines = reuseLines,
                                                 allowImageReuse = reuseImages,
+                                                reconcileConfig = !forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
                                                 onStageProgress = { progress ->
@@ -220,6 +234,10 @@ object PlatformSpeedTestCoordinator {
                                             val snapshot = PicacgSpeedTester.run(
                                                 reuseApi = linesDone,
                                                 reuseImages = imagesDone,
+                                                fastApi = reuseLines,
+                                                fastImages = reuseImages,
+                                                reconcileConfig = !forceFresh,
+                                                forceFresh = forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
                                                 onProgress = { progress ->
@@ -246,7 +264,7 @@ object PlatformSpeedTestCoordinator {
                                             }
                                             publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {
-                                            val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
+                                            val snapshot = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
                                                 if (generationIsCurrent()) {
                                                     _jmProgress.value = progress
                                                     _progressText.value = progress.message()
@@ -300,6 +318,7 @@ object PlatformSpeedTestCoordinator {
                         }
                     }
                     if (onlyPlatform == null) completedKey = key.takeIf { result.none { it.status == "incomplete" } }
+                    checkedConfigurationVersion = version
                     persist(result)
                     if (notifyCompletion) result.filter { it.platform in measuredPlatforms && it.status != "skipped" }.forEach { _completions.emit(it) }
                     runCompleted = true

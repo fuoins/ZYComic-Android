@@ -805,6 +805,7 @@ object SpeedTester {
         allowImageReuse: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        reconcileConfig: Boolean = false,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             val configRevisionAtStart = RouteManager.configRevision
@@ -856,16 +857,64 @@ object SpeedTester {
                 val linePreparationTiming = timings.start(SpeedTestTimings.Phase.LINE_PREPARATION)
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
                 val lineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
-                val compatibleHistory = RouteManager.speedTestHistoryForVersion(configVersionAtStart)
+                val priorVersionHistory = if (reconcileConfig) RouteManager.latestSpeedTestHistory() else null
+                val shouldReconcile = reconcileConfig && configVersionAtStart != null &&
+                    priorVersionHistory?.remoteVersion != null && priorVersionHistory.remoteVersion < configVersionAtStart
+                val reconciliationLineTargets = if (shouldReconcile) lineTargets() else emptyList()
+                val reconciliationImageTargets = if (shouldReconcile) imgTargets() else emptyList()
+                fun identity(endpoint: DomainIp, type: String, request: String, probe: String): String {
+                    val routes = RouteManager.customRule.entries.firstOrNull { it.key.equals(endpoint.domain, true) }
+                        ?.value.orEmpty()
+                    // Other IPs in this host's pool do not change this IP's probe conditions.
+                    val route = if (routes.any { it.trim() == endpoint.ip }) "configured-rule" else "system-dns"
+                    val sniConfigured = ManwaSniPolicy.isConfiguredHost(endpoint.domain, DevConfig.getSniDomains())
+                    return SpeedTestHistoryPolicy.endpointIdentity(
+                        "MANWA",
+                        type,
+                        endpoint,
+                        request,
+                        route,
+                        "$probe|sni=$sniConfigured|vpn=${networkPath.followSystemVpnEnabled}:${networkPath.systemVpnActive}|direct=${networkPath.directStrategy}",
+                    )
+                }
+                val reconciliationLineIdentities = reconciliationLineTargets.associate { target ->
+                    target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v1")
+                }
+                val reconciliationImageIdentities = reconciliationImageTargets.associate { endpoint ->
+                    endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-2048-fallback-v1")
+                }
+                val reconciledHistory = if (shouldReconcile) {
+                    RouteManager.reconcileSpeedTestHistory(
+                        configVersionAtStart,
+                        reconciliationLineIdentities,
+                        reconciliationImageIdentities,
+                        configRevisionAtStart,
+                        platformRevisionAtStart,
+                    )
+                } else {
+                    null
+                }
+                val compatibleHistory = if (reconciledHistory != null) reconciledHistory else RouteManager.speedTestHistoryForVersion(configVersionAtStart)
+                val configReconciled = reconciledHistory != null
                 val lineHistory = compatibleHistory?.lineDelays.orEmpty()
-                val selectedLineEndpoints = if (reuseLines) {
+                val selectedLineEndpoints = if (configReconciled) {
+                    lineHistory.keys.toSet()
+                } else if (reuseLines) {
                     SpeedTestHistoryPolicy.selectRankedTop(lineHistory).toSet()
                 } else {
                     emptySet()
                 }
-                val quickLineRetest = selectedLineEndpoints.isNotEmpty()
-                val resolvedLines = if (quickLineRetest) emptyList() else lineTargets()
-                val lineProbeTargets = if (quickLineRetest) {
+                val quickLineRetest = !configReconciled && selectedLineEndpoints.isNotEmpty()
+                val resolvedLines = if (configReconciled) {
+                    reconciliationLineTargets.filterNot { it.endpoint in lineHistory }
+                } else if (quickLineRetest) {
+                    emptyList()
+                } else {
+                    lineTargets()
+                }
+                val lineProbeTargets = if (configReconciled) {
+                    resolvedLines
+                } else if (quickLineRetest) {
                     selectedLineEndpoints.map { endpoint ->
                         val url = RouteManager.lineHosts.firstOrNull {
                             lineDomain(it).equals(endpoint.domain, ignoreCase = true)
@@ -875,7 +924,10 @@ object SpeedTester {
                 } else {
                     resolvedLines
                 }
-                val retainedLineCount = if (quickLineRetest) {
+                val retainedLineCount = if (configReconciled) {
+                    lineAcc.putAll(lineHistory)
+                    lineHistory.size
+                } else if (quickLineRetest) {
                     lineAcc.putAll(lineHistory.filterKeys { it !in selectedLineEndpoints })
                     lineHistory.size - selectedLineEndpoints.size
                 } else {
@@ -922,7 +974,9 @@ object SpeedTester {
                 lastImgVerdicts = emptyMap()
                 lastImgIpVerdicts = emptyMap()
                 val freshLines = freshLineOutcomes.mapValues { it.value.delayMs }
-                val lines = if (quickLineRetest) {
+                val lines = if (configReconciled) {
+                    (lineHistory + freshLines).entries.sortedBy { it.value }.associateTo(LinkedHashMap()) { it.key to it.value }
+                } else if (quickLineRetest) {
                     SpeedTestHistoryPolicy.merge(lineHistory, selectedLineEndpoints, freshLines)
                 } else {
                     freshLines
@@ -945,7 +999,7 @@ object SpeedTester {
                         lineQuickTest = quickLineRetest,
                     ),
                 )
-                val bestLine = fastestLineEndpoint(if (quickLineRetest) freshLines else lines)
+                val bestLine = fastestLineEndpoint(if (quickLineRetest && !configReconciled) freshLines else lines)
                 val bestLineIndex = bestLine?.let { endpoint ->
                     RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
                 }?.takeIf { it >= 0 }
@@ -987,15 +1041,35 @@ object SpeedTester {
                 val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
                 reportStage(Progress(Phase.PREPARING_IMAGES))
                 val imageHistory = compatibleHistory?.imgDelays.orEmpty()
-                val selectedImageEndpoints = if (allowImageReuse) {
+                val selectedImageEndpoints = if (configReconciled) {
+                    imageHistory.keys
+                } else if (allowImageReuse) {
                     SpeedTestHistoryPolicy.selectRankedTop(imageHistory).toSet()
                 } else {
                     emptySet()
                 }
-                val quickImageRetest = selectedImageEndpoints.isNotEmpty()
-                val resolvedImages = if (quickImageRetest) emptyList() else imgTargets()
-                val imageProbeTargets = if (quickImageRetest) selectedImageEndpoints.toList() else resolvedImages
-                if (quickImageRetest) {
+                val quickImageRetest = !configReconciled && selectedImageEndpoints.isNotEmpty()
+                val resolvedImages = if (configReconciled) {
+                    reconciliationImageTargets.filterNot { it in imageHistory }
+                } else if (quickImageRetest) {
+                    emptyList()
+                } else {
+                    imgTargets()
+                }
+                val imageProbeTargets = if (configReconciled) {
+                    resolvedImages
+                } else if (quickImageRetest) {
+                    selectedImageEndpoints.toList()
+                } else {
+                    resolvedImages
+                }
+                if (configReconciled) {
+                    imageHistory.forEach { (endpoint, delay) ->
+                        imgAcc[endpoint] = delay
+                        compatibleHistory?.imgVerdicts?.get(endpoint)?.let { verdictAcc[endpoint] = it }
+                    }
+                    reusedImageCount.set(imageHistory.size)
+                } else if (quickImageRetest) {
                     imageHistory.filterKeys { it !in selectedImageEndpoints }.forEach { (endpoint, delay) ->
                         imgAcc[endpoint] = delay
                         compatibleHistory?.imgVerdicts?.get(endpoint)?.let { verdictAcc[endpoint] = it }
@@ -1061,7 +1135,9 @@ object SpeedTester {
                 imgJobs.awaitAll()
                 imageTiming.close()
                 val freshImages = imageDiagnosticAcc.keys.associateWith { imgAcc.getValue(it) }
-                val imgs = if (quickImageRetest) {
+                val imgs = if (configReconciled) {
+                    (imageHistory + freshImages).entries.sortedBy { it.value }.associateTo(LinkedHashMap()) { it.key to it.value }
+                } else if (quickImageRetest) {
                     SpeedTestHistoryPolicy.merge(imageHistory, selectedImageEndpoints, freshImages)
                 } else {
                     freshImages
@@ -1101,14 +1177,33 @@ object SpeedTester {
                         expectedConfigRevision = configRevisionAtStart,
                         invalidateCompletedSnapshot = mixedImageResult,
                         expectedPlatformRevision = platformRevisionAtStart,
-                        lineUntestedEndpoints = if (quickLineRetest) lineHistory.keys - selectedLineEndpoints else emptySet(),
-                        imageUntestedEndpoints = if (quickImageRetest) imageHistory.keys - selectedImageEndpoints else emptySet(),
+                        lineUntestedEndpoints = if (configReconciled) {
+                            lineHistory.keys
+                        } else if (quickLineRetest) {
+                            lineHistory.keys - selectedLineEndpoints
+                        } else {
+                            emptySet()
+                        },
+                        imageUntestedEndpoints = if (configReconciled) {
+                            imageHistory.keys
+                        } else if (quickImageRetest) {
+                            imageHistory.keys - selectedImageEndpoints
+                        } else {
+                            emptySet()
+                        },
+                        lineMeasuredAtEpochMs = if (configReconciled) compatibleHistory?.lineMeasuredAtEpochMs.orEmpty() else emptyMap(),
+                        imageMeasuredAtEpochMs = if (configReconciled) compatibleHistory?.imageMeasuredAtEpochMs.orEmpty() else emptyMap(),
+                        lineIdentities = if (configReconciled) reconciliationLineIdentities else lineProbeTargets.associate { target -> target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v1") },
+                        imageIdentities = if (configReconciled) reconciliationImageIdentities else imageProbeTargets.associate { endpoint -> endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-2048-fallback-v1") },
+                        sortMergedHistory = configReconciled,
                     )
                 ) {
                     return@coroutineScope (-1 to -1)
                 }
                 if (!runIsCurrent()) return@coroutineScope (-1 to -1)
-                val bestImg = if (quickImageRetest) {
+                val bestImg = if (configReconciled) {
+                    imgs.entries.filter { it.value < MAX && verdictAcc[it.key] == ImgVerdict.OK }.minByOrNull { it.value }?.key
+                } else if (quickImageRetest) {
                     freshImages.entries
                         .filter { it.value < MAX && freshVerdictAcc[it.key] == ImgVerdict.OK }
                         .minByOrNull { it.value }
@@ -1145,6 +1240,9 @@ object SpeedTester {
                             completeSnapshot = true,
                             expectedPlatformRevision = platformRevisionAtStart,
                             imageCacheNetworkIdentity = imageCacheNetworkIdentityAtStart,
+                            lineIdentities = if (configReconciled) reconciliationLineIdentities else lineProbeTargets.associate { target -> target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v1") },
+                            imageIdentities = if (configReconciled) reconciliationImageIdentities else imageProbeTargets.associate { endpoint -> endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-2048-fallback-v1") },
+                            sortMergedHistory = configReconciled,
                         )
                     ) {
                         return@coroutineScope (-1 to -1)
