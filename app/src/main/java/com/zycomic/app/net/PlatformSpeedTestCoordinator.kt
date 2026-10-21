@@ -249,6 +249,9 @@ object PlatformSpeedTestCoordinator {
                                                 },
                                             )
                                             picacgSnapshot = snapshot.takeIf { PicacgSpeedTester.snapshot.value == it && generationIsCurrent() }
+                                            picacgSnapshot?.let { current ->
+                                                publishPicacgMeasuredChecks(current)
+                                            }
                                             status = if (picacgSnapshot?.complete == true) "tested" else "incomplete"
                                             reason = if (snapshot.complete) {
                                                 val apiAvailable = snapshot.apiProbes.count(PicacgSpeedTester.Probe::success)
@@ -422,8 +425,37 @@ object PlatformSpeedTestCoordinator {
             PicacgSpeedTester.Stage.TESTING_API -> publishMeasuredCheck(StartupCheckPhase.PICACG_LINE, progress.completed, progress.total, progress.successful)
             PicacgSpeedTester.Stage.PREPARING_IMAGES -> publishStartupCheck(StartupCheckPhase.PICACG_IMAGE, StartupCheckResult.RUNNING)
             PicacgSpeedTester.Stage.TESTING_IMAGES -> publishMeasuredCheck(StartupCheckPhase.PICACG_IMAGE, progress.completed, progress.total, progress.successful)
-            PicacgSpeedTester.Stage.IMAGE_BLOCKED -> publishStartupCheck(StartupCheckPhase.PICACG_IMAGE, StartupCheckResult.BLOCKED, "无真实图片样本或图源 IP，未验证通过")
+            PicacgSpeedTester.Stage.IMAGE_BLOCKED -> publishStartupCheck(
+                StartupCheckPhase.PICACG_IMAGE,
+                if (PicacgRouteManager.verifiedImageSampleUrl == null) StartupCheckResult.NO_SAMPLE else StartupCheckResult.BLOCKED,
+                "无真实图片样本或图源 IP，未验证通过",
+            )
             PicacgSpeedTester.Stage.COMPLETE -> Unit
+        }
+    }
+
+    private fun publishPicacgMeasuredChecks(snapshot: PicacgSpeedTester.Snapshot) {
+        fun measured(phase: StartupCheckPhase, probes: List<PicacgSpeedTester.Probe>) {
+            val fresh = probes.filter { it.testedThisRound }
+            publishStartupCheck(
+                phase,
+                when {
+                    fresh.isEmpty() -> StartupCheckResult.NOT_TESTED
+                    fresh.any { it.success } -> StartupCheckResult.SUCCESS
+                    else -> StartupCheckResult.FAILED
+                },
+                if (fresh.isEmpty()) "仅复用历史结果，本轮未检测" else "仅统计本轮真实探测",
+            )
+        }
+        measured(StartupCheckPhase.PICACG_LINE, snapshot.apiProbes)
+        if (snapshot.imageBlockedReason != null) {
+            publishStartupCheck(
+                StartupCheckPhase.PICACG_IMAGE,
+                if (PicacgRouteManager.verifiedImageSampleUrl == null) StartupCheckResult.NO_SAMPLE else StartupCheckResult.BLOCKED,
+                snapshot.imageBlockedReason,
+            )
+        } else {
+            measured(StartupCheckPhase.PICACG_IMAGE, snapshot.imageProbes)
         }
     }
 

@@ -193,7 +193,6 @@ private fun LegacyBrowseScreen(
     var showTagDialog by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
     var showJmAlbumJumpDialog by remember { mutableStateOf(false) }
-    var showGuide by remember { mutableStateOf(false) }
     val jmCategoryActive = platform == ContentPlatform.JM
     val activeSelectionMode = if (jmCategoryActive) jmSelectionMode else selectionMode
     val activeSelectionCount = if (jmCategoryActive) jmSelectedIds.size else selectedIds.size
@@ -392,7 +391,6 @@ private fun LegacyBrowseScreen(
                                     AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", null) }),
                                     AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
                                     AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = { vm.enterSelection() }),
-                                    AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuide = true }),
                                 )
                             } else {
                                 persistentListOf(
@@ -407,7 +405,6 @@ private fun LegacyBrowseScreen(
                                             jmSelectionMode = true
                                         }
                                     }),
-                                    AppBar.Action(title = "使用说明", icon = Icons.Outlined.Info, onClick = { showGuide = true }),
                                 )
                             },
                         )
@@ -598,12 +595,6 @@ private fun LegacyBrowseScreen(
         JmAlbumJumpDialog(
             onDismiss = { showJmAlbumJumpDialog = false },
             onOpenManga = onOpenManga,
-        )
-    }
-    if (showGuide) {
-        BrowseGuideDialog(
-            onDismiss = { showGuide = false },
-            initialPlatform = platform,
         )
     }
 

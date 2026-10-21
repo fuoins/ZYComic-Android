@@ -53,6 +53,14 @@ object PicacgRouteManager {
 
     private fun prefs() = DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    /** Client-owned pools are independent of optional lines3/sources3 in remote snapshots. */
+    @Synchronized
+    internal fun installBuiltin(version: Int?, smartIps: List<String> = emptyList()) {
+        val rules = PicacgBuiltinNetwork.rules(smartIps)
+        applyRemoteConfig(PicacgBuiltinNetwork.apiUrls, PicacgBuiltinNetwork.imageHosts, rules, version)
+        dnsFallbackRules = rules
+    }
+
     /** Install only already-validated remote values; no built-in domain, IP, or fallback pool is introduced. */
     @Synchronized
     fun applyRemoteConfig(apiUrls: List<String>, imageHosts: List<String>, rules: Map<String, List<String>>, version: Int?) {
@@ -121,11 +129,14 @@ object PicacgRouteManager {
         // Keep route-rule snapshots in memory only; source lists and rules always come from DevConfig's validated snapshot.
         apiRouteRules = apiRules
         imageRouteRules = imageRules
+        dnsFallbackRules = emptyMap()
     }
 
     @Volatile private var apiRouteRules: Map<String, List<String>> = emptyMap()
 
     @Volatile private var imageRouteRules: Map<String, List<String>> = emptyMap()
+
+    @Volatile private var dnsFallbackRules: Map<String, List<String>> = emptyMap()
 
     /** Restore saved selection/pins only after the validated authoritative route pools have been installed. */
     @Synchronized
@@ -218,8 +229,7 @@ object PicacgRouteManager {
     fun routeRules(): Map<String, List<String>> = apiRouteRules + imageRouteRules
     fun apiRouteRules(): Map<String, List<String>> = apiRouteRules.toMap()
     fun imageRouteRules(): Map<String, List<String>> = imageRouteRules.toMap()
-    fun resolveIps(host: String): List<String> = (apiRouteRules + imageRouteRules).entries
-        .firstOrNull { it.key.equals(host, true) }?.value.orEmpty()
+    fun resolveIps(host: String): List<String> = PicacgBuiltinNetwork.lookup(dnsFallbackRules + apiRouteRules + imageRouteRules, host)
 
     /** DNS policy for Picacg clients; applies only Picacg's remote rules and endpoint pins. */
     fun dns(): Dns = object : Dns {
@@ -243,7 +253,7 @@ object PicacgRouteManager {
                 override fun lookup(hostname: String): List<InetAddress> = if (hostname.equals(endpoint.domain, true)) {
                     listOf(InetAddress.getByName(endpoint.ip))
                 } else {
-                    base.dns.lookup(hostname)
+                    dns().lookup(hostname)
                 }
             })
             .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
@@ -315,6 +325,7 @@ object PicacgRouteManager {
         routeConfigRevision++
         apiRouteRules = emptyMap()
         imageRouteRules = emptyMap()
+        dnsFallbackRules = emptyMap()
         _verifiedImageSampleUrl = null
     }
 

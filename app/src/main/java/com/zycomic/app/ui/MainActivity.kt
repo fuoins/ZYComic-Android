@@ -483,6 +483,7 @@ fun AppContent(
                             com.zycomic.app.ui.onboarding.OnboardingPrefs.setDone(context, false)
                             onboardingDone = false
                         },
+                        guideInitialPlatform = browseVm.currentPlatform.value,
                     )
                 }
             }
@@ -540,9 +541,6 @@ fun AppContent(
                         color = MaterialTheme.colorScheme.primary,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                }
-                if (platformTestsRunning) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp))
                 }
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
@@ -761,6 +759,10 @@ private fun StartupPlatformSwitches() {
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
+        LinearProgressIndicator(
+            progress = { com.zycomic.app.net.startupChecksProgress(checkStatuses) },
+            modifier = Modifier.fillMaxWidth().height(6.dp),
+        )
         Text(
             "通过 ${startupChecksPassed(checkStatuses)}/6",
             modifier = Modifier.fillMaxWidth(),
@@ -786,6 +788,7 @@ private fun StartupPlatformSwitches() {
                                 StartupCheckResult.FAILED -> "×"
                                 StartupCheckResult.DISABLED -> "禁"
                                 StartupCheckResult.BLOCKED -> "阻"
+                                StartupCheckResult.NO_SAMPLE -> "缺"
                                 StartupCheckResult.NOT_RUN -> "—"
                                 StartupCheckResult.INTERRUPTED -> "!"
                             }

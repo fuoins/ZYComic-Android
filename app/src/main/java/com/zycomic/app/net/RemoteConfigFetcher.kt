@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -66,8 +68,21 @@ object RemoteConfigFetcher {
     private val HOST_REGEX = Regex("^(?=.{1,253}$)([a-z0-9](-?[a-z0-9])*\\.)+[a-z]{2,}$")
     private val IPV4_REGEX = Regex("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$")
 
+    private val checkLock = Mutex()
+
     /** 执行一次远程检查；[manual] 为手动触发（仅用于日志/返回信息，行为一致）。 */
-    suspend fun checkAndApply(manual: Boolean = false): Result = withContext(Dispatchers.IO) {
+    suspend fun checkAndApply(manual: Boolean = false): Result = checkLock.withLock {
+        try {
+            checkRemote(manual)
+        } finally {
+            // First-install lookup belongs to this check, including an offline/failed remote check.
+            // The restored active version also recovers a process death after config commit but before lookup.
+            // An already-attempted generation is a no-op, including same-version/304/failed checks.
+            PicacgNetworkGeneration.onConfigCheck(PicacgRouteManager.remoteVersion)
+        }
+    }
+
+    private suspend fun checkRemote(manual: Boolean): Result = withContext(Dispatchers.IO) {
         SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.CONFIG).use { timings ->
             DevConfig.markBootstrapLoading()
             if (!DevConfig.remoteEnabled() && DevConfig.hasUsableRouteConfig) {
@@ -116,6 +131,7 @@ object RemoteConfigFetcher {
                                 DevConfig.applyRemoteConfig(body, etag)
                             }
                             if (applied) {
+                                PicacgNetworkGeneration.onConfigCheck(version)
                                 // The route list is now authoritative. Rebuild the API base URL and rebind the image stack
                                 // before allowing a first-install UI to issue any requests.
                                 runCatching { NetworkModule.rebuildApi("远程配置 v$version") }

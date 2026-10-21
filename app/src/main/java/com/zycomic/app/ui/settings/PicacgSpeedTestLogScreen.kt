@@ -82,7 +82,7 @@ fun PicacgSpeedTestLogScreen(onClose: () -> Unit) {
     val picacgInterrupted = startupCheckStatuses.any { it.phase in picacgPhases && it.result == StartupCheckResult.INTERRUPTED }
     val picacgPlatformRunning = platformStatuses[ContentPlatform.PICACG]?.running == true
     val picacgImageBlocked = startupCheckStatuses.any {
-        it.phase == StartupCheckPhase.PICACG_IMAGE && it.result == StartupCheckResult.BLOCKED
+        it.phase == StartupCheckPhase.PICACG_IMAGE && it.result in setOf(StartupCheckResult.BLOCKED, StartupCheckResult.NO_SAMPLE)
     }
     val picacgActiveStage = progress?.stage in setOf(
         PicacgSpeedTester.Stage.PREPARING_API,

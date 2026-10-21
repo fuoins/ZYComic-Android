@@ -163,8 +163,8 @@ object PicacgSpeedTester {
                 timings.start(SpeedTestTimings.Phase.PICACG_LINES).use {
                     publishProgress(Progress(Stage.TESTING_API, total = targetsToProbeApi.size))
                     val completed = AtomicInteger(0)
-                    val successful = AtomicInteger(apiResults.count(Probe::success))
-                    val failed = AtomicInteger(apiResults.count { !it.success })
+                    val successful = AtomicInteger(0)
+                    val failed = AtomicInteger(0)
                     val freshResults = coroutineScope {
                         targetsToProbeApi.map { target ->
                             async {
@@ -255,8 +255,8 @@ object PicacgSpeedTester {
                 timings.start(SpeedTestTimings.Phase.PICACG_IMAGES).use {
                     if (targetsToProbeImages.isNotEmpty()) publishProgress(Progress(Stage.TESTING_IMAGES, total = targetsToProbeImages.size))
                     val completed = AtomicInteger(0)
-                    val successful = AtomicInteger(imageResults.count(Probe::success))
-                    val failed = AtomicInteger(imageResults.count { !it.success })
+                    val successful = AtomicInteger(0)
+                    val failed = AtomicInteger(0)
                     val freshResults = coroutineScope {
                         targetsToProbeImages.map { target ->
                             async {
@@ -294,7 +294,7 @@ object PicacgSpeedTester {
                     }
                 }
                 if (imageTargets.isEmpty() && imageResults.isEmpty() && blockedReason == null) {
-                    blockedReason = "真实图片样本可用，但当前 sources3 图源没有可探测的 IP；图源验证未完成"
+                    blockedReason = "真实图片样本可用，但当前哔咔图源没有可探测的 IP；图源验证未完成"
                     publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
                 }
 
@@ -354,7 +354,16 @@ object PicacgSpeedTester {
                     }
                     _snapshot.value = result
                 }
-                publishProgress(Progress(Stage.COMPLETE, apiResults.size, apiResults.size, apiResults.count(Probe::success), apiResults.count { !it.success }))
+                val measuredApiResults = apiResults.filter(Probe::testedThisRound)
+                publishProgress(
+                    Progress(
+                        Stage.COMPLETE,
+                        apiResults.size,
+                        apiResults.size,
+                        measuredApiResults.count(Probe::success),
+                        measuredApiResults.count { !it.success },
+                    ),
+                )
                 result
             }
         }
@@ -458,7 +467,11 @@ object PicacgSpeedTester {
         var contentType: String? = null
         var decoded: Boolean? = false
         val success = runCatching {
-            val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
+            // Follow the actual storage-b -> safedataplj chain; never turn redirect targets into selectable origins.
+            val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint).newBuilder()
+                .followRedirects(true)
+                .followSslRedirects(false)
+                .build()
             val request = Request.Builder().url(url).header("User-Agent", "okhttp/3.8.1").get().build()
             client.newCall(request).execute().use { response ->
                 code = response.code
@@ -508,7 +521,13 @@ object PicacgSpeedTester {
 
     private fun replaceHost(url: String, host: String): String {
         val uri = URI(url)
-        return URI(uri.scheme, null, host, uri.port, uri.path, uri.query, uri.fragment).toASCIIString()
+        return buildString {
+            append(uri.scheme).append("://").append(host)
+            if (uri.port != -1) append(':').append(uri.port)
+            append(uri.rawPath.orEmpty())
+            uri.rawQuery?.let { append('?').append(it) }
+            uri.rawFragment?.let { append('#').append(it) }
+        }.let(::URI).toASCIIString()
     }
 
     private fun elapsedMs(startNanos: Long): Long = ((System.nanoTime() - startNanos) / 1_000_000L).coerceAtLeast(0L)

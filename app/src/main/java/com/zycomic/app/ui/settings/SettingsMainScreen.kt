@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.ui.browse.BrowseGuideDialog
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -65,10 +66,12 @@ fun SettingsMainScreen(
     onOpenDataStorage: () -> Unit,
     onOpenAbout: () -> Unit,
     onReplayOnboarding: () -> Unit,
+    guideInitialPlatform: ContentPlatform,
 ) {
     val context = LocalContext.current
     val platformPolicy by StartupPlatformPolicy.settingsState.collectAsState()
     var showDeveloperWarning by remember { mutableStateOf(false) }
+    var showGuide by remember { mutableStateOf(false) }
     val topBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(topBarState)
     val restartMessage = stringResource(KMR.strings.startup_platform_restart_toast)
@@ -179,6 +182,13 @@ fun SettingsMainScreen(
             item { HorizontalDivider() }
             item {
                 TextPreferenceWidget(
+                    title = stringResource(KMR.strings.usage_guide_title),
+                    icon = Icons.Outlined.Info,
+                    onPreferenceClick = { showGuide = true },
+                )
+            }
+            item {
+                TextPreferenceWidget(
                     title = "新手引导",
                     subtitle = "重新查看使用说明",
                     icon = Icons.Outlined.Info,
@@ -193,6 +203,13 @@ fun SettingsMainScreen(
                 )
             }
         }
+    }
+
+    if (showGuide) {
+        BrowseGuideDialog(
+            onDismiss = { showGuide = false },
+            initialPlatform = guideInitialPlatform,
+        )
     }
 
     if (showDeveloperWarning) {

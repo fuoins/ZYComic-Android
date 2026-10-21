@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgLoginException
 import com.zycomic.app.picacg.PicacgRepository
+import com.zycomic.app.ui.register.PicacgRegisterScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -61,8 +62,13 @@ fun PicacgLoginScreen(
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var registering by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val loginFailed = stringResource(KMR.strings.picacg_login_failed)
+    if (registering) {
+        PicacgRegisterScreen(onBack = { registering = false })
+        return
+    }
     Surface(Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize()
@@ -109,6 +115,9 @@ fun PicacgLoginScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.small,
             ) { Text(stringResource(if (loading) KMR.strings.picacg_loading else KMR.strings.zy_account_picacg_login_action)) }
+            TextButton(onClick = { registering = true }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(KMR.strings.picacg_register_open))
+            }
         }
     }
 }

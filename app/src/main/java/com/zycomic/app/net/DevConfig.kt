@@ -14,9 +14,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Runtime configuration sourced exclusively from a validated remote snapshot.
- * Route and source lists are not packaged in the app; first launch remains network-gated
- * until the first successful fetch. A previously successful remote snapshot is retained for offline startup.
+ * Manwa/JM runtime configuration comes exclusively from a validated remote snapshot.
+ * Picacg owns a separate immutable client baseline; the remote version only identifies its SmartDNS generation.
+ * A previously successful remote snapshot is retained for offline startup.
  */
 sealed interface RouteConfigState {
     data object Loading : RouteConfigState
@@ -52,7 +52,7 @@ object DevConfig {
 
     val hasUsableRouteConfig: Boolean get() = RouteManager.hasRemoteConfig
 
-    /** 初始化时只恢复经远程版本、候选列表及规则校验的成功快照；不从包内/旧基线补线路。 */
+    /** Restore a validated remote snapshot for Manwa/JM and the independent Picacg client generation. */
     fun init(ctx: Context) {
         context = ctx.applicationContext
         JmRouteManager.loadPreferences()
@@ -79,7 +79,7 @@ object DevConfig {
                     cachedJson = EMPTY_CONFIG_JSON
                     RouteManager.clearConfiguration()
                     JmRouteManager.applyRemoteConfig(emptyList(), emptyList(), emptyMap(), null)
-                    PicacgRouteManager.clearConfiguration()
+                    PicacgNetworkGeneration.restore(null)
                     remotePrefs.edit()
                         .remove("remote_etag")
                         .remove("remote_updated_at")
@@ -93,7 +93,7 @@ object DevConfig {
             cachedJson = EMPTY_CONFIG_JSON
             RouteManager.clearConfiguration()
             JmRouteManager.applyRemoteConfig(emptyList(), emptyList(), emptyMap(), null)
-            PicacgRouteManager.clearConfiguration()
+            PicacgNetworkGeneration.restore(null)
             // Discard only the unusable snapshot/ETag. Keep the last applied version marker monotonic,
             // while forcing a full response instead of allowing an old ETag to produce a cacheless 304.
             remotePrefs.edit()
@@ -287,19 +287,8 @@ object DevConfig {
         }
     }
 
-    /** Picacg-only API/image rules; never merged into Manwa or JM route maps. */
-    fun getPicacgRouteRules(): Map<String, List<String>> {
-        return try {
-            val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(getConfigJson()).jsonObject
-            val hosts = root["lines3"]?.jsonArray.orEmpty().map { bareHost(it.jsonPrimitive.content).lowercase() }.toSet() +
-                root["sources3"]?.jsonArray.orEmpty().map { it.jsonPrimitive.content.lowercase() }
-            val rules = root["rule"]?.jsonObject ?: return emptyMap()
-            rules.filterKeys { it.lowercase() in hosts }.mapValues { (_, values) -> values.jsonArray.map { it.jsonPrimitive.content } }
-        } catch (e: Exception) {
-            Log.e(TAG, "getPicacgRouteRules failed", e)
-            emptyMap()
-        }
-    }
+    /** Picacg candidates are client-owned and never merged into Manwa or JM route maps. */
+    fun getPicacgRouteRules(): Map<String, List<String>> = PicacgRouteManager.routeRules()
 
     /** 保存配置到 SharedPreferences 并更新缓存。 */
     fun saveConfig(json: String) {
@@ -334,8 +323,6 @@ object DevConfig {
         val sources = strList("sources")
         val lines2 = strList("lines2")
         val sources2 = strList("sources2")
-        val lines3 = strList("lines3")
-        val sources3 = strList("sources3")
         require(lines.isNotEmpty() && sources.isNotEmpty()) { "Remote routes and sources must not be empty" }
         val manwaHosts = (lines.map(::bareHost) + sources).map { it.lowercase() }.toSet()
         val manwaRules = ruleMap.filterKeys { it.lowercase() in manwaHosts }
@@ -343,7 +330,7 @@ object DevConfig {
         val version = root["version"]?.jsonPrimitive?.content?.toIntOrNull()
         RouteManager.applyBaseLists(lines, sources, version)
         JmRouteManager.applyRemoteConfig(lines2, sources2, ruleMap, version)
-        PicacgRouteManager.applyRemoteConfig(lines3, sources3, ruleMap, version)
+        PicacgNetworkGeneration.restore(version)
         val manwaRuleHosts = manwaRules.keys.map { it.lowercase() }.filter { it in manwaHosts }
         RouteManager.setSniDomains((manwaHosts + manwaRuleHosts) - "dns.google")
     }

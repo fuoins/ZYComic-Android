@@ -201,6 +201,38 @@ class PicacgOfflineApiTest {
     }
 
     @Test
+    fun `registration sends all eleven fields as an unauthenticated request`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"message":"success","data":null}"""
+
+        PicacgRepository.register(testRegistrationDraft())
+
+        val request = requests.single()
+        assertEquals("POST", request.method)
+        assertEquals("/api/v2/auth/register", request.url.encodedPath)
+        assertEquals(null, request.header("authorization"))
+        val payload = org.json.JSONObject(Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+        assertEquals(11, payload.length())
+        assertEquals("testaccount123", payload.getString("email"))
+        assertEquals("f", payload.getString("gender"))
+        assertFalse(payload.has("username"))
+    }
+
+    @Test
+    fun `registration errors are mapped without exposing response text`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 400 to """{"code":400,"error":"1025","message":"sensitive server echo"}"""
+
+        val failure = assertThrows(PicacgRegistrationException::class.java) {
+            runBlocking { PicacgRepository.register(testRegistrationDraft()) }
+        }
+
+        assertTrue(failure.message.orEmpty().contains("账号或昵称"))
+        assertFalse(failure.message.orEmpty().contains("sensitive server echo"))
+        assertEquals(1, requests.size)
+    }
+
+    @Test
     fun `punch in posts an empty object then reads back authoritative profile status`() = runBlocking {
         PicacgRepository.installClientForTests(client)
         responses += 200 to """{"code":200,"data":{}}"""
@@ -213,6 +245,19 @@ class PicacgOfflineApiTest {
         assertEquals("{}", Buffer().also { requests[0].body!!.writeTo(it) }.readUtf8())
         assertEquals("/api/v2/users/profile", requests[1].url.encodedPath)
     }
+
+    private fun testRegistrationDraft() = PicacgRegistrationDraft(
+        name = "Test Reader",
+        username = "testaccount123",
+        password = "offline-password",
+        question1 = "Question one",
+        answer1 = "Answer one",
+        question2 = "Question two",
+        answer2 = "Answer two",
+        question3 = "Question three",
+        answer3 = "Answer three",
+        birthday = "2000-01-01",
+    )
 
     @Test
     fun `browse serializes all documented filter keys`() = runBlocking {

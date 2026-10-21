@@ -55,7 +55,7 @@ object PicacgRepository {
     private fun client(): PicacgClient = api ?: error("PicacgRepository.init(context) must be called first")
 
     suspend fun login(email: String, password: String): String {
-        require(email.isNotBlank() && password.isNotBlank()) { "邮箱和密码不能为空。" }
+        require(email.isNotBlank() && password.isNotBlank()) { "账号和密码不能为空。" }
         val startingRevision = PicacgAuthStore.sessionRevision.value
         val payload = JSONObject().put("email", email).put("password", password)
         val token = try {
@@ -77,6 +77,24 @@ object PicacgRepository {
         }
         synchronized(pageCache) { pageCache.clear() }
         return token
+    }
+
+    /** Register a Picacg account. The wire field named `email` is the username, not an email address. */
+    suspend fun register(draft: PicacgRegistrationDraft) {
+        val issue = PicacgRegistrationPolicy.validate(draft)
+        require(issue == null) { "Picacg registration draft is invalid" }
+        try {
+            client().request(
+                "/auth/register",
+                "POST",
+                PicacgRegistrationPolicy.toPayload(draft),
+                authenticated = false,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            throw PicacgRegistrationException(PicacgRegistrationErrorPolicy.message(error))
+        }
     }
 
     private fun loginFailure(error: Exception): PicacgLoginException {

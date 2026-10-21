@@ -35,4 +35,26 @@ class StartupCheckStatusTest {
         assertEquals(1, startupChecksPassed(passed))
         assertEquals(StartupCheckResult.BLOCKED, passed.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.result)
     }
+
+    @Test
+    fun `all non success states keep fixed denominator without counting as passes`() {
+        StartupCheckResult.entries.filter { it != StartupCheckResult.SUCCESS }.forEach { result ->
+            val statuses = initialStartupCheckStatuses().map { it.copy(result = result) }
+            assertEquals(0, startupChecksPassed(statuses), result.name)
+            assertEquals(0f, startupChecksProgress(statuses), result.name)
+        }
+        val partial = updateStartupCheckStatus(initialStartupCheckStatuses(), StartupCheckPhase.JM_LINE, StartupCheckResult.SUCCESS)
+        assertEquals(1f / 6f, startupChecksProgress(partial))
+        assertEquals(1f, startupChecksProgress(initialStartupCheckStatuses().map { it.copy(result = StartupCheckResult.SUCCESS) }))
+    }
+
+    @Test
+    fun `new round clears prior successes and duplicate phases do not advance twice`() {
+        val old = initialStartupCheckStatuses().map { it.copy(result = StartupCheckResult.SUCCESS) }
+        assertEquals(6, startupChecksPassed(old + old))
+        assertEquals(0f, startupChecksProgress(initialStartupCheckStatuses()))
+        val current = updateStartupCheckStatus(initialStartupCheckStatuses(), StartupCheckPhase.PICACG_IMAGE, StartupCheckResult.NO_SAMPLE)
+        assertEquals(StartupCheckResult.NO_SAMPLE, current.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.result)
+        assertEquals(0, startupChecksPassed(current))
+    }
 }

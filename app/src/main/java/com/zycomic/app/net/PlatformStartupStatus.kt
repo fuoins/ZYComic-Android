@@ -19,6 +19,7 @@ enum class StartupCheckResult(val label: String) {
     FAILED("失败"),
     DISABLED("已禁用"),
     BLOCKED("受阻"),
+    NO_SAMPLE("缺样本"),
     NOT_RUN("未检测"),
     INTERRUPTED("中断"),
 }
@@ -41,7 +42,11 @@ fun updateStartupCheckStatus(
 }
 
 fun startupChecksPassed(statuses: List<StartupCheckStatus>): Int =
-    statuses.count { it.result == StartupCheckResult.SUCCESS }
+    statuses.distinctBy { it.phase }.count { it.result == StartupCheckResult.SUCCESS }
+
+/** Fixed six-stage denominator; failures, skipped work and history never advance it. */
+fun startupChecksProgress(statuses: List<StartupCheckStatus>): Float =
+    startupChecksPassed(statuses).toFloat() / StartupCheckPhase.entries.size
 
 /** Progress shown beneath one platform's startup switch; never shared across concurrent tests. */
 data class PlatformStartupStatus(
