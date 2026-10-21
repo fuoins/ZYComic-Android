@@ -15,6 +15,10 @@ sealed interface ReaderPageLoadStatus {
     data object ResolvingImageUrl : ReaderPageLoadStatus
     data object Requesting : ReaderPageLoadStatus
     data class Receiving(val percentage: Int?) : ReaderPageLoadStatus
+    // KMK --> Picacg-only display state, not shared endpoint/retry policy.
+    data class PicacgRequesting(val manualRetry: Int) : ReaderPageLoadStatus
+    data class PicacgReceiving(val bytesRead: Long, val contentLength: Long, val percentage: Int?) : ReaderPageLoadStatus
+    // KMK <--
     data class TryingFallback(val attempt: Int, val total: Int, val automaticRetryRound: Int? = null) : ReaderPageLoadStatus
     data object Idle : ReaderPageLoadStatus
 
@@ -24,6 +28,8 @@ sealed interface ReaderPageLoadStatus {
             WaitingForRequest -> "请求线程加载"
             ResolvingImageUrl -> "正在获取图片地址"
             Requesting -> "正在请求图片端点"
+            is PicacgRequesting -> Requesting.label
+            is PicacgReceiving -> Receiving(percentage).label
             is Receiving -> "正在接收图片数据"
             is TryingFallback -> automaticRetryRound?.let {
                 "自动重试（第 $it/${PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS} 轮）"

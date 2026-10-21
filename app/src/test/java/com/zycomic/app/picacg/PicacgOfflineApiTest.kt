@@ -3,6 +3,7 @@ package com.zycomic.app.picacg
 import android.content.Context
 import com.zycomic.app.net.PicacgRouteManager
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -434,5 +435,73 @@ class PicacgOfflineApiTest {
         responses += 200 to """{"code":200,"data":{"comics":{"docs":[{"_id":"x"}],"pages":0}}}"""
         assertThrows(IOException::class.java) { runBlocking { PicacgRepository.browse(1) } }
         Unit
+    }
+
+    @Test
+    fun `reader page list fetches ordered batches with continuous indices and batch progress`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"pages":{"docs":[{"_id":"p1","media":{"path":"/chapter/01.jpg"}},{"_id":"p2","media":{"path":"/chapter/02.jpg"}}],"pages":2}}}"""
+        responses += 200 to """{"code":200,"data":{"pages":{"docs":[{"_id":"p3","media":{"path":"/chapter/03.jpg"}}],"pages":2}}}"""
+        val progress = mutableListOf<Triple<Int, Int, Boolean>>()
+        val chapter = eu.kanade.tachiyomi.source.model.SChapter.create().apply { url = "/chapter/comic-reader/7" }
+
+        val pages = withContext(
+            com.zycomic.app.reader.PicacgPageListProgress { batch, images, hasMore ->
+                progress += Triple(batch, images, hasMore)
+            },
+        ) {
+            com.zycomic.app.reader.PicacgSource.getPageList(chapter)
+        }
+
+        assertEquals(listOf(0, 1, 2), pages.map { it.index })
+        assertEquals(
+            listOf(
+                "https://img.example/static/chapter/01.jpg",
+                "https://img.example/static/chapter/02.jpg",
+                "https://img.example/static/chapter/03.jpg",
+            ),
+            pages.map { it.url },
+        )
+        assertEquals(listOf(1, 2), requests.map { it.url.queryParameter("page")?.toInt() })
+        assertEquals(
+            listOf(Triple(1, 2, true), Triple(2, 3, false)),
+            progress,
+        )
+        assertEquals(3, pages.size)
+    }
+
+    @Test
+    fun `reader page list does not publish a partial directory after failure and a fresh retry succeeds`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"pages":{"docs":[{"_id":"p1","media":{"path":"/chapter/01.jpg"}}],"pages":2}}}"""
+        val progress = mutableListOf<Triple<Int, Int, Boolean>>()
+        var publishedDirectory: List<eu.kanade.tachiyomi.source.model.Page>? = null
+        val chapter = eu.kanade.tachiyomi.source.model.SChapter.create().apply { url = "/chapter/comic-retry/8" }
+
+        val failure = runCatching {
+            withContext(
+                com.zycomic.app.reader.PicacgPageListProgress { batch, images, hasMore ->
+                    progress += Triple(batch, images, hasMore)
+                    if (hasMore) failNextCall = true
+                },
+            ) {
+                com.zycomic.app.reader.PicacgSource.getPageList(chapter).also { publishedDirectory = it }
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is IOException)
+        assertEquals(null, publishedDirectory)
+        assertEquals(listOf(Triple(1, 1, true)), progress)
+
+        // Start a new load with an empty page cache; a failed earlier batch must not poison the retry.
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"pages":{"docs":[{"_id":"p1","media":{"path":"/chapter/01.jpg"}}],"pages":2}}}"""
+        responses += 200 to """{"code":200,"data":{"pages":{"docs":[{"_id":"p2","media":{"path":"/chapter/02.jpg"}}],"pages":2}}}"""
+
+        publishedDirectory = com.zycomic.app.reader.PicacgSource.getPageList(chapter)
+
+        assertEquals(2, publishedDirectory?.size)
+        assertEquals(listOf(0, 1), publishedDirectory?.map { it.index })
+        assertEquals(listOf("1", "2", "1", "2"), requests.map { it.url.queryParameter("page") })
     }
 }

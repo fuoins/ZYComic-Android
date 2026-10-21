@@ -291,6 +291,25 @@ class ReaderActivity : BaseActivity() {
             .launchIn(lifecycleScope)
 
         viewModel.state
+            .map { Triple(it.isPicacgDirectoryLoading, it.picacgDirectoryBatches, it.picacgDirectoryImages) }
+            .distinctUntilChanged()
+            .onEach { (isLoading, batches, images) ->
+                val indicator = loadingIndicator ?: return@onEach
+                if (isLoading) {
+                    indicator.show(immediate = true)
+                    val status = if (batches == 0) {
+                        stringResource(KMR.strings.picacg_reader_directory_loading)
+                    } else {
+                        stringResource(KMR.strings.picacg_reader_directory_batch, batches, images)
+                    }
+                    indicator.setStatus(status, immediate = true)
+                } else {
+                    indicator.setStatus("")
+                }
+            }
+            .launchIn(lifecycleScope)
+
+        viewModel.state
             .map { it.viewerChapters }
             .distinctUntilChanged()
             .filterNotNull()
@@ -523,6 +542,24 @@ class ReaderActivity : BaseActivity() {
                 )
                 // SY <--
                 null -> {}
+            }
+
+            if (state.isPicacgDirectoryFailed) {
+                AlertDialog(
+                    onDismissRequest = { finish() },
+                    confirmButton = {
+                        TextButton(onClick = viewModel::retryInitialPicacgDirectory) {
+                            Text(text = stringResource(KMR.strings.picacg_reader_retry))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { finish() }) {
+                            Text(text = stringResource(KMR.strings.picacg_reader_exit))
+                        }
+                    },
+                    title = { Text(text = stringResource(KMR.strings.picacg_reader_directory_failed_title)) },
+                    text = { Text(text = stringResource(KMR.strings.picacg_reader_directory_failed)) },
+                )
             }
 
             // 图源切换对话框
@@ -1545,6 +1582,11 @@ class ReaderActivity : BaseActivity() {
             // KMK <--
         )
         binding.readerContainer.addView(loadingIndicator)
+        val state = viewModel.state.value
+        if (state.manga?.source == com.zycomic.app.reader.PicacgSource.id && state.viewerChapters == null) {
+            loadingIndicator?.show(immediate = true)
+            loadingIndicator?.setStatus(stringResource(KMR.strings.picacg_reader_directory_loading), immediate = true)
+        }
 
         startPostponedEnterTransition()
     }
@@ -1599,6 +1641,7 @@ class ReaderActivity : BaseActivity() {
      */
     @SuppressLint("RestrictedApi")
     private fun setChapters(viewerChapters: ViewerChapters) {
+        loadingIndicator?.hide()
         binding.readerContainer.removeView(loadingIndicator)
         // SY -->
         val state = viewModel.state.value
@@ -1641,6 +1684,11 @@ class ReaderActivity : BaseActivity() {
      */
     private fun setInitialChapterError(error: Throwable) {
         logcat(LogPriority.ERROR, error)
+        if (viewModel.state.value.manga?.source == com.zycomic.app.reader.PicacgSource.id) {
+            viewModel.markInitialPicacgDirectoryFailed()
+            loadingIndicator?.hide()
+            return
+        }
         finish()
         toast(error.message)
     }

@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,11 +36,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdd
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.Block
@@ -55,7 +51,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,7 +76,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,12 +88,10 @@ import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
 import com.zycomic.app.data.dto.Folder
-import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.net.JmAuthStore
 import com.zycomic.app.reader.ReaderLauncher
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.ErrorView
-import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import com.zycomic.app.ui.login.ManwaDetailLoginDialog
 import com.zycomic.app.ui.settings.AddBlacklistDialog
@@ -551,7 +543,7 @@ fun MangaDetailScreen(
 
                     // 3. 可展开简介
                     if (d.text.isNotBlank()) {
-                        ExpandableSummary(text = d.text)
+                        MangaDetailDescription(text = d.text)
                     }
 
                     // JM groups retain their authoritative namespace and each starts a new row.
@@ -562,36 +554,14 @@ fun MangaDetailScreen(
                     }
                     // Manwa tags keep their existing behavior.
                     if (!vm.isJm && d.tags.isNotEmpty()) {
-                        FlowRow(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            d.tags.forEach { tag ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .clickable {
-                                            if (vm.isJm) onSearchKeyword(tag.name) else onTagClick(tag.name)
-                                            Toast.makeText(
-                                                context,
-                                                "已根据${tag.name}标签进行搜索",
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                                ) {
-                                    Text(
-                                        tag.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            if (!vm.isJm) {
+                        MangaDetailTagChips(
+                            tags = d.tags.map { it.name },
+                            onTagClick = { tag ->
+                                onTagClick(tag)
+                                Toast.makeText(context, "已根据${tag}标签进行搜索", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            trailingContent = {
                                 val blockChipShape = RoundedCornerShape(8.dp)
                                 Box(
                                     modifier = Modifier
@@ -620,8 +590,8 @@ fun MangaDetailScreen(
                                         )
                                     }
                                 }
-                            }
-                        }
+                            },
+                        )
                     }
 
                     // 5. 章节列表头
@@ -666,42 +636,10 @@ fun MangaDetailScreen(
                         }
                     }
 
-                    // 章节项
-                    chapters.forEach { ch ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { openReader(ch.id) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (ch.readed != 1) {
-                                Icon(
-                                    Icons.Filled.Circle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(8.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text(
-                                text = ch.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                                color = if (ch.readed == 1) {
-                                    LocalContentColor.current.copy(alpha = 0.38f)
-                                } else {
-                                    Color.Unspecified
-                                },
-                            )
-                        }
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            thickness = 0.5.dp,
-                        )
-                    }
+                    MangaDetailChapterGrid(
+                        chapters = chapters,
+                        onChapterClick = { chapter -> openReader(chapter.id) },
+                    )
 
                     // 6. 相关推荐
                     if (!vm.isJm || d.loveList.isNotEmpty()) {
@@ -736,7 +674,7 @@ fun MangaDetailScreen(
                                     .drawHorizontalScrollbar(lazyRowState),
                             ) {
                                 items(d.loveList) { m ->
-                                    RelatedItem(manga = m, imageLoader = jmImageLoader, onClick = {
+                                    MangaDetailRecommendationCard(manga = m, imageLoader = jmImageLoader, onClick = {
                                         onOpenManga(relatedMangaRoute(m.id, vm.isJm))
                                     })
                                 }
@@ -868,42 +806,6 @@ private fun ActionItem(
             color = tint,
         )
     }
-}
-
-/** 可展开简介：收起 3 行 + 向下箭头，展开全文 + 向上箭头。 */
-@Composable
-private fun ExpandableSummary(text: String) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clickable { expanded = !expanded },
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = if (expanded) Int.MAX_VALUE else 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
-}
-
-/** 相关推荐单项：封面 96dp + 标题最多 2 行。 */
-@Composable
-private fun RelatedItem(manga: Manga, imageLoader: coil3.ImageLoader, onClick: () -> Unit) {
-    MangaDetailRecommendationCard(manga = manga, imageLoader = imageLoader, onClick = onClick)
 }
 
 /** 封面点击弹出的简化操作 Dialog。 */

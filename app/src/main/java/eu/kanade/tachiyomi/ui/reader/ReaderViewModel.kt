@@ -8,6 +8,8 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.zycomic.app.reader.PicacgPageListProgress
+import com.zycomic.app.reader.PicacgSource
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.model.toDbChapter
 import eu.kanade.domain.manga.interactor.SetMangaViewerFlags
@@ -74,6 +76,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import tachiyomi.core.common.preference.toggle
 import tachiyomi.core.common.storage.UniFileTempFileManager
@@ -172,6 +175,8 @@ class ReaderViewModel @JvmOverloads constructor(
             savedState["page_index"] = value
             field = value
         }
+
+    private var initialPageToOpen: Int? = null
 
     // KMK -->
     fun handleDownloadAction(chapter: Chapter, action: ChapterDownloadAction) {
@@ -469,6 +474,7 @@ class ReaderViewModel @JvmOverloads constructor(
                         )
                     }
                     if (chapterId == -1L) chapterId = initialChapterId
+                    initialPageToOpen = page
 
                     val context = Injekt.get<Application>()
                     // val source = sourceManager.getOrStub(manga.source)
@@ -492,6 +498,7 @@ class ReaderViewModel @JvmOverloads constructor(
                         // SY -->
                         page,
                         // SY <--
+                        reportPicacgProgress = manga.source == PicacgSource.id,
                     )
                     Result.success(true)
                 } else {
@@ -539,11 +546,36 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY -->
         page: Int? = null,
         // SY <--
+        reportPicacgProgress: Boolean = false,
     ): ViewerChapters {
         val imageLoadingBarrier = state.value.viewerChapters
             ?.takeIf { it.nextChapter == chapter }
             ?.currChapter
-        loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier)
+        if (reportPicacgProgress && manga?.source == PicacgSource.id) {
+            mutableState.update {
+                it.copy(
+                    isPicacgDirectoryLoading = true,
+                    isPicacgDirectoryFailed = false,
+                    picacgDirectoryBatches = 0,
+                    picacgDirectoryImages = 0,
+                )
+            }
+            withContext(
+                PicacgPageListProgress { batch, fetchedImages, _ ->
+                    mutableState.update {
+                        it.copy(
+                            picacgDirectoryBatches = batch,
+                            picacgDirectoryImages = fetchedImages,
+                        )
+                    }
+                },
+            ) {
+                loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier)
+            }
+            mutableState.update { it.copy(isPicacgDirectoryLoading = false, isPicacgDirectoryFailed = false) }
+        } else {
+            loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier)
+        }
 
         val chapterPos = chapterList.indexOf(chapter)
         val newChapters = ViewerChapters(
@@ -567,6 +599,27 @@ class ReaderViewModel @JvmOverloads constructor(
             }
         }
         return newChapters
+    }
+
+    /** Marks a failed initial Picacg page-list load without dismissing the reader. */
+    fun markInitialPicacgDirectoryFailed() {
+        if (manga?.source != PicacgSource.id) return
+        mutableState.update { it.copy(isPicacgDirectoryLoading = false, isPicacgDirectoryFailed = true) }
+    }
+
+    /** Retries the complete initial chapter directory, preserving the requested/resume page. */
+    fun retryInitialPicacgDirectory() {
+        val currentLoader = loader ?: return
+        viewModelScope.launchIO {
+            val chapter = runCatching { chapterList.firstOrNull { it.chapter.id == chapterId } }.getOrNull() ?: return@launchIO
+            try {
+                loadChapter(currentLoader, chapter, initialPageToOpen, reportPicacgProgress = true)
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                logcat(LogPriority.ERROR, error)
+                markInitialPicacgDirectoryFailed()
+            }
+        }
     }
 
     private fun activateChapterForReading(chapter: ReaderChapter) {
@@ -1465,6 +1518,10 @@ class ReaderViewModel @JvmOverloads constructor(
         val bookmarked: Boolean = false,
         val isLoadingAdjacentChapter: Boolean = false,
         val currentPage: Int = -1,
+        val isPicacgDirectoryLoading: Boolean = false,
+        val isPicacgDirectoryFailed: Boolean = false,
+        val picacgDirectoryBatches: Int = 0,
+        val picacgDirectoryImages: Int = 0,
 
         /**
          * Viewer used to display the pages (pager, webtoon, ...).

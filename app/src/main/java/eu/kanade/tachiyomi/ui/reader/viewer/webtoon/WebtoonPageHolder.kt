@@ -16,12 +16,15 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -147,8 +150,10 @@ class WebtoonPageHolder(
                 loader.loadPageWhenAllowed(page)
             }
             launch {
-                page.loadStatusFlow.collectLatest { status ->
-                    progressIndicator.setStatus(status.label)
+                page.loadStatusFlow.collect { status ->
+                    progressIndicator.setLoadStatus(status)
+                    // StateFlow conflates intermediate labels while image I/O continues normally.
+                    if (status is ReaderPageLoadStatus.PicacgReceiving) delay(100)
                 }
             }
             page.statusFlow.collectLatest { state ->
@@ -173,7 +178,7 @@ class WebtoonPageHolder(
      */
     private fun setQueued() {
         progressContainer.isVisible = true
-        progressIndicator.setStatus(page?.loadStatus?.label.orEmpty())
+        page?.loadStatus?.let(progressIndicator::setLoadStatus)
         progressIndicator.show()
         removeErrorLayout()
     }

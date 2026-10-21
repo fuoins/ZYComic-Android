@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resources>
+    <string name="picacg_reader_directory_loading">正在读取完整目录…</string>
+    <string name="picacg_reader_directory_batch">已读取 %1$d 批，累计 %2$d 张图片</string>
+    <string name="picacg_reader_directory_failed_title">哔咔目录加载失败</string>
+    <string name="picacg_reader_directory_failed">目录加载失败。请检查网络或登录状态后重试。</string>
+    <string name="picacg_reader_retry">重试</string>
+    <string name="picacg_reader_exit">退出阅读器</string>
+</resources>

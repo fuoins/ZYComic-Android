@@ -6,19 +6,21 @@ import android.graphics.Bitmap
 import android.view.LayoutInflater
 import androidx.annotation.ColorInt
 import androidx.core.view.isVisible
+import com.zycomic.app.net.RouteManager
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
-import com.zycomic.app.net.RouteManager
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -77,6 +79,19 @@ class PagerPageHolder(
      */
     private var extraLoadJob: Job? = null
 
+    private val isPicacgDoublePage: Boolean
+        get() = extraPage != null && viewer.activity.viewModel.manga?.source == com.zycomic.app.reader.PicacgSource.id
+
+    private fun updateLoadStatus(status: ReaderPageLoadStatus) {
+        if (isPicacgDoublePage) {
+            progressIndicator?.setPageLoadStatuses(
+                listOfNotNull(page, extraPage).map { it.number to it.loadStatus },
+            )
+        } else {
+            progressIndicator?.setLoadStatus(status)
+        }
+    }
+
     init {
         loadJob = scope.launch { loadPageAndProcessStatus(1) }
         // SY -->
@@ -102,8 +117,9 @@ class PagerPageHolder(
                 // KMK -->
                 seedColor = seedColor,
                 // KMK <--
-            ).apply { setStatus(page.loadStatus.label) }
+            ).apply { setLoadStatus(page.loadStatus) }
             addView(progressIndicator)
+            updateLoadStatus(page.loadStatus)
         }
     }
 
@@ -125,8 +141,10 @@ class PagerPageHolder(
                 loader.loadPageWhenAllowed(page)
             }
             launch {
-                page.loadStatusFlow.collectLatest { status ->
-                    progressIndicator?.setStatus(status.label)
+                page.loadStatusFlow.collect { status ->
+                    updateLoadStatus(status)
+                    // Limit byte-label redraws only; request scheduling and body reads are unchanged.
+                    if (status is ReaderPageLoadStatus.PicacgReceiving) delay(100)
                 }
             }
             page.statusFlow.collectLatest { state ->
@@ -136,7 +154,7 @@ class PagerPageHolder(
                     Page.State.DownloadImage -> {
                         setDownloading()
                         page.progressFlow.collectLatest { value ->
-                            progressIndicator?.setProgress(value.takeIf { it in 0..100 } ?: 0)
+                            progressIndicator?.setProgress(if (isPicacgDoublePage) 0 else value.takeIf { it in 0..100 } ?: 0)
                         }
                     }
                     Page.State.Ready -> setImage()
@@ -466,8 +484,9 @@ class PagerPageHolder(
             errorLayout?.actionRetry?.setOnClickListener {
                 val exhausted = page.manualRetryCount.get() >= 3 &&
                     page.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
-                if (exhausted) viewer.activity.showMenu()
-                else {
+                if (exhausted) {
+                    viewer.activity.showMenu()
+                } else {
                     errorLayout?.actionRetry?.text = "重试"
                     page.chapter.pageLoader?.retryPage(page)
                 }

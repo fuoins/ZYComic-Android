@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -95,7 +96,16 @@ object PicacgSource : HttpSource() {
         require(parts.size == 3 && parts[0] == "chapter") { "Invalid Picacg chapter URL" }
         val comicId = parts[1]
         val order = parts[2].toIntOrNull()?.takeIf { it > 0 } ?: throw IOException("Invalid Picacg chapter order")
-        return PicacgRepository.allPages(comicId, order).mapIndexed { index, image -> Page(index, image.url, image.url) }
+        val images = mutableListOf<com.zycomic.app.picacg.PicacgImage>()
+        var page = 1
+        while (page <= 1000) {
+            val response = PicacgRepository.pages(comicId, order, page)
+            images += response.items
+            reportPicacgPageListProgress(page, images.size, response.hasMore)
+            if (!response.hasMore) break
+            page++
+        }
+        return images.mapIndexed { index, image -> Page(index, image.url, image.url) }
     }
 
     override suspend fun getImageUrl(page: Page): String = page.imageUrl?.takeIf(String::isNotBlank)
@@ -104,7 +114,35 @@ object PicacgSource : HttpSource() {
     override suspend fun getImage(page: Page): Response {
         val request = Request.Builder().url(PicacgRouteManager.rewriteImageUrl(getImageUrl(page))).headers(headers).get().build()
         val call = client.newCall(request)
-        return call.awaitSuccess()
+        // KMK --> UI observation only: keep this source's client, URL and request policy unchanged.
+        val readerPage = page as? ReaderPage
+        val generation = readerPage?.generation?.get()
+        val attempt = readerPage?.activeAttempt?.get()
+        fun isCurrent(): Boolean = readerPage != null && readerPage.generation.get() == generation &&
+            readerPage.activeAttempt.get() === attempt && (attempt == null || attempt.isCurrent)
+        if (readerPage != null) {
+            synchronized(readerPage) {
+                if (isCurrent()) {
+                    readerPage.progress = 0
+                    readerPage.loadStatus = ReaderPageLoadStatus.PicacgRequesting(readerPage.manualRetryCount.get())
+                }
+            }
+        }
+        val response = call.awaitSuccess()
+        if (readerPage == null) return response
+        return response.withPicacgImageProgress(::isCurrent) { progress ->
+            synchronized(readerPage) {
+                if (isCurrent()) {
+                    readerPage.progress = progress.percentage ?: -1
+                    readerPage.loadStatus = ReaderPageLoadStatus.PicacgReceiving(
+                        progress.bytesRead,
+                        progress.contentLength,
+                        progress.percentage,
+                    )
+                }
+            }
+        }
+        // KMK <--
     }
 
     private fun toSManga(manga: MangaDto) = SManga.create().apply {

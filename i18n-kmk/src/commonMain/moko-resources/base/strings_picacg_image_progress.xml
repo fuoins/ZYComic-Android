@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="picacg_image_request">正在请求图片</string>
+    <string name="picacg_image_retry_request">正在重试图片（第 %1$d 次）</string>
+    <string name="picacg_image_receiving_known">正在下载图片 %1$d%%\n%2$d / %3$d 字节</string>
+    <string name="picacg_image_receiving_unknown">正在下载图片\n已接收 %1$d 字节（总大小未知）</string>
+    <string name="picacg_image_page_status">第 %1$d 页：%2$s</string>
+</resources>

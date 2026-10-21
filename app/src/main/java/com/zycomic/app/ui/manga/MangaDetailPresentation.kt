@@ -128,6 +128,7 @@ fun MangaDetailTagChips(
     tags: List<String>,
     onTagClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    trailingContent: @Composable () -> Unit = {},
 ) {
     FlowRow(
         modifier = modifier.fillMaxWidth(),
@@ -145,6 +146,7 @@ fun MangaDetailTagChips(
                 Text(tag, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        trailingContent()
     }
 }
 

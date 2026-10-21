@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.isVisible
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.theme.TachiyomiTheme
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.CombinedCircularProgressIndicator
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -104,9 +107,16 @@ class ReaderProgressIndicator @JvmOverloads constructor(
         }
     }
 
-    fun show() {
+    fun show(immediate: Boolean = false) {
         showRequested = true
-        if (!isVisible && !showScheduled) {
+        if (immediate) {
+            mainHandler.removeCallbacks(showIndicatorRunnable)
+            showScheduled = false
+            isVisible = true
+            mainHandler.removeCallbacks(showStatusRunnable)
+            statusScheduled = false
+            statusText = pendingStatusText
+        } else if (!isVisible && !showScheduled) {
             showScheduled = true
             mainHandler.postDelayed(showIndicatorRunnable, 300L)
         }
@@ -131,12 +141,49 @@ class ReaderProgressIndicator @JvmOverloads constructor(
         this.progress = progress / 100f
     }
 
-    fun setStatus(status: String) {
+    // KMK --> Only Picacg byte observations use these labels; other sources retain their stages.
+    fun setLoadStatus(status: ReaderPageLoadStatus) {
+        setStatus(
+            loadStatusText(status),
+            immediate = status is ReaderPageLoadStatus.PicacgReceiving || status is ReaderPageLoadStatus.PicacgRequesting,
+        )
+    }
+
+    fun setPageLoadStatuses(statuses: List<Pair<Int, ReaderPageLoadStatus>>) {
+        setStatus(
+            statuses.filter { it.second != ReaderPageLoadStatus.Idle }.joinToString("\n") { (page, status) ->
+                context.stringResource(KMR.strings.picacg_image_page_status, page, loadStatusText(status))
+            },
+            immediate = true,
+        )
+    }
+
+    private fun loadStatusText(status: ReaderPageLoadStatus): String = when (status) {
+        is ReaderPageLoadStatus.PicacgRequesting -> if (status.manualRetry > 0) {
+            context.stringResource(KMR.strings.picacg_image_retry_request, status.manualRetry)
+        } else {
+            context.stringResource(KMR.strings.picacg_image_request)
+        }
+        is ReaderPageLoadStatus.PicacgReceiving -> status.percentage?.let { percentage ->
+            context.stringResource(
+                KMR.strings.picacg_image_receiving_known,
+                percentage,
+                status.bytesRead,
+                status.contentLength,
+            )
+        } ?: context.stringResource(KMR.strings.picacg_image_receiving_unknown, status.bytesRead)
+        else -> status.label
+    }
+    // KMK <--
+
+    fun setStatus(status: String, immediate: Boolean = false) {
         if (status == pendingStatusText) return
         pendingStatusText = status
         mainHandler.removeCallbacks(showStatusRunnable)
         statusScheduled = false
-        if (status.isBlank()) {
+        if (immediate) {
+            statusText = status
+        } else if (status.isBlank()) {
             statusText = ""
         } else if (showRequested) {
             statusScheduled = true
