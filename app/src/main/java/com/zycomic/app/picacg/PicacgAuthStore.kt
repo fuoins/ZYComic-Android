@@ -52,6 +52,7 @@ object PicacgAuthStore {
         val packed = cipher.iv + encrypted
         val encoded = Base64.encodeToString(packed, Base64.NO_WRAP)
         check(requirePreferences().edit().putString(TOKEN_KEY, encoded).commit()) { "Could not persist Picacg token" }
+        PicacgDetailCache.clear()
         _loggedIn.value = true
         _sessionRevision.value += 1L
     }
@@ -67,6 +68,7 @@ object PicacgAuthStore {
     @Synchronized
     fun clear() {
         requirePreferences().edit().remove(TOKEN_KEY).commit()
+        PicacgDetailCache.clear()
         _loggedIn.value = false
         _sessionRevision.value += 1L
     }

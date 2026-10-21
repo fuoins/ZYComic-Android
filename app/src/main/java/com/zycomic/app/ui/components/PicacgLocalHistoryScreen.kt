@@ -161,7 +161,7 @@ fun PicacgLocalHistoryScreen(
                     refreshKey++
                 },
                 onFilter = {},
-                onEnterSelection = { if (rows.isNotEmpty()) selectionMode = true },
+                onEnterSelection = { if (allRows != null && rows.isNotEmpty()) selectionMode = true },
                 selectionMode = selectionMode,
                 selectionCount = selectedIds.size,
                 onExitSelection = ::exitSelection,
@@ -171,7 +171,8 @@ fun PicacgLocalHistoryScreen(
                 },
                 scrollBehavior = scrollBehavior,
                 history = true,
-                selectionSupported = rows.isNotEmpty(),
+                selectionSupported = true,
+                selectionEnabled = allRows != null && rows.isNotEmpty(),
             )
         },
         bottomBar = {

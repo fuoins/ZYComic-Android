@@ -15,19 +15,36 @@ class LibraryHistoryRefreshContractTest {
     @Test
     fun `Picacg refresh support stays visible while busy is passed separately`() {
         val screen = source("PicacgLibraryScreen")
-        assertTrue(screen.contains("refreshSupported = !history && loggedIn,"))
+        assertTrue(screen.contains("refreshSupported = !history,"))
         assertTrue(screen.contains("refreshBusy = loading || removingSelected,"))
+        assertTrue(screen.contains("refreshEnabled = loggedIn,"))
+        assertTrue(screen.contains("refreshIndicatorSeparate = true,"))
         assertFalse(screen.contains("refreshSupported = !history && loggedIn && !loading"))
     }
 
     @Test
     fun `shared toolbar renders the busy indicator inside a disabled refresh action`() {
         val toolbar = source("LibraryHistoryToolbar")
-        assertTrue(toolbar.contains("enabled = !refreshBusy"))
+        assertTrue(toolbar.contains("refreshEnabled: Boolean = true,"))
+        assertTrue(toolbar.contains("refreshIndicatorSeparate: Boolean = false,"))
+        assertTrue(toolbar.contains("enabled = refreshEnabled && !refreshBusy"))
         assertTrue(toolbar.contains("busy = refreshBusy"))
+        assertTrue(toolbar.contains("busyIndicatorSeparate = refreshIndicatorSeparate"))
         assertTrue(toolbar.contains("IconButton(onClick = onClick, enabled = enabled"))
+        assertTrue(toolbar.contains("if (busy && !busyIndicatorSeparate)"))
         assertTrue(toolbar.contains("if (busy)"))
         assertTrue(toolbar.contains("CircularProgressIndicator("))
+    }
+
+    @Test
+    fun `Picacg history selection action stays present but cannot enter selection without rows`() {
+        val screen = source("PicacgLocalHistoryScreen")
+        assertTrue(screen.contains("selectionSupported = true,"))
+        assertTrue(screen.contains("selectionEnabled = allRows != null && rows.isNotEmpty(),"))
+        assertTrue(screen.contains("onEnterSelection = { if (allRows != null && rows.isNotEmpty()) selectionMode = true },"))
+        val toolbar = source("LibraryHistoryToolbar")
+        assertTrue(toolbar.contains("selectionEnabled: Boolean = true,"))
+        assertTrue(toolbar.contains("enabled = selectionEnabled"))
     }
 
     @Test

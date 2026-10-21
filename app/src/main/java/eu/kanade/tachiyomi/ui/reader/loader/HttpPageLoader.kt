@@ -8,6 +8,8 @@ import com.zycomic.app.net.ImageDecryptFailedException
 import com.zycomic.app.net.PageAttemptScope
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.normalizedForComparison
+import com.zycomic.app.reader.PicacgReaderPreloadPolicy
+import com.zycomic.app.reader.PicacgSource
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
@@ -60,7 +62,11 @@ internal class HttpPageLoader(
     private val preloadSize = readerPreferences.preloadSize().get().coerceAtLeast(0)
     private val configuredReaderThreads = readerPreferences.readerThreads().get().coerceIn(0, 10)
     private val readerThreads = configuredReaderThreads.coerceAtLeast(1)
-    private val preloadTaskLimit = if (configuredReaderThreads == 0) 0 else min(10, preloadSize)
+    private val preloadTaskLimit = PicacgReaderPreloadPolicy.taskLimit(
+        configuredSize = preloadSize,
+        isPicacg = source.id == PicacgSource.id,
+        readerThreadsEnabled = configuredReaderThreads != 0,
+    )
     private val nearForegroundSize = min(9, preloadTaskLimit)
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()

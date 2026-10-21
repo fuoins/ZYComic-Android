@@ -66,11 +66,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -84,7 +81,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
 import com.zycomic.app.data.dto.Folder
@@ -270,28 +266,11 @@ fun MangaDetailScreen(
                 var recommendY by remember { mutableStateOf(0) }
 
                 // 1. 模糊封面背景
-                Box(Modifier.matchParentSize()) {
-                    AsyncImage(
-                        model = coverUrl(d),
-                        contentDescription = null,
-                        imageLoader = jmImageLoader,
-                        modifier = Modifier
-                            .matchParentSize()
-                            .blur(7.dp)
-                            .alpha(0.2f),
-                        contentScale = ContentScale.Crop,
-                    )
-                    Box(
-                        Modifier
-                            .matchParentSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0.5f to Color.Transparent,
-                                    1f to MaterialTheme.colorScheme.background,
-                                ),
-                            ),
-                    )
-                }
+                MangaDetailBackdrop(
+                    coverModel = coverUrl(d),
+                    imageLoader = jmImageLoader,
+                    modifier = Modifier.matchParentSize(),
+                )
 
                 // 内容主体
                 Column(

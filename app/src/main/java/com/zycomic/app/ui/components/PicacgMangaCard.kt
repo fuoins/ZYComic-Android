@@ -28,23 +28,35 @@ import com.zycomic.app.net.PicacgRouteManager
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** A Picacg-only client; never uses the shared Manwa image interceptor or platform cookies. */
 object PicacgImageLoader {
     @Volatile private var instance: ImageLoader? = null
 
+    /** Picacg disk cache stays in its own directory, separate from Manwa and JM. */
+    fun diskCacheDirectory(context: Context): File =
+        context.applicationContext.cacheDir.resolve("picacg_image_cache")
+
     fun get(context: Context): ImageLoader = instance ?: synchronized(this) {
         instance ?: ImageLoader.Builder(context.applicationContext)
             .components { add(OkHttpNetworkFetcherFactory(newHttpClient())) }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("picacg_image_cache"))
+                    .directory(diskCacheDirectory(context))
                     .maxSizePercent(0.04)
                     .build()
             }
             .build()
             .also { instance = it }
+    }
+
+    /** Clear only Picacg's memory and disk caches. */
+    fun clearCache(context: Context) {
+        val loader = get(context)
+        loader.memoryCache?.clear()
+        loader.diskCache?.clear()
     }
 
     private fun newHttpClient(): OkHttpClient = OkHttpClient.Builder()

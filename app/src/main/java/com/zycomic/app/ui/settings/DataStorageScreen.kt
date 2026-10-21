@@ -18,9 +18,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.zycomic.app.net.DevConfig
+import com.zycomic.app.ui.components.PicacgImageLoader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
-import kotlin.io.walkTopDown
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
+import tachiyomi.presentation.core.i18n.stringResource
+import java.io.File
+import kotlin.io.walkTopDown
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,12 +34,24 @@ fun DataStorageScreen(
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("zycomic_data", android.content.Context.MODE_PRIVATE) }
     var autoClear by remember { mutableStateOf(prefs.getBoolean("auto_clear_chapter_cache", true)) }
+    var cacheRevision by remember { mutableStateOf(0) }
 
-    fun coilDiskSize(): String = try {
-        val dir = coil3.SingletonImageLoader.get(context).diskCache?.directory?.toFile() ?: return "0 B"
-        val bytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        "%.1f MB".format(bytes / 1024.0 / 1024.0)
-    } catch (_: Exception) { "未知" }
+    fun directorySize(directory: File?): Long =
+        directory?.takeIf { it.exists() }?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+
+    fun formatSize(bytes: Long): String = "%.1f MB".format(bytes / 1024.0 / 1024.0)
+
+    fun imageDiskCacheSize(): Pair<String, String> = try {
+        val coilDirectory = coil3.SingletonImageLoader.get(context).diskCache?.directory?.toFile()
+        val picacgDirectory = PicacgImageLoader.diskCacheDirectory(context)
+        val coilBytes = directorySize(coilDirectory)
+        val picacgBytes = directorySize(picacgDirectory)
+        formatSize(coilBytes + picacgBytes) to formatSize(picacgBytes)
+    } catch (_: Exception) {
+        "未知" to "未知"
+    }
+
+    val cacheSize = remember(cacheRevision) { imageDiskCacheSize() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -54,7 +70,7 @@ fun DataStorageScreen(
             item {
                 TextPreferenceWidget(
                     title = "图片缓存",
-                    subtitle = "Coil 磁盘缓存占用：${coilDiskSize()}",
+                    subtitle = stringResource(KMR.strings.picacg_image_cache_size, cacheSize.first, cacheSize.second),
                 )
             }
             item {
@@ -66,9 +82,10 @@ fun DataStorageScreen(
             item {
                 TextPreferenceWidget(
                     title = "清除图片缓存",
-                    subtitle = "清除内存+磁盘图片缓存，不影响收藏和历史",
+                    subtitle = stringResource(KMR.strings.picacg_image_cache_clear_summary),
                     onPreferenceClick = {
                         DevConfig.clearImageCaches()
+                        cacheRevision++
                         Toast.makeText(context, "图片缓存已清除", Toast.LENGTH_SHORT).show()
                     },
                 )

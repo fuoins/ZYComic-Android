@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="picacg_image_cache_size">Coil + 哔咔独立磁盘缓存占用：%1$s（哔咔 %2$s）</string>
+    <string name="picacg_image_cache_clear_summary">清除 Coil + 哔咔内存/磁盘缓存（不清理 JM 独立缓存），不影响收藏和历史</string>
+</resources>

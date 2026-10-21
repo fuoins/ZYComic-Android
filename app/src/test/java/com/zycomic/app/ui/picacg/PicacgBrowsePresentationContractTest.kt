@@ -27,6 +27,10 @@ class PicacgBrowsePresentationContractTest {
         assertTrue(rankingRow.contains("\"日榜\""))
         assertTrue(rankingRow.contains("\"周榜\""))
         assertTrue(rankingRow.contains("\"月榜\""))
+        val rankingRowPosition = source.indexOf("if (pageMode == PicacgBrowsePageMode.RANKING)")
+        val loginPromptPosition = source.indexOf("if (!loggedIn) {\n            Text(stringResource(KMR.strings.picacg_session_required))")
+        assertTrue(rankingRowPosition < loginPromptPosition)
+        assertTrue(rankingRowPosition < source.indexOf("if (loading && mangas.isEmpty())"))
         assertTrue(source.contains("val displayOnly = pageMode != PicacgBrowsePageMode.CATEGORY"))
     }
 

@@ -53,6 +53,9 @@ fun LibraryHistoryToolbar(
     history: Boolean = false,
     selectionSupported: Boolean = true,
     refreshBusy: Boolean = false,
+    selectionEnabled: Boolean = true,
+    refreshEnabled: Boolean = true,
+    refreshIndicatorSeparate: Boolean = false,
 ) {
     val slotWidth = LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP.dp
     val platformSelectorWidth = LibraryHistoryToolbarPolicy.COMPACT_PLATFORM_SELECTOR_WIDTH_DP.dp
@@ -79,8 +82,9 @@ fun LibraryHistoryToolbar(
                         description = "刷新",
                         icon = Icons.Outlined.Refresh,
                         width = slotWidth,
-                        enabled = !refreshBusy,
+                        enabled = refreshEnabled && !refreshBusy,
                         busy = refreshBusy,
+                        busyIndicatorSeparate = refreshIndicatorSeparate,
                     )
                     LibraryHistoryToolbarPolicy.Action.FILTER -> ToolbarSlot(
                         onClick = onFilter.takeIf { filterSupported },
@@ -96,6 +100,7 @@ fun LibraryHistoryToolbar(
                 description = "多选",
                 icon = Icons.Outlined.Checklist,
                 width = slotWidth,
+                enabled = selectionEnabled,
             )
         }
         if (LibraryHistoryToolbarPolicy.showPlatformSelector(searchQuery != null)) {
@@ -143,6 +148,7 @@ private fun ToolbarSlot(
     width: androidx.compose.ui.unit.Dp = 48.dp,
     enabled: Boolean = true,
     busy: Boolean = false,
+    busyIndicatorSeparate: Boolean = false,
 ) {
     Box(
         modifier = Modifier.width(width).height(48.dp),
@@ -150,10 +156,18 @@ private fun ToolbarSlot(
     ) {
         if (onClick != null && icon != null) {
             IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.width(width)) {
-                if (busy) {
+                if (busy && !busyIndicatorSeparate) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(imageVector = icon, contentDescription = description)
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(imageVector = icon, contentDescription = description)
+                        if (busy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.BottomEnd).size(12.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                    }
                 }
             }
         }

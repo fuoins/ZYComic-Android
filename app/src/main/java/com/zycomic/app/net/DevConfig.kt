@@ -2,6 +2,7 @@ package com.zycomic.app.net
 
 import android.content.Context
 import android.util.Log
+import com.zycomic.app.ui.components.PicacgImageLoader
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -431,20 +432,21 @@ object DevConfig {
         }
     }
 
-    /** 清除 Coil 图片加载器的内存缓存 + 磁盘缓存。 */
+    /** 清除 Coil 与 Picacg 各自加载器的内存/磁盘缓存；不触碰 JM 的独立缓存。 */
     fun clearImageCaches() {
-        try {
-            val ctx = context ?: run {
-                Log.w(TAG, "clearImageCaches: context is null")
-                return
-            }
+        val ctx = context ?: run {
+            Log.w(TAG, "clearImageCaches: context is null")
+            return
+        }
+        runCatching {
             val loader = coil3.SingletonImageLoader.get(ctx)
             loader.memoryCache?.clear()
             loader.diskCache?.clear()
-            Log.i(TAG, "Coil image caches cleared (memory + disk)")
-        } catch (e: Exception) {
-            Log.w(TAG, "clearImageCaches failed: ${e.message}")
-        }
+        }.onSuccess { Log.i(TAG, "Coil image caches cleared (memory + disk)") }
+            .onFailure { Log.w(TAG, "Coil image cache clear failed: ${it.message}") }
+        runCatching { PicacgImageLoader.clearCache(ctx) }
+            .onSuccess { Log.i(TAG, "Picacg image caches cleared (memory + disk)") }
+            .onFailure { Log.w(TAG, "Picacg image cache clear failed: ${it.message}") }
     }
 
     /** 仅清除 Coil 内存缓存（网络切换重建图片栈时用；磁盘内均为成功图，无需删除）。 */

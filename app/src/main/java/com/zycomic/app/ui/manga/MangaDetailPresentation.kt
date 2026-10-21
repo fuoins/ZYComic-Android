@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +51,8 @@ import com.zycomic.app.data.dto.Chapter
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.ui.components.CoverError
 import com.zycomic.app.ui.components.coverUrl
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /** Shared cover/title/author presentation used by each platform's manga detail screen. */
 @Composable
@@ -61,10 +64,10 @@ fun MangaDetailCoverHeader(
     onSearchAuthor: (String) -> Unit = onSearchTitle,
     imageLoader: ImageLoader? = null,
     modifier: Modifier = Modifier,
-    titleMaxLines: Int = 2,
     coverModel: String = coverUrl(manga),
     trailingInfo: @Composable () -> Unit = {},
 ) {
+    var titleExpanded by rememberSaveable(manga.id) { mutableStateOf(false) }
     val resolvedImageLoader = imageLoader ?: LocalContext.current.imageLoader
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         SubcomposeAsyncImage(
@@ -83,9 +86,17 @@ fun MangaDetailCoverHeader(
             Text(
                 text = manga.name,
                 style = MaterialTheme.typography.titleLarge,
-                maxLines = titleMaxLines,
+                maxLines = detailTitleMaxLines(titleExpanded),
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable { onSearchTitle(manga.name) },
+            )
+            Text(
+                stringResource(if (titleExpanded) KMR.strings.detail_title_collapse else KMR.strings.detail_title_expand),
+                modifier = Modifier
+                    .clickable { titleExpanded = !titleExpanded }
+                    .padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(8.dp))
             FlowRow(

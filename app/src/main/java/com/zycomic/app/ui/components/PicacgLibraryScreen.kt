@@ -241,8 +241,10 @@ fun PicacgLibraryScreen(
                 onChangeSearchQuery = { query = it },
                 titleContent = { Text(stringResource(if (history) KMR.strings.picacg_history_title else KMR.strings.picacg_library_title)) },
                 searchSupported = !history && loggedIn,
-                refreshSupported = !history && loggedIn,
+                refreshSupported = !history,
                 refreshBusy = loading || removingSelected,
+                refreshEnabled = loggedIn,
+                refreshIndicatorSeparate = true,
                 filterSupported = !history && loggedIn,
                 onRefresh = {
                     page = 1
