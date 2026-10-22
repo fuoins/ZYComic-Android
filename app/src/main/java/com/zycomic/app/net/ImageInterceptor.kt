@@ -120,9 +120,10 @@ class ImageInterceptor : Interceptor {
                 RuntimeRecoveryPolicy.Platform.MANWA,
                 recoverySource,
                 originalUrl,
-            ) {
-                RuntimeImageRecovery.retryVisiblePageAfterAttempt(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, scope)
-            }
+                retryPage = {
+                    RuntimeImageRecovery.retryVisiblePageAfterAttempt(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, scope)
+                },
+            )
         }
         return when (failure) {
             is Outcome.Fail.Http -> errorResponse(original, failure.code, failure.retryAfter)

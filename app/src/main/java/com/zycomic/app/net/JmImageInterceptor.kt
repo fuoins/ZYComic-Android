@@ -138,13 +138,14 @@ class JmImageInterceptor internal constructor(
                     RuntimeRecoveryPolicy.Platform.JM,
                     activeCandidate,
                     original.url.toString(),
-                ) {
-                    RuntimeImageRecovery.retryVisiblePageAfterAttempt(
-                        RuntimeRecoveryPolicy.Platform.JM,
-                        activeCandidate,
-                        scope,
-                    )
-                }
+                    retryPage = {
+                        RuntimeImageRecovery.retryVisiblePageAfterAttempt(
+                            RuntimeRecoveryPolicy.Platform.JM,
+                            activeCandidate,
+                            scope,
+                        )
+                    },
+                )
             }
         }
         throw lastError ?: IOException("JM image request failed${lastStatus?.let { " (HTTP $it)" } ?: ""}")

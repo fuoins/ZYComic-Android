@@ -293,7 +293,7 @@ object PicacgRouteManager {
     }
 
     /** Previously tested candidates only; configured host ordering stays unchanged. */
-    fun runtimeImageRecoveryCandidates(
+    internal fun runtimeImageRecoveryCandidates(
         expectedSource: String,
         service: PicacgImageService? = null,
     ): List<DomainIp> {
@@ -316,7 +316,7 @@ object PicacgRouteManager {
     }
 
     @Synchronized
-    fun advanceRuntimeImageSourceAfterRecovery(
+    internal fun advanceRuntimeImageSourceAfterRecovery(
         expectedSource: String,
         expectedConfigRevision: Long,
         expectedPlatformRevision: Long,
