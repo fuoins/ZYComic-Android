@@ -18,7 +18,7 @@ class MaccmsSpeedTesterTest {
     @Test
     fun `full mode checks all three routes and quick mode reuses historical fastest first`() = runBlocking {
         val order = CopyOnWriteArrayList<String>()
-        MaccmsSpeedTester.installProbeTransportForTests { route ->
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ ->
             order += route
             val ms = when (route) {
                 MaccmsSpeedTester.routes[0] -> 30L
@@ -28,7 +28,7 @@ class MaccmsSpeedTesterTest {
             probe(route, ms)
         }
         try {
-            val full = MaccmsSpeedTester.run(quick = false)
+            val full = MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false)
             assertEquals(MaccmsSpeedTester.routes, order.toList())
             assertEquals(3, full.probes.size)
             assertFalse(full.quick)
@@ -36,7 +36,7 @@ class MaccmsSpeedTesterTest {
             assertNotEquals(null, full.completedAtEpochMs)
 
             order.clear()
-            val quick = MaccmsSpeedTester.run(quick = true)
+            val quick = MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = true)
             assertEquals(3, quick.probes.size, "Quick mode still evaluates the complete three-host pool")
             assertEquals(MaccmsSpeedTester.routes[1], order.first(), "Quick mode should reuse the prior fastest route first")
             assertTrue(quick.quick)
@@ -47,9 +47,9 @@ class MaccmsSpeedTesterTest {
 
     @Test
     fun `separate Maccms JSON log contains independent routes probes and history`() = runBlocking {
-        MaccmsSpeedTester.installProbeTransportForTests { route -> probe(route, 12L, status = 204) }
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ -> probe(route, 12L, status = 204) }
         try {
-            MaccmsSpeedTester.run(quick = false)
+            MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false)
             val log = MaccmsSpeedTester.logJson()
             assertEquals("maccms", log.getString("service"))
             assertEquals(MaccmsSpeedTester.routes.size, log.getJSONArray("hosts").length())
@@ -70,9 +70,9 @@ class MaccmsSpeedTesterTest {
 
     @Test
     fun `runtime telemetry is separate from the last completed HEAD probe snapshot`() = runBlocking {
-        MaccmsSpeedTester.installProbeTransportForTests { route -> probe(route, 12L, status = 204) }
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ -> probe(route, 12L, status = 204) }
         try {
-            MaccmsSpeedTester.run(quick = false)
+            MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false)
             val headProbes = MaccmsSpeedTester.snapshot.value.probes
             val selection = MaccmsSpeedTester.routeSelection()
             MaccmsSpeedTester.recordRuntime(
@@ -116,14 +116,14 @@ class MaccmsSpeedTesterTest {
 
     @Test
     fun `all failed probes keep the previously selected route`() = runBlocking {
-        MaccmsSpeedTester.installProbeTransportForTests { route -> probe(route, 10L) }
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ -> probe(route, 10L) }
         try {
-            val chosen = MaccmsSpeedTester.run(quick = false).selectedRoute
+            val chosen = MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false).selectedRoute
             assertTrue(chosen in MaccmsSpeedTester.routes)
-            MaccmsSpeedTester.installProbeTransportForTests { route ->
+            MaccmsSpeedTester.installProbeTransportForTests { route, _ ->
                 MaccmsSpeedTester.Probe(route, 25L, success = false, httpStatus = 503, testedAt = System.currentTimeMillis())
             }
-            val allFailed = MaccmsSpeedTester.run(quick = false)
+            val allFailed = MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false)
             assertTrue(allFailed.probes.all { !it.success })
             assertEquals(chosen, allFailed.selectedRoute)
             assertEquals(chosen, MaccmsSpeedTester.currentRoute())
@@ -137,7 +137,7 @@ class MaccmsSpeedTesterTest {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val calls = AtomicInteger()
-        MaccmsSpeedTester.installProbeTransportForTests { route ->
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ ->
             if (calls.incrementAndGet() == 1) {
                 entered.complete(Unit)
                 release.await()
@@ -145,9 +145,9 @@ class MaccmsSpeedTesterTest {
             probe(route, 9L)
         }
         try {
-            val first = async { MaccmsSpeedTester.run(quick = false, beforeApply = { false }) }
+            val first = async { MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false, beforeApply = { false }) }
             entered.await()
-            val second = async { MaccmsSpeedTester.run(quick = false, beforeApply = { false }) }
+            val second = async { MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false, beforeApply = { false }) }
             delay(100)
             assertEquals(3, calls.get(), "One active run may probe its three hosts concurrently, but the queued run must not start")
             assertTrue(MaccmsSpeedTester.running.value)
@@ -165,9 +165,10 @@ class MaccmsSpeedTesterTest {
     fun `outdated UI round cannot apply probe results`() = runBlocking {
         val before = MaccmsSpeedTester.snapshot.value
         val beforeApplyCalls = AtomicInteger()
-        MaccmsSpeedTester.installProbeTransportForTests { route -> probe(route, 1L) }
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ -> probe(route, 1L) }
         try {
             val result = MaccmsSpeedTester.run(
+                lines3Ip = "192.0.2.17",
                 quick = false,
                 isCurrent = { false },
                 beforeApply = {
@@ -187,9 +188,9 @@ class MaccmsSpeedTesterTest {
     fun `beforeApply rejection leaves the published snapshot unchanged`() = runBlocking {
         val before = MaccmsSpeedTester.snapshot.value
         val beforeApplyCalls = AtomicInteger()
-        MaccmsSpeedTester.installProbeTransportForTests { route -> probe(route, 2L) }
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ -> probe(route, 2L) }
         try {
-            MaccmsSpeedTester.run(quick = false, isCurrent = { true }, beforeApply = {
+            MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false, isCurrent = { true }, beforeApply = {
                 beforeApplyCalls.incrementAndGet()
                 false
             })
@@ -202,10 +203,10 @@ class MaccmsSpeedTesterTest {
 
     @Test
     fun `cancellation always clears running state`() = runBlocking {
-        MaccmsSpeedTester.installProbeTransportForTests { throw kotlinx.coroutines.CancellationException("test cancellation") }
+        MaccmsSpeedTester.installProbeTransportForTests { _, _ -> throw kotlinx.coroutines.CancellationException("test cancellation") }
         try {
             val failure = org.junit.jupiter.api.Assertions.assertThrows(kotlinx.coroutines.CancellationException::class.java) {
-                runBlocking { MaccmsSpeedTester.run(quick = false) }
+                runBlocking { MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false) }
             }
             assertEquals("test cancellation", failure.message)
             assertFalse(MaccmsSpeedTester.running.value)
@@ -221,7 +222,7 @@ class MaccmsSpeedTesterTest {
         val route = selection.route
         val beforeApplyCalls = AtomicInteger()
         lateinit var stateAfterRuntimeUpdate: MaccmsSpeedTester.Snapshot
-        MaccmsSpeedTester.installProbeTransportForTests { checkedRoute ->
+        MaccmsSpeedTester.installProbeTransportForTests { checkedRoute, _ ->
             if (checkedRoute == route) {
                 MaccmsSpeedTester.recordRuntime(
                     route = route,
@@ -237,6 +238,7 @@ class MaccmsSpeedTesterTest {
         }
         try {
             val result = MaccmsSpeedTester.run(
+                lines3Ip = "192.0.2.17",
                 quick = false,
                 isCurrent = { true },
                 beforeApply = {

@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.MaccmsSpeedTester
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,7 +39,7 @@ import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.i18n.stringResource
 
-/** This log never reads or mutates Picacg API, cover or reader source snapshots. */
+/** Independent Maccms health log; explicit retests first obtain this round's Picacg lines3 IP. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaccmsSpeedTestLogScreen(onClose: () -> Unit) {
@@ -112,7 +113,7 @@ fun MaccmsSpeedTestLogScreen(onClose: () -> Unit) {
                     onClick = {
                         scope.launch {
                             try {
-                                MaccmsSpeedTester.run(quick = false)
+                                PlatformSpeedTestCoordinator.run(forceFresh = true, onlyPlatform = ContentPlatform.PICACG)
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (_: Exception) {
@@ -138,7 +139,13 @@ fun MaccmsSpeedTestLogScreen(onClose: () -> Unit) {
                     Text(
                         stringResource(
                             KMR.strings.maccms_speed_log_result,
-                            stringResource(if (probe.success) KMR.strings.maccms_speed_log_reachable else KMR.strings.maccms_speed_log_unreachable),
+                            stringResource(
+                                when {
+                                    !probe.tested -> KMR.strings.maccms_speed_log_not_tested
+                                    probe.success -> KMR.strings.maccms_speed_log_reachable
+                                    else -> KMR.strings.maccms_speed_log_unreachable
+                                },
+                            ),
                             probe.elapsedMs?.let { "$it ms" } ?: "—",
                             probe.httpStatus?.toString() ?: "—",
                         ),

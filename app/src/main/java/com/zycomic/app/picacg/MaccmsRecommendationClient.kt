@@ -1,7 +1,7 @@
 package com.zycomic.app.picacg
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.zycomic.app.net.MaccmsPinnedTransport
+import com.zycomic.app.net.MaccmsSpeedTester
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -16,31 +16,26 @@ import java.util.concurrent.TimeUnit
 /** Fetches anonymous recommendations from the independent Maccms endpoint. */
 class MaccmsRecommendationClient internal constructor(
     private val baseUrl: HttpUrl = PRODUCTION_BASE_URL,
+    private val lines3Ip: String? = null,
 ) {
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .callTimeout(10, TimeUnit.SECONDS)
-        .cookieJar(CookieJar.NO_COOKIES)
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .retryOnConnectionFailure(false)
-        .build()
-
     /** Returns at most ten distinct, valid comic IDs, excluding [comicId] itself. */
     suspend fun recommendationIds(comicId: String): List<String> {
         require(COMIC_ID.matches(comicId)) { "Invalid comic ID" }
-        return withContext(Dispatchers.IO) {
-            val url = baseUrl.newBuilder()
-                .addPathSegments("maccms/json/baofeng/picacomic/rec")
-                .addPathSegment(comicId)
-                .addQueryParameter("limit", "10")
-                .build()
-            val request = Request.Builder().url(url).get().build()
-            http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw MaccmsRecommendationHttpException(response.code)
-                parseIds(response.body?.string().orEmpty(), comicId)
-            }
+        val url = baseUrl.newBuilder()
+            .addPathSegments("maccms/json/baofeng/picacomic/rec")
+            .addPathSegment(comicId)
+            .addQueryParameter("limit", "10")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        val http = if (baseUrl.host in MaccmsSpeedTester.routes) {
+            MaccmsPinnedTransport.client(BASE_HTTP, baseUrl.host, lines3Ip)
+        } else {
+            // Internal constructor permits local transport tests; production uses only fixed macapi hosts.
+            BASE_HTTP
+        }
+        return MaccmsPinnedTransport.request(http, request) { response ->
+            if (!response.isSuccessful) throw MaccmsRecommendationHttpException(response.code)
+            parseIds(response.body?.string().orEmpty(), comicId)
         }
     }
 
@@ -82,6 +77,16 @@ class MaccmsRecommendationClient internal constructor(
     }
 
     private companion object {
+        val BASE_HTTP = OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .callTimeout(10, TimeUnit.SECONDS)
+            .cookieJar(CookieJar.NO_COOKIES)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .build()
+
         val PRODUCTION_BASE_URL: HttpUrl = "https://macapi1.com/".toHttpUrl()
         val COMIC_ID = Regex("[0-9a-fA-F]{24}")
     }

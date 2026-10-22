@@ -2,7 +2,6 @@ package com.zycomic.app.net
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -11,7 +10,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.CookieJar
@@ -33,6 +31,7 @@ object MaccmsSpeedTester {
         val httpStatus: Int? = null,
         val error: String? = null,
         val testedAt: Long = System.currentTimeMillis(),
+        val tested: Boolean = true,
     ) {
         val latencyMs: Long? get() = elapsedMs
         val reachable: Boolean get() = success
@@ -44,11 +43,12 @@ object MaccmsSpeedTester {
         val selectedRoute: String? = null,
         val quick: Boolean = false,
         val completedAtEpochMs: Long? = null,
+        val lines3Ip: String? = null,
     ) {
         val completedAt: Long? get() = completedAtEpochMs
     }
 
-    internal data class RouteSelection(val route: String, val generation: Long)
+    internal data class RouteSelection(val route: String, val generation: Long, val lines3Ip: String?)
 
     private val lock = Any()
     private val runMutex = Mutex()
@@ -61,13 +61,21 @@ object MaccmsSpeedTester {
     private val _logRevision = MutableStateFlow(0L)
     val logRevision: StateFlow<Long> = _logRevision.asStateFlow()
     private var generation = 0L
+    // Never restored from preferences: a process restart is not a current speed-test round.
+    private var currentLines3Ip: String? = null
+
+    /** Retire in-flight recommendation selections before a new Picacg measurement starts. */
+    internal fun invalidateLines3Ip() = synchronized(lock) {
+        currentLines3Ip = null
+        generation++
+    }
     private val history = loadHistory()
     private val runtimeEvents = loadRuntimeEvents()
 
-    @Volatile private var probeTransport: suspend (String) -> Probe = ::probe
+    @Volatile private var probeTransport: suspend (String, String) -> Probe = ::probe
 
     /** Test seam for deterministic server, cancellation, and concurrency tests. */
-    internal fun installProbeTransportForTests(transport: suspend (String) -> Probe) {
+    internal fun installProbeTransportForTests(transport: suspend (String, String) -> Probe) {
         probeTransport = transport
     }
 
@@ -91,6 +99,7 @@ object MaccmsSpeedTester {
      */
     suspend fun run(
         quick: Boolean = false,
+        lines3Ip: String? = null,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
     ): Snapshot = runMutex.withLock {
@@ -105,14 +114,23 @@ object MaccmsSpeedTester {
             } else {
                 routes
             }
-            val probes = coroutineScope { order.map { route -> async { probeTransport(route) } }.awaitAll() }
+            val ip = lines3Ip?.takeIf { MaccmsPinnedTransport.address(it) != null }
+            val probes = if (ip == null) {
+                order.map { route -> Probe(route, null, false, error = "No current-run lines3 IP; not tested", tested = false) }
+            } else {
+                coroutineScope { order.map { route -> async { probeTransport(route, ip) } }.awaitAll() }
+            }
+            currentCoroutineContext().ensureActive()
             val selected = probes.filter { it.success && it.elapsedMs != null }
                 .minByOrNull { it.elapsedMs!! }?.route ?: _selectedRoute.value
-            val result = Snapshot(probes = probes, selectedRoute = selected, quick = quick, completedAtEpochMs = System.currentTimeMillis())
+            val result = Snapshot(probes = probes, selectedRoute = selected, quick = quick, completedAtEpochMs = System.currentTimeMillis(), lines3Ip = ip)
             if (isCurrent() && beforeApply()) {
+                currentCoroutineContext().ensureActive()
                 synchronized(lock) {
                     if (isCurrent() && generation == startingGeneration) {
-                        if (selected != _selectedRoute.value) generation++
+                        // Even an unchanged host/IP starts a new telemetry generation.
+                        generation++
+                        currentLines3Ip = ip
                         _snapshot.value = result
                         _selectedRoute.value = selected
                         selected?.let { preferences()?.edit()?.putString(KEY_SELECTED_ROUTE, it)?.apply() }
@@ -179,7 +197,7 @@ object MaccmsSpeedTester {
     }
 
     internal fun routeSelection(): RouteSelection = synchronized(lock) {
-        RouteSelection(_selectedRoute.value?.takeIf { it in routes } ?: routes.first(), generation)
+        RouteSelection(_selectedRoute.value?.takeIf { it in routes } ?: routes.first(), generation, currentLines3Ip)
     }
 
     internal fun currentRoute(): String = synchronized(lock) {
@@ -192,6 +210,7 @@ object MaccmsSpeedTester {
             .put("service", "maccms")
             .put("hosts", JSONArray(routes))
             .put("selectedRoute", _selectedRoute.value ?: JSONObject.NULL)
+            .put("currentLines3Ip", currentLines3Ip ?: JSONObject.NULL)
             .put("measurement", "Anonymous HTTPS HEAD /; 200-299 and 400-499 are reachable, 300-399 and 500+ are not; does not validate recommendation API")
             .put("eventSuccessMeaning", "HTTP/connectivity reachability: 200-299 and 400-499 (including 404, 401, 403, 429), excluding redirects; recommendationSuccess records the recommendation request outcome separately")
             .put("snapshot", snapshotJson(_snapshot.value))
@@ -200,12 +219,12 @@ object MaccmsSpeedTester {
             .put("runtimeEvents", JSONArray().also { array -> runtimeEvents.forEach { array.put(JSONObject(it.toString())) } })
     }
 
-    private suspend fun probe(route: String): Probe {
+    private suspend fun probe(route: String, lines3Ip: String): Probe {
         val started = System.nanoTime()
         val now = System.currentTimeMillis()
         return try {
             val request = Request.Builder().url("https://$route/".toHttpUrl()).head().build()
-            runInterruptible(Dispatchers.IO) { probeClient.newCall(request).execute() }.use { response ->
+            MaccmsPinnedTransport.request(MaccmsPinnedTransport.client(probeClient, route, lines3Ip), request) { response ->
                 val status = response.code
                 Probe(route, elapsed(started), status in 200..299 || status in 400..499, status, testedAt = now)
             }
@@ -261,11 +280,13 @@ object MaccmsSpeedTester {
                     array.put(
                         JSONObject().put("route", probe.route).put("elapsedMs", probe.elapsedMs ?: JSONObject.NULL)
                             .put("success", probe.success).put("httpStatus", probe.httpStatus ?: JSONObject.NULL)
-                            .put("error", probe.error ?: JSONObject.NULL).put("testedAt", probe.testedAt),
+                            .put("error", probe.error ?: JSONObject.NULL).put("testedAt", probe.testedAt)
+                            .put("tested", probe.tested),
                     )
                 }
             },
         )
+        .put("lines3Ip", value.lines3Ip ?: JSONObject.NULL)
         .put("selectedRoute", value.selectedRoute ?: JSONObject.NULL)
         .put("quick", value.quick)
         .put("completedAtEpochMs", value.completedAtEpochMs ?: JSONObject.NULL)
@@ -285,6 +306,7 @@ object MaccmsSpeedTester {
                 httpStatus = item.optInt(statusField).takeIf { !item.isNull(statusField) },
                 error = item.optString("error").takeUnless { item.isNull("error") },
                 testedAt = item.optLong("testedAt"),
+                tested = item.optBoolean("tested", true),
             )
         }
         Snapshot(
@@ -292,6 +314,7 @@ object MaccmsSpeedTester {
             json.optString("selectedRoute").takeIf { it in routes },
             json.optBoolean("quick"),
             json.optLong("completedAtEpochMs").takeIf { !json.isNull("completedAtEpochMs") },
+            json.optString("lines3Ip").takeUnless { json.isNull("lines3Ip") || it.isBlank() },
         )
     }
 

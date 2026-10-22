@@ -652,8 +652,8 @@
     <string name="jm_speed_test_cancelled">禁漫测速已取消</string>
     <string name="maccms_speed_log_title">Maccms 推荐线路测速日志</string>
     <string name="maccms_speed_log_summary">独立推荐线路、连通性结果、故障切换与日志导出</string>
-    <string name="maccms_speed_log_scope">匿名 HTTPS HEAD 根路径；HTTP 200–499（不含重定向）仅表示连通。未使用有效漫画 ID 验证推荐 API，404 不代表线路死亡。与哔咔 API、封面和阅读图源完全独立。</string>
-    <string name="maccms_speed_log_quick">开屏快测按历史最快前五个候选检测；当前线路池只有三条，因此快测与完整测速均至多检测三条。</string>
+    <string name="maccms_speed_log_scope">匿名 HTTPS HEAD 根路径；HTTP 200–499（不含重定向）仅表示连通。未使用有效漫画 ID 验证推荐 API，404 不代表线路死亡。复用本轮哔咔 API lines3 选中的 IP，仅替换 TCP 目标；域名、TLS 校验与 SNI 保持 macapi 域名，各域名独立记录状态。无本轮 IP 时不检测、不回退 DNS。</string>
+    <string name="maccms_speed_log_quick">开屏快测按历史最快前五个候选检测；当前域名只有三条，因此快测与完整测速均至多检测三条，不建立独立 IP 池。完整重新测速会先重新检测哔咔线路与图源以取得本轮 IP。</string>
     <string name="maccms_speed_log_current">当前线路：%1$s</string>
     <string name="maccms_speed_log_none">尚无测速记录</string>
     <string name="maccms_speed_log_running">检测中；下方保留上轮结果</string>
@@ -665,6 +665,7 @@
     <string name="maccms_speed_log_result">%1$s · %2$s · HTTP %3$s</string>
     <string name="maccms_speed_log_reachable">连通</string>
     <string name="maccms_speed_log_unreachable">失败</string>
+    <string name="maccms_speed_log_not_tested">未检测（本轮无 lines3 IP）</string>
     <string name="maccms_speed_log_round">上轮：%1$s · %2$s</string>
     <string name="maccms_speed_log_quick_mode">快测</string>
     <string name="maccms_speed_log_full_mode">完整测速</string>

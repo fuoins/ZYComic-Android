@@ -2,6 +2,8 @@ package com.zycomic.app.picacg
 
 import com.zycomic.app.net.MaccmsSpeedTester
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import java.net.ConnectException
@@ -13,26 +15,39 @@ import javax.net.ssl.SSLException
 
 /** Routes anonymous Maccms recommendation requests across its own fixed host pool. */
 object MaccmsRecommendationRouter {
-    private val clients = MaccmsSpeedTester.routes.associateWith { host ->
-        MaccmsRecommendationClient("https://$host/".toHttpUrl())
+    suspend fun recommendationIds(comicId: String): List<String> {
+        val selection = MaccmsSpeedTester.routeSelection()
+        val ip = selection.lines3Ip ?: throw IOException("No current-run lines3 IP; Maccms not tested")
+        return recommendationIds(comicId, selection) { host, id ->
+            MaccmsRecommendationClient("https://$host/".toHttpUrl(), ip).recommendationIds(id)
+        }
     }
-
-    suspend fun recommendationIds(comicId: String): List<String> =
-        recommendationIds(comicId) { host, id -> clients.getValue(host).recommendationIds(id) }
 
     /** Same routing path as production, with only anonymous request transport replaceable in tests. */
     internal suspend fun recommendationIds(
         comicId: String,
         fetch: suspend (String, String) -> List<String>,
+    ): List<String> = recommendationIds(comicId, MaccmsSpeedTester.routeSelection(), fetch)
+
+    private suspend fun recommendationIds(
+        comicId: String,
+        initialSelection: MaccmsSpeedTester.RouteSelection,
+        fetch: suspend (String, String) -> List<String>,
     ): List<String> {
-        val initialSelection = MaccmsSpeedTester.routeSelection()
         val order = listOf(initialSelection.route) + MaccmsSpeedTester.routes.filterNot { it == initialSelection.route }
         var expectedGeneration: Long? = initialSelection.generation
         var lastFailure: Throwable? = null
         for (host in order) {
+            currentCoroutineContext().ensureActive()
+            if (initialSelection.lines3Ip != null &&
+                (expectedGeneration == null || MaccmsSpeedTester.routeSelection().generation != expectedGeneration)
+            ) {
+                throw IOException("Maccms lines3 selection was superseded; no stale-IP retry")
+            }
             val started = System.nanoTime()
             try {
                 val result = fetch(host, comicId)
+                currentCoroutineContext().ensureActive()
                 MaccmsSpeedTester.recordRuntime(
                     route = host,
                     latencyMs = elapsed(started),
@@ -42,6 +57,7 @@ object MaccmsRecommendationRouter {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: MaccmsRecommendationHttpException) {
+                currentCoroutineContext().ensureActive()
                 val status = failure.statusCode
                 val shouldFailover = status in 500..599
                 expectedGeneration = MaccmsSpeedTester.recordRuntime(
@@ -55,6 +71,7 @@ object MaccmsRecommendationRouter {
                 if (!shouldFailover) throw failure
                 lastFailure = failure
             } catch (failure: IOException) {
+                currentCoroutineContext().ensureActive()
                 val transportFailure = failure.isTransportFailure()
                 expectedGeneration = MaccmsSpeedTester.recordRuntime(
                     route = host,

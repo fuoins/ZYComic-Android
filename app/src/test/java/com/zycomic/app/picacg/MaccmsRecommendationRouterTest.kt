@@ -19,12 +19,12 @@ import java.util.concurrent.atomic.AtomicInteger
 class MaccmsRecommendationRouterTest {
     @BeforeEach
     fun establishKnownSelectedRoute() = runBlocking {
-        MaccmsSpeedTester.installProbeTransportForTests { route ->
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ ->
             val latency = if (route == MaccmsSpeedTester.routes.first()) 1L else 20L
             MaccmsSpeedTester.Probe(route, latency, success = true, httpStatus = 200)
         }
         try {
-            val result = MaccmsSpeedTester.run(quick = false)
+            val result = MaccmsSpeedTester.run(lines3Ip = "192.0.2.17", quick = false)
             assertEquals(MaccmsSpeedTester.routes.first(), result.selectedRoute)
         } finally {
             MaccmsSpeedTester.resetProbeTransportForTests()
@@ -164,6 +164,26 @@ class MaccmsRecommendationRouterTest {
         assertEquals("caller cancelled", thrown.message)
         assertEquals(1, calls.get())
         assertEquals(initialRoute, MaccmsSpeedTester.currentRoute())
+    }
+
+    @Test
+    fun `a superseded lines3 generation stops retries on the captured old IP`() {
+        val initialRoute = MaccmsSpeedTester.currentRoute()
+        val calls = AtomicInteger()
+        val failure = assertThrows(IOException::class.java) {
+            runBlocking {
+                MaccmsRecommendationRouter.recommendationIds("0123456789abcdef01234567") { _, _ ->
+                    calls.incrementAndGet()
+                    MaccmsSpeedTester.invalidateLines3Ip()
+                    throw ConnectException("old connection failed after new round started")
+                }
+            }
+        }
+        assertTrue(failure.message.orEmpty().contains("superseded"))
+        assertEquals(1, calls.get())
+        assertEquals(initialRoute, MaccmsSpeedTester.currentRoute())
+        assertFalse(latestRuntimeEvent().getBoolean("failover"))
+        assertEquals(null, MaccmsSpeedTester.routeSelection().lines3Ip)
     }
 
     private fun latestRuntimeEvent(): JSONObject {

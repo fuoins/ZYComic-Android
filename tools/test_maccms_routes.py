@@ -40,14 +40,20 @@ def source_contracts() -> None:
     if coordinator.exists():
         text = coordinator.read_text(encoding="utf-8")
         if "MaccmsSpeedTester.run(" not in text or "quick = reuseLines" not in text:
-            raise AssertionError("Coordinator is missing the independent Maccms quick/full run")
+            raise AssertionError("Coordinator is missing the Maccms quick/full host check")
         for contract in ("isCurrent =", "beforeApply ="):
             if contract not in text:
                 raise AssertionError(f"Maccms coordinator call is missing {contract}")
+        if "checkMaccms(picacgSnapshot?.roundSelectedLine?.ip)" not in text:
+            raise AssertionError("Maccms must consume only the current returned Picacg selection")
+        if "checkMaccms(null)" not in text or "MaccmsSpeedTester.invalidateLines3Ip()" not in text:
+            raise AssertionError("Missing current-run invalidation or no-IP path")
+        if text.index("val snapshot = PicacgSpeedTester.run(") >= text.index("checkMaccms(picacgSnapshot?.roundSelectedLine?.ip)"):
+            raise AssertionError("Maccms must run after this round's Picacg selection")
     log_screen = ROOT / "app/src/main/java/com/zycomic/app/ui/settings/MaccmsSpeedTestLogScreen.kt"
     if log_screen.exists():
         text = log_screen.read_text(encoding="utf-8")
-        if "MaccmsSpeedTester.logJson()" not in text or "MaccmsSpeedTester.run(quick = false)" not in text:
+        if "MaccmsSpeedTester.logJson()" not in text or "PlatformSpeedTestCoordinator.run(forceFresh = true, onlyPlatform = ContentPlatform.PICACG)" not in text:
             raise AssertionError("The dedicated Maccms log screen must expose its own full scan and JSON export")
     # Route logs must have a distinct storage key, not alias one of the existing histories.
     history_candidates = sorted((ROOT / "app/src/main/java/com/zycomic/app/net").glob("Maccms*History*.kt"))
@@ -74,9 +80,11 @@ def main() -> None:
     sources += [path for path in (
         main_picacg / "MaccmsRecommendationClient.kt",
         main_picacg / "MaccmsRecommendationRouter.kt",
+        main_picacg / "PicacgRecommendationLoader.kt",
     ) if path.exists()]
     tests = sorted(test_net.glob("Maccms*Test.kt")) + sorted(test_picacg.glob("Maccms*Test.kt"))
     tests += sorted(offline_tests.glob("Maccms*Test.kt"))
+    tests += [test_picacg / "PicacgRecommendationTest.kt"]
     startup_status = ROOT / "app/src/main/java/com/zycomic/app/net/PlatformStartupStatus.kt"
     startup_test = test_net / "StartupCheckStatusTest.kt"
     if startup_status.exists() and startup_test.exists():
