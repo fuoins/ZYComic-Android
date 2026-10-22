@@ -50,6 +50,12 @@ def source_contracts() -> None:
             raise AssertionError("Missing current-run invalidation or no-IP path")
         if text.index("val snapshot = PicacgSpeedTester.run(") >= text.index("checkMaccms(picacgSnapshot?.roundSelectedLine?.ip)"):
             raise AssertionError("Maccms must run after this round's Picacg selection")
+        cache_branch = text.split("if (linesDone && imagesDone) {", 1)[1].split("measuredPlatforms.add", 1)[0]
+        if "platform != ContentPlatform.PICACG" not in cache_branch or "checkMaccms(null)" in cache_branch:
+            raise AssertionError("A completed Picacg report must not skip current-round IP revalidation")
+        picacg_run = text.split("val snapshot = PicacgSpeedTester.run(", 1)[1].split("picacgSnapshot =", 1)[0]
+        if "reuseApi = false" not in picacg_run:
+            raise AssertionError("Maccms requires a newly validated lines3 IP, never cached API probes")
     log_screen = ROOT / "app/src/main/java/com/zycomic/app/ui/settings/MaccmsSpeedTestLogScreen.kt"
     if log_screen.exists():
         text = log_screen.read_text(encoding="utf-8")

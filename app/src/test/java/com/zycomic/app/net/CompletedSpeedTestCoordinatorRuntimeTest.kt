@@ -30,8 +30,9 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
 
         val duplicate = PlatformSpeedTestCoordinator.run()
 
-        assertEquals(listOf(1, 1, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
-        assertEquals(1, PicacgSpeedTester.apiProbeCount)
+        assertEquals(listOf(1, 2, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
+        assertEquals(2, PicacgSpeedTester.apiProbeCount)
+        assertEquals(listOf(false to false, false to false), PicacgSpeedTester.reuseFlags)
         assertEquals("incomplete", duplicate.single { it.platform == "哔咔" }.status)
         assertEquals("tested", duplicate.single { it.platform == "漫蛙" }.status)
         assertEquals("tested", duplicate.single { it.platform == "禁漫天堂" }.status)
@@ -50,10 +51,12 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
 
         val duplicate = PlatformSpeedTestCoordinator.run()
 
-        assertEquals(listOf(1, 1, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
+        assertEquals(listOf(1, 2, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
         assertEquals(listOf(false), SpeedTester.reuseLines)
         assertEquals(listOf(false to false), JmSpeedTester.reuseFlags)
-        assertEquals(listOf(false to false), PicacgSpeedTester.reuseFlags)
+        assertEquals(2, PicacgSpeedTester.apiProbeCount)
+        assertEquals(1, PicacgSpeedTester.imageProbeCount)
+        assertEquals(listOf(false to false, false to true), PicacgSpeedTester.reuseFlags)
         assertTrue(duplicate.all { it.status == "tested" })
     }
 
@@ -78,7 +81,7 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
     }
 
     @Test
-    fun `new real image sample runs only Picacg image phase and reuses API`() = runBlocking {
+    fun `new real image sample probes Picacg API and image phases`() = runBlocking {
         PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
         PicacgRouteManager.verifiedImageSampleUrl = "https://img.picacg.test/chapter/cover.jpg"
 
@@ -87,9 +90,9 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
         assertEquals(1, SpeedTester.runCount)
         assertEquals(1, JmSpeedTester.runCount)
         assertEquals(2, PicacgSpeedTester.runCount)
-        assertEquals(1, PicacgSpeedTester.apiProbeCount)
+        assertEquals(2, PicacgSpeedTester.apiProbeCount)
         assertEquals(1, PicacgSpeedTester.imageProbeCount)
-        assertEquals(listOf(false to false, true to false), PicacgSpeedTester.reuseFlags)
+        assertEquals(listOf(false to false, false to false), PicacgSpeedTester.reuseFlags)
         assertEquals("tested", result.single { it.platform == "哔咔" }.status)
         assertEquals("tested", result.single { it.platform == "哔咔" }.lineStatus)
         assertEquals("tested", result.single { it.platform == "哔咔" }.imageStatus)

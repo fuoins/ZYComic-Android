@@ -36,7 +36,7 @@ class MaccmsRecommendationTransportTest {
 
         assertEquals(listOf("aaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbb"), actual)
         assertEquals("GET", requestMethod.get())
-        assertEquals("/maccms/json/baofeng/picacomic/rec/111111111111111111111111?limit=10", requestPath.get())
+        assertEquals("/picacomic/rec/111111111111111111111111?limit=10", requestPath.get())
         assertEquals(null, cookie.get())
         assertEquals(null, authorization.get())
         val headers = seenHeaders.get().keys

@@ -42,7 +42,7 @@ class MaccmsPinnedTlsTest {
             assertEquals("127.0.0.1", captured.localAddress, "TCP destination for $host")
             assertEquals("$host:${exchange.port}", captured.hostHeader, "HTTP Host header")
             assertEquals(host, captured.sniHost, "TLS SNI")
-            assertTrue(captured.requestLine.startsWith("GET /maccms/json/baofeng/picacomic/rec/"), captured.requestLine)
+            assertTrue(captured.requestLine.startsWith("GET /picacomic/rec/"), captured.requestLine)
         }
 
         val mismatch = exchange("macapi1.com", "mismatch", base)
@@ -127,7 +127,7 @@ class MaccmsPinnedTlsTest {
         try {
             val client = MaccmsPinnedTransport.client(base, host, "127.0.0.1")
             assertSame(base.hostnameVerifier, client.hostnameVerifier, "helper must preserve the default hostname verifier")
-            val url = "https://$host:$port/maccms/json/baofeng/picacomic/rec/0123456789abcdef01234567?limit=10".toHttpUrl()
+            val url = "https://$host:$port/picacomic/rec/0123456789abcdef01234567?limit=10".toHttpUrl()
             val request = Request.Builder().url(url).get().build()
             client.newCall(request).execute().use { response -> statusCode = response.code }
         } catch (failure: Throwable) {

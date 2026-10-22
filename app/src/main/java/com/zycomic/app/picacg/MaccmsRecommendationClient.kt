@@ -22,7 +22,7 @@ class MaccmsRecommendationClient internal constructor(
     suspend fun recommendationIds(comicId: String): List<String> {
         require(COMIC_ID.matches(comicId)) { "Invalid comic ID" }
         val url = baseUrl.newBuilder()
-            .addPathSegments("maccms/json/baofeng/picacomic/rec")
+            .addPathSegments("picacomic/rec")
             .addPathSegment(comicId)
             .addQueryParameter("limit", "10")
             .build()
@@ -62,17 +62,22 @@ class MaccmsRecommendationClient internal constructor(
     }
 
     private fun parseEnvelope(response: JSONObject): JSONArray {
-        // The documented endpoint uses code=0 and a top-level recommendations array, not data.
-        if (response.has("code") && response.opt("code") != 0) {
-            throw IOException("Maccms recommendation response indicates failure")
+        val hasCode = response.has("code")
+        if (hasCode) {
+            val code = response.opt("code")
+            if (code !is Number || code.toDouble() != 1.0) {
+                throw IOException("Maccms recommendation response indicates failure")
+            }
+        } else if (response.has("recommendations")) {
+            throw IOException("Maccms recommendation response has no success code")
         }
-        if (response.has("recommendations")) {
-            if (response.opt("code") != 0) throw IOException("Maccms recommendation response has no success code")
-            return response.optJSONArray("recommendations")
-                ?: throw IOException("Maccms recommendation response has no recommendations array")
-        }
-        // Retain support for the legacy envelope without confusing it with documented responses.
-        return response.optJSONArray("data")
+
+        val key = when {
+            response.has("recommendations") -> "recommendations"
+            response.has("data") -> "data"
+            else -> null
+        } ?: throw IOException("Maccms recommendation response has no recommendations array")
+        return response.optJSONArray(key)
             ?: throw IOException("Maccms recommendation response has no recommendations array")
     }
 

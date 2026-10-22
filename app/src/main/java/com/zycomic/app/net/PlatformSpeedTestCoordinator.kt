@@ -214,8 +214,9 @@ object PlatformSpeedTestCoordinator {
                                     // Image ranking uses a fixed auth-free tile, so there is no longer a sample gate.
                                     if (linesDone && imagesDone) {
                                         val cached = completedReports[platform]?.takeIf { it.first == phaseKey }?.second
-                                        if (cached != null) {
-                                            if (platform == ContentPlatform.PICACG) checkMaccms(null)
+                                        // A cached report is not a current-round lines3 selection. Picacg
+                                        // must revalidate its lines before binding the independent Maccms pool.
+                                        if (cached != null && platform != ContentPlatform.PICACG) {
                                             publishPlatformStatus(platform, platformCompletionStatus(cached), running = false)
                                             return@async cached
                                         }
@@ -269,7 +270,9 @@ object PlatformSpeedTestCoordinator {
                                             }
                                         } else if (platform == ContentPlatform.PICACG) {
                                             val snapshot = PicacgSpeedTester.run(
-                                                reuseApi = linesDone,
+                                                // Even a phase-cache hit needs a newly tested/published lines3
+                                                // IP. Reuse image work, never an earlier round's API binding.
+                                                reuseApi = false,
                                                 reuseImages = imagesDone,
                                                 fastApi = reuseLines,
                                                 fastImages = reuseImages,

@@ -157,7 +157,7 @@ class MaccmsLines3BindingTest {
         val seen = CopyOnWriteArrayList<String>()
         server.createContext("/") { exchange ->
             seen += exchange.requestHeaders.getFirst("Host")
-            assertEquals("/maccms/json/baofeng/picacomic/rec/111111111111111111111111?limit=10", exchange.requestURI.toString())
+            assertEquals("/picacomic/rec/111111111111111111111111?limit=10", exchange.requestURI.toString())
             val body = "[\"aaaaaaaaaaaaaaaaaaaaaaaa\"]".toByteArray()
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { it.write(body) }

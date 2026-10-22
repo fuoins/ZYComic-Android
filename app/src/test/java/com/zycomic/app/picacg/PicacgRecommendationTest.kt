@@ -22,7 +22,7 @@ class PicacgRecommendationTest {
             val client = MaccmsRecommendationClient(server.baseUrl)
             assertEquals(emptyList<String>(), client.recommendationIds(selfId))
             val request = server.requests.single()
-            assertTrue(request.startsWith("GET /maccms/json/baofeng/picacomic/rec/$selfId?limit=10 HTTP/1.1"))
+            assertTrue(request.startsWith("GET /picacomic/rec/$selfId?limit=10 HTTP/1.1"))
             val forbiddenHeaders = listOf("authorization:", "cookie:", "signature:", "api-key:", "app-uuid:", "nonce:")
             assertFalse(
                 request.lines().any {
@@ -51,7 +51,14 @@ class PicacgRecommendationTest {
                 else -> "\"$value\""
             }
         }
-        MockServer(listOf(MockResponse(raw), MockResponse("{\"data\":$raw}"), MockResponse("{\"code\":0,\"count\":10,\"recommendations\":$raw}"))).use { server ->
+        MockServer(
+            listOf(
+                MockResponse(raw),
+                MockResponse("{\"data\":$raw}"),
+                MockResponse("{\"code\":1,\"count\":10,\"recommendations\":$raw}"),
+                MockResponse("{\"code\":1,\"data\":$raw}"),
+            ),
+        ).use { server ->
             val client = MaccmsRecommendationClient(server.baseUrl)
             val result = client.recommendationIds(selfId)
             assertEquals(10, result.size)
@@ -60,13 +67,14 @@ class PicacgRecommendationTest {
             assertFalse(result.any { it.equals(selfId, true) })
             assertEquals(result, client.recommendationIds(selfId))
             assertEquals(result, client.recommendationIds(selfId))
+            assertEquals(result, client.recommendationIds(selfId))
         }
     }
 
     @Test
     fun `documented recommendations envelope loads cards in order without reading data`() = runBlocking {
         val ids = listOf("bbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccccccc")
-        val body = """{"code":0,"count":2,"recommendations":["${ids[0]}","${ids[1]}"],"data":[]}"""
+        val body = """{"code":1,"count":2,"recommendations":["${ids[0]}","${ids[1]}"],"data":[]}"""
         MockServer(listOf(MockResponse(body))).use { server ->
             val client = MaccmsRecommendationClient(server.baseUrl)
             val parsed = client.recommendationIds(selfId)
@@ -77,12 +85,19 @@ class PicacgRecommendationTest {
     }
 
     @Test
-    fun `documented envelopes reject business errors missing success codes and invalid arrays`() = runBlocking {
+    fun `envelopes reject business errors missing success codes and invalid arrays`() = runBlocking {
         val bodies = listOf(
-            """{"code":1,"recommendations":[],"data":[]}""",
+            """{"code":0,"recommendations":[],"data":[]}""",
             """{"code":"0","recommendations":[]}""",
+            """{"code":"1","recommendations":[]}""",
+            """{"code":null,"recommendations":[]}""",
+            """{"code":2,"recommendations":[]}""",
+            """{"code":1.5,"recommendations":[]}""",
+            """{"code":true,"recommendations":[]}""",
             """{"recommendations":[]}""",
-            """{"code":0,"recommendations":{},"data":[]}""",
+            """{"code":1}""",
+            """{"code":1,"recommendations":{},"data":[]}""",
+            """{"code":1,"data":"not-an-array"}""",
         )
         MockServer(bodies.map(::MockResponse)).use { server ->
             val client = MaccmsRecommendationClient(server.baseUrl)
@@ -120,9 +135,16 @@ class PicacgRecommendationTest {
 
     @Test
     fun `valid empty arrays remain successful empty recommendations`() = runBlocking {
-        MockServer(listOf(MockResponse("[]"), MockResponse("{\"data\":[]}"), MockResponse("{\"code\":0,\"count\":0,\"recommendations\":[]}"))).use { server ->
+        MockServer(
+            listOf(
+                MockResponse("[]"),
+                MockResponse("{\"data\":[]}"),
+                MockResponse("{\"code\":1,\"count\":0,\"recommendations\":[]}"),
+                MockResponse("{\"code\":1,\"data\":[]}"),
+            ),
+        ).use { server ->
             val client = MaccmsRecommendationClient(server.baseUrl)
-            repeat(3) { assertEquals(emptyList<String>(), client.recommendationIds(selfId)) }
+            repeat(4) { assertEquals(emptyList<String>(), client.recommendationIds(selfId)) }
         }
     }
 
