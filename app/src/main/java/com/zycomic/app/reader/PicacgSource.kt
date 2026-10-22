@@ -1,5 +1,6 @@
 package com.zycomic.app.reader
 
+import com.zycomic.app.net.PicacgImageFallbackInterceptor
 import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.picacg.PicacgRepository
 import eu.kanade.tachiyomi.network.awaitSuccess
@@ -37,6 +38,8 @@ object PicacgSource : HttpSource() {
             .callTimeout(90, TimeUnit.SECONDS)
             .dns(PicacgRouteManager.dns())
             .cookieJar(okhttp3.CookieJar.NO_COOKIES)
+            // A reader page that fails on the fastest mirror automatically retries the other roots.
+            .addInterceptor(PicacgImageFallbackInterceptor())
             .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
             .build()
     }

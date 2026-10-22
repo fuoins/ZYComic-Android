@@ -46,6 +46,8 @@ object PicacgSpeedTester {
         val measuredAtEpochMs: Long? = null,
         val testedThisRound: Boolean = false,
         val quickSelected: Boolean = false,
+        /** False = cover (imgproxy) probe; true = reader-page (storage-b bucket) probe. */
+        val content: Boolean = false,
     )
 
     data class Snapshot(
@@ -88,7 +90,13 @@ object PicacgSpeedTester {
     }
 
     private data class ApiTarget(val url: String, val endpoint: DomainIp, val identity: PicacgSpeedTestHistoryPolicy.Identity)
-    private data class ImageTarget(val url: String, val endpoint: DomainIp, val identity: PicacgSpeedTestHistoryPolicy.Identity)
+    // content=false -> cover probe (imgproxy tile); content=true -> reader-page probe (storage-b bucket).
+    private data class ImageTarget(
+        val url: String,
+        val endpoint: DomainIp,
+        val identity: PicacgSpeedTestHistoryPolicy.Identity,
+        val content: Boolean = false,
+    )
 
     suspend fun run(
         reuseApi: Boolean = false,
@@ -210,8 +218,9 @@ object PicacgSpeedTester {
                 }
 
                 var blockedReason: String? = null
-                // Sources are ranked with a fixed, auth-free imgproxy cover tile (same root/IP as the
-                // storage bucket), so a cold or unauthenticated start can still measure them.
+                // Each root × IP is probed twice with fixed, auth-free tiles: a cover probe on the
+                // imgproxy node (storage-b + storage1 tiles) and a reader-page probe on the storage-b
+                // bucket, so covers and pages get independent per-root rankings.
                 val imageTargets = timings.start(SpeedTestTimings.Phase.PICACG_IMAGE_PREPARATION).use {
                     publishProgress(Progress(Stage.PREPARING_IMAGES, total = PicacgRouteManager.imageHosts.size))
                     when {
@@ -225,10 +234,14 @@ object PicacgSpeedTester {
                             if (coverHost == null) {
                                 emptyList()
                             } else {
-                                val tileUrl = PicacgBuiltinNetwork.speedTileUrl(coverHost)
-                                resolve(contentHost).map { ip ->
+                                val coverTileUrl = PicacgBuiltinNetwork.speedTileUrl(coverHost)
+                                val contentTileUrl = PicacgBuiltinNetwork.speedTileContentUrl(contentHost)
+                                resolve(contentHost).flatMap { ip ->
                                     val endpoint = DomainIp(contentHost, ip)
-                                    ImageTarget(tileUrl, endpoint, imageIdentity(endpoint))
+                                    listOf(
+                                        ImageTarget(coverTileUrl, endpoint, imageIdentity(endpoint, content = false), content = false),
+                                        ImageTarget(contentTileUrl, endpoint, imageIdentity(endpoint, content = true), content = true),
+                                    )
                                 }
                             }
                         }
@@ -268,7 +281,7 @@ object PicacgSpeedTester {
                                     ContentPlatform.PICACG,
                                     { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
                                 ) {
-                                    if (isCurrent()) probeImage(target.url, target.endpoint) else null
+                                    if (isCurrent()) probeImage(target.url, target.endpoint, content = target.content) else null
                                 }?.copy(
                                     measuredAtEpochMs = System.currentTimeMillis(),
                                     testedThisRound = true,
@@ -316,10 +329,29 @@ object PicacgSpeedTester {
                         }
                     }
                     val imageSelection = if (imageQuick) freshImageHistory.map { it.toProbe() } else imageResults
-                    val fastestImage = imageSelection.filter(Probe::success).minByOrNull(Probe::elapsedMs)
-                    if (fastestImage != null && !PicacgRouteManager.isImageManuallyPinned) {
-                        PicacgRouteManager.selectImageHost(fastestImage.endpoint.domain, manual = false)
-                        PicacgRouteManager.applyAutomaticImageEndpoint(fastestImage.endpoint)
+                    if (!PicacgRouteManager.isImageManuallyPinned) {
+                        // Keep the fastest IP per storage-b root for EACH service independently — covers
+                        // (imgproxy) and reader pages (storage-b) — then order roots by that best probe.
+                        // Both ranked lists are installed for automatic fallback; never a single winner.
+                        fun rankingOf(wantContent: Boolean): List<DomainIp> =
+                            imageSelection.filter { it.success && it.content == wantContent }
+                                .groupBy { it.endpoint.domain.lowercase() }
+                                .map { (_, probes) ->
+                                    val best = probes.minByOrNull(Probe::elapsedMs)!!
+                                    best.elapsedMs to best.endpoint
+                                }
+                                .sortedBy { it.first }
+                                .map { it.second }
+                        val coverRanking = rankingOf(wantContent = false)
+                        val contentRanking = rankingOf(wantContent = true)
+                        if (!PicacgRouteManager.applyImageRankings(coverRanking, contentRanking)) {
+                            // Legacy fallback: if neither ranking validated, pin the single fastest image.
+                            val fastestImage = imageSelection.filter(Probe::success).minByOrNull(Probe::elapsedMs)
+                            if (fastestImage != null) {
+                                PicacgRouteManager.selectImageHost(fastestImage.endpoint.domain, manual = false)
+                                PicacgRouteManager.applyAutomaticImageEndpoint(fastestImage.endpoint)
+                            }
+                        }
                     }
                     val canPersistApiHistory = forceFresh || apiCanUseHistory || apiReconcile || storedApi.remoteVersion == null
                     if (cachedApi.isEmpty() && canPersistApiHistory) {
@@ -393,10 +425,15 @@ object PicacgSpeedTester {
         probeCondition = "GET-root;redirects-disabled;accept-non-redirect-http-status",
     )
 
-    private fun imageIdentity(endpoint: DomainIp): PicacgSpeedTestHistoryPolicy.Identity {
-        val tileUrl = PicacgBuiltinNetwork.coverHostFor(endpoint.domain)
-            ?.let(PicacgBuiltinNetwork::speedTileUrl)
-            .orEmpty()
+    private fun imageIdentity(endpoint: DomainIp, content: Boolean): PicacgSpeedTestHistoryPolicy.Identity {
+        // Reader-page probe hits the storage-b bucket directly; cover probe hits the imgproxy node.
+        val tileUrl = if (content) {
+            PicacgBuiltinNetwork.speedTileContentUrl(endpoint.domain)
+        } else {
+            PicacgBuiltinNetwork.coverHostFor(endpoint.domain)
+                ?.let(PicacgBuiltinNetwork::speedTileUrl)
+                .orEmpty()
+        }
         return PicacgSpeedTestHistoryPolicy.Identity(
             platform = PicacgSpeedTestHistoryPolicy.PLATFORM,
             phase = PicacgSpeedTestHistoryPolicy.IMAGE_PHASE,
@@ -404,9 +441,16 @@ object PicacgSpeedTester {
             domain = endpoint.domain,
             ip = endpoint.ip,
             routeCondition = routeCondition(PicacgSpeedTestHistoryPolicy.IMAGE_ROUTE_CONDITION, endpoint),
-            probeCondition = "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic",
+            probeCondition = if (content) {
+                "GET-storage-b-page-tile;redirects-disabled;status-200;image-content-type;image-magic"
+            } else {
+                "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic"
+            },
         )
     }
+
+    /** Cover tiles are imgproxy `/insecure/...` urls; reader-page tiles are storage-b `/static/...` urls. */
+    private fun isContentTileUrl(u: String): Boolean = !u.contains("/insecure/")
 
     private fun PicacgSpeedTestHistoryPolicy.Measurement.toProbe() = Probe(
         endpoint = endpoint,
@@ -416,6 +460,7 @@ object PicacgSpeedTester {
         contentType = contentType,
         imageDecoded = imageDecoded,
         measuredAtEpochMs = measuredAtEpochMs,
+        content = isContentTileUrl(identity.url),
     )
 
     private fun PicacgSpeedTestHistoryPolicy.Identity.toMeasurement(probe: Probe, measuredAt: Long) =
@@ -431,7 +476,8 @@ object PicacgSpeedTester {
 
     private fun PicacgSpeedTestHistoryPolicy.Measurement.toApiTarget() = ApiTarget(identity.url, endpoint, identity)
 
-    private fun PicacgSpeedTestHistoryPolicy.Measurement.toImageTarget() = ImageTarget(identity.url, endpoint, identity)
+    private fun PicacgSpeedTestHistoryPolicy.Measurement.toImageTarget() =
+        ImageTarget(identity.url, endpoint, identity, content = isContentTileUrl(identity.url))
 
     private fun routeCondition(base: String, endpoint: DomainIp): String =
         "$base;ip-source=${if (PicacgRouteManager.resolveIps(endpoint.domain).isNotEmpty()) "configured-rules" else "system-dns"}"
@@ -480,29 +526,38 @@ object PicacgSpeedTester {
         return Probe(endpoint, success, elapsedMs(start), code)
     }
 
-    private fun probeImage(url: String, endpoint: DomainIp, clientOverride: OkHttpClient? = null): Probe {
+    private fun probeImage(
+        url: String,
+        endpoint: DomainIp,
+        clientOverride: OkHttpClient? = null,
+        content: Boolean = false,
+    ): Probe {
         val start = System.nanoTime()
         var code: Int? = null
         var contentType: String? = null
         var validImage: Boolean? = false
         val success = runCatching {
-            // Main test hits the fixed auth-free tile on the img.{root} mirror; pin both the bucket and
-            // its mirror to the measured IP and never follow redirects so only that concrete IP is timed.
-            // The diagnostic caller supplies a client pinned to the storage bucket and a real sample URL.
+            // Cover probe pins both the bucket and its imgproxy mirror to the measured IP; the reader-page
+            // probe pins only the storage-b bucket (img nodes answer 502/404 for content paths). Redirects
+            // are never followed so only that concrete IP is timed.
             val client = clientOverride
-                ?: PicacgBuiltinNetwork.coverHostFor(endpoint.domain)?.let { coverHost ->
-                    PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint).newBuilder()
-                        .dns(object : Dns {
-                            override fun lookup(hostname: String): List<InetAddress> =
-                                if (hostname.equals(endpoint.domain, true) || hostname.equals(coverHost, true)) {
-                                    listOf(InetAddress.getByName(endpoint.ip))
-                                } else {
-                                    PicacgRouteManager.dns().lookup(hostname)
-                                }
-                        })
-                        .build()
+                ?: if (content) {
+                    PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
+                } else {
+                    PicacgBuiltinNetwork.coverHostFor(endpoint.domain)?.let { coverHost ->
+                        PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint).newBuilder()
+                            .dns(object : Dns {
+                                override fun lookup(hostname: String): List<InetAddress> =
+                                    if (hostname.equals(endpoint.domain, true) || hostname.equals(coverHost, true)) {
+                                        listOf(InetAddress.getByName(endpoint.ip))
+                                    } else {
+                                        PicacgRouteManager.dns().lookup(hostname)
+                                    }
+                            })
+                            .build()
+                    }
+                        ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
                 }
-                ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
             // Fetch one tile and validate status + content-type + image magic on the head bytes.
             fun fetchTile(testUrl: String): Boolean =
                 client.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()).execute().use { response ->
@@ -518,19 +573,21 @@ object PicacgSpeedTester {
                         PicacgNetworkPolicy.imageTileVerified(response.code, contentType, validImage == true)
                     }
                 }
-            // Main test requires BOTH the storage-b tile and the storage1 tile to pass: ~59/60 covers
-            // originate from storage1, so ranking a source by storage-b alone could leave covers broken.
-            // The diagnostic caller supplies a pinned client + real sample and only runs its own url.
-            if (clientOverride == null) {
-                val storageB = fetchTile(url)
-                val coverHost = PicacgBuiltinNetwork.coverHostFor(endpoint.domain)
-                val storage1 = coverHost != null && fetchTile(PicacgBuiltinNetwork.speedTileStorage1Url(coverHost))
-                storageB && storage1
-            } else {
-                fetchTile(url)
+            // Diagnostic caller supplies a pinned client + real sample and only runs its own url.
+            // Reader-page probe fetches the single storage-b tile; cover probe requires BOTH the
+            // storage-b and storage1 tiles (~59/60 covers originate from storage1).
+            when {
+                clientOverride != null -> fetchTile(url)
+                content -> fetchTile(url)
+                else -> {
+                    val storageB = fetchTile(url)
+                    val coverHost = PicacgBuiltinNetwork.coverHostFor(endpoint.domain)
+                    val storage1 = coverHost != null && fetchTile(PicacgBuiltinNetwork.speedTileStorage1Url(coverHost))
+                    storageB && storage1
+                }
             }
         }.getOrDefault(false)
-        return Probe(endpoint, success, elapsedMs(start), code, contentType, validImage)
+        return Probe(endpoint, success, elapsedMs(start), code, contentType, validImage, content = content)
     }
 
     /** Reads at most [maxBytes] — the header needed to validate the image — and never buffers the whole picture. */

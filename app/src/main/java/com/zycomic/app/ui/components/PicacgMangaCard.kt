@@ -24,10 +24,9 @@ import coil3.disk.DiskCache
 import coil3.disk.directory
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.net.PicacgImageFallbackInterceptor
 import com.zycomic.app.net.PicacgRouteManager
-import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.Response
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -66,16 +65,8 @@ object PicacgImageLoader {
         .cookieJar(okhttp3.CookieJar.NO_COOKIES)
         .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
         .dns(PicacgRouteManager.dns())
-        .addInterceptor(
-            Interceptor { chain ->
-                val request = chain.request().newBuilder()
-                    .url(PicacgRouteManager.rewriteImageUrl(chain.request().url.toString()))
-                    .header("User-Agent", "okhttp/3.8.1")
-                    .header("Referer", "https://www.picacomic.com/")
-                    .build()
-                chain.proceed(request)
-            },
-        )
+        // Walks every measured mirror root on failure, so a fixed subset of covers never stays broken.
+        .addInterceptor(PicacgImageFallbackInterceptor())
         .build()
 }
 

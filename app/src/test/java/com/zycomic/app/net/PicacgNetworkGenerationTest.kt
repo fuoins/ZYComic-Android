@@ -124,6 +124,28 @@ class PicacgNetworkGenerationTest {
         // Hosts outside the Picacg bucket/mirror set remain untouched.
         val external = "https://example.com/static/x.jpg"
         assertEquals(external, PicacgRouteManager.rewriteImageUrl(external))
+
+        // Covers fan out across every imgproxy root, selected root first, for automatic fallback.
+        assertEquals(
+            listOf(
+                "https://img.go2778.com/insecure/rs:fill:300:400:0/QUJD",
+                "https://img.safedataplj.com/insecure/rs:fill:300:400:0/QUJD",
+                "https://img.picacomic.com/insecure/rs:fill:300:400:0/QUJD",
+            ),
+            PicacgRouteManager.candidateImageUrls("https://storage-b.picacomic.com/static/tobeimg/TOKEN/rs:fill:300:400:0/g:sm/QUJD.jpg"),
+        )
+        // Reader pages fan out across every storage-b root, never touching imgproxy.
+        assertEquals(
+            listOf(
+                "https://storage-b.go2778.com/static/tobs/sub_storage_1/x.jpg",
+                "https://storage-b.safedataplj.com/static/tobs/sub_storage_1/x.jpg",
+                "https://storage-b.picacomic.com/static/tobs/sub_storage_1/x.jpg",
+            ),
+            PicacgRouteManager.candidateImageUrls("https://storage-b.picacomic.com/static/tobs/sub_storage_1/x.jpg"),
+        )
+        // External/non-bucket URLs collapse to a single untouched candidate.
+        assertEquals(1, PicacgRouteManager.candidateImageUrls(external).size)
+        assertEquals(external, PicacgRouteManager.candidateImageUrls(external).first())
     }
 
     @Test

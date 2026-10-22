@@ -57,6 +57,18 @@ object PicacgBuiltinNetwork {
     fun speedTileStorage1Url(coverHost: String): String =
         "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/rs:fill:50:67:0/$SPEED_TILE_STORAGE1_BASE64"
 
+    /**
+     * Fixed reader-page tile served directly from the `storage-b.{root}` bucket (NOT imgproxy — img
+     * nodes answer 502/404 for /static/sub_storage). All three mirrors return 200 image/jpeg without
+     * following a redirect, so a cold/unauthenticated start can rank reader-page origins independently
+     * from cover mirrors. The path mirrors the official contract `{fileServer}/static/{path}`.
+     */
+    private const val SPEED_TILE_CONTENT_PATH = "/static/sub_storage_1/f0/e3/f0e3922a-6229-4b83-aa1a-2d4c630a4d7c.jpg"
+
+    /** Probe URL for a reader-page (storage-b) origin; returns a stable JPEG directly from the bucket. */
+    fun speedTileContentUrl(contentHost: String): String =
+        "https://${contentHost.trim().lowercase(Locale.ROOT)}$SPEED_TILE_CONTENT_PATH"
+
     // ── Cover-vs-content classification + imgproxy rewrite helpers ────────────────────────
     /** Cover thumbnail (imgproxy signed) prefix: `/static/tobeimg/...`. */
     const val COVER_PROXY_PREFIX = "/static/tobeimg/"

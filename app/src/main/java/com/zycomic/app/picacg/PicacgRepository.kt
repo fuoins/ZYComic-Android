@@ -290,7 +290,10 @@ object PicacgRepository {
             val media = obj.optJSONObject("media") ?: return@mapNotNull null
             val path = media.optString("path")
             if (path.isBlank()) return@mapNotNull null
-            val url = PicacgImageUrl.resolve(path, host)
+            // Keep the API-reported fileServer (real bucket: storage-b/storage1/sub_storage);
+            // PicacgRouteManager mirrors that bucket and falls back across roots at load time.
+            val fileServer = media.optString("fileServer").takeIf { it.isNotBlank() && it != "null" }
+            val url = PicacgImageUrl.resolveWithFileServer(path, fileServer, host)
             PicacgImage(obj.optString("_id"), url, media.optString("originalName"))
         }
         val response = PicacgPage(entries, page < pageCount(paged, "pages"), page)

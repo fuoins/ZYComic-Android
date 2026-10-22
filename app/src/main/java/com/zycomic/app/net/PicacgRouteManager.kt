@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import org.json.JSONArray
+import org.json.JSONObject
 import java.net.InetAddress
 import java.net.Proxy
 import java.net.URI
@@ -22,6 +23,14 @@ object PicacgRouteManager {
         val imageHost: String? = null,
         val pinnedApi: DomainIp? = null,
         val pinnedImage: DomainIp? = null,
+        /**
+         * Best endpoint per content root (`storage-b.{root}`) measured for READER PAGES (the
+         * storage-b bucket), ordered fastest-first. Keys are storage-b hosts; the cover mirror
+         * `img.{root}` shares the same root but is ranked independently in [coverRanking].
+         */
+        val contentRanking: List<DomainIp> = emptyList(),
+        /** Best endpoint per content root measured for COVERS (imgproxy), ordered fastest-first. */
+        val coverRanking: List<DomainIp> = emptyList(),
         val remoteVersion: Int? = null,
         val revision: Long = 0L,
     )
@@ -152,11 +161,15 @@ object PicacgRouteManager {
         }
         val imageHost = prefs.getString("selected_image_host", null)?.let { saved -> old.imageHosts.firstOrNull { it.equals(saved, true) } }
             ?: old.imageHost ?: old.imageHosts.firstOrNull()
+        val restoredCover = persistedRanking("cover_ranking").filter { ep -> old.imageHosts.any { it.equals(ep.domain, true) } }
+        val restoredContent = persistedRanking("content_ranking").filter { ep -> old.imageHosts.any { it.equals(ep.domain, true) } }
         _state.value = old.copy(
             apiIndex = index,
             imageHost = imageHost,
             pinnedApi = persistedEndpoint("api_pin_domain", "api_pin_ip"),
             pinnedImage = persistedEndpoint("image_pin_domain", "image_pin_ip"),
+            coverRanking = restoredCover,
+            contentRanking = restoredContent,
             revision = old.revision + 1,
         )
     }
@@ -195,6 +208,93 @@ object PicacgRouteManager {
 
     /** Apply a measured image endpoint without changing the user's manual-selection preference. */
     fun applyAutomaticImageEndpoint(endpoint: DomainIp?): Boolean = setPin(endpoint, false, manual = false)
+
+    /**
+     * Install the two independent, per-root rankings: one best IP per `storage-b.{root}` for covers
+     * (imgproxy) and one for reader pages (the storage-b bucket), each ordered fastest-first by its
+     * own probe. The first CONTENT entry becomes the active selection/pin; every later entry in both
+     * lists remains an automatic fallback used by [candidateImageUrls]. Entries must already exist in
+     * the active image route rules; invalid/out-of-pool endpoints are dropped.
+     */
+    @Synchronized
+    fun applyImageRankings(cover: List<DomainIp>, content: List<DomainIp>): Boolean {
+        val current = _state.value
+        fun valid(ranking: List<DomainIp>): List<DomainIp> = ranking
+            .filter { ep ->
+                isIpv4Literal(ep.ip) &&
+                    current.imageHosts.any { it.equals(ep.domain, true) } &&
+                    imageRouteRules.entries.firstOrNull { it.key.equals(ep.domain, true) }?.value?.contains(ep.ip) == true
+            }
+            .distinctBy { it.domain.lowercase(Locale.ROOT) }
+        val validCover = valid(cover)
+        val validContent = valid(content)
+        if (validCover.isEmpty() && validContent.isEmpty()) return false
+        // The reader bucket is the user-visible "图源" selection; covers follow their root automatically.
+        val first = validContent.firstOrNull() ?: validCover.first()
+        prefs()?.edit()?.apply {
+            putBoolean("manual_image_selection", false)
+            remove("selected_image_host")
+            putString("cover_ranking", encodeRanking(validCover))
+            putString("content_ranking", encodeRanking(validContent))
+            putString("image_pin_domain", first.domain)
+            putString("image_pin_ip", first.ip)
+        }?.apply()
+        _state.value = current.copy(
+            coverRanking = validCover,
+            contentRanking = validContent,
+            imageHost = first.domain,
+            pinnedImage = first,
+            revision = current.revision + 1,
+        )
+        return true
+    }
+
+    private fun encodeRanking(ranking: List<DomainIp>): String =
+        JSONArray().apply {
+            ranking.forEach { ep -> put(JSONObject().put("domain", ep.domain).put("ip", ep.ip)) }
+        }.toString()
+
+    /** Ordered content hosts (`storage-b.{root}`) for the given service, then any unmeasured pool host. */
+    fun rankedContentHosts(forContent: Boolean): List<String> {
+        val state = _state.value
+        val ranking = if (forContent) state.contentRanking else state.coverRanking
+        val ranked = ranking.map { it.domain }.filter { d -> state.imageHosts.any { it.equals(d, true) } }
+        val manual = state.imageHost?.takeIf { host -> ranked.none { it.equals(host, true) } }
+        val rest = state.imageHosts.filter { h ->
+            h != manual && ranked.none { it.equals(h, true) }
+        }
+        return (listOfNotNull(manual) + ranked + rest).distinctBy { it.lowercase(Locale.ROOT) }
+    }
+
+    /** Best measured IP for a host: storage-b uses the content ranking, img.{root} uses the cover ranking. */
+    private fun rankedIpFor(hostname: String?): String? {
+        if (hostname == null) return null
+        val state = _state.value
+        // Reader bucket request -> content ranking.
+        state.contentRanking.firstOrNull { it.domain.equals(hostname, true) }?.let { return it.ip }
+        // Cover mirror img.{root} -> its root's cover ranking.
+        val contentHost = PicacgBuiltinNetwork.contentHostFor(hostname)
+        if (contentHost != null) {
+            state.coverRanking.firstOrNull { it.domain.equals(contentHost, true) }?.let { return it.ip }
+        }
+        // Same-root content bucket lookup for a cover-measured host (kept as a fallback when no content result).
+        state.coverRanking.firstOrNull { it.domain.equals(hostname, true) }?.let { return it.ip }
+        return null
+    }
+
+    private fun persistedRanking(key: String): List<DomainIp> {
+        val p = prefs() ?: return emptyList()
+        val raw = p.getString(key, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                val domain = obj.optString("domain").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val ip = obj.optString("ip").takeIf { isIpv4Literal(it) } ?: return@mapNotNull null
+                DomainIp(domain, ip)
+            }
+        }.getOrDefault(emptyList())
+    }
 
     private fun setPin(endpoint: DomainIp?, api: Boolean, manual: Boolean = true): Boolean {
         val current = _state.value
@@ -240,13 +340,11 @@ object PicacgRouteManager {
      */
     fun dns(): Dns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            val pin = _state.value.let { state ->
-                state.pinnedApi?.takeIf { it.domain.equals(hostname, true) }?.ip
-                    ?: state.pinnedImage?.takeIf { it.domain.equals(hostname, true) }?.ip
-                    ?: state.pinnedImage?.takeIf {
-                        it.domain.equals(PicacgBuiltinNetwork.contentHostFor(hostname), true)
-                    }?.ip
-            }
+            // Per-root measured IP first: content bucket (storage-b.{root}) or its cover mirror (img.{root}).
+            val imagePin = rankedIpFor(hostname)
+            val pin = imagePin
+                ?: _state.value.pinnedApi?.takeIf { it.domain.equals(hostname, true) }?.ip
+                ?: _state.value.pinnedImage?.takeIf { it.domain.equals(hostname, true) }?.ip
             val addresses = pin?.let(::listOf) ?: resolveIps(hostname)
             if (addresses.isNotEmpty()) return addresses.map(InetAddress::getByName)
             return Dns.SYSTEM.lookup(hostname)
@@ -310,36 +408,67 @@ object PicacgRouteManager {
      *     insecure urls as well, so storage1 items load through the same verified mirror.
      *  4. Hosts outside the bucket/mirror set and already-mirror urls are left untouched.
      */
-    fun rewriteImageUrl(url: String): String = runCatching {
+    /**
+     * All mirror candidates for one image, ordered fastest-first by the independent speed test.
+     * [PicacgImageFallbackInterceptor] walks these on failure, so a cold/failed mirror never leaves a
+     * fixed cover or page permanently broken.
+     *
+     * Covers and reader pages use distinct services (covers on imgproxy `img.{root}`, pages on the
+     * `storage-b.{root}` bucket); both fan out across every root:
+     *  - `/static/tobeimg/...` thumbnails → `img.{root}/insecure/...` (embedded b64 names the real bucket).
+     *  - `/static/tobs`, `/static/sub_storage_*` pages → `storage-b.{root}` (img nodes answer 502).
+     *  - already-mirror `/insecure` urls → swap only the `img.{root}` host.
+     *  - storage1/storage-b direct covers/avatars → `img.{root}/insecure` fetching the real origin.
+     * Hosts outside the bucket/mirror set yield a single untouched url.
+     */
+    fun candidateImageUrls(url: String): List<String> = runCatching {
         val original = URI(url)
-        if (original.scheme !in setOf("http", "https") || original.host.isNullOrBlank() || original.rawUserInfo != null) return url
+        if (original.scheme !in setOf("http", "https") || original.host.isNullOrBlank() || original.rawUserInfo != null) {
+            return@runCatching listOf(url)
+        }
         val host = original.host
-        if (PicacgBuiltinNetwork.isCoverHost(host)) return url
         val rawPath = original.rawPath.orEmpty()
-        val coverHost = PicacgBuiltinNetwork.coverHostFor(currentImageHost)
+        // Covers and reader pages are measured and ranked independently.
+        val coverRoots = rankedContentHosts(forContent = false)
+        val contentRoots = rankedContentHosts(forContent = true)
 
-        // 1) Cover thumbnails -> imgproxy insecure (base64 already encodes the real storage1/storage-b origin).
-        if (rawPath.startsWith(PicacgBuiltinNetwork.COVER_PROXY_PREFIX, ignoreCase = true)) {
-            if (coverHost != null) {
-                PicacgBuiltinNetwork.coverInsecureFromTobeimg(rawPath, coverHost)?.let { return@runCatching it }
+        val isTobeimg = rawPath.startsWith(PicacgBuiltinNetwork.COVER_PROXY_PREFIX, ignoreCase = true)
+        val isContent = PicacgBuiltinNetwork.isContentPath(rawPath)
+        val isInsecureMirror = PicacgBuiltinNetwork.isCoverHost(host) && rawPath.startsWith("/insecure", ignoreCase = true)
+        val isBucketDirect = PicacgBuiltinNetwork.isImageBucketHost(host)
+
+        val out = LinkedHashSet<String>()
+        when {
+            // 1) Cover thumbnails -> imgproxy insecure (base64 encodes the real storage1/storage-b origin).
+            isTobeimg -> coverRoots.forEach { contentHost ->
+                PicacgBuiltinNetwork.coverHostFor(contentHost)?.let { coverHost ->
+                    PicacgBuiltinNetwork.coverInsecureFromTobeimg(rawPath, coverHost)?.let(out::add)
+                }
             }
+            // 2) Reader pages stay on storage-b; never route tobs/sub_storage through imgproxy.
+            isContent -> contentRoots.forEach { contentHost -> out.add(rebuildImageUrl(original, contentHost, rawPath)) }
+            // 3) Already an imgproxy url: swap only the img host, keep the (self-contained) options/b64.
+            isInsecureMirror -> coverRoots.forEach { contentHost ->
+                PicacgBuiltinNetwork.coverHostFor(contentHost)?.let { coverHost ->
+                    out.add(rebuildImageUrl(original, coverHost, rawPath))
+                }
+            }
+            // 4) Direct bucket covers/avatars (storage1/storage-b) -> imgproxy insecure fetch of real origin.
+            isBucketDirect -> coverRoots.forEach { contentHost ->
+                PicacgBuiltinNetwork.coverHostFor(contentHost)?.let { coverHost ->
+                    out.add(PicacgBuiltinNetwork.coverInsecureFromOrigin(original.toASCIIString(), coverHost))
+                }
+            }
+            // 5) Other static paths already on a storage-b mirror -> fan out across content roots.
+            _state.value.imageHosts.any { it.equals(host, true) } ->
+                contentRoots.forEach { contentHost -> out.add(rebuildImageUrl(original, contentHost, rawPath)) }
+            else -> return@runCatching listOf(url)
         }
-        // 2) Reader pages must stay on storage-b; never route tobs/sub_storage through imgproxy.
-        if (PicacgBuiltinNetwork.isContentPath(rawPath)) {
-            val target = currentImageHost ?: return url
-            return@runCatching rebuildImageUrl(original, target, rawPath)
-        }
-        // 3) Direct bucket files (storage1 covers / avatars, …) -> imgproxy insecure fetch of the real origin.
-        if (coverHost != null && PicacgBuiltinNetwork.isImageBucketHost(host)) {
-            return@runCatching PicacgBuiltinNetwork.coverInsecureFromOrigin(original.toASCIIString(), coverHost)
-        }
-        // 4) Remaining content-pool paths -> selected storage-b source.
-        if (_state.value.imageHosts.any { it.equals(host, true) }) {
-            val target = currentImageHost ?: return url
-            return@runCatching rebuildImageUrl(original, target, rawPath)
-        }
-        url
-    }.getOrDefault(url)
+        if (out.isEmpty()) listOf(url) else out.toList()
+    }.getOrDefault(listOf(url))
+
+    /** The fastest candidate; kept for call sites that still take a single url. */
+    fun rewriteImageUrl(url: String): String = candidateImageUrls(url).firstOrNull() ?: url
 
     private fun rebuildImageUrl(original: URI, host: String, path: String): String = buildString {
         append(original.scheme).append("://").append(host)
