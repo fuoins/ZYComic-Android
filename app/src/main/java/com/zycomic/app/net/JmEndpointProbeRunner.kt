@@ -6,7 +6,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 
 /** JM endpoint probes participate in the same fair platform scheduler and shared cap. */
-internal class JmEndpointProbeRunner {
+internal class JmEndpointProbeRunner(
+    private val scheduler: FairSpeedTestProbeScheduler = SpeedTestProbeBudget.scheduler,
+) {
     suspend fun <T, R> run(
         targets: List<T>,
         probe: suspend (T) -> R,
@@ -15,7 +17,7 @@ internal class JmEndpointProbeRunner {
     ): List<Pair<T, R>> = coroutineScope {
         targets.map { target ->
             async {
-                SpeedTestProbeBudget.scheduler.withPermit(
+                scheduler.withPermit(
                     ContentPlatform.JM,
                     { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.JM, it) },
                 ) {

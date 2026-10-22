@@ -314,7 +314,8 @@ fun logcat(message: () -> String) = Unit
         logging_file,
         signer_file,
     ]
-    cp = ":".join([stdlib, coroutines, okhttp, okio, junit, "/tmp/jm-targeted-check/deps/json-20240303.jar"])
+    mockwebserver = jar("com.squareup.okhttp3", "mockwebserver3", "5.3.2")
+    cp = ":".join([stdlib, coroutines, okhttp, okio, junit, "/tmp/jm-targeted-check/deps/json-20240303.jar", mockwebserver])
     subprocess.run([
         "java", "-cp", compiler, "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
         "-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", cp,

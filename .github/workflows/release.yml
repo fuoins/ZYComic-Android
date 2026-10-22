@@ -89,10 +89,25 @@ jobs:
           echo "Release source SHA: $SHA"
           grep -E 'version(Code|Name) =' app/build.gradle.kts
 
+      - name: Isolated JVM contract tests
+        run: |
+          ./gradlew -p tools/offline-tests prepareHarnessDependencies --console=plain
+          python3 tools/test_maccms_coordinator.py
+          python3 tools/test_picacg_repository.py
+
       - name: Release unit tests
         env:
           ORG_GRADLE_PROJECT_abi: 'arm64-v8a'
-        run: ./gradlew :app:testReleaseUnitTest --console=plain -Dorg.gradle.jvmargs="-Xmx4g" --build-cache
+        run: |
+          ./gradlew :app:testReleaseUnitTest --console=plain -Dorg.gradle.jvmargs="-Xmx4g" --build-cache
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          reports = [ET.parse(path).getroot() for path in glob.glob('app/build/test-results/testReleaseUnitTest/TEST-*.xml')]
+          counts = {key: sum(int(report.get(key, 0)) for report in reports) for key in ('tests', 'failures', 'errors', 'skipped')}
+          print('Release unit test totals:', counts)
+          assert counts['tests'] > 0 and counts['failures'] == 0 and counts['errors'] == 0
+          PY
 
       - name: Decode release keystore
         if: ${{ !inputs.validate_only }}

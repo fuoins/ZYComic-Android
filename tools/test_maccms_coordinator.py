@@ -1,142 +1,101 @@
 #!/usr/bin/env python3
-"""Compile/run focused Maccms coordinator tests using only locally cached jars; never invokes Gradle or downloads."""
+"""Run production coordinator contracts against isolated fakes, never the Android app classpath.
+
+Prepare dependencies with ./gradlew -p tools/offline-tests prepareHarnessDependencies.
+Every method runs in a fresh JVM because the production coordinator owns process-wide state.
+"""
 from pathlib import Path
-import shutil
+import os
+import re
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / "tools/offline-tests/maccms-coordinator"
-CACHE = Path.home() / ".gradle/caches/modules-2/files-2.1"
-LOCAL_DEPS = Path("/tmp/jm-targeted-check/deps")
-OUT = Path("/tmp/maccms-coordinator-offline-runtime")
-CLASSES = OUT / "classes"
+DEPS = ROOT / "tools/offline-tests/build/deps"
+CACHE = Path(os.environ.get("GRADLE_USER_HOME", Path.home() / ".gradle")) / "caches/modules-2/files-2.1"
 
 
 def jar(group: str, name: str, version: str) -> str:
+    prepared = DEPS / f"{name}-{version}.jar"
+    if prepared.is_file():
+        return str(prepared)
     matches = sorted((CACHE / group / name / version).rglob("*.jar"))
-    local = LOCAL_DEPS / f"{name}-{version}.jar"
-    if not matches and local.is_file():
-        matches = [local]
     if not matches:
-        raise RuntimeError(f"Cached dependency not found: {group}:{name}:{version}; this runner is offline")
+        raise RuntimeError(f"Missing {group}:{name}:{version}; run prepareHarnessDependencies first")
     return str(matches[0])
-
-
-def latest(group: str, name: str) -> str:
-    base = CACHE / group / name
-    for version in sorted(base.iterdir(), reverse=True):
-        matches = sorted(version.rglob("*.jar"))
-        if matches:
-            return str(matches[0])
-    raise RuntimeError(f"Cached dependency not found: {group}:{name}; this runner is offline")
 
 
 def main() -> None:
     net = ROOT / "app/src/main/java/com/zycomic/app/net"
-    app_tests = ROOT / "app/src/test/java/com/zycomic/app/net"
-    offline_tests = HARNESS / "MaccmsCoordinatorRuntimeTest.kt"
-    previous_cache_test = app_tests / "CompletedSpeedTestCoordinatorRuntimeTest.kt"
-    startup_runtime_test = app_tests / "StartupSpeedTestSharingRuntimeTest.kt"
-    pinned_transport = net / "MaccmsPinnedTransport.kt"
-    sources = [
-        HARNESS / "MaccmsCoordinatorAndroid.kt",
-        HARNESS / "MaccmsCoordinatorConnectivity.kt",
-        HARNESS / "Log.kt",
-        HARNESS / "MaccmsCoordinatorPlatform.kt",
-        HARNESS / "MaccmsCoordinatorFakes.kt",
-        HARNESS / "MaccmsOfflineProbeExtension.kt",
-        net / "DomainIp.kt",
-        pinned_transport,
-        net / "MaccmsSpeedTester.kt",
-        net / "CompletedSpeedTestPhases.kt",
-        net / "StartupSpeedTestGate.kt",
-        net / "StartupSpeedTestRequest.kt",
-        net / "SpeedTestRunPolicy.kt",
-        net / "FullSpeedTestRequest.kt",
-        net / "PlatformStartupStatus.kt",
-        net / "PlatformSpeedTestCoordinator.kt",
-        net / "PlatformSpeedTestReport.kt",
-        net / "SpeedTestTimings.kt",
-        net / "SpeedTestTimingLog.kt",
-        net / "SpeedTestUiTextPolicy.kt",
-        net / "ImageSourceDisplayPolicy.kt",
-        net / "ImgDomainPolicy.kt",
-        previous_cache_test,
-        startup_runtime_test,
-        offline_tests,
+    test_names = [
+        "CompletedSpeedTestCoordinatorRuntimeTest",
+        "StartupSpeedTestSharingRuntimeTest",
+        "CoordinatorRetestAllRuntimeTest",
+        "StartupCompletionToastRuntimeTest",
+        "MaccmsCoordinatorRuntimeTest",
     ]
-    missing = [str(path) for path in sources if not path.is_file()]
-    if missing:
-        raise RuntimeError("Missing coordinator runtime source(s): " + ", ".join(missing))
-
+    tests = [HARNESS / f"{name}.kt" for name in test_names]
+    sources = [HARNESS / name for name in [
+        "MaccmsCoordinatorAndroid.kt", "MaccmsCoordinatorConnectivity.kt", "Log.kt",
+        "MaccmsCoordinatorPlatform.kt", "MaccmsCoordinatorFakes.kt", "MaccmsOfflineProbeExtension.kt",
+    ]]
+    sources += [net / f"{name}.kt" for name in [
+        "DomainIp", "MaccmsPinnedTransport", "MaccmsSpeedTester", "CompletedSpeedTestPhases",
+        "StartupSpeedTestGate", "StartupSpeedTestRequest", "SpeedTestRunPolicy", "FullSpeedTestRequest",
+        "PlatformStartupStatus", "PlatformSpeedTestCoordinator", "PlatformSpeedTestReport",
+        "SpeedTestTimings", "SpeedTestTimingLog", "SpeedTestUiTextPolicy", "ImageSourceDisplayPolicy",
+        "ImgDomainPolicy",
+    ]]
+    sources += tests
+    for path in sources:
+        if not path.is_file():
+            raise RuntimeError(f"Missing coordinator source: {path}")
+    selectors = []
+    for path in tests:
+        current_class = None
+        for match in re.finditer(r"\bclass\s+(\w+)|@Test\s+fun\s+`([^`]+)`", path.read_text()):
+            if match.group(1):
+                current_class = match.group(1)
+            else:
+                assert current_class, path
+                selectors.append(f"com.zycomic.app.net.{current_class}#{match.group(2)}")
+    assert len(selectors) == 23, f"Expected all 23 coordinator contract methods, found {len(selectors)}"
     stdlib = jar("org.jetbrains.kotlin", "kotlin-stdlib", "2.2.21")
-    coroutines = latest("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm")
-    junit = Path("/tmp/jm-targeted-check/junit-console.jar")
-    json = Path("/tmp/zycomic-ui-check/json.jar")
-    if not junit.is_file() or not json.is_file():
-        raise RuntimeError("Cached JUnit/JSON runtime jars are missing; this runner is offline")
-    compiler = ":".join([
-        jar("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.2.21"),
-        stdlib,
+    coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.10.2")
+    junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")
+    compiler = os.pathsep.join([
+        jar("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.2.21"), stdlib,
         jar("org.jetbrains.kotlin", "kotlin-script-runtime", "2.2.21"),
         jar("org.jetbrains.kotlin", "kotlin-reflect", "1.6.10"),
-        jar("org.jetbrains.kotlin", "kotlin-daemon-embeddable", "2.2.21"),
-        coroutines,
+        jar("org.jetbrains.kotlin", "kotlin-daemon-embeddable", "2.2.21"), coroutines,
         jar("org.jetbrains", "annotations", "13.0"),
     ])
-    okhttp = jar("com.squareup.okhttp3", "okhttp-jvm", "5.3.2")
-    okio = jar("com.squareup.okio", "okio-jvm", "3.16.4")
-    classpath = ":".join([stdlib, str(junit), str(json), coroutines, okhttp, okio])
-    OUT.mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(CLASSES, ignore_errors=True)
-    CLASSES.mkdir(parents=True)
-    compile_command = [
-        "java", "-cp", compiler, "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
-        "-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", classpath,
-        "-d", str(CLASSES), *map(str, sources),
-    ]
-    print(f"Compiling {len(sources)} coordinator production/fake/test sources with cached Kotlin 2.2.21", flush=True)
-    subprocess.run(compile_command, cwd=ROOT, check=True)
-    extension_service = CLASSES / "META-INF/services/org.junit.jupiter.api.extension.Extension"
-    extension_service.parent.mkdir(parents=True, exist_ok=True)
-    extension_service.write_text("com.zycomic.app.net.MaccmsOfflineProbeExtension\n", encoding="utf-8")
-
-    custom_methods = [
-        "complete phase cache still publishes a fresh current round IP for Maccms",
-        "persisted historical selected IP is ignored in favor of this run",
-        "failed Picacg run with old snapshot cannot fall back to old IP or probe Maccms",
-        "unpublished returned snapshot is discarded before Maccms binding",
-        "configuration race discards stale selection and retries with only latest generation IP",
-        "cancellation propagates and never hands a cached selection to Maccms",
-    ]
-    old_methods = [
-        "updated config runs full probes and duplicate no-sample request reuses other phases",
-        "completed config update is not repeated as a quick test by duplicate startup",
-        "normal startup retains independent top five preferences and platform toggles",
-        "new real image sample probes Picacg API and image phases",
-        "forceFresh retests all platforms and onlyPlatform retests just its platform",
-        "network and remote config version changes invalidate phase reuse",
-        "disabled platform does not start its underlying tester",
-        "failed explicit single platform retest cannot be hidden by previously completed phases",
-    ]
-    startup_methods = [
-        "concurrent startup waiters share one run and completed result without resetting checks",
-        "cancelling one startup waiter leaves worker and surviving waiter intact",
-        "force fresh and identity changes create new startup generations",
-        "stale startup generation cannot publish old report or lines3 IP",
-    ]
-    selectors = [("MaccmsCoordinatorRuntimeTest", method) for method in custom_methods]
-    selectors += [("CompletedSpeedTestCoordinatorRuntimeTest", method) for method in old_methods]
-    selectors += [("StartupSpeedTestSharingRuntimeTest", method) for method in startup_methods]
-    for class_name, method in selectors:
-        selector = f"com.zycomic.app.net.{class_name}#{method}"
-        command = [
-            "java", "-Djunit.jupiter.extensions.autodetection.enabled=true", "-jar", str(junit), "execute", "--class-path", str(CLASSES) + ":" + classpath,
-            "--select-method=" + selector, "--disable-banner", "--details=summary", "--fail-if-no-tests",
-        ]
-        print("FRESH TEST JVM:", selector, flush=True)
-        subprocess.run(command, cwd=ROOT, check=True)
-    print(f"PASS: {len(selectors)} focused runtime methods; each method ran in a fresh JVM")
+    classpath = os.pathsep.join([
+        stdlib, junit, coroutines, jar("org.json", "json", "20240303"),
+        jar("com.squareup.okhttp3", "okhttp-jvm", "5.3.2"),
+        jar("com.squareup.okio", "okio-jvm", "3.16.4"),
+    ])
+    with tempfile.TemporaryDirectory(prefix="zycomic-coordinator-") as temp:
+        classes = Path(temp) / "classes"
+        classes.mkdir()
+        print(f"Compiling {len(sources)} production/fake/test sources", flush=True)
+        subprocess.run([
+            "java", "-cp", compiler, "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
+            "-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", classpath,
+            "-d", str(classes), *map(str, sources),
+        ], cwd=ROOT, check=True)
+        extension = classes / "META-INF/services/org.junit.jupiter.api.extension.Extension"
+        extension.parent.mkdir(parents=True)
+        extension.write_text("com.zycomic.app.net.MaccmsOfflineProbeExtension\n")
+        for selector in selectors:
+            print("FRESH TEST JVM:", selector, flush=True)
+            subprocess.run([
+                "java", "-Djunit.jupiter.extensions.autodetection.enabled=true", "-jar", junit,
+                "execute", "--class-path", str(classes) + os.pathsep + classpath,
+                "--select-method=" + selector, "--disable-banner", "--details=summary", "--fail-if-no-tests",
+            ], cwd=ROOT, check=True)
+    print(f"PASS: {len(selectors)} coordinator runtime methods; each ran in a fresh JVM", flush=True)
 
 
 if __name__ == "__main__":

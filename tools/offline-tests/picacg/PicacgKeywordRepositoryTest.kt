@@ -20,6 +20,7 @@ import java.util.ArrayDeque
 
 class PicacgKeywordRepositoryTest {
     private val responses = ArrayDeque<String>()
+    private val metadataResponses = mutableMapOf<String, String>()
 
     @BeforeEach
     fun setUp() {
@@ -30,6 +31,8 @@ class PicacgKeywordRepositoryTest {
         PicacgRepository.installClientForTests(null)
         PicacgRouteManager.currentImageHost = "img.example"
         responses.clear()
+        metadataResponses.clear()
+        MaccmsRecommendationRouter.ids = emptyList()
         val http = OkHttpClient.Builder().addInterceptor(
             Interceptor { chain ->
                 Response.Builder()
@@ -37,7 +40,7 @@ class PicacgKeywordRepositoryTest {
                     .protocol(Protocol.HTTP_1_1)
                     .code(200)
                     .message("OK")
-                    .body(responses.removeFirst().toResponseBody("application/json".toMediaType()))
+                    .body((metadataResponses[chain.request().url.encodedPath] ?: responses.removeFirst()).toResponseBody("application/json".toMediaType()))
                     .build()
             },
         ).build()
@@ -73,7 +76,10 @@ class PicacgKeywordRepositoryTest {
         assertEquals(listOf("kept"), PicacgRepository.leaderboard().map { it.id })
         responses += collection
         assertEquals(listOf("kept"), PicacgRepository.random().map { it.id })
-        responses += collection
+        // Recommendations now receive anonymous Maccms IDs and fetch Picacg card metadata.
+        MaccmsRecommendationRouter.ids = listOf("hit", "kept")
+        metadataResponses["/api/v2/comics/hit"] = """{"code":200,"data":{"comic":{"_id":"hit","title":"blocked"}}}"""
+        metadataResponses["/api/v2/comics/kept"] = """{"code":200,"data":{"comic":{"_id":"kept","title":"clean"}}}"""
         assertEquals(listOf("kept"), PicacgRepository.recommendations("parent").map { it.id })
     }
 

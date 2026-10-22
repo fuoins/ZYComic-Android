@@ -1,12 +1,15 @@
 package com.zycomic.app.net
 
-import com.sun.net.httpserver.HttpServer
 import com.zycomic.app.picacg.MaccmsRecommendationClient
 import com.zycomic.app.picacg.MaccmsRecommendationRouter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -15,7 +18,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.IOException
-import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
@@ -153,25 +155,34 @@ class MaccmsLines3BindingTest {
 
     @Test
     fun `recommendation TCP uses captured IP and keeps each macapi URL and Host`() {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        val seen = CopyOnWriteArrayList<String>()
-        server.createContext("/") { exchange ->
-            seen += exchange.requestHeaders.getFirst("Host")
-            assertEquals("/picacomic/rec/111111111111111111111111?limit=10", exchange.requestURI.toString())
-            val body = "[\"aaaaaaaaaaaaaaaaaaaaaaaa\"]".toByteArray()
-            exchange.sendResponseHeaders(200, body.size.toLong())
-            exchange.responseBody.use { it.write(body) }
+        val server = MockWebServer()
+        val requests = CopyOnWriteArrayList<RecordedRequest>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                return MockResponse.Builder()
+                    .code(200)
+                    .body("[\"aaaaaaaaaaaaaaaaaaaaaaaa\"]")
+                    .build()
+            }
         }
         server.start()
         try {
             MaccmsSpeedTester.routes.forEach { host ->
-                val client = MaccmsRecommendationClient("http://$host:${server.address.port}/".toHttpUrl(), "127.0.0.1")
+                val client = MaccmsRecommendationClient("http://$host:${server.port}/".toHttpUrl(), "127.0.0.1")
                 val result = runBlocking { client.recommendationIds("111111111111111111111111") }
                 assertEquals(listOf("aaaaaaaaaaaaaaaaaaaaaaaa"), result)
             }
-            assertEquals(MaccmsSpeedTester.routes.map { "$it:${server.address.port}" }, seen.toList())
+            assertEquals(
+                MaccmsSpeedTester.routes.map { "$it:${server.port}" },
+                requests.map { it.headers["Host"] },
+            )
+            assertEquals(
+                List(MaccmsSpeedTester.routes.size) { "/picacomic/rec/111111111111111111111111?limit=10" },
+                requests.map { it.target },
+            )
         } finally {
-            server.stop(0)
+            server.close()
         }
     }
 }

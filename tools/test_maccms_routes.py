@@ -140,7 +140,8 @@ object DevConfig { var appContext: android.content.Context? = null }
         coroutines,
         jar("org.jetbrains", "annotations", "13.0"),
     ])
-    cp = ":".join([stdlib, coroutines, okhttp, okio, json, junit])
+    mockwebserver = jar("com.squareup.okhttp3", "mockwebserver3", "5.3.2")
+    cp = ":".join([stdlib, coroutines, okhttp, okio, json, junit, mockwebserver])
     sources += [platform_stub, android_stub, dev_config_stub]
     print(f"Compiling {len(sources)} focused Kotlin source/test files with cached Kotlin 2.2.21")
     subprocess.run([

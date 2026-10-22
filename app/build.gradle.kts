@@ -125,6 +125,11 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+
+    testOptions {
+        // Storage tests provide their own Context/SharedPreferences implementations.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {
@@ -280,6 +285,9 @@ dependencies {
 
     // Tests
     testImplementation(libs.bundles.test)
+    // Retain the existing JUnit 4 suites alongside Jupiter; both engines run in CI.
+    testImplementation("junit:junit:4.13.2")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:6.0.3")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
     testRuntimeOnly(libs.junit.platform.launcher)

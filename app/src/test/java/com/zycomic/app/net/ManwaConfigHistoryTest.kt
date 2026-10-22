@@ -5,8 +5,12 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -39,7 +43,8 @@ class ManwaConfigHistoryTest {
 
     @BeforeEach
     fun resetState() {
-        DevConfig.appContext = context
+        mockkObject(DevConfig)
+        every { DevConfig.appContext } returns context
         prefs.edit().clear().commit()
         RouteManager.clearConfiguration()
         RouteManager.setAutoSelectEnabled(true)
@@ -49,6 +54,11 @@ class ManwaConfigHistoryTest {
         StartupPlatformPolicy.load(context)
         StartupPlatformPolicy.setManwaEnabled(true)
         assertTrue(StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA))
+    }
+
+    @AfterEach
+    fun tearDown() {
+        unmockkObject(DevConfig)
     }
 
     @Test

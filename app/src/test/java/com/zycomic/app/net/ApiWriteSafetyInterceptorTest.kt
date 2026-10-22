@@ -1,6 +1,9 @@
 package com.zycomic.app.net
 
-import com.sun.net.httpserver.HttpServer
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -8,7 +11,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.IOException
-import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
@@ -113,19 +115,20 @@ class ApiWriteSafetyInterceptorTest {
 
     private fun withServer(code: Int, headers: Map<String, String>, block: (String, AtomicInteger) -> Unit) {
         val count = AtomicInteger()
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { exchange ->
-            val first = count.incrementAndGet() == 1
-            exchange.requestBody.use { it.readBytes() }
-            if (first) headers.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
-            exchange.sendResponseHeaders(if (first) code else 200, -1)
-            exchange.close()
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val first = count.incrementAndGet() == 1
+                val response = MockResponse.Builder().code(if (first) code else 200)
+                if (first) headers.forEach { (name, value) -> response.addHeader(name, value) }
+                return response.build()
+            }
         }
         server.start()
         try {
-            block("http://127.0.0.1:${server.address.port}/write", count)
+            block(server.url("/write").toString(), count)
         } finally {
-            server.stop(0)
+            server.close()
         }
     }
 

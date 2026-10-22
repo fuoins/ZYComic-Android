@@ -1,0 +1,20 @@
+{
+  "dependencies": [
+    { "key": "kotlin-compiler", "coordinate": "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.2.21", "jar": "kotlin-compiler-embeddable-2.2.21.jar" },
+    { "key": "kotlin-stdlib", "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.2.21", "jar": "kotlin-stdlib-2.2.21.jar" },
+    { "key": "kotlin-script-runtime", "coordinate": "org.jetbrains.kotlin:kotlin-script-runtime:2.2.21", "jar": "kotlin-script-runtime-2.2.21.jar" },
+    { "key": "kotlin-reflect", "coordinate": "org.jetbrains.kotlin:kotlin-reflect:1.6.10", "jar": "kotlin-reflect-1.6.10.jar" },
+    { "key": "kotlin-daemon", "coordinate": "org.jetbrains.kotlin:kotlin-daemon-embeddable:2.2.21", "jar": "kotlin-daemon-embeddable-2.2.21.jar" },
+    { "key": "coroutines", "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.0", "jar": "kotlinx-coroutines-core-jvm-1.8.0.jar" },
+    { "key": "annotations", "coordinate": "org.jetbrains:annotations:13.0", "jar": "annotations-13.0.jar" },
+    { "key": "okhttp", "coordinate": "com.squareup.okhttp3:okhttp-jvm:5.3.2", "jar": "okhttp-jvm-5.3.2.jar" },
+    { "key": "okio", "coordinate": "com.squareup.okio:okio-jvm:3.16.4", "jar": "okio-jvm-3.16.4.jar" },
+    { "key": "json", "coordinate": "org.json:json:20240303", "jar": "json-20240303.jar" },
+    { "key": "junit-console", "coordinate": "org.junit.platform:junit-platform-console-standalone:1.10.2", "jar": "junit-platform-console-standalone-1.10.2.jar" }
+  ],
+  "resolution": {
+    "preferredDirectory": "tools/offline-tests/build/deps",
+    "gradleCacheFallback": "~/.gradle/caches/modules-2/files-2.1",
+    "overrideEnvironmentVariables": ["PICACG_HARNESS_DEPS", "GRADLE_MODULE_CACHE"]
+  }
+}

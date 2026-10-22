@@ -6,6 +6,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -18,7 +19,7 @@ class JmEndpointProbeRunnerTest {
 
     @Test
     fun `runner bounds concurrency without serializing and preserves input order`() = runBlocking {
-        val runner = JmEndpointProbeRunner(concurrency = 2)
+        val runner = JmEndpointProbeRunner(FairSpeedTestProbeScheduler(maxConcurrent = 2, picacgMaxConcurrent = 1))
         val targets = listOf(1, 2, 3, 4)
         val gates = targets.associateWith { CompletableDeferred<Unit>() }
         val started = Channel<Int>(Channel.UNLIMITED)
@@ -70,7 +71,7 @@ class JmEndpointProbeRunnerTest {
 
     @Test
     fun `started callback is immediate and fast result is not blocked by slow endpoint`() = runBlocking {
-        val runner = JmEndpointProbeRunner(concurrency = 2)
+        val runner = JmEndpointProbeRunner(FairSpeedTestProbeScheduler(maxConcurrent = 2, picacgMaxConcurrent = 1))
         val slowGate = CompletableDeferred<Unit>()
         val started = Channel<String>(Channel.UNLIMITED)
         val results = Channel<Pair<String, String>>(Channel.UNLIMITED)
@@ -111,7 +112,7 @@ class JmEndpointProbeRunnerTest {
 
     @Test
     fun `cancellation propagates without reporting a completed result`() = runBlocking {
-        val runner = JmEndpointProbeRunner(concurrency = 1)
+        val runner = JmEndpointProbeRunner(FairSpeedTestProbeScheduler(maxConcurrent = 1, picacgMaxConcurrent = 1))
         val started = Channel<String>(Channel.UNLIMITED)
         val results = Channel<String>(Channel.UNLIMITED)
         val probeCancelled = AtomicBoolean(false)
@@ -144,45 +145,63 @@ class JmEndpointProbeRunnerTest {
     }
 
     @Test
-    fun `default concurrency permits are isolated per runner instance`() = runBlocking {
-        val runnerA = JmEndpointProbeRunner()
-        val runnerB = JmEndpointProbeRunner()
-        val targets = (0..24).toList()
+    fun `runner instances share the injected concurrency budget`() = runBlocking {
+        val scheduler = FairSpeedTestProbeScheduler(maxConcurrent = 2, picacgMaxConcurrent = 1)
+        val runnerA = JmEndpointProbeRunner(scheduler)
+        val runnerB = JmEndpointProbeRunner(scheduler)
+        val targets = (0..4).toList()
         val gatesA = targets.associateWith { CompletableDeferred<Unit>() }
         val gatesB = targets.associateWith { CompletableDeferred<Unit>() }
-        val started = Channel<Pair<String, Int>>(Channel.UNLIMITED)
+        val entered = Channel<Pair<String, Int>>(Channel.UNLIMITED)
+        val active = AtomicInteger()
+        val maxActive = AtomicInteger()
 
         val resultA = async {
             runnerA.run(
                 targets = targets,
                 probe = { target ->
-                    gatesA.getValue(target).await()
-                    target
+                    val nowActive = active.incrementAndGet()
+                    maxActive.updateAndGet { current -> maxOf(current, nowActive) }
+                    entered.trySend("A" to target)
+                    try {
+                        gatesA.getValue(target).await()
+                        target
+                    } finally {
+                        active.decrementAndGet()
+                    }
                 },
-                onStarted = { target -> started.trySend("A" to target) },
             )
         }
         val resultB = async {
             runnerB.run(
                 targets = targets,
                 probe = { target ->
-                    gatesB.getValue(target).await()
-                    target
+                    val nowActive = active.incrementAndGet()
+                    maxActive.updateAndGet { current -> maxOf(current, nowActive) }
+                    entered.trySend("B" to target)
+                    try {
+                        gatesB.getValue(target).await()
+                        target
+                    } finally {
+                        active.decrementAndGet()
+                    }
                 },
-                onStarted = { target -> started.trySend("B" to target) },
             )
         }
 
-        val starts = (1..48).map { withTimeout(5_000) { started.receive() } }
-        assertEquals(24, starts.count { it.first == "A" })
-        assertEquals(24, starts.count { it.first == "B" })
-        assertFalse(starts.contains("A" to 24))
-        assertFalse(starts.contains("B" to 24))
+        val starts = (1..2).map { withTimeout(5_000) { entered.receive() } }
+        assertEquals(2, starts.size)
+        assertEquals(2, maxActive.get())
+        withTimeout(5_000) {
+            while (scheduler.queuedCount < 8) yield()
+        }
+        assertTrue(entered.tryReceive().isFailure, "both runner instances must share the same concurrency cap")
 
         gatesA.values.forEach { it.complete(Unit) }
         gatesB.values.forEach { it.complete(Unit) }
         assertEquals(targets.map { it to it }, withTimeout(5_000) { resultA.await() })
         assertEquals(targets.map { it to it }, withTimeout(5_000) { resultB.await() })
+        assertEquals(2, maxActive.get(), "the shared scheduler should allow parallel probes without exceeding its cap")
     }
 
     @Test

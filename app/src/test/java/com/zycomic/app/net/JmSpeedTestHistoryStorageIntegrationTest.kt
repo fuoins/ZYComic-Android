@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import com.zycomic.app.platform.StartupPlatformPolicy
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -17,13 +21,19 @@ class JmSpeedTestHistoryStorageIntegrationTest {
 
     @BeforeEach
     fun setUp() {
-        DevConfig.appContext = context
+        mockkObject(DevConfig)
+        every { DevConfig.appContext } returns context
         context.commitsSucceed = true
         context.commitThrows = false
         StartupPlatformPolicy.load(context)
         StartupPlatformPolicy.setJmEnabled(true)
         JmSpeedTestHistoryStorage.saveLines(JmSpeedTestHistoryPolicy.PhaseHistory(null))
         JmSpeedTestHistoryStorage.saveImages(JmSpeedTestHistoryPolicy.PhaseHistory(null))
+    }
+
+    @AfterEach
+    fun tearDown() {
+        unmockkObject(DevConfig)
     }
 
     @Test
@@ -125,13 +135,9 @@ class JmSpeedTestHistoryStorageIntegrationTest {
 
     @Test
     fun `history cannot be reported saved without an application context`() {
-        DevConfig.appContext = null
-        try {
-            assertFalse(JmSpeedTestHistoryStorage.saveLines(JmSpeedTestHistoryPolicy.PhaseHistory(7)))
-            assertFalse(JmSpeedTestHistoryStorage.saveImages(JmSpeedTestHistoryPolicy.PhaseHistory(7)))
-        } finally {
-            DevConfig.appContext = context
-        }
+        every { DevConfig.appContext } returns null
+        assertFalse(JmSpeedTestHistoryStorage.saveLines(JmSpeedTestHistoryPolicy.PhaseHistory(7)))
+        assertFalse(JmSpeedTestHistoryStorage.saveImages(JmSpeedTestHistoryPolicy.PhaseHistory(7)))
     }
 
     /** Compile-only analogue of the actual coordinator call, including its named arguments and trailing lambda. */

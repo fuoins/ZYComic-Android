@@ -1,0 +1,4 @@
+package eu.kanade.tachiyomi.source.online
+import eu.kanade.tachiyomi.source.model.*
+import okhttp3.*
+abstract class HttpSource { abstract val name:String; abstract val lang:String; open val supportsLatest=false; abstract val baseUrl:String; open val client=OkHttpClient(); open val headers=Headers.Builder().build(); open fun getFilterList()=FilterList(); open suspend fun getPopularManga(page:Int)=MangasPage(emptyList(),false); open suspend fun getLatestUpdates(page:Int)=MangasPage(emptyList(),false); open suspend fun getSearchManga(page:Int,query:String,filters:FilterList)=MangasPage(emptyList(),false); open suspend fun getMangaUpdate(manga:SManga,chapters:List<SChapter>,fetchDetails:Boolean,fetchChapters:Boolean)=SMangaUpdate(manga,chapters); open suspend fun getPageList(chapter:SChapter)=emptyList<Page>(); open suspend fun getImageUrl(page:Page)=page.url; open suspend fun getImage(page:Page):Response=error("stub") }
