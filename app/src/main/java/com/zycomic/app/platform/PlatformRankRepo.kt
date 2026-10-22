@@ -42,7 +42,7 @@ internal object PlatformRankRepo {
                     title = title.trim(),
                     coverUrl = cover,
                     externalId = "",
-                )
+                ),
             )
         }
         return out
@@ -88,7 +88,7 @@ internal object PlatformRankRepo {
                         title = title.trim(),
                         coverUrl = cover,
                         externalId = id,
-                    )
+                    ),
                 )
             }
         }
@@ -101,7 +101,7 @@ internal object PlatformRankRepo {
             .subs.map { it.id }.toSet()
         val id = if (subId in validIds) subId else "9"
         val body = httpGet(
-            "https://m.kuaikanmanhua.com/mini/v1/comic/mkuaikan/rank_list?since=0&limit=50&need_ranks=true&rank_id=$id"
+            "https://m.kuaikanmanhua.com/mini/v1/comic/mkuaikan/rank_list?since=0&limit=50&need_ranks=true&rank_id=$id",
         )
         val root = JSONObject(body)
         val topics = root.optJSONObject("data")?.optJSONArray("topics") ?: return emptyList()
@@ -114,7 +114,7 @@ internal object PlatformRankRepo {
                     title = t.optString("title").trim(),
                     coverUrl = t.optString("image_url"),
                     externalId = t.opt("id")?.toString().orEmpty(),
-                )
+                ),
             )
         }
         return out

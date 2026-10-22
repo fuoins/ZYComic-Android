@@ -26,7 +26,7 @@ internal object PlatformImageLoader {
                 chain.proceed(
                     chain.request().newBuilder()
                         .header("User-Agent", PlatformNet.UA)
-                        .build()
+                        .build(),
                 )
             }
             .build()

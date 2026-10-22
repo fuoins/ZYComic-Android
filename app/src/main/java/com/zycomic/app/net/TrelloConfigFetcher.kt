@@ -12,7 +12,7 @@ object TrelloConfigFetcher {
 
     private val LINE_PATHS = listOf(
         "data.hosts", "data.lines", "data.api_urls", "data.api_domains", "data.domains",
-        "hosts", "lines", "api_urls", "api_domains", "domains"
+        "hosts", "lines", "api_urls", "api_domains", "domains",
     )
 
     suspend fun fetchLines(): List<String> = withContext(Dispatchers.IO) {

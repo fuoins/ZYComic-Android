@@ -22,7 +22,9 @@ class ReaderViewModel(private val chapterId: String) {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    init { load() }
+    init {
+        load()
+    }
 
     fun load() {
         scope.launch {

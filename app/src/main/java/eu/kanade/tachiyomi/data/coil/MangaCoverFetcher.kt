@@ -227,7 +227,9 @@ class MangaCoverFetcher(
             val target = rm.imgRewriteTarget
             if (!target.isNullOrBlank()) {
                 url!!.replace(Regex("https?://[^/]+"), "https://$target")
-            } else url
+            } else {
+                url
+            }
         }
         val request = Request.Builder().apply {
             url(reqUrl!!)

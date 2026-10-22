@@ -1,6 +1,5 @@
 package com.zycomic.app.reader
 
-import com.zycomic.app.data.dto.Manga as MangaDto
 import com.zycomic.app.data.repository.ReaderRepository
 import com.zycomic.app.net.ManwaInterceptor
 import com.zycomic.app.net.NetworkModule
@@ -20,6 +19,7 @@ import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.io.IOException
+import com.zycomic.app.data.dto.Manga as MangaDto
 
 /**
  * Manwa 原生图源：把 ZYComic 的 API 适配成 komikku [HttpSource] 接口。

@@ -3,11 +3,11 @@ package eu.kanade.tachiyomi.ui.reader.viewer
 import android.content.Context
 import android.graphics.Color
 import android.view.Gravity
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 
 /** Neutral, non-clickable status placeholder shown while a visible page is recovering. */
 class SlowPageOverlay(

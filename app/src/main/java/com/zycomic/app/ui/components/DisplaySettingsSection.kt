@@ -43,7 +43,7 @@ fun DisplaySettingsSection(
             }
         }
 
-        if (displayMode > 2) return@Column   // 列表档没有列数概念
+        if (displayMode > 2) return@Column // 列表档没有列数概念
         FilterSection("每行数量") {
             Text(
                 if (gridColumns == 0) "自动" else gridColumns.toString(),

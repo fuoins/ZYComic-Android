@@ -193,7 +193,10 @@ private fun BookUnblockDialog(
 
             OutlinedTextField(
                 value = keyword,
-                onValueChange = { keyword = it; allSelected = false },
+                onValueChange = {
+                    keyword = it
+                    allSelected = false
+                },
                 placeholder = { Text("搜索已屏蔽漫画名") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -206,8 +209,11 @@ private fun BookUnblockDialog(
                 TextButton(
                     onClick = {
                         allSelected = !allSelected
-                        selected = if (allSelected) filtered.map { it.id }.toSet()
-                        else selected - filtered.map { it.id }.toSet()
+                        selected = if (allSelected) {
+                            filtered.map { it.id }.toSet()
+                        } else {
+                            selected - filtered.map { it.id }.toSet()
+                        }
                     },
                     enabled = filtered.isNotEmpty(),
                 ) { Text(if (allSelected) "取消全选" else "全选(筛出${filtered.size})") }
@@ -241,8 +247,11 @@ private fun BookUnblockDialog(
                             book = book,
                             selected = selected.contains(book.id),
                             onClickRow = {
-                                selected = if (selected.contains(book.id)) selected - book.id
-                                else selected + book.id
+                                selected = if (selected.contains(book.id)) {
+                                    selected - book.id
+                                } else {
+                                    selected + book.id
+                                }
                                 allSelected = false
                             },
                             onClickDelete = { vm.submitUnblockBooks(listOf(book)) {} },
@@ -277,8 +286,10 @@ private fun BookUnblockDialog(
             onDismissRequest = { confirmClearAll = false },
             title = { Text("清空全部屏蔽漫画？") },
             text = {
-                Text("将逐个取消 ${books.size} 本漫画的屏蔽，服务端没有批量接口，需要逐条提交，" +
-                    "中途失败会保留已成功的部分。该操作不会删除收藏与历史记录。")
+                Text(
+                    "将逐个取消 ${books.size} 本漫画的屏蔽，服务端没有批量接口，需要逐条提交，" +
+                        "中途失败会保留已成功的部分。该操作不会删除收藏与历史记录。",
+                )
             },
             confirmButton = {
                 TextButton(

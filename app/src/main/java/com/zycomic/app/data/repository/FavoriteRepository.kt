@@ -3,8 +3,8 @@ package com.zycomic.app.data.repository
 import com.zycomic.app.data.dto.BatchFavoriteRequest
 import com.zycomic.app.data.dto.FavoriteFolderRequest
 import com.zycomic.app.data.dto.FavoriteItem
-import com.zycomic.app.data.dto.FavoriteRequest
 import com.zycomic.app.data.dto.FavoriteLimitInfo
+import com.zycomic.app.data.dto.FavoriteRequest
 import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.net.NetworkModule
 import java.io.IOException

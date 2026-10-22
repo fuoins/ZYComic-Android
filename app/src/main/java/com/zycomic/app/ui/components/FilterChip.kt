@@ -73,7 +73,7 @@ fun OutlinedFilterChip(
             .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
             .clickable(interaction, indication = null) { onClick() }
             .then(
-                if (!selected) Modifier.padding(1.dp) else Modifier
+                if (!selected) Modifier.padding(1.dp) else Modifier,
             )
             .padding(horizontal = 8.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,

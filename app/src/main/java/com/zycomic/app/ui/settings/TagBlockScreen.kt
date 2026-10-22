@@ -168,8 +168,11 @@ private fun RemoveBlacklistDialog(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
 
-            val filtered = if (keyword.isBlank()) blockedTags
-            else blockedTags.filter { it.contains(keyword, ignoreCase = true) }
+            val filtered = if (keyword.isBlank()) {
+                blockedTags
+            } else {
+                blockedTags.filter { it.contains(keyword, ignoreCase = true) }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -178,8 +181,11 @@ private fun RemoveBlacklistDialog(
                 androidx.compose.material3.TextButton(
                     onClick = {
                         allSelected = !allSelected
-                        selected = if (allSelected) filtered.toSet()
-                        else selected - filtered.toSet()
+                        selected = if (allSelected) {
+                            filtered.toSet()
+                        } else {
+                            selected - filtered.toSet()
+                        }
                     },
                 ) { Text(if (allSelected) "取消全选" else "全选(已加载出的)") }
             }

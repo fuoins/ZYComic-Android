@@ -11,8 +11,10 @@ class FastestImgInterceptor : Interceptor {
         // 统一读 imgRewriteTarget：这样手动 pin 的图源在运行时也真的生效
         val host = RouteManager.imgRewriteTarget
         if (!host.isNullOrBlank() &&
-            (req.url.toString().contains("/static/upload") || req.url.toString().contains(".webp") ||
-                req.url.toString().contains(".jpg") || req.url.toString().contains(".png"))
+            (
+                req.url.toString().contains("/static/upload") || req.url.toString().contains(".webp") ||
+                    req.url.toString().contains(".jpg") || req.url.toString().contains(".png")
+                )
         ) {
             val newUrl = req.url.toString().replace(Regex("https?://[^/]+"), "https://$host")
             return chain.proceed(req.newBuilder().url(newUrl.toHttpUrl()).build())

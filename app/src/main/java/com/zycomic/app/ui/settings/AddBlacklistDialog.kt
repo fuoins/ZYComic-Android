@@ -80,8 +80,11 @@ fun AddBlacklistDialog(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
 
-            val filtered = if (keyword.isBlank()) availableTags
-            else availableTags.filter { it.contains(keyword, ignoreCase = true) }
+            val filtered = if (keyword.isBlank()) {
+                availableTags
+            } else {
+                availableTags.filter { it.contains(keyword, ignoreCase = true) }
+            }
             if (filtered.isEmpty()) {
                 Text(
                     if (availableTags.isEmpty()) "暂无可添加标签" else "没有匹配的标签",
