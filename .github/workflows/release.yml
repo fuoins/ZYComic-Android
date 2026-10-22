@@ -147,7 +147,7 @@ jobs:
           "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
           grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "versionCode='10'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='11'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
           test -s app/build/outputs/mapping/release/mapping.txt
           {
@@ -165,19 +165,19 @@ jobs:
         if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 3.0.0 正式版
+          ZYComic 4.0.0 正式版
 
-          本次更新（相对 v2.2.0）
-          - 新增 Manwa / JM 平台切换，完善 JM 浏览、分类、搜索、详情、相关推荐与评论交互。
-          - 完善 JM 登录、注册、邮箱激活、账号恢复和个人资料刷新，隔离不同平台及账号的会话与资料。
-          - 接入 JM 在线收藏、收藏夹、观看历史与阅读进度，优化书库搜索、标题和加载状态。
-          - 完善 JM 签到状态、补签预览与操作保护。
-          - 优化书库和分类工具栏、平台配色、筛选与详情页交互。
-          - 优化启动测速、配置预热与版本变更后的重测，完善线路选择、运行时恢复、图片加载及重试策略。
+          本次更新（相对 v3.0.0）
+          - 完善哔咔注册、账号资料、自动签到、关键词屏蔽，以及浏览、搜索、排行、书库和历史界面。
+          - 优化哔咔缓存首屏、封面与正文图源选择、图片加载及跨镜像恢复。
+          - 统一详情页展示，完善阅读器目录增量加载、详情导航与加载进度。
+          - 优化三平台启动检测、测速日志及线路诊断，支持配置升级时复用身份未变的端点记录，并提供完整重测入口。
+          - 修复哔咔相关推荐与 Maccms 线路隔离，Maccms 请求固定使用本轮 lines3 IP 并保留正确的 Host/TLS 校验。
+          - 合并重复启动测速请求，移除哔咔收藏刷新多余的加载指示，更新启动引导文案与重点提示。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 版本：3.0.0（versionCode 10），正式包名 com.zycomic.app。
+          - 版本：4.0.0（versionCode 11），正式包名 com.zycomic.app。
           - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
 
