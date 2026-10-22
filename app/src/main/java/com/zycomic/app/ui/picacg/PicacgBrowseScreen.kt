@@ -36,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,8 @@ import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
@@ -132,6 +135,7 @@ fun PicacgBrowseScreen(
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val session by PicacgAuthStore.sessionRevision.collectAsState()
     val blockKeywords by PicacgBlockKeywordStore.keywords.collectAsState()
+    val keywordRevision by PicacgBlockKeywordStore.revision.collectAsState()
     val browseCacheRevision by PicacgRepository.browseCacheRevision.collectAsState()
     val routeState by PicacgRouteManager.state.collectAsState()
     val presets = remember { mutableStateOf(PicacgBrowsePrefs.load(context)) }
@@ -145,14 +149,40 @@ fun PicacgBrowseScreen(
         )
     }
     var filter by remember(session, tabId, initialFilter) { mutableStateOf(initialFilter?.normalized() ?: PicacgBrowseFilter()) }
-    // Reload from page one so removing a rule can restore items previously filtered at the facade.
-    var page by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(1) }
-    var mangas by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf<List<Manga>>(emptyList()) }
-    var hasMore by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(false) }
-    var loading by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(false) }
-    var error by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf<String?>(null) }
+    val currentFilter = filter.normalized()
+    val condition = PicacgRepository.currentBrowseCondition()
+    // A different query/condition gets a different state object, never a frame of the old list.
+    val queryIdentity = listOf(session, loggedIn, tabId, initialFilter, pageMode, mode, currentFilter, condition, routeState.revision, keywordRevision, blockKeywords)
+    fun snapshotKey(requestedPage: Int) = when (mode) {
+        PicacgFeedMode.RANDOM -> null
+        PicacgFeedMode.LEADERBOARD_24H, PicacgFeedMode.LEADERBOARD_7D, PicacgFeedMode.LEADERBOARD_30D ->
+            PicacgRepository.leaderboardSnapshotKey(mode.timeframe!!)
+        PicacgFeedMode.LATEST, PicacgFeedMode.FILTERED -> PicacgRepository.browseSnapshotKey(
+            page = requestedPage,
+            category = currentFilter.category.ifBlank { null },
+            sort = currentFilter.sort,
+            tag = currentFilter.tag.ifBlank { null },
+            author = currentFilter.author.ifBlank { null },
+            creatorId = currentFilter.creatorId.ifBlank { null },
+            chineseTeam = currentFilter.chineseTeam.ifBlank { null },
+        )
+    }
+    val initialSnapshot = remember(queryIdentity) {
+        if (loggedIn) snapshotKey(1)?.let(PicacgRepository::peekBrowseSnapshot) else null
+    }
+    // Restore synchronously: effects run too late to prevent a blank/loading first frame.
+    var page by remember(queryIdentity) { mutableStateOf(1) }
+    var pageSnapshots by remember(queryIdentity) { mutableStateOf(mapOf(1 to initialSnapshot?.items.orEmpty())) }
+    val mangas = pageSnapshots.filterKeys { it <= page }.toSortedMap().values.fold(emptyList<Manga>()) { previous, items ->
+        PicacgCollectionPolicy.merge(previous, items, false) { it.id }
+    }
+    var hasSnapshot by remember(queryIdentity) { mutableStateOf(initialSnapshot != null) }
+    var hasMore by remember(queryIdentity) { mutableStateOf(initialSnapshot?.hasMore ?: false) }
+    var loading by remember(queryIdentity) { mutableStateOf(loggedIn) }
+    var error by remember(queryIdentity) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
-    var forceCacheRefresh by remember(session, tabId, initialFilter, pageMode) { mutableStateOf(false) }
+    var forceCacheRefresh by remember(queryIdentity) { mutableStateOf(true) }
+    val currentRequest by rememberUpdatedState(queryIdentity to page)
     var showFilters by remember { mutableStateOf(false) }
     var showPresets by remember { mutableStateOf(false) }
     var draftFilter by remember { mutableStateOf(filter) }
@@ -178,14 +208,19 @@ fun PicacgBrowseScreen(
         }
     }
 
-    LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords, browseCacheRevision, routeState.revision) {
+    LaunchedEffect(queryIdentity, page, refresh, browseCacheRevision) {
         if (!loggedIn) return@LaunchedEffect
+        val requestIdentity = queryIdentity to page
+        val requestedPage = page
+        val requestedRefresh = refresh
+        fun requestIsCurrent(): Boolean =
+            currentRequest == requestIdentity && page == requestedPage && refresh == requestedRefresh &&
+                PicacgAuthStore.loggedIn.value && PicacgRepository.browseConditionIsCurrent(condition)
         loading = true
         error = null
         try {
             val forceRefresh = forceCacheRefresh
             forceCacheRefresh = false
-            val currentFilter = filter.normalized()
             val pageItems: List<Manga>
             val nextPageExists: Boolean
             when (mode) {
@@ -215,16 +250,22 @@ fun PicacgBrowseScreen(
                     nextPageExists = response.hasMore
                 }
             }
-            if (session == PicacgAuthStore.sessionRevision.value && loggedIn) {
-                mangas = PicacgCollectionPolicy.merge(mangas, pageItems, page == 1) { it.id }
+            currentCoroutineContext().ensureActive()
+            if (requestIsCurrent()) {
+                pageSnapshots = if (requestedPage == 1) {
+                    mapOf(1 to pageItems)
+                } else {
+                    pageSnapshots + (requestedPage to pageItems)
+                }
                 hasMore = nextPageExists
+                hasSnapshot = true
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            if (session == PicacgAuthStore.sessionRevision.value) error = failure.message ?: loadFailed
+            if (requestIsCurrent()) error = failure.message ?: loadFailed
         } finally {
-            loading = false
+            if (requestIsCurrent()) loading = false
         }
     }
 
@@ -232,9 +273,6 @@ fun PicacgBrowseScreen(
         mode = next
         filter = nextFilter
         page = 1
-        mangas = emptyList()
-        error = null
-        hasMore = false
     }
 
     fun persistPresets(next: List<PicacgBrowsePreset>) {
@@ -252,7 +290,7 @@ fun PicacgBrowseScreen(
             Text(stringResource(KMR.strings.picacg_session_required))
             Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
         } else {
-            if (loading && mangas.isEmpty()) {
+            if (loading && mangas.isEmpty() && !hasSnapshot) {
                 if (displayMode == 3) {
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(8) {
@@ -284,7 +322,7 @@ fun PicacgBrowseScreen(
                     itemsIndexed(mangas, key = { _, manga -> manga.id }) { index, manga ->
                         PicacgBrowseComicListItem(manga = manga, rank = if (mode.timeframe != null) index + 1 else null) { onOpenManga("picacg:${manga.id}") }
                     }
-                    if (!loading && error == null && mangas.isEmpty()) item { Text(stringResource(KMR.strings.picacg_search_empty)) }
+                    if ((!loading || hasSnapshot) && error == null && mangas.isEmpty()) item { Text(stringResource(KMR.strings.picacg_search_empty)) }
                     if (hasMore) {
                         item {
                             TextButton(onClick = {
@@ -319,7 +357,7 @@ fun PicacgBrowseScreen(
                     itemsIndexed(mangas, key = { _, manga -> manga.id }) { index, manga ->
                         PicacgBrowseComicGridItem(manga = manga, displayMode = displayMode, rank = if (mode.timeframe != null) index + 1 else null) { onOpenManga("picacg:${manga.id}") }
                     }
-                    if (!loading && error == null && mangas.isEmpty()) {
+                    if ((!loading || hasSnapshot) && error == null && mangas.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) { Text(stringResource(KMR.strings.picacg_search_empty)) }
                     }
                     if (hasMore) {

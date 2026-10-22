@@ -20,6 +20,12 @@ data class ReaderChapter(val chapter: Chapter) {
     val pages: List<ReaderPage>?
         get() = (state as? State.Loaded)?.pages
 
+    val directoryComplete: Boolean
+        get() = (state as? State.Loaded)?.directoryComplete == true
+
+    /** A seek beyond the fetched prefix is fulfilled only when its real page arrives. */
+    var pendingPage: Int? = null
+
     var pageLoader: PageLoader? = null
 
     var requestedPage: Int = 0
@@ -50,6 +56,6 @@ data class ReaderChapter(val chapter: Chapter) {
         data object Wait : State
         data object Loading : State
         data class Error(val error: Throwable) : State
-        data class Loaded(val pages: List<ReaderPage>) : State
+        data class Loaded(val pages: List<ReaderPage>, val directoryComplete: Boolean = true) : State
     }
 }

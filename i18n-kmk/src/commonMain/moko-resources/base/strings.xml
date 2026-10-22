@@ -256,7 +256,6 @@
     <string name="zy_platform_jm_accent">禁漫天堂对应颜色</string>
     <string name="content_platform_jm">禁漫</string>
     <string name="content_platform_jm_full">禁漫天堂</string>
-    <string name="zy_network_maintenance_notice">本软件对所有线路和图源进行网络层优化,\n,三个平台晚上会卡顿,我已经把网络配置改成每日早晚各更新一次了.</string>
     <string name="content_platform_switch">平台切换</string>
     <string name="content_platform_section_title">内容平台</string>
     <string name="content_platform_profile_summary">选择此页面默认平台</string>

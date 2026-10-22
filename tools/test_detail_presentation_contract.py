@@ -172,10 +172,21 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
     def test_ranking_tabs_are_outside_authentication_and_loading_branches(self):
         tabs = self.browse.index("if (pageMode == PicacgBrowsePageMode.RANKING)")
         login = self.browse.index("if (!loggedIn) {\n            Text(stringResource(KMR.strings.picacg_session_required))")
-        loading = self.browse.index("if (loading && mangas.isEmpty())")
+        loading = self.browse.index("if (loading && mangas.isEmpty() && !hasSnapshot)")
         self.assertLess(tabs, login)
         self.assertLess(tabs, loading)
         self.assertEqual(1, self.browse.count("LazyRow("))
+
+    def test_browse_query_identity_controls_cached_first_frame_and_empty_snapshot_presentation(self):
+        identity = self.browse.split("val queryIdentity = ", 1)[1].split("\n", 1)[0]
+        for dimension in ("session", "loggedIn", "tabId", "initialFilter", "pageMode", "mode", "currentFilter", "condition", "routeState.revision", "keywordRevision", "blockKeywords"):
+            with self.subTest(dimension=dimension):
+                self.assertIn(dimension, identity)
+        self.assertLess(self.browse.index("val initialSnapshot = remember(queryIdentity)"), self.browse.index("LaunchedEffect(queryIdentity, page, refresh, browseCacheRevision)"))
+        self.assertIn("var pageSnapshots by remember(queryIdentity) { mutableStateOf(mapOf(1 to initialSnapshot?.items.orEmpty())) }", self.browse)
+        self.assertIn("var hasSnapshot by remember(queryIdentity) { mutableStateOf(initialSnapshot != null) }", self.browse)
+        self.assertIn("if (loading && mangas.isEmpty() && !hasSnapshot)", self.browse)
+        self.assertGreaterEqual(self.browse.count("if ((!loading || hasSnapshot) && error == null && mangas.isEmpty())"), 2)
 
     def test_ranking_pager_preview_exists_before_selected_data_page(self):
         host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()
@@ -210,7 +221,7 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         self.assertIn("snapshotFlow { pagerState.settledPage }", host)
         self.assertIn("pagerState.animateScrollToPage(index)\n                                            vm.selectMainTab(index)", host)
         self.assertEqual(1, host.count("com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
-        self.assertEqual(1, self.browse.count("LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords, browseCacheRevision, routeState.revision)"))
+        self.assertEqual(1, self.browse.count("LaunchedEffect(queryIdentity, page, refresh, browseCacheRevision)"))
 
     def test_category_and_custom_filter_pages_do_not_get_ranking_preview(self):
         host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()

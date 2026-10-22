@@ -8,13 +8,15 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import mihon.core.archive.archiveReader
-import mihon.core.archive.epubReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
+import mihon.core.archive.archiveReader
+import mihon.core.archive.epubReader
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
@@ -78,6 +80,7 @@ class ChapterLoader(
         chapter: ReaderChapter /* SY --> */,
         page: Int? = null/* SY <-- */,
         imageLoadingBarrier: ReaderChapter? = null,
+        onPagesReady: (suspend () -> Unit)? = null,
     ) {
         chapter.loadMutex.withLock {
             if (isRecycled) throw CancellationException("Chapter loader has already been recycled")
@@ -108,14 +111,6 @@ class ChapterLoader(
                     loader.setNextChapterGatePageCount(nextChapterGatePageCount())
                     loader.setImageLoadingBarrier(imageLoadingBarrier)
 
-                    val pages = loader.getPages()
-                        .onEach { it.chapter = chapter }
-                    loader.setChapterPages(pages)
-
-                    if (pages.isEmpty()) {
-                        throw Exception(context.stringResource(MR.strings.page_list_empty_error))
-                    }
-
                     // If the chapter is partially read, set the starting page to the last the user read
                     // otherwise use the requested page.
                     if (!chapter.chapter.read /* --> EH */ ||
@@ -127,12 +122,29 @@ class ChapterLoader(
                         chapter.requestedPage = /* SY --> */ page ?: /* SY <-- */ chapter.chapter.last_page_read
                     }
 
-                    synchronized(this@ChapterLoader) {
-                        if (isRecycled || chapter.pageLoader !== loader) {
-                            throw CancellationException("Chapter loader has already been recycled")
+                    var receivedBatch = false
+                    var finalComplete = true
+                    suspend fun publish(pages: List<ReaderPage>, complete: Boolean) {
+                        withUIContext {
+                            pages.forEach { it.chapter = chapter }
+                            synchronized(this@ChapterLoader) {
+                                if (isRecycled || chapter.pageLoader !== loader) {
+                                    throw CancellationException("Chapter loader has already been recycled")
+                                }
+                                loader.setChapterPages(pages, complete)
+                                if (pages.isNotEmpty()) chapter.state = ReaderChapter.State.Loaded(pages, complete)
+                            }
+                            if (pages.isNotEmpty()) onPagesReady?.invoke()
                         }
-                        chapter.state = ReaderChapter.State.Loaded(pages)
                     }
+                    val pages = loader.getPages { partial, complete ->
+                        receivedBatch = true
+                        finalComplete = complete
+                        if (onPagesReady != null) publish(partial, complete)
+                    }
+                    if (pages.isEmpty()) throw Exception(context.stringResource(MR.strings.page_list_empty_error))
+                    // A source with more batches at its safety cap must not claim a final count.
+                    if (!receivedBatch || onPagesReady == null) publish(pages, finalComplete)
                 } catch (e: Throwable) {
                     chapter.pageLoader?.takeIf { !it.isRecycled }?.recycle()
                     chapter.pageLoader = null

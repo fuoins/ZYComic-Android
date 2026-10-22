@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zycomic.app.reader.PicacgPageListProgress
 import com.zycomic.app.reader.PicacgSource
+import com.zycomic.app.reader.ReaderDirectoryPolicy
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.chapter.model.toDbChapter
 import eu.kanade.domain.manga.interactor.SetMangaViewerFlags
@@ -145,6 +146,11 @@ class ReaderViewModel @JvmOverloads constructor(
 
     private val mutableState = MutableStateFlow(State())
     val state = mutableState.asStateFlow()
+
+    private val directoryRequest = java.util.concurrent.atomic.AtomicLong(0L)
+    private val adjacentRequest = java.util.concurrent.atomic.AtomicLong(0L)
+    private var failedDirectoryChapter: ReaderChapter? = null
+    private var failedDirectoryPage: Int? = null
 
     private val eventChannel = Channel<Event>()
     val eventFlow = eventChannel.receiveAsFlow()
@@ -395,6 +401,8 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     override fun onCleared() {
+        directoryRequest.incrementAndGet()
+        adjacentRequest.incrementAndGet()
         val currentChapters = state.value.viewerChapters
         if (currentChapters != null) {
             currentChapters.unref()
@@ -548,10 +556,55 @@ class ReaderViewModel @JvmOverloads constructor(
         // SY <--
         reportPicacgProgress: Boolean = false,
     ): ViewerChapters {
+        val request = directoryRequest.incrementAndGet()
         val imageLoadingBarrier = state.value.viewerChapters
             ?.takeIf { it.nextChapter == chapter }
             ?.currChapter
-        if (reportPicacgProgress && manga?.source == PicacgSource.id) {
+        val chapterPos = chapterList.indexOf(chapter)
+        val newChapters = ViewerChapters(
+            chapter,
+            chapterList.getOrNull(chapterPos - 1),
+            chapterList.getOrNull(chapterPos + 1),
+        )
+        var published = false
+        suspend fun publishPages() {
+            val loaded = chapter.state as? ReaderChapter.State.Loaded ?: return
+            if (ReaderDirectoryPolicy.resolveTarget(chapter.requestedPage, loaded.pages.size, loaded.directoryComplete) == null) return
+            withUIContext {
+                if (directoryRequest.get() != request) return@withUIContext
+                if (!published) {
+                    activateChapterForReading(chapter)
+                    // Add references first so an append never recycles the current loader.
+                    newChapters.ref()
+                    state.value.viewerChapters?.unref()
+                    chapterToDownload = cancelQueuedDownloads(chapter)
+                    published = true
+                }
+                mutableState.update {
+                    it.copy(
+                        viewerChapters = newChapters,
+                        bookmarked = chapter.chapter.bookmark,
+                        directoryRevision = it.directoryRevision + 1L,
+                        isLoadingAdjacentChapter = false,
+                    )
+                }
+            }
+        }
+        suspend fun fetchPages() {
+            try {
+                loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier, ::publishPages)
+            } catch (error: Throwable) {
+                if (error !is CancellationException && directoryRequest.get() != request) return
+                if (error !is CancellationException && directoryRequest.get() == request && manga?.source == PicacgSource.id) {
+                    failedDirectoryChapter = chapter
+                    failedDirectoryPage = chapter.requestedPage
+                    markInitialPicacgDirectoryFailed()
+                }
+                throw error
+            }
+        }
+        val observeDirectory = reportPicacgProgress || manga?.source == PicacgSource.id
+        if (observeDirectory && manga?.source == PicacgSource.id) {
             mutableState.update {
                 it.copy(
                     isPicacgDirectoryLoading = true,
@@ -562,42 +615,24 @@ class ReaderViewModel @JvmOverloads constructor(
             }
             withContext(
                 PicacgPageListProgress { batch, fetchedImages, _ ->
-                    mutableState.update {
-                        it.copy(
-                            picacgDirectoryBatches = batch,
-                            picacgDirectoryImages = fetchedImages,
-                        )
+                    if (directoryRequest.get() == request) {
+                        mutableState.update {
+                            it.copy(picacgDirectoryBatches = batch, picacgDirectoryImages = fetchedImages)
+                        }
                     }
                 },
             ) {
-                loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier)
+                fetchPages()
             }
-            mutableState.update { it.copy(isPicacgDirectoryLoading = false, isPicacgDirectoryFailed = false) }
+            if (directoryRequest.get() == request) {
+                failedDirectoryChapter = null
+                failedDirectoryPage = null
+                mutableState.update { it.copy(isPicacgDirectoryLoading = false, isPicacgDirectoryFailed = false) }
+            }
         } else {
-            loader.loadChapter(chapter /* SY --> */, page/* SY <-- */, imageLoadingBarrier)
+            fetchPages()
         }
-
-        val chapterPos = chapterList.indexOf(chapter)
-        val newChapters = ViewerChapters(
-            chapter,
-            chapterList.getOrNull(chapterPos - 1),
-            chapterList.getOrNull(chapterPos + 1),
-        )
-
-        withUIContext {
-            activateChapterForReading(chapter)
-            mutableState.update {
-                // Add new references first to avoid unnecessary recycling
-                newChapters.ref()
-                it.viewerChapters?.unref()
-
-                chapterToDownload = cancelQueuedDownloads(newChapters.currChapter)
-                it.copy(
-                    viewerChapters = newChapters,
-                    bookmarked = newChapters.currChapter.chapter.bookmark,
-                )
-            }
-        }
+        if (!published) publishPages()
         return newChapters
     }
 
@@ -611,9 +646,12 @@ class ReaderViewModel @JvmOverloads constructor(
     fun retryInitialPicacgDirectory() {
         val currentLoader = loader ?: return
         viewModelScope.launchIO {
-            val chapter = runCatching { chapterList.firstOrNull { it.chapter.id == chapterId } }.getOrNull() ?: return@launchIO
+            val chapter = failedDirectoryChapter
+                ?: runCatching { chapterList.firstOrNull { it.chapter.id == chapterId } }.getOrNull() ?: return@launchIO
+            val target = failedDirectoryPage ?: initialPageToOpen
+            chapter.pendingPage = target
             try {
-                loadChapter(currentLoader, chapter, initialPageToOpen, reportPicacgProgress = true)
+                loadChapter(currentLoader, chapter, target, reportPicacgProgress = true)
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
                 logcat(LogPriority.ERROR, error)
@@ -665,13 +703,16 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private suspend fun loadAdjacent(chapter: ReaderChapter) {
         val loader = loader ?: return
+        val request = adjacentRequest.incrementAndGet()
 
         logcat { "Loading adjacent ${chapter.chapter.url}" }
 
+        chapter.pendingPage = 0
+        chapter.requestedPage = 0
         mutableState.update { it.copy(isLoadingAdjacentChapter = true) }
         try {
             withIOContext {
-                loadChapter(loader, chapter)
+                loadChapter(loader, chapter, page = 0)
             }
         } catch (e: Throwable) {
             if (e is CancellationException) {
@@ -679,7 +720,9 @@ class ReaderViewModel @JvmOverloads constructor(
             }
             logcat(LogPriority.ERROR, e)
         } finally {
-            mutableState.update { it.copy(isLoadingAdjacentChapter = false) }
+            if (adjacentRequest.get() == request) {
+                mutableState.update { it.copy(isLoadingAdjacentChapter = false) }
+            }
         }
     }
 
@@ -897,10 +940,12 @@ class ReaderViewModel @JvmOverloads constructor(
         if (!incognitoMode && page.status !is Page.State.Error) {
             readerChapter.chapter.last_page_read = pageIndex
 
-            if (readerChapter.pages?.lastIndex == pageIndex ||
-                // SY -->
-                (hasExtraPage && readerChapter.pages?.lastIndex?.minus(1) == page.index)
-                // SY <--
+            if (readerChapter.directoryComplete && (
+                    readerChapter.pages?.lastIndex == pageIndex ||
+                        // SY -->
+                        (hasExtraPage && readerChapter.pages?.lastIndex?.minus(1) == page.index)
+                    // SY <--
+                    )
             ) {
                 updateChapterProgressOnComplete(readerChapter)
 
@@ -1522,6 +1567,7 @@ class ReaderViewModel @JvmOverloads constructor(
         val isPicacgDirectoryFailed: Boolean = false,
         val picacgDirectoryBatches: Int = 0,
         val picacgDirectoryImages: Int = 0,
+        val directoryRevision: Long = 0L,
 
         /**
          * Viewer used to display the pages (pager, webtoon, ...).
@@ -1551,7 +1597,10 @@ class ReaderViewModel @JvmOverloads constructor(
             get() = viewerChapters?.currChapter
 
         val totalPages: Int
-            get() = currentChapter?.pages?.size ?: -1
+            get() {
+                val loaded = currentChapter?.state as? ReaderChapter.State.Loaded ?: return -1
+                return ReaderDirectoryPolicy.totalPages(loaded.pages.size, loaded.directoryComplete)
+            }
     }
 
     sealed interface Dialog {

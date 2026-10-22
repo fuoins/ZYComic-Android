@@ -36,14 +36,8 @@ class PlatformPresentationResourcesTest {
     }
 
     @Test
-    fun `notice preserves requested text and contains no terms`() {
-        assertEquals(
-            "本软件对所有线路和图源进行网络层优化,\\n,三个平台晚上会卡顿,我已经把网络配置改成每日早晚各更新一次了.",
-            resource("zy_network_maintenance_notice"),
-        )
-        val notice = File(root, "app/src/main/java/com/zycomic/app/ui/components/NetworkMaintenanceNotice.kt").readText()
-        listOf("使用协议", "学习交流", "24小时", "商业用途", "自行承担").forEach {
-            assertFalse(notice.contains(it))
-        }
+    fun `removed startup maintenance notice has no base resource`() {
+        val baseStrings = File(root, "i18n-kmk/src/commonMain/moko-resources/base/strings.xml").readText()
+        assertFalse(baseStrings.contains("zy_network_maintenance_notice"))
     }
 }

@@ -49,10 +49,10 @@ class WebtoonAdapter(
         val nextHasMissingChapters = calculateChapterGap(chapters.nextChapter, chapters.currChapter) > 0
 
         // Add previous chapter pages and transition.
-        chapters.prevChapter?.pages?.let(newItems::addAll)
+        chapters.prevChapter?.takeIf { it.directoryComplete }?.pages?.let(newItems::addAll)
 
         // Skip transition page if the chapter is loaded & current page is not a transition page
-        if (prevHasMissingChapters || forceTransition || chapters.prevChapter?.state !is ReaderChapter.State.Loaded) {
+        if (prevHasMissingChapters || forceTransition || chapters.prevChapter?.directoryComplete != true) {
             newItems.add(ChapterTransition.Prev(chapters.currChapter, chapters.prevChapter))
         }
 
@@ -65,11 +65,13 @@ class WebtoonAdapter(
         currentChapter = chapters.currChapter
 
         // Add next chapter transition and pages.
-        if (nextHasMissingChapters || forceTransition || chapters.nextChapter?.state !is ReaderChapter.State.Loaded) {
+        if (chapters.currChapter.directoryComplete &&
+            (nextHasMissingChapters || forceTransition || chapters.nextChapter?.state !is ReaderChapter.State.Loaded)
+        ) {
             newItems.add(ChapterTransition.Next(chapters.currChapter, chapters.nextChapter))
         }
 
-        chapters.nextChapter?.pages?.let(newItems::addAll)
+        if (chapters.currChapter.directoryComplete) chapters.nextChapter?.pages?.let(newItems::addAll)
 
         updateItems(newItems)
     }

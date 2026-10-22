@@ -47,6 +47,8 @@ class PagerViewerAdapter(
 
     var currentChapter: ReaderChapter? = null
 
+    private var currentDirectoryComplete = true
+
     // SY -->
     /** Page used to start the shifted pages */
     var pageToShift: ReaderPage? = null
@@ -69,16 +71,22 @@ class PagerViewerAdapter(
      */
     fun setChapters(chapters: ViewerChapters, forceTransition: Boolean) {
         val newItems = mutableListOf<ReaderItem>()
+        val preservedSplits = if (currentChapter === chapters.currChapter && !currentDirectoryComplete) {
+            joinedItems.mapNotNull { it.first as? InsertPage }
+                .filter { split -> chapters.currChapter.pages.orEmpty().any { it === split.parent } }
+        } else {
+            emptyList()
+        }
 
         // Forces chapter transition if there is missing chapters
         val prevHasMissingChapters = calculateChapterGap(chapters.currChapter, chapters.prevChapter) > 0
         val nextHasMissingChapters = calculateChapterGap(chapters.nextChapter, chapters.currChapter) > 0
 
         // Add previous chapter pages and transition
-        chapters.prevChapter?.pages?.let(newItems::addAll)
+        chapters.prevChapter?.takeIf { it.directoryComplete }?.pages?.let(newItems::addAll)
 
         // Skip transition page if the chapter is loaded & current page is not a transition page
-        if (prevHasMissingChapters || forceTransition || chapters.prevChapter?.state !is ReaderChapter.State.Loaded) {
+        if (prevHasMissingChapters || forceTransition || chapters.prevChapter?.directoryComplete != true) {
             newItems.add(ChapterTransition.Prev(chapters.currChapter, chapters.prevChapter))
         }
 
@@ -100,24 +108,35 @@ class PagerViewerAdapter(
                     preprocessed[key]?.let { pages.add(key + 1, it) }
                 }
 
+            preservedSplits.sortedByDescending { it.index }.forEach { split ->
+                if (pages.none { it === split }) {
+                    val parentPosition = pages.indexOfFirst { it === split.parent }
+                    if (parentPosition >= 0) pages.add(parentPosition + 1, split)
+                }
+            }
             newItems.addAll(pages)
         }
 
         currentChapter = chapters.currChapter
+        currentDirectoryComplete = chapters.currChapter.directoryComplete
 
         // Add next chapter transition and pages.
-        nextTransition = ChapterTransition.Next(chapters.currChapter, chapters.nextChapter)
-            .also {
-                if (
-                    nextHasMissingChapters ||
-                    forceTransition ||
-                    chapters.nextChapter?.state !is ReaderChapter.State.Loaded
-                ) {
-                    newItems.add(it)
+        nextTransition = if (chapters.currChapter.directoryComplete) {
+            ChapterTransition.Next(chapters.currChapter, chapters.nextChapter)
+                .also {
+                    if (
+                        nextHasMissingChapters ||
+                        forceTransition ||
+                        chapters.nextChapter?.state !is ReaderChapter.State.Loaded
+                    ) {
+                        newItems.add(it)
+                    }
                 }
-            }
+        } else {
+            null
+        }
 
-        chapters.nextChapter?.pages?.let(newItems::addAll)
+        if (chapters.currChapter.directoryComplete) chapters.nextChapter?.pages?.let(newItems::addAll)
 
         // Resets double-page splits, else insert pages get misplaced
         subItems.filterIsInstance<InsertPage>().also { subItems.removeAll(it) }

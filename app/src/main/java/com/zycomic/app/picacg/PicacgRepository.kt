@@ -154,15 +154,7 @@ object PicacgRepository {
         require(page >= 1) { "Picacg pages are one-based" }
         require(sort in SORT_VALUES) { "Unsupported Picacg sort value" }
         val keywords = PicacgBlockKeywordStore.keywords.value.toList()
-        val key = browseCacheKey(
-            operation = if (category.isNullOrBlank()) "browse" else "category",
-            mode = if (category.isNullOrBlank()) "all" else "category",
-            query = listOfNotNull(category, tag, author, creatorId, chineseTeam).joinToString("&"),
-            sort = sort,
-            filters = listOf(category.orEmpty(), tag.orEmpty(), author.orEmpty(), creatorId.orEmpty(), chineseTeam.orEmpty()),
-            page = page,
-            keywords = keywords,
-        )
+        val key = browseSnapshotKey(page, category, sort, tag, author, creatorId, chineseTeam, keywords)
         val query = buildList {
             add("page=$page")
             addFilter("c", category)
@@ -177,6 +169,49 @@ object PicacgRepository {
             comicList(data, page, applyKeywordFilter = true, blockedKeywords = keywords)
         }
     }
+
+    /** The UI uses the same identity as the loader before its first frame, without doing I/O. */
+    internal fun browseSnapshotKey(
+        page: Int,
+        category: String? = null,
+        sort: String = "dd",
+        tag: String? = null,
+        author: String? = null,
+        creatorId: String? = null,
+        chineseTeam: String? = null,
+        keywords: List<String> = PicacgBlockKeywordStore.keywords.value.toList(),
+    ): PicacgBrowseCacheKey = browseCacheKey(
+        operation = if (category.isNullOrBlank()) "browse" else "category",
+        mode = if (category.isNullOrBlank()) "all" else "category",
+        query = listOfNotNull(category, tag, author, creatorId, chineseTeam).joinToString("&"),
+        sort = sort,
+        filters = listOf(category.orEmpty(), tag.orEmpty(), author.orEmpty(), creatorId.orEmpty(), chineseTeam.orEmpty()),
+        page = page,
+        keywords = keywords,
+    )
+
+    internal fun leaderboardSnapshotKey(
+        timeframe: String,
+        keywords: List<String> = PicacgBlockKeywordStore.keywords.value.toList(),
+    ): PicacgBrowseCacheKey = browseCacheKey("leaderboard", timeframe, timeframe, "", listOf("ct=VC"), 1, keywords)
+
+    /** Both fresh and stale successful snapshots are safe to show for this exact condition. */
+    internal fun peekBrowseSnapshot(key: PicacgBrowseCacheKey): PicacgPage<Manga>? {
+        if (!browseConditionIsCurrent(key.condition)) return null
+        return when (val cached = browseSnapshotCache.get(key, System.currentTimeMillis())) {
+            is PicacgBrowseCacheLookup.Fresh -> cached.value
+            is PicacgBrowseCacheLookup.Stale -> cached.value
+            null -> null
+        }
+    }
+
+    internal fun currentBrowseCondition(): PicacgBrowseCacheCondition = PicacgBrowseCacheCondition(
+        sessionRevision = PicacgAuthStore.sessionRevision.value,
+        keywordRevision = PicacgBlockKeywordStore.revision.value,
+        routeConfigRevision = PicacgRouteManager.configRevision,
+        configGeneration = browseConfigGeneration,
+        blockedKeywords = PicacgBlockKeywordStore.keywords.value.toList(),
+    )
 
     suspend fun search(
         keyword: String,
@@ -216,7 +251,7 @@ object PicacgRepository {
     suspend fun leaderboard(timeframe: String = "H24", forceRefresh: Boolean = false): List<Manga> {
         require(timeframe in LEADERBOARD_TIMEFRAMES) { "Unsupported Picacg leaderboard timeframe" }
         val keywords = PicacgBlockKeywordStore.keywords.value.toList()
-        val key = browseCacheKey("leaderboard", timeframe, timeframe, "", listOf("ct=VC"), 1, keywords)
+        val key = leaderboardSnapshotKey(timeframe, keywords)
         return loadBrowseSnapshot(key, forceRefresh) {
             val data = client().request(
                 "/comics/leaderboard?tt=$timeframe&ct=VC",
@@ -241,13 +276,7 @@ object PicacgRepository {
         page: Int,
         keywords: List<String>,
     ): PicacgBrowseCacheKey {
-        val condition = PicacgBrowseCacheCondition(
-            sessionRevision = PicacgAuthStore.sessionRevision.value,
-            keywordRevision = PicacgBlockKeywordStore.revision.value,
-            routeConfigRevision = PicacgRouteManager.configRevision,
-            configGeneration = browseConfigGeneration,
-            blockedKeywords = keywords.toList(),
-        )
+        val condition = currentBrowseCondition().copy(blockedKeywords = keywords.toList())
         browseSnapshotCache.activate(condition)
         return PicacgBrowseCacheKey(condition, operation, mode, query, sort, filters.toList(), page)
     }
@@ -277,7 +306,7 @@ object PicacgRepository {
         }
     }
 
-    private fun browseConditionIsCurrent(condition: PicacgBrowseCacheCondition): Boolean =
+    internal fun browseConditionIsCurrent(condition: PicacgBrowseCacheCondition): Boolean =
         condition.sessionRevision == PicacgAuthStore.sessionRevision.value &&
             condition.keywordRevision == PicacgBlockKeywordStore.revision.value &&
             condition.routeConfigRevision == PicacgRouteManager.configRevision &&
@@ -446,12 +475,12 @@ object PicacgRepository {
     }
 
     /** Get one documented page of image entries; page is one-based. */
-    suspend fun pages(comicId: String, order: Int, page: Int = 1): PicacgPage<PicacgImage> {
+    suspend fun pages(comicId: String, order: Int, page: Int = 1, readerFresh: Boolean = false): PicacgPage<PicacgImage> {
         require(comicId.isNotBlank() && order > 0 && page > 0) { "Invalid Picacg comic/chapter/page" }
         val imageHost = PicacgRouteManager.currentImageHost.orEmpty()
         val sessionRevision = PicacgAuthStore.sessionRevision.value
         val cacheKey = "$sessionRevision:$comicId:$order:$page:$imageHost"
-        pageCache.get(cacheKey)?.let { return it }
+        if (!readerFresh) pageCache.get(cacheKey)?.let { return it }
         val data = client().request("/comics/${encodePathSegment(comicId)}/order/$order/pages?page=$page").data
         val paged = data.optJSONObject("pages") ?: throw IOException("Picacg pages response has no pages object")
         val host = imageHost

@@ -169,6 +169,8 @@ fun ChapterNavigator(
                         )
                     }
                 }
+            } else if (totalPages < 0 && currentPage > 0) {
+                Text(text = "$currentPageText / …", modifier = Modifier.weight(1f), color = textColor)
             } else {
                 Spacer(Modifier.weight(1f))
             }
@@ -300,6 +302,8 @@ fun ChapterNavigatorVert(
                     // KMK <--
                 )
             }
+        } else if (totalPages < 0 && currentPage > 0) {
+            Text(text = "$currentPageText / …", modifier = Modifier.weight(1f), color = textColor)
         } else {
             Spacer(Modifier.weight(1f))
         }

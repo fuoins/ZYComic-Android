@@ -14,6 +14,7 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.WebtoonLayoutManager
+import com.zycomic.app.reader.ReaderDirectoryPolicy
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
@@ -269,7 +270,7 @@ class WebtoonViewer(
         activity.onPageSelected(page)
 
         // Preload next chapter once we're within the last 5 pages of the current chapter
-        val inPreloadRange = pages.size - page.number < 5
+        val inPreloadRange = page.chapter.directoryComplete && pages.size - page.number < 5
         if (inPreloadRange && allowPreload && page.chapter == adapter.currentChapter) {
             logcat { "Request preload next chapter because we're at page ${page.number} of ${pages.size}" }
             val nextItem = adapter.items.getOrNull(adapter.items.size - 1)
@@ -301,11 +302,21 @@ class WebtoonViewer(
         val forceTransition = config.alwaysShowChapterTransition || currentPage is ChapterTransition
         adapter.setChapters(chapters, forceTransition)
 
-        if (recycler.isGone) {
+        val chapter = chapters.currChapter
+        val pending = chapter.pendingPage
+        if (recycler.isGone || pending != null) {
             logcat { "Recycler first layout" }
-            val pages = chapters.currChapter.pages ?: return
-            moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
-            recycler.isVisible = true
+            val pages = chapter.pages.orEmpty()
+            val target = ReaderDirectoryPolicy.resolveTarget(
+                pending ?: chapter.requestedPage,
+                pages.size,
+                chapter.directoryComplete,
+            )
+            if (target != null) {
+                chapter.pendingPage = null
+                moveToPage(pages[target])
+                recycler.isVisible = true
+            }
         }
         onAdapterItemsUpdated()
     }

@@ -23,9 +23,9 @@ fun ReaderPageIndicator(
     totalPages: Int,
     modifier: Modifier = Modifier,
 ) {
-    if (currentPage.isEmpty() || totalPages <= 0) return
+    if (currentPage.isEmpty() || totalPages == 0) return
 
-    val text = "$currentPage / $totalPages"
+    val text = "$currentPage / ${if (totalPages < 0) "…" else totalPages.toString()}"
 
     val style = TextStyle(
         // KMK -->

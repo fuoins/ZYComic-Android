@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reader_image_decoding">正在解码图片</string>
+</resources>

@@ -294,7 +294,7 @@ class ReaderActivity : BaseActivity() {
             .distinctUntilChanged()
             .onEach { (isLoading, batches, images) ->
                 val indicator = loadingIndicator ?: return@onEach
-                if (isLoading) {
+                if (isLoading && viewModel.state.value.viewerChapters == null) {
                     indicator.show(immediate = true)
                     val status = if (batches == 0) {
                         stringResource(KMR.strings.picacg_reader_directory_loading)
@@ -308,11 +308,20 @@ class ReaderActivity : BaseActivity() {
             }
             .launchIn(lifecycleScope)
 
+        var displayedChapters: ViewerChapters? = null
         viewModel.state
-            .map { it.viewerChapters }
+            .map { it.viewerChapters to it.directoryRevision }
             .distinctUntilChanged()
-            .filterNotNull()
-            .onEach(::setChapters)
+            .onEach { (chapters, _) ->
+                if (chapters != null) {
+                    if (chapters === displayedChapters) {
+                        viewModel.state.value.viewer?.setChapters(chapters)
+                    } else {
+                        displayedChapters = chapters
+                        setChapters(chapters)
+                    }
+                }
+            }
             .launchIn(lifecycleScope)
 
         viewModel.eventFlow
@@ -484,7 +493,6 @@ class ReaderActivity : BaseActivity() {
                         onClickChapter = { c ->
                             lifecycleScope.launch {
                                 viewModel.loadNewChapterFromDialog(c)
-                                moveToPageIndex(0)
                             }
                             onDismissRequest()
                         },
@@ -1706,9 +1714,15 @@ class ReaderActivity : BaseActivity() {
      * page is not found.
      */
     private fun moveToPageIndex(index: Int) {
+        if (index < 0) return
         val viewer = viewModel.state.value.viewer ?: return
         val currentChapter = viewModel.state.value.currentChapter ?: return
-        val page = currentChapter.pages?.getOrNull(index) ?: return
+        val page = currentChapter.pages?.getOrNull(index)
+        if (page == null) {
+            if (!currentChapter.directoryComplete) currentChapter.pendingPage = index
+            return
+        }
+        currentChapter.pendingPage = null
         viewer.moveToPage(page)
     }
 
@@ -1719,7 +1733,6 @@ class ReaderActivity : BaseActivity() {
     private fun loadNextChapter() {
         lifecycleScope.launch {
             viewModel.loadNextChapter()
-            moveToPageIndex(0)
         }
     }
 
@@ -1730,7 +1743,6 @@ class ReaderActivity : BaseActivity() {
     private fun loadPreviousChapter() {
         lifecycleScope.launch {
             viewModel.loadPreviousChapter()
-            moveToPageIndex(0)
         }
     }
 

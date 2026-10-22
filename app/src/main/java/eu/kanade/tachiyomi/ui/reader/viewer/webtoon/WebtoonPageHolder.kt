@@ -20,6 +20,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
+import eu.kanade.tachiyomi.ui.reader.viewer.readerPagePosition
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
 import kotlinx.coroutines.Job
@@ -39,6 +40,7 @@ import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 
 /**
  * Holder of the webtoon reader for a single page of a chapter.
@@ -152,7 +154,13 @@ class WebtoonPageHolder(
             }
             launch {
                 page.loadStatusFlow.collect { status ->
-                    progressIndicator.setLoadStatus(status)
+                    if (status != ReaderPageLoadStatus.Idle || page.status != Page.State.Ready) {
+                        progressIndicator.setLoadStatus(
+                            status,
+                            page.number,
+                            page.chapter.pages?.takeIf { page.chapter.directoryComplete }?.size,
+                        )
+                    }
                     // StateFlow conflates intermediate labels while image I/O continues normally.
                     if (status is ReaderPageLoadStatus.PicacgReceiving) delay(100)
                 }
@@ -164,7 +172,10 @@ class WebtoonPageHolder(
                     Page.State.DownloadImage -> {
                         setDownloading()
                         page.progressFlow.collectLatest { value ->
-                            progressIndicator.setProgress(value.takeIf { it in 0..100 } ?: 0)
+                            progressIndicator.setProgress(
+                                value.takeIf { it in 0..100 } ?: 0,
+                                showPercentage = page.loadStatus !is ReaderPageLoadStatus.PicacgReceiving,
+                            )
                         }
                     }
                     Page.State.Ready -> setImage()
@@ -179,7 +190,13 @@ class WebtoonPageHolder(
      */
     private fun setQueued() {
         progressContainer.isVisible = true
-        page?.loadStatus?.let(progressIndicator::setLoadStatus)
+        page?.let { currentPage ->
+            progressIndicator.setLoadStatus(
+                currentPage.loadStatus,
+                currentPage.number,
+                currentPage.chapter.pages?.takeIf { currentPage.chapter.directoryComplete }?.size,
+            )
+        }
         progressIndicator.show()
         removeErrorLayout()
     }
@@ -209,6 +226,13 @@ class WebtoonPageHolder(
         progressIndicator.setProgress(0)
 
         val streamFn = page?.stream ?: return
+        page?.let { currentPage ->
+            progressIndicator.setStageStatus(
+                context.stringResource(KMR.strings.reader_image_decoding),
+                currentPage.number,
+                currentPage.chapter.pages?.takeIf { currentPage.chapter.directoryComplete }?.size,
+            )
+        }
 
         try {
             val (source, isAnimated) = withIOContext {
@@ -358,10 +382,16 @@ class WebtoonPageHolder(
         val formattedError = with(context) { error?.formattedMessage }
             ?: context.stringResource(MR.strings.decode_image_error)
         val errorMessage = context.readerFailureMessage(error, formattedError) ?: formattedError
+        val pageErrorMessage = current?.let { currentPage ->
+            "${readerPagePosition(
+                currentPage.number,
+                currentPage.chapter.pages?.takeIf { currentPage.chapter.directoryComplete }?.size,
+            )} · $errorMessage"
+        } ?: errorMessage
         errorLayout?.errorMessage?.text = if (current?.automaticRetryExhausted == true) {
-            "$errorMessage\n已测试 ${current.attemptedImageEndpoints.size} 个节点"
+            "$pageErrorMessage\n已测试 ${current.attemptedImageEndpoints.size} 个节点"
         } else {
-            errorMessage
+            pageErrorMessage
         }
 
         return errorLayout!!

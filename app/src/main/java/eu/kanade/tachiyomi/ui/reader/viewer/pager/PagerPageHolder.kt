@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
+import eu.kanade.tachiyomi.ui.reader.viewer.readerPagePosition
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import kotlinx.coroutines.Job
@@ -36,6 +37,7 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.decoder.ImageDecoder
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import kotlin.math.max
 
 /**
@@ -80,16 +82,29 @@ class PagerPageHolder(
      */
     private var extraLoadJob: Job? = null
 
-    private val isPicacgDoublePage: Boolean
-        get() = extraPage != null && viewer.activity.viewModel.manga?.source == com.zycomic.app.reader.PicacgSource.id
+    private val isDoublePage: Boolean
+        get() = extraPage != null
 
     private fun updateLoadStatus(status: ReaderPageLoadStatus) {
-        if (isPicacgDoublePage) {
+        if (isDoublePage) {
             progressIndicator?.setPageLoadStatuses(
-                listOfNotNull(page, extraPage).map { it.number to it.loadStatus },
+                listOfNotNull(page, extraPage).map { currentPage ->
+                    ReaderProgressIndicator.PageStatus(
+                        number = currentPage.number,
+                        pageCount = currentPage.chapter.pages
+                            ?.takeIf { currentPage.chapter.directoryComplete }
+                            ?.size,
+                        status = currentPage.loadStatus,
+                        progressPercentage = currentPage.progress.takeIf { progress -> progress in 1..99 },
+                    )
+                },
             )
         } else {
-            progressIndicator?.setLoadStatus(status)
+            progressIndicator?.setLoadStatus(
+                status,
+                page.number,
+                page.chapter.pages?.takeIf { page.chapter.directoryComplete }?.size,
+            )
         }
     }
 
@@ -118,7 +133,13 @@ class PagerPageHolder(
                 // KMK -->
                 seedColor = seedColor,
                 // KMK <--
-            ).apply { setLoadStatus(page.loadStatus) }
+            ).apply {
+                setLoadStatus(
+                    page.loadStatus,
+                    page.number,
+                    page.chapter.pages?.takeIf { page.chapter.directoryComplete }?.size,
+                )
+            }
             addView(progressIndicator)
             updateLoadStatus(page.loadStatus)
         }
@@ -143,7 +164,9 @@ class PagerPageHolder(
             }
             launch {
                 page.loadStatusFlow.collect { status ->
-                    updateLoadStatus(status)
+                    if (status != ReaderPageLoadStatus.Idle || page.status != Page.State.Ready) {
+                        updateLoadStatus(status)
+                    }
                     // Limit byte-label redraws only; request scheduling and body reads are unchanged.
                     if (status is ReaderPageLoadStatus.PicacgReceiving) delay(100)
                 }
@@ -155,7 +178,14 @@ class PagerPageHolder(
                     Page.State.DownloadImage -> {
                         setDownloading()
                         page.progressFlow.collectLatest { value ->
-                            progressIndicator?.setProgress(if (isPicacgDoublePage) 0 else value.takeIf { it in 0..100 } ?: 0)
+                            if (isDoublePage) {
+                                updateLoadStatus(page.loadStatus)
+                            } else {
+                                progressIndicator?.setProgress(
+                                    value.takeIf { it in 0..100 } ?: 0,
+                                    showPercentage = page.loadStatus !is ReaderPageLoadStatus.PicacgReceiving,
+                                )
+                            }
                         }
                     }
                     Page.State.Ready -> setImage()
@@ -196,14 +226,15 @@ class PagerPageHolder(
      * Called when the page is ready.
      */
     private suspend fun setImage() {
-        if (extraPage == null) {
-            progressIndicator?.setProgress(0)
-        } else {
-            progressIndicator?.setProgress(95)
-        }
+        progressIndicator?.setProgress(0)
 
         val streamFn = page.stream ?: return
         val streamFn2 = extraPage?.stream
+        progressIndicator?.setStageStatus(
+            context.stringResource(KMR.strings.reader_image_decoding),
+            page.number,
+            page.chapter.pages?.takeIf { page.chapter.directoryComplete }?.size,
+        )
 
         try {
             val (source, isAnimated, background) = withIOContext {
@@ -322,7 +353,6 @@ class PagerPageHolder(
             return imageSource
         }
 
-        scope.launch { progressIndicator?.setProgress(96) }
         if (imageBitmap.height < imageBitmap.width) {
             imageSource2.close()
             page.fullPage = true
@@ -340,7 +370,6 @@ class PagerPageHolder(
             return imageSource
         }
 
-        scope.launch { progressIndicator?.setProgress(97) }
         if (imageBitmap2.height < imageBitmap2.width) {
             imageSource2.close()
             extraPage?.fullPage = true
@@ -355,9 +384,7 @@ class PagerPageHolder(
         imageSource.close()
         imageSource2.close()
 
-        return ImageUtil.mergeBitmaps(imageBitmap, imageBitmap2, isLTR, centerMargin, viewer.config.pageCanvasColor) {
-            updateProgress(it)
-        }
+        return ImageUtil.mergeBitmaps(imageBitmap, imageBitmap2, isLTR, centerMargin, viewer.config.pageCanvasColor)
     }
 
     private fun handleWideImage(imageSource: BufferedSource): BufferedSource {
@@ -389,16 +416,6 @@ class PagerPageHolder(
             96 / (this.height.coerceAtLeast(1) / max(height, height2).coerceAtLeast(1)).coerceAtLeast(1)
         } else {
             0
-        }
-    }
-
-    private fun updateProgress(progress: Int) {
-        scope.launch {
-            if (progress == 100) {
-                progressIndicator?.hide()
-            } else {
-                progressIndicator?.setProgress(progress)
-            }
         }
     }
 
@@ -526,10 +543,14 @@ class PagerPageHolder(
         val formattedError = with(context) { error?.formattedMessage }
             ?: context.stringResource(MR.strings.decode_image_error)
         val errorMessage = context.readerFailureMessage(error, formattedError) ?: formattedError
+        val pageErrorMessage = "${readerPagePosition(
+            page.number,
+            page.chapter.pages?.takeIf { page.chapter.directoryComplete }?.size,
+        )} · $errorMessage"
         errorLayout?.errorMessage?.text = if (page.automaticRetryExhausted) {
-            "$errorMessage\n已测试 ${page.attemptedImageEndpoints.size} 个节点"
+            "$pageErrorMessage\n已测试 ${page.attemptedImageEndpoints.size} 个节点"
         } else {
-            errorMessage
+            pageErrorMessage
         }
 
         errorLayout?.root?.isVisible = true

@@ -11,10 +11,11 @@ import androidx.core.view.children
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.viewpager.widget.ViewPager
+import com.zycomic.app.reader.ReaderDirectoryPolicy
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
-import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderItem
@@ -26,7 +27,6 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
-import kotlin.math.min
 
 /**
  * Implementation of a [Viewer] to display pages with a [ViewPager].
@@ -320,7 +320,7 @@ abstract class PagerViewer(
         }
 
         // Preload next chapter once we're within the last 5 pages of the current chapter
-        val inPreloadRange = pages.size - page.number < 5
+        val inPreloadRange = page.chapter.directoryComplete && pages.size - page.number < 5
         if (inPreloadRange && allowPreload && page.chapter == adapter.currentChapter) {
             logcat { "Request preload next chapter because we're at page ${page.number} of ${pages.size}" }
             adapter.nextTransition?.to?.let(activity::requestPreloadChapter)
@@ -359,6 +359,8 @@ abstract class PagerViewer(
      * Sets the active [chapters] on this pager.
      */
     internal fun setChaptersInternal(chapters: ViewerChapters) {
+        val anchor = (adapter.joinedItems.getOrNull(pager.currentItem)?.first as? ReaderPage)
+            ?.takeIf { it.chapter === chapters.currChapter }
         // Remove listener so the change in item doesn't trigger it
         // since we're about to change the size of the items
         // If we don't the size change could put us on a new chapter
@@ -371,17 +373,30 @@ abstract class PagerViewer(
         adapter.setChapters(chapters, forceTransition)
 
         // Layout the pager once a chapter is being set
-        if (pager.isGone) {
+        val chapter = chapters.currChapter
+        val pages = chapter.pages.orEmpty()
+        val pending = chapter.pendingPage
+        if (pager.isGone || pending != null) {
             logcat { "Pager first layout" }
-            val pages = chapters.currChapter.pages ?: return
-            moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
-            pager.isVisible = true
+            val target = ReaderDirectoryPolicy.resolveTarget(
+                pending ?: chapter.requestedPage,
+                pages.size,
+                chapter.directoryComplete,
+            )
+            if (target != null) {
+                chapter.pendingPage = null
+                moveToPage(pages[target])
+                pager.isVisible = true
+            }
+        } else if (anchor != null) {
+            val position = adapter.joinedItems.indexOfFirst { it.first === anchor || it.second === anchor }
+            if (position >= 0) pager.setCurrentItem(position, false)
         }
 
         pager.addOnPageChangeListener(pagerListener)
         // Since we removed the listener while shifting,
         // Manually call onPageChange to update the UI
-        onPageChange(pager.currentItem)
+        if (pager.isVisible) onPageChange(pager.currentItem)
     }
 
     /**

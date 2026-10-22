@@ -30,8 +30,50 @@ class PicacgBrowsePresentationContractTest {
         val rankingRowPosition = source.indexOf("if (pageMode == PicacgBrowsePageMode.RANKING)")
         val loginPromptPosition = source.indexOf("if (!loggedIn) {\n            Text(stringResource(KMR.strings.picacg_session_required))")
         assertTrue(rankingRowPosition < loginPromptPosition)
-        assertTrue(rankingRowPosition < source.indexOf("if (loading && mangas.isEmpty())"))
+        assertTrue(rankingRowPosition < source.indexOf("if (loading && mangas.isEmpty() && !hasSnapshot)"))
         assertTrue(source.contains("val displayOnly = pageMode != PicacgBrowsePageMode.CATEGORY"))
+    }
+
+    @Test
+    fun `cached snapshot is restored synchronously and even an empty snapshot suppresses skeleton`() {
+        val snapshot = source.indexOf("val initialSnapshot = remember(queryIdentity)")
+        val effect = source.indexOf("LaunchedEffect(queryIdentity, page, refresh, browseCacheRevision)")
+        assertTrue(snapshot >= 0 && snapshot < effect)
+        assertTrue(source.contains("var pageSnapshots by remember(queryIdentity) { mutableStateOf(mapOf(1 to initialSnapshot?.items.orEmpty())) }"))
+        assertTrue(source.contains("var hasSnapshot by remember(queryIdentity) { mutableStateOf(initialSnapshot != null) }"))
+        assertTrue(source.contains("if (loading && mangas.isEmpty() && !hasSnapshot)"))
+        assertTrue(source.contains("if ((!loading || hasSnapshot) && error == null && mangas.isEmpty())"))
+    }
+
+    @Test
+    fun `query identity fences every cache dimension and random remains uncached`() {
+        val identity = source.substringAfter("val queryIdentity = ").substringBefore("\n")
+        for (dimension in listOf("session", "loggedIn", "tabId", "initialFilter", "pageMode", "mode", "currentFilter", "condition", "routeState.revision", "keywordRevision", "blockKeywords")) {
+            assertTrue(identity.contains(dimension), "query identity is missing $dimension")
+        }
+        assertTrue(source.contains("PicacgFeedMode.RANDOM -> null"))
+        assertTrue(source.contains("pageItems = if (page == 1) PicacgRepository.random() else emptyList()"))
+    }
+
+    @Test
+    fun `failed refresh retains page snapshots and late results cannot overwrite current query`() {
+        assertTrue(source.contains("val currentRequest by rememberUpdatedState(queryIdentity to page)"))
+        assertTrue(source.contains("currentRequest == requestIdentity && page == requestedPage && refresh == requestedRefresh"))
+        assertTrue(source.contains("PicacgRepository.browseConditionIsCurrent(condition)"))
+        assertTrue(source.contains("currentCoroutineContext().ensureActive()"))
+        assertTrue(source.contains("if (requestIsCurrent()) {\n                pageSnapshots = if (requestedPage == 1)"))
+        val failure = source.substringAfter("} catch (failure: Exception) {").substringBefore("} finally {")
+        assertTrue(failure.contains("if (requestIsCurrent()) error = failure.message ?: loadFailed"))
+        assertFalse(failure.contains("pageSnapshots ="))
+        assertFalse(failure.contains("mangas ="))
+        assertTrue(source.contains("if (requestIsCurrent()) loading = false"))
+    }
+
+    @Test
+    fun `page reload replaces that page snapshot while later pages remain distinct`() {
+        assertTrue(source.contains("pageSnapshots = if (requestedPage == 1) {\n                    mapOf(1 to pageItems)"))
+        assertTrue(source.contains("pageSnapshots + (requestedPage to pageItems)"))
+        assertTrue(source.contains("pageSnapshots.filterKeys { it <= page }.toSortedMap()"))
     }
 
     @Test

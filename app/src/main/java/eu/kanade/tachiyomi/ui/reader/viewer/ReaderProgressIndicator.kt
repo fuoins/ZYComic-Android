@@ -73,6 +73,7 @@ class ReaderProgressIndicator @JvmOverloads constructor(
     }
 
     private var progress by mutableFloatStateOf(0f)
+    private var progressPercentage by mutableStateOf<Int?>(null)
     private var statusText by mutableStateOf("")
 
     @Composable
@@ -92,6 +93,17 @@ class ReaderProgressIndicator @JvmOverloads constructor(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 CombinedCircularProgressIndicator(progress = { progress })
+                progressPercentage?.let { percentage ->
+                    Text(
+                        text = "$percentage%",
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 if (statusText.isNotBlank()) {
                     Text(
                         text = statusText,
@@ -135,27 +147,58 @@ class ReaderProgressIndicator @JvmOverloads constructor(
         isVisible = false
         pendingStatusText = ""
         statusText = ""
+        progressPercentage = null
     }
 
-    fun setProgress(@IntRange(from = 0, to = 100) progress: Int) {
-        this.progress = progress / 100f
+    fun setProgress(@IntRange(from = 0, to = 100) progress: Int, showPercentage: Boolean = true) {
+        val validProgress = progress.takeIf { it in 0..100 }
+        this.progress = validProgress?.div(100f) ?: 0f
+        // Zero may mean either a fresh transfer or unknown content length; do not label it as a percentage.
+        progressPercentage = validProgress?.takeIf { showPercentage && it in 1..99 }
     }
 
-    // KMK --> Only Picacg byte observations use these labels; other sources retain their stages.
-    fun setLoadStatus(status: ReaderPageLoadStatus) {
+    // KMK --> Reader page stages are shared; only Picacg supplies byte-count labels.
+    data class PageStatus(
+        val number: Int,
+        val pageCount: Int?,
+        val status: ReaderPageLoadStatus,
+        val progressPercentage: Int?,
+    )
+
+    fun setLoadStatus(
+        status: ReaderPageLoadStatus,
+        pageNumber: Int? = null,
+        pageCount: Int? = null,
+    ) {
+        val label = loadStatusText(status)
+        if (label.isBlank()) {
+            setStageStatus("")
+            return
+        }
+        setStageStatus(label, pageNumber, pageCount)
+    }
+
+    fun setPageLoadStatuses(statuses: List<PageStatus>) {
         setStatus(
-            loadStatusText(status),
-            immediate = status is ReaderPageLoadStatus.PicacgReceiving || status is ReaderPageLoadStatus.PicacgRequesting,
-        )
-    }
-
-    fun setPageLoadStatuses(statuses: List<Pair<Int, ReaderPageLoadStatus>>) {
-        setStatus(
-            statuses.filter { it.second != ReaderPageLoadStatus.Idle }.joinToString("\n") { (page, status) ->
-                context.stringResource(KMR.strings.picacg_image_page_status, page, loadStatusText(status))
+            statuses.filter { it.status != ReaderPageLoadStatus.Idle }.joinToString("\n") { pageStatus ->
+                val label = loadStatusText(pageStatus.status)
+                val page = readerPagePosition(pageStatus.number, pageStatus.pageCount)
+                val progress = pageStatus.progressPercentage
+                    ?.takeIf { it in 1..99 && pageStatus.status !is ReaderPageLoadStatus.PicacgReceiving }
+                    ?.let { "$it%" }
+                listOfNotNull(page, label, progress).joinToString(" · ")
             },
             immediate = true,
         )
+    }
+
+    fun setStageStatus(stage: String, pageNumber: Int? = null, pageCount: Int? = null) {
+        val label = if (stage.isBlank()) {
+            ""
+        } else {
+            listOfNotNull(pageNumber?.let { readerPagePosition(it, pageCount) }, stage).joinToString(" · ")
+        }
+        setStatus(label, immediate = true)
     }
 
     private fun loadStatusText(status: ReaderPageLoadStatus): String = when (status) {
@@ -191,3 +234,6 @@ class ReaderProgressIndicator @JvmOverloads constructor(
         }
     }
 }
+
+internal fun readerPagePosition(pageNumber: Int, pageCount: Int?): String =
+    pageCount?.takeIf { it > 0 }?.let { "$pageNumber/$it" } ?: pageNumber.toString()

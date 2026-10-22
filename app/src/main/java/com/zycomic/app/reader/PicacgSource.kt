@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPageLoadStatus
+import kotlinx.coroutines.currentCoroutineContext
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -102,13 +103,23 @@ object PicacgSource : HttpSource() {
         val comicId = parts[1]
         val order = parts[2].toIntOrNull()?.takeIf { it > 0 } ?: throw IOException("Invalid Picacg chapter order")
         val images = mutableListOf<com.zycomic.app.picacg.PicacgImage>()
+        val readerBatches = currentCoroutineContext()[ReaderPageBatchListener]
+        var directoryComplete = false
         var page = 1
         while (page <= 1000) {
-            val response = PicacgRepository.pages(comicId, order, page)
+            val response = PicacgRepository.pages(comicId, order, page, readerFresh = readerBatches != null)
             images += response.items
+            directoryComplete = !response.hasMore
             reportPicacgPageListProgress(page, images.size, response.hasMore)
+            readerBatches?.onPages?.invoke(
+                images.mapIndexed { index, image -> Page(index, image.url, image.url) },
+                !response.hasMore,
+            )
             if (!response.hasMore) break
             page++
+        }
+        if (readerBatches != null && !directoryComplete) {
+            throw IOException("Picacg reader directory is incomplete at the existing page-list limit")
         }
         return images.mapIndexed { index, image -> Page(index, image.url, image.url) }
     }

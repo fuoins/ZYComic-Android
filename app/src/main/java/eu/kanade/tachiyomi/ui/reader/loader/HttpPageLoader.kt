@@ -10,6 +10,8 @@ import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.normalizedForComparison
 import com.zycomic.app.reader.PicacgReaderPreloadPolicy
 import com.zycomic.app.reader.PicacgSource
+import com.zycomic.app.reader.ReaderPageBatchListener
+import com.zycomic.app.reader.ReaderPageSnapshots
 import com.zycomic.app.reader.ReaderPlatformRetryPolicy
 import com.zycomic.app.reader.ReaderRetryPlatform
 import eu.kanade.domain.source.service.SourcePreferences
@@ -36,6 +38,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.ImageUtil
@@ -157,6 +160,24 @@ internal class HttpPageLoader(
             source.getPageList(chapter.chapter)
         }
         return pages.mapIndexed { index, page -> ReaderPage(index, page.url, page.imageUrl) }
+    }
+
+    override suspend fun getPages(onPages: suspend (List<ReaderPage>, Boolean) -> Unit): List<ReaderPage> {
+        if (source.id != PicacgSource.id) return getPages()
+        val snapshots = ReaderPageSnapshots<ReaderPage> { old, fresh ->
+            old.index == fresh.index && old.url == fresh.url && old.imageUrl == fresh.imageUrl
+        }
+        var latest = emptyList<ReaderPage>()
+        // getPages() retains its existing single fallback call on failure. Both calls opt into
+        // fresh API manifests; only freshly returned matching entries retain their reader object.
+        withContext(
+            ReaderPageBatchListener { pages, complete ->
+                if (isRecycled) throw CancellationException("Page loader has already been recycled")
+                latest = snapshots.accept(pages.mapIndexed { index, page -> ReaderPage(index, page.url, page.imageUrl) })
+                onPages(latest, complete)
+            },
+        ) { getPages() }
+        return latest
     }
 
     override suspend fun loadPage(page: ReaderPage) = withIOContext {

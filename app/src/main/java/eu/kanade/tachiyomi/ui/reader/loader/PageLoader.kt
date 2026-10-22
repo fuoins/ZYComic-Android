@@ -55,12 +55,20 @@ abstract class PageLoader {
      */
     abstract suspend fun getPages(): List<ReaderPage>
 
+    /** Optional reader-only snapshots; ordinary loaders retain their full-list behavior. */
+    open suspend fun getPages(onPages: suspend (List<ReaderPage>, Boolean) -> Unit): List<ReaderPage> = getPages()
+
+    private val directoryComplete = MutableStateFlow(false)
+
     /** Records the page list used to determine the chapter's final preloading window. */
-    fun setChapterPages(pages: List<ReaderPage>) {
+    fun setChapterPages(pages: List<ReaderPage>, complete: Boolean = true) {
+        val changed = chapterPages != pages
         chapterPages = pages
-        if (chapterReadingOrder.value.pages.isEmpty()) {
-            chapterReadingOrder.value = ChapterReadingOrder(pages, emptySet(), false, false)
+        if (changed || chapterReadingOrder.value.pages.isEmpty()) {
+            val visible = chapterReadingOrder.value.visiblePageIndices
+            chapterReadingOrder.value = ChapterReadingOrder(pages, visible, false, false)
         }
+        directoryComplete.value = complete
     }
 
     fun setNextChapterGatePageCount(count: Int) {
@@ -104,6 +112,7 @@ abstract class PageLoader {
 
     /** Waits for the current page to enter the preloaded tail and for that tail to settle. */
     suspend fun awaitNextChapterImagesAllowed() {
+        directoryComplete.first { it }
         val preloadCount = nextChapterGatePageCount
         if (preloadCount == 0) {
             val order = chapterReadingOrder.first { it.viewerOrderKnown }
