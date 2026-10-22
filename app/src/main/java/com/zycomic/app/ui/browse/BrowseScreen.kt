@@ -566,6 +566,7 @@ private fun LegacyBrowseScreen(
             ) { page ->
                 BrowseTabContent(
                     page = page,
+                    isActive = page == mainTab,
                     vm = vm,
                     platform = platform,
                     displayMode = displayMode,
@@ -710,6 +711,7 @@ private fun PlatformLegendRow(color: Color, label: String) {
 @Composable
 private fun BrowseTabContent(
     page: Int,
+    isActive: Boolean,
     vm: BrowseViewModel,
     platform: ContentPlatform,
     displayMode: Int,
@@ -733,7 +735,7 @@ private fun BrowseTabContent(
             BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
             else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
         }
-        if (page == vm.mainTab.value) {
+        if (isActive) {
             com.zycomic.app.ui.picacg.PicacgBrowseScreen(
                 onOpenManga = onOpenManga,
                 onRequireLogin = onRequireLogin,

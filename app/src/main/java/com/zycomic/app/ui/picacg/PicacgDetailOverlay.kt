@@ -87,7 +87,8 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
     var manga by remember(selectedId, session, loggedIn) { mutableStateOf(snapshot?.manga) }
     var state by remember(selectedId, session, loggedIn) { mutableStateOf(snapshot?.state) }
     var related by remember(selectedId, session, blockKeywords) { mutableStateOf<List<Manga>>(emptyList()) }
-    var relatedError by remember(selectedId, session) { mutableStateOf<String?>(null) }
+    var relatedError by remember(selectedId, session, blockKeywords) { mutableStateOf<String?>(null) }
+    var relatedLoading by remember(selectedId, session, blockKeywords) { mutableStateOf(loggedIn) }
     var error by remember(selectedId, session) { mutableStateOf<String?>(null) }
     var busy by remember(selectedId, session) { mutableStateOf(false) }
     var chapterAscending by remember(selectedId) { mutableStateOf(false) }
@@ -98,6 +99,7 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
     var searchTerm by remember { mutableStateOf<String?>(null) }
     val invalidId = stringResource(KMR.strings.picacg_invalid_id)
     val uncertainWrite = stringResource(KMR.strings.picacg_write_uncertain)
+    val recommendationFailure = stringResource(KMR.strings.picacg_recommendations_failed)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     LaunchedEffect(selectedId, session) { listState.scrollToItem(0) }
@@ -138,13 +140,16 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
     LaunchedEffect(selectedId, session, loggedIn, refresh, blockKeywords) {
         if (!loggedIn || selectedId.isBlank()) return@LaunchedEffect
         relatedError = null
+        relatedLoading = true
         try {
             val result = PicacgRepository.recommendations(selectedId)
             if (sessionIsCurrent(session)) related = result.filter { it.id != selectedId }.distinctBy { it.id }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            if (sessionIsCurrent(session)) relatedError = failure.message
+            if (sessionIsCurrent(session)) relatedError = recommendationFailure
+        } finally {
+            relatedLoading = false
         }
     }
     fun openChapter(detail: Manga, chapterId: String? = null) {
@@ -325,6 +330,11 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
                                     // Header and chapter section each occupy one item, so recommendations begin at index 2.
                                     item(key = "recommendations") { Text(stringResource(KMR.strings.picacg_recommendations), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp)) }
                                     relatedError?.let { failure -> item { Text(failure, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) } }
+                                    if (relatedLoading) {
+                                        item { CircularProgressIndicator(modifier = Modifier.padding(horizontal = 16.dp).size(24.dp)) }
+                                    } else if (related.isEmpty() && relatedError == null) {
+                                        item { Text(stringResource(KMR.strings.picacg_recommendations_empty), modifier = Modifier.padding(horizontal = 16.dp)) }
+                                    }
                                     item {
                                         MangaDetailRecommendationRow(
                                             mangas = related,

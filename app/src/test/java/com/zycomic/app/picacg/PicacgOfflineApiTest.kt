@@ -426,18 +426,47 @@ class PicacgOfflineApiTest {
     }
 
     @Test
-    fun `random leaderboard recommendations and comment like use documented paths`() = runBlocking {
+    fun `random leaderboard and comment like use documented paths`() = runBlocking {
         PicacgRepository.installClientForTests(client)
         responses += 200 to """{"code":200,"data":{"comics":[{"_id":"r1","title":"Random"}]}}"""
         assertEquals("r1", PicacgRepository.random().single().id)
         responses += 200 to """{"code":200,"data":{"comics":[{"_id":"b1","title":"Ranked"}]}}"""
         assertEquals("b1", PicacgRepository.leaderboard("D7").single().id)
         assertEquals("/api/v2/comics/leaderboard?tt=D7&ct=VC", requests.last().url.encodedPath + "?" + requests.last().url.encodedQuery)
-        responses += 200 to """{"code":200,"data":{"comics":[]}}"""
-        assertTrue(PicacgRepository.recommendations("comic-1").isEmpty())
         responses += 200 to """{"code":200,"data":{}}"""
         PicacgRepository.toggleCommentLike("c1")
         assertEquals("/api/v2/comments/c1/like", requests.last().url.encodedPath)
+    }
+
+    @Test
+    fun `recommendation cards use one same session GET and never fetch a chapter directory`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        responses += 200 to """{"code":200,"data":{"comic":{"_id":"card1","title":"Card","thumb":{"path":"cover.jpg","fileServer":"https://images.example"},"chapterList":[{"_id":"unexpected","title":"Do not use"}]}}}"""
+        val card = PicacgRepository.recommendationMetadata("card1", PicacgAuthStore.sessionRevision.value)!!
+        assertEquals("card1", card.id)
+        assertEquals("Card", card.name)
+        assertTrue(card.picx.contains("cover.jpg"))
+        assertTrue(card.chapterList.isEmpty())
+        assertEquals(1, requests.size)
+        assertEquals("GET", requests.single().method)
+        assertEquals("/api/v2/comics/card1", requests.single().url.encodedPath)
+        assertEquals("offline-test-token", requests.single().header("authorization"))
+    }
+
+    @Test
+    fun `recommendation metadata rejects missing titles mismatched IDs and stale sessions`() = runBlocking {
+        PicacgRepository.installClientForTests(client)
+        val revision = PicacgAuthStore.sessionRevision.value
+        responses += 200 to """{"code":200,"data":{"comic":{"_id":"card1"}}}"""
+        assertEquals(null, PicacgRepository.recommendationMetadata("card1", revision))
+        responses += 200 to """{"code":200,"data":{"comic":{"_id":"other","title":"Wrong"}}}"""
+        assertEquals(null, PicacgRepository.recommendationMetadata("card1", revision))
+        PicacgAuthStore.clear()
+        assertThrows(IOException::class.java) {
+            runBlocking { PicacgRepository.recommendationMetadata("card1", revision) }
+        }
+        assertEquals(2, requests.size)
+        Unit
     }
 
     @Test

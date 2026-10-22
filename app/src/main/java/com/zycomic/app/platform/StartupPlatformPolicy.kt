@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /** Startup-time policy for content platforms and remembered platform selections. */
 object StartupPlatformPolicy {
     data class State(
-        val disableManwa: Boolean = true,
-        val disablePicacg: Boolean = true,
+        val disableManwa: Boolean = false,
+        val disablePicacg: Boolean = false,
         val disableJm: Boolean = false,
         /** Re-test the previous image-source top five when the config version matches. */
         val useLastResult: Boolean = true,
@@ -49,9 +49,9 @@ object StartupPlatformPolicy {
             manwaEnabled = preferences.getBoolean(KEY_ENABLED_MANWA, false).takeIf { preferences.contains(KEY_ENABLED_MANWA) },
             picacgEnabled = preferences.getBoolean(KEY_ENABLED_PICACG, false).takeIf { preferences.contains(KEY_ENABLED_PICACG) },
             jmEnabled = preferences.getBoolean(KEY_ENABLED_JM, false).takeIf { preferences.contains(KEY_ENABLED_JM) },
-            legacyDisableManwa = preferences.getBoolean(KEY_DISABLE_MANWA, true),
-            legacyDisablePicacg = preferences.getBoolean(KEY_DISABLE_PICACG, true),
-            legacyDisableJm = preferences.getBoolean(KEY_DISABLE_JM, false),
+            legacyDisableManwa = preferences.getBoolean(KEY_DISABLE_MANWA, false).takeIf { preferences.contains(KEY_DISABLE_MANWA) },
+            legacyDisablePicacg = preferences.getBoolean(KEY_DISABLE_PICACG, false).takeIf { preferences.contains(KEY_DISABLE_PICACG) },
+            legacyDisableJm = preferences.getBoolean(KEY_DISABLE_JM, false).takeIf { preferences.contains(KEY_DISABLE_JM) },
         )
         val normalized = normalize(!enabled.first, !enabled.second, !enabled.third)
         _state.value = State(
@@ -205,26 +205,26 @@ object StartupPlatformPolicy {
     internal fun migratedEnabledValues(
         manwaEnabled: Boolean?,
         jmEnabled: Boolean?,
-        legacyDisableManwa: Boolean,
-        legacyDisableJm: Boolean,
+        legacyDisableManwa: Boolean?,
+        legacyDisableJm: Boolean?,
     ): Pair<Boolean, Boolean> {
-        val manwa = manwaEnabled ?: !legacyDisableManwa
-        val jm = jmEnabled ?: !legacyDisableJm
+        val manwa = manwaEnabled ?: legacyDisableManwa?.not() ?: true
+        val jm = jmEnabled ?: legacyDisableJm?.not() ?: true
         return if (!manwa && !jm) false to true else manwa to jm
     }
 
-    /** Positive platform preferences take precedence; Picacg stays disabled for users upgrading old installs. */
+    /** Positive preferences take precedence; absent positive and legacy preferences default to enabled. */
     internal fun migratedEnabledState(
         manwaEnabled: Boolean?,
         picacgEnabled: Boolean?,
         jmEnabled: Boolean?,
-        legacyDisableManwa: Boolean,
-        legacyDisablePicacg: Boolean,
-        legacyDisableJm: Boolean,
+        legacyDisableManwa: Boolean?,
+        legacyDisablePicacg: Boolean?,
+        legacyDisableJm: Boolean?,
     ): Triple<Boolean, Boolean, Boolean> {
-        val manwa = manwaEnabled ?: !legacyDisableManwa
-        val picacg = picacgEnabled ?: !legacyDisablePicacg
-        val jm = jmEnabled ?: !legacyDisableJm
+        val manwa = manwaEnabled ?: legacyDisableManwa?.not() ?: true
+        val picacg = picacgEnabled ?: legacyDisablePicacg?.not() ?: true
+        val jm = jmEnabled ?: legacyDisableJm?.not() ?: true
         return if (!manwa && !picacg && !jm) Triple(false, false, true) else Triple(manwa, picacg, jm)
     }
 

@@ -110,7 +110,7 @@ object PlatformSpeedTestCoordinator {
             _running.value = true
             _progressText.value = null
             _jmProgress.value = null
-            _startupSummary.value = "三平台测速进行中；各平台进度独立显示"
+            _startupSummary.value = null
             var runCompleted = false
             try {
                 // A changed toggle/config starts a new generation; never publish the old generation.

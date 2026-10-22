@@ -23,6 +23,7 @@ import java.net.URLEncoder
 /** Public Picacg data facade; no methods fall back to Manwa or JM. */
 object PicacgRepository {
     @Volatile private var api: PicacgClient? = null
+    private val recommendationApi = MaccmsRecommendationClient()
     private val pageCache = PicacgPageCache<PicacgImage>()
     private val browseSnapshotCache = PicacgBrowseSnapshotCache<PicacgPage<Manga>>()
     private val browseRefreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -406,9 +407,25 @@ object PicacgRepository {
         )
     }
 
-    suspend fun recommendations(id: String): List<Manga> = filterDiscovery(
-        client().request("/comics/${encodePathSegment(id)}/recommendation").data.comicArray("recommendations"),
-    )
+    /** Maccms sees only a comic ID; authenticated metadata stays on the Picacg client. */
+    suspend fun recommendations(id: String): List<Manga> {
+        val condition = currentBrowseCondition()
+        val ids = recommendationApi.recommendationIds(id)
+        if (!browseConditionIsCurrent(condition)) throw CancellationException("Picacg recommendation conditions changed")
+        val cards = loadPicacgRecommendations(ids) { recommendedId ->
+            recommendationMetadata(recommendedId, condition.sessionRevision)
+        }
+        if (!browseConditionIsCurrent(condition)) throw CancellationException("Picacg recommendation conditions changed")
+        return filterDiscovery(cards, condition.blockedKeywords)
+    }
+
+    /** A card needs a single comic GET, never detail(), episodes, pages, or interaction state. */
+    internal suspend fun recommendationMetadata(id: String, expectedSessionRevision: Long): Manga? {
+        val comic = loadComicJson(id, expectedSessionRevision)
+        if (comic.optString("_id") != id || comic.optString("title").isBlank()) return null
+        val fields = comic.toPicacgMap().apply { remove("chapterList") }
+        return fields.toPicacgManga().withResolvedCover(comic.optJSONObject("thumb"))
+    }
 
     /** Toggle POST responses contain no action/state evidence; a same-session detail GET is authoritative. */
     suspend fun toggleFavourite(id: String): Boolean = toggleAndReadState(id, "favourite", "isFavourite", refreshFavourites = true)

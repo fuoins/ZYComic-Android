@@ -50,6 +50,26 @@ class DetailPresentationContractTest(unittest.TestCase):
             with self.subTest(contract=contract):
                 self.assertIn(contract, self.picacg)
 
+    def test_recommendations_are_independent_lightweight_and_session_scoped(self):
+        repository = (JAVA / "picacg/PicacgRepository.kt").read_text()
+        recommendations = repository.split("suspend fun recommendations(id: String)", 1)[1].split("/** Toggle POST", 1)[0]
+        self.assertIn("recommendationApi.recommendationIds(id)", recommendations)
+        self.assertIn("loadPicacgRecommendations(ids)", recommendations)
+        self.assertIn("recommendationMetadata(recommendedId, condition.sessionRevision)", recommendations)
+        self.assertEqual(2, recommendations.count("browseConditionIsCurrent(condition)"))
+        self.assertIn("filterDiscovery(cards, condition.blockedKeywords)", recommendations)
+        self.assertIn("loadComicJson(id, expectedSessionRevision)", recommendations)
+        self.assertIn('remove("chapterList")', recommendations)
+        self.assertNotIn("allEpisodes(", recommendations)
+        self.assertNotIn("= detail(", recommendations)
+        self.assertNotIn('/recommendation"', repository)
+        detail_effect, related_effect = self.picacg.split("// Recommendations may fail independently:", 1)
+        self.assertNotIn("PicacgRepository.recommendations(", detail_effect)
+        self.assertIn("LaunchedEffect(selectedId, session, loggedIn, refresh, blockKeywords)", related_effect)
+        self.assertIn("relatedLoading = false", related_effect)
+        self.assertIn("KMR.strings.picacg_recommendations_empty", related_effect)
+        self.assertIn("relatedError = recommendationFailure", related_effect)
+
     def test_actions_appear_above_synopsis_and_tags(self):
         description = self.picacg.index("MangaDetailDescription(detail.text)")
         tags = self.picacg.index("MangaDetailTagChips(")
@@ -192,7 +212,9 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()
         page = host.split("if (tabPlatform == ContentPlatform.PICACG)", 1)[1].split("if (item?.kind == TabKind.SPECIAL", 1)[0]
         selected, preview = page.split("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)", 1)
-        self.assertIn("if (page == vm.mainTab.value) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen(", selected)
+        self.assertIn("isActive = page == mainTab,", host)
+        self.assertIn("if (isActive) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen(", selected)
+        self.assertNotIn("vm.mainTab.value", page)
         self.assertIn("pageMode = pageMode,", selected)
         self.assertIn("com.zycomic.app.ui.picacg.PicacgRankingChips()", preview)
         self.assertIn("padding(horizontal = 12.dp, vertical = 8.dp)", preview)

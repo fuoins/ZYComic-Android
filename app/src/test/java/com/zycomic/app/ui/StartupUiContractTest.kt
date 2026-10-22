@@ -1,9 +1,11 @@
 package com.zycomic.app.ui
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
 
 /** Source contracts cover startup first-frame UI without requiring Compose or an Android runtime. */
 class StartupUiContractTest {
@@ -13,6 +15,18 @@ class StartupUiContractTest {
     private val mainActivity by lazy {
         File(root, "app/src/main/java/com/zycomic/app/ui/MainActivity.kt").readText()
     }
+    private val measurementPage by lazy {
+        mainActivity.substringAfter("} else if (!blockingSpeedTest) {")
+            .substringBefore("// ---- 详情覆盖层 ----")
+    }
+    private val strings by lazy {
+        val file = File(root, "i18n-kmk/src/commonMain/moko-resources/base/strings.xml")
+        val nodes = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file).getElementsByTagName("string")
+        (0 until nodes.length).associate { index ->
+            val node = nodes.item(index)
+            node.attributes.getNamedItem("name").nodeValue to node.textContent
+        }
+    }
 
     @Test
     fun `remote config gate keeps loading copy and startup measurement but no manga grid skeleton`() {
@@ -21,26 +35,75 @@ class StartupUiContractTest {
 
         assertTrue(gate.contains("StartupPlatformSwitches()"))
         assertTrue(gate.contains("正在从网络加载线路与图源配置…"))
+        assertTrue(gate.contains("StartupNetworkStatus("))
+        assertTrue(gate.contains("StartupBrand()"))
+        assertTrue(gate.contains(".statusBarsPadding().navigationBarsPadding()"))
+        assertTrue(gate.contains(".verticalScroll(rememberScrollState())"))
         assertFalse(gate.contains("MangaGridSkeleton"))
     }
 
     @Test
-    fun `startup measurement keeps live config status controls and progress without maintenance notice`() {
-        val measurementPage = mainActivity.substringAfter("} else if (!blockingSpeedTest) {")
-            .substringBefore("// ---- 详情覆盖层 ----")
-
-        assertTrue(measurementPage.contains("\"网络配置：\${remoteInfo.substringBefore(\"　上次错误：\")}\""))
+    fun `startup keeps dynamic config and per platform progress without redundant running summary`() {
+        assertTrue(measurementPage.contains("StartupNetworkStatus(remoteInfo.substringBefore(\"　上次错误：\"))"))
         assertTrue(measurementPage.contains("StartupPlatformSwitches()"))
-        assertTrue(measurementPage.contains("KMR.strings.startup_retest_all"))
-        assertTrue(measurementPage.contains("platformTestSummary ?: \"正在准备启动测速…\""))
+        assertTrue(measurementPage.contains("platformTestSummary?.let { summary ->"))
+        assertFalse(measurementPage.contains("正在准备启动测速…"))
+        val coordinator = File(root, "app/src/main/java/com/zycomic/app/net/PlatformSpeedTestCoordinator.kt").readText()
+        assertFalse(coordinator.contains("三平台测速进行中；各平台进度独立显示"))
+        assertTrue(coordinator.contains("_startupSummary.value = null"))
+        assertTrue(coordinator.contains("_startupSummary.value = startupSummary(result)"))
         val startupSwitches = mainActivity.substringAfter("private fun StartupPlatformSwitches()")
             .substringBefore("@Composable\nprivate fun StartupSwitch(")
         assertTrue(startupSwitches.contains("StartupSwitch("))
         assertTrue(startupSwitches.contains("LinearProgressIndicator("))
         assertTrue(startupSwitches.contains("startupChecksProgress(checkStatuses)"))
         assertTrue(startupSwitches.contains("startupChecksPassed(checkStatuses)"))
-        assertFalse(measurementPage.contains("NetworkMaintenanceNotice"))
+        assertTrue(startupSwitches.contains("}/6"))
+        val row = mainActivity.substringAfter("private fun StartupSwitch(")
+        assertTrue(row.contains("status?.message ?: \"等待测速\""))
+        assertTrue(row.contains("progress = { status.fraction }"))
         assertFalse(mainActivity.contains("NetworkMaintenanceNotice"))
+    }
+
+    @Test
+    fun `network status sits below system bars and enlarged brand uses compact spacing`() {
+        assertTrue(measurementPage.contains(".statusBarsPadding().navigationBarsPadding()"))
+        assertTrue(measurementPage.contains(".verticalScroll(rememberScrollState())"))
+        assertTrue(measurementPage.contains("padding(horizontal = 20.dp, vertical = 8.dp)"))
+        assertTrue(measurementPage.indexOf("StartupNetworkStatus(") < measurementPage.indexOf("StartupBrand()"))
+        assertFalse(measurementPage.contains("contentAlignment = Alignment.Center"))
+        val brand = mainActivity.substringAfter("private fun StartupBrand()").substringBefore("@Composable")
+        assertTrue(brand.contains("fontSize = 40.sp"))
+        assertTrue(brand.contains("FontWeight.ExtraBold"))
+        assertTrue(brand.contains("MaterialTheme.colorScheme.primary"))
+        val network = mainActivity.substringAfter("private fun StartupNetworkStatus(").substringBefore("@Composable")
+        assertTrue(network.contains("startup_network_status_title"))
+        assertTrue(network.contains("surfaceContainerHigh"))
+        assertTrue(network.contains("\n                info,"))
+    }
+
+    @Test
+    fun `guidance card follows full retest button with exact copy and emphasized phrases`() {
+        assertEquals("重新完整测速", strings["startup_retest_all"])
+        assertEquals("网络配置", strings["startup_network_status_title"])
+        assertEquals(
+            "三个平台源本身晚上就卡，建议早 6 点、晚 5 点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。",
+            strings["startup_guidance_copy"],
+        )
+        assertEquals("本身晚上就卡", strings["startup_guidance_evening"])
+        assertEquals("早 6 点、晚 5 点", strings["startup_guidance_time"])
+        assertEquals("首次", strings["startup_guidance_first"])
+        assertTrue(measurementPage.indexOf("KMR.strings.startup_retest_all") < measurementPage.indexOf("StartupGuidanceCard()"))
+        val card = mainActivity.substringAfter("private fun StartupGuidanceCard()").substringBefore("@Composable")
+        listOf("copy", "evening", "time", "first").forEach {
+            assertTrue(card.contains("KMR.strings.startup_guidance_$it"))
+        }
+        assertTrue(card.contains("listOf(evening, time, first)"))
+        assertTrue(card.contains("addStyle("))
+        assertTrue(card.contains("if (phrase == time) FontWeight.ExtraBold else FontWeight.Bold"))
+        assertTrue(card.contains("MaterialTheme.colorScheme.primaryContainer"))
+        assertTrue(card.contains("color = MaterialTheme.colorScheme.surfaceContainer"))
+        assertTrue(card.contains("lineHeight = 18.sp"))
     }
 
     @Test

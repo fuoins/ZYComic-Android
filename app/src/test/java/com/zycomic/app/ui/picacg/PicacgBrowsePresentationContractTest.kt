@@ -81,7 +81,7 @@ class PicacgBrowsePresentationContractTest {
         val browse = File(root, "app/src/main/java/com/zycomic/app/ui/browse/BrowseScreen.kt").readText()
         val picacgPage = browse.substringAfter("if (tabPlatform == ContentPlatform.PICACG)").substringBefore("if (item?.kind == TabKind.SPECIAL")
         val preview = picacgPage.substringAfter("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)")
-        assertTrue(picacgPage.contains("if (page == vm.mainTab.value) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
+        assertTrue(picacgPage.contains("if (isActive) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
         assertTrue(preview.contains("com.zycomic.app.ui.picacg.PicacgRankingChips()"))
         assertFalse(preview.contains("PicacgBrowseScreen("))
         assertFalse(preview.contains("LaunchedEffect"))
@@ -90,6 +90,42 @@ class PicacgBrowsePresentationContractTest {
         assertTrue(browse.contains("pagerState.animateScrollToPage(index)\n                                            vm.selectMainTab(index)"))
         assertTrue(picacgPage.contains("BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY"))
         assertTrue(picacgPage.contains("item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME"))
+    }
+
+    @Test
+    fun `returning to category or ranking passes observed selection into the real page instead of a stale preview`() {
+        val browse = File(root, "app/src/main/java/com/zycomic/app/ui/browse/BrowseScreen.kt").readText()
+        val parent = browse.substringBefore("private fun BrowseTabContent(")
+        assertTrue(parent.contains("val mainTab by vm.mainTab.collectAsState()"))
+        assertTrue(parent.contains("BrowseTabContent(\n                    page = page,\n                    isActive = page == mainTab,"))
+        val child = browse.substringAfter("private fun BrowseTabContent(")
+        assertTrue(child.substringBefore(") {").contains("isActive: Boolean,"))
+        val picacgPage = child.substringAfter("if (tabPlatform == ContentPlatform.PICACG)")
+            .substringBefore("if (item?.kind == TabKind.SPECIAL")
+        assertFalse(picacgPage.contains("vm.mainTab.value"))
+        val active = picacgPage.substringAfter("if (isActive) {").substringBefore("} else if")
+        assertTrue(active.contains("com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
+        assertTrue(active.contains("pageMode = pageMode,"))
+        assertTrue(active.contains("initialFilter = item?.picacgFilter,"))
+        assertFalse(active.contains("PicacgRankingChips()"))
+        assertFalse(active.contains("Box(Modifier.fillMaxSize())"))
+        assertEquals(1, Regex("PicacgBrowseScreen\\(").findAll(picacgPage).count())
+    }
+
+    @Test
+    fun `active ranking chips change mode while logged out content stays mutually exclusive`() {
+        val ranking = source.substringAfter("if (pageMode == PicacgBrowsePageMode.RANKING) {")
+            .substringBefore("if (!loggedIn) {")
+        assertTrue(ranking.contains("PicacgRankingChips(selectedMode = mode) { item ->"))
+        assertTrue(ranking.contains("selectMode(item, if (item == PicacgFeedMode.LATEST)"))
+        assertFalse(ranking.contains("PicacgRankingChips()"))
+        val selectMode = source.substringAfter("fun selectMode(").substringBefore("fun persistPresets(")
+        assertTrue(selectMode.contains("mode = next"))
+        assertTrue(selectMode.contains("filter = nextFilter"))
+        assertTrue(selectMode.contains("page = 1"))
+        assertTrue(source.contains("Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }\n        } else {\n            if (loading && mangas.isEmpty() && !hasSnapshot)"))
+        val request = source.substringAfter("LaunchedEffect(queryIdentity, page, refresh, browseCacheRevision) {")
+        assertTrue(request.trimStart().startsWith("if (!loggedIn) return@LaunchedEffect"))
     }
 
     @Test
