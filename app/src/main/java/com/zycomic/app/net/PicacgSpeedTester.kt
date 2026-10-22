@@ -503,19 +503,31 @@ object PicacgSpeedTester {
                         .build()
                 }
                 ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
-            val request = Request.Builder().url(url).header("User-Agent", "okhttp/3.8.1").get().build()
-            client.newCall(request).execute().use { response ->
-                code = response.code
-                contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
-                if (response.code != 200 || contentType?.startsWith("image/") != true) {
-                    response.closeBodyQuietly()
-                    false
-                } else {
-                    val bytes = response.body?.byteStream()?.use { readImageHead(it, MAX_IMAGE_HEAD_BYTES) }
-                        ?: throw IOException("Empty image body")
-                    validImage = hasImageMagic(bytes)
-                    PicacgNetworkPolicy.imageTileVerified(response.code, contentType, validImage == true)
+            // Fetch one tile and validate status + content-type + image magic on the head bytes.
+            fun fetchTile(testUrl: String): Boolean =
+                client.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()).execute().use { response ->
+                    code = response.code
+                    contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
+                    if (response.code != 200 || contentType?.startsWith("image/") != true) {
+                        response.closeBodyQuietly()
+                        false
+                    } else {
+                        val bytes = response.body?.byteStream()?.use { readImageHead(it, MAX_IMAGE_HEAD_BYTES) }
+                            ?: throw IOException("Empty image body")
+                        validImage = hasImageMagic(bytes)
+                        PicacgNetworkPolicy.imageTileVerified(response.code, contentType, validImage == true)
+                    }
                 }
+            // Main test requires BOTH the storage-b tile and the storage1 tile to pass: ~59/60 covers
+            // originate from storage1, so ranking a source by storage-b alone could leave covers broken.
+            // The diagnostic caller supplies a pinned client + real sample and only runs its own url.
+            if (clientOverride == null) {
+                val storageB = fetchTile(url)
+                val coverHost = PicacgBuiltinNetwork.coverHostFor(endpoint.domain)
+                val storage1 = coverHost != null && fetchTile(PicacgBuiltinNetwork.speedTileStorage1Url(coverHost))
+                storageB && storage1
+            } else {
+                fetchTile(url)
             }
         }.getOrDefault(false)
         return Probe(endpoint, success, elapsedMs(start), code, contentType, validImage)

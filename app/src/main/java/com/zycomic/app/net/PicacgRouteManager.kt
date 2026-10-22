@@ -296,33 +296,49 @@ object PicacgRouteManager {
             .build()
     }
 
-    /** Prefix that identifies a cover/thumbnail request served by the imgproxy mirrors. */
-    private const val COVER_PROXY_PREFIX = "/static/tobeimg/"
-
     /**
-     * Rewrites only a configured source host. Credentials, query and fragment are preserved verbatim.
+     * Rewrites every Picacg image bucket host to a reachable mirror. Credentials, query and fragment
+     * are preserved for content paths.
      *
-     * Cover thumbnails (`/static/tobeimg/...`) are rewritten straight to the selected content root's
-     * imgproxy mirror with the `/static/tobeimg` prefix removed, which is exactly the URL the official
-     * client reaches after storage-b's cross-domain 301 — saving one extra TLS round-trip. Content
-     * pages (`/static/tobs`, `/static/sub_storage_*`) and avatars stay on the selected storage bucket.
+     * Routing is bucket-aware and mirrors the official contract ({fileServer}/static/{path}):
+     *  1. Cover thumbnails `/static/tobeimg/...` (their originals live ~59/60 in storage1, not storage-b)
+     *     become the selected root's imgproxy UNSIGNED url `/insecure/{rs}/{b64}`; the embedded base64
+     *     points at the real bucket, so no cross-bucket guess is made and no login/token is required.
+     *  2. Reader pages `/static/tobs`, `/static/sub_storage_*` stay on the selected storage-b source
+     *     (img nodes answer 502 for tobs).
+     *  3. Non-content bucket files (direct-cover / avatar on storage1, …) are encoded into imgproxy
+     *     insecure urls as well, so storage1 items load through the same verified mirror.
+     *  4. Hosts outside the bucket/mirror set and already-mirror urls are left untouched.
      */
     fun rewriteImageUrl(url: String): String = runCatching {
         val original = URI(url)
         if (original.scheme !in setOf("http", "https") || original.host.isNullOrBlank() || original.rawUserInfo != null) return url
-        // Already an imgproxy direct URL, or a host outside the content pool (storage1 avatars, third-party signed URLs): leave as-is.
-        if (PicacgBuiltinNetwork.isCoverHost(original.host)) return url
-        if (_state.value.imageHosts.none { it.equals(original.host, true) }) return url
+        val host = original.host
+        if (PicacgBuiltinNetwork.isCoverHost(host)) return url
         val rawPath = original.rawPath.orEmpty()
-        if (rawPath.startsWith(COVER_PROXY_PREFIX, ignoreCase = true)) {
-            val coverHost = PicacgBuiltinNetwork.coverHostFor(currentImageHost)
+        val coverHost = PicacgBuiltinNetwork.coverHostFor(currentImageHost)
+
+        // 1) Cover thumbnails -> imgproxy insecure (base64 already encodes the real storage1/storage-b origin).
+        if (rawPath.startsWith(PicacgBuiltinNetwork.COVER_PROXY_PREFIX, ignoreCase = true)) {
             if (coverHost != null) {
-                val mirrorPath = rawPath.substring(COVER_PROXY_PREFIX.length).let { if (it.startsWith("/")) it else "/$it" }
-                return@runCatching rebuildImageUrl(original, coverHost, mirrorPath)
+                PicacgBuiltinNetwork.coverInsecureFromTobeimg(rawPath, coverHost)?.let { return@runCatching it }
             }
         }
-        val target = currentImageHost ?: return url
-        rebuildImageUrl(original, target, rawPath)
+        // 2) Reader pages must stay on storage-b; never route tobs/sub_storage through imgproxy.
+        if (PicacgBuiltinNetwork.isContentPath(rawPath)) {
+            val target = currentImageHost ?: return url
+            return@runCatching rebuildImageUrl(original, target, rawPath)
+        }
+        // 3) Direct bucket files (storage1 covers / avatars, …) -> imgproxy insecure fetch of the real origin.
+        if (coverHost != null && PicacgBuiltinNetwork.isImageBucketHost(host)) {
+            return@runCatching PicacgBuiltinNetwork.coverInsecureFromOrigin(original.toASCIIString(), coverHost)
+        }
+        // 4) Remaining content-pool paths -> selected storage-b source.
+        if (_state.value.imageHosts.any { it.equals(host, true) }) {
+            val target = currentImageHost ?: return url
+            return@runCatching rebuildImageUrl(original, target, rawPath)
+        }
+        url
     }.getOrDefault(url)
 
     private fun rebuildImageUrl(original: URI, host: String, path: String): String = buildString {
@@ -342,7 +358,8 @@ object PicacgRouteManager {
             runCatching {
                 val uri = URI(candidate)
                 uri.scheme in setOf("http", "https") && uri.host != null &&
-                    _state.value.imageHosts.any { it.equals(uri.host, true) }
+                    (PicacgBuiltinNetwork.isImageBucketHost(uri.host) ||
+                        PicacgBuiltinNetwork.isCoverHost(uri.host))
             }.getOrDefault(false)
         }
     }

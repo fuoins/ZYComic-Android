@@ -342,8 +342,11 @@ object PicacgRepository {
         val id = text("id", "_id")
         val name = text("name")
         val avatar = profile.optJSONObject("avatar")
-        val avatarUrl = avatar?.optString("path")?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { PicacgImageUrl.resolve(it, PicacgRouteManager.currentImageHost.orEmpty()) }.orEmpty()
+        val avatarPath = avatar?.optString("path")?.takeIf { it.isNotBlank() && it != "null" }
+        val avatarServer = avatar?.optString("fileServer")?.takeIf { it.isNotBlank() && it != "null" }
+        val avatarUrl = avatarPath?.let {
+            PicacgImageUrl.resolveWithFileServer(it, avatarServer, PicacgRouteManager.currentImageHost.orEmpty())
+        }.orEmpty()
         val isPunched = when (val value = profile.opt("isPunched")) {
             is Boolean -> value
             is String -> value.toBooleanStrictOrNull()
@@ -498,7 +501,10 @@ object PicacgRepository {
     private fun Manga.withResolvedCover(thumb: JSONObject?): Manga {
         val apiPath = thumb?.optString("path").orEmpty()
         val path = apiPath.ifBlank { picx }
-        val resolved = if (path.isBlank()) "" else PicacgImageUrl.resolve(path, PicacgRouteManager.currentImageHost.orEmpty())
+        // Keep the API's real fileServer (storage1/storage-b); RouteManager mirrors the true bucket.
+        val fileServer = thumb?.optString("fileServer")?.takeIf { it.isNotBlank() && it != "null" }
+        val resolved = if (path.isBlank()) ""
+        else PicacgImageUrl.resolveWithFileServer(path, fileServer, PicacgRouteManager.currentImageHost.orEmpty())
         if (apiPath.isNotBlank() && resolved.isNotBlank()) PicacgRouteManager.setVerifiedImageSampleUrlFromApiResponse(resolved)
         return copy(picx = resolved)
     }

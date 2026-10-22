@@ -124,6 +124,19 @@ internal object PicacgImageUrl {
         while (relative.startsWith("static/", ignoreCase = true)) relative = relative.substringAfter('/')
         return "https://$host/static/$relative"
     }
+
+    /**
+     * Prefer the API-provided [fileServer] (the real bucket, e.g. storage1.picacomic.com) so the URL
+     * carries the true origin; [PicacgRouteManager.rewriteImageUrl] then mirrors that bucket. Falls
+     * back to the currently selected image host when the API omits a usable fileServer.
+     */
+    fun resolveWithFileServer(path: String, fileServer: String?, selectedImageHost: String): String {
+        val value = path.trim()
+        if (value.startsWith("file://") || value.startsWith("content://")) return value
+        val server = fileServer?.trim()?.removePrefix("https://")?.removePrefix("http://")?.trimEnd('/')
+            ?.takeIf { it.isNotBlank() && !it.contains('/') && !it.contains('@') }
+        return resolve(value, server ?: selectedImageHost)
+    }
 }
 
 /** Convert only documented Picacg comic fields into the app's existing Manga DTO. */

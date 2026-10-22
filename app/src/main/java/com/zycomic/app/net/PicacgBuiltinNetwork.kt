@@ -1,5 +1,6 @@
 package com.zycomic.app.net
 
+import android.util.Base64
 import java.util.Locale
 
 /** Immutable, client-owned Picacg network defaults. Remote DNS results can only augment Picacomic hosts. */
@@ -44,6 +45,66 @@ object PicacgBuiltinNetwork {
     /** Probe URL for a cover mirror; the returned tile is a stable ~1.9KB JPEG. */
     fun speedTileUrl(coverHost: String): String =
         "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/rs:fill:50:67:0/$SPEED_TILE_ORIGIN_BASE64"
+
+    /**
+     * Second fixed tile whose ORIGINAL lives in the storage1 bucket. ~59/60 real covers originate
+     * from storage1, so this proves the imgproxy can cross-origin fetch storage1 (not just storage-b).
+     */
+    private const val SPEED_TILE_STORAGE1_BASE64 =
+        "aHR0cHM6Ly9zdG9yYWdlMS5waWNhY29taWMuY29tL3N0YXRpYy9mNjI1OGNhOS0yMmM4LTQxN2MtOWI4MS1mNjRmMzhjNTNiZjEuanBn"
+
+    /** Extra storage1-bucket probe; both tiles must pass before an image source is considered cover-capable. */
+    fun speedTileStorage1Url(coverHost: String): String =
+        "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/rs:fill:50:67:0/$SPEED_TILE_STORAGE1_BASE64"
+
+    // ── Cover-vs-content classification + imgproxy rewrite helpers ────────────────────────
+    /** Cover thumbnail (imgproxy signed) prefix: `/static/tobeimg/...`. */
+    const val COVER_PROXY_PREFIX = "/static/tobeimg/"
+    /** Reader page prefixes; these stay on storage-b and MUST NOT go through imgproxy (img nodes 502 on tobs). */
+    private const val CONTENT_TOBS_PREFIX = "/static/tobs/"
+    private const val CONTENT_SUB_PREFIX = "/static/sub_storage"
+    private val BUCKET_LABELS = setOf("storage-b", "storage1", "storage")
+
+    /** True for reader-page paths (`/static/tobs`, `/static/sub_storage_*`). */
+    fun isContentPath(path: String?): Boolean {
+        val p = path ?: return false
+        return p.startsWith(CONTENT_TOBS_PREFIX, ignoreCase = true) ||
+            p.contains(CONTENT_SUB_PREFIX, ignoreCase = true)
+    }
+
+    /** True when host is a Picacg storage bucket (storage1/storage-b/storage) under any known root. */
+    fun isImageBucketHost(host: String?): Boolean {
+        val h = normalizeHost(host) ?: return false
+        val labels = h.split('.')
+        if (labels.size < 3 || labels.first() !in BUCKET_LABELS) return false
+        return rootRules.containsKey(labels.drop(1).joinToString("."))
+    }
+
+    /**
+     * Convert a `/static/tobeimg/{token}/{options}/g:sm/{b64}.jpg` cover path to an imgproxy
+     * UNSIGNED URL: `https://{coverHost}/insecure/{rs-option}/{b64}`. The embedded base64 already
+     * encodes the ORIGINAL full URL (storage1 or storage-b), so the mirror fetches the real bucket
+     * regardless of the host the client happened to put on the request.
+     */
+    fun coverInsecureFromTobeimg(rawPath: String, coverHost: String): String? {
+        if (!rawPath.startsWith(COVER_PROXY_PREFIX, ignoreCase = true)) return null
+        val rest = rawPath.substring(COVER_PROXY_PREFIX.length).trimStart('/')
+        val segs = rest.split('/').filter { it.isNotEmpty() }
+        if (segs.size < 3) return null
+        val sourceB64 = segs.last().substringBeforeLast('.', segs.last())
+        val options = segs.subList(1, segs.size - 1).filterNot { it.startsWith("g:", ignoreCase = true) }
+        val sizeOption = options.firstOrNull { it.startsWith("rs:", ignoreCase = true) } ?: "rs:fill:300:400:0"
+        return "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/$sizeOption/$sourceB64"
+    }
+
+    /** Encode a bucket original URL (non-tobeimg cover / avatar) into an imgproxy unsigned URL. */
+    fun coverInsecureFromOrigin(originUrl: String, coverHost: String): String {
+        val b64 = Base64.encodeToString(
+            originUrl.toByteArray(Charsets.UTF_8),
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+        )
+        return "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/rs:fill:300:400:0/$b64"
+    }
 
     /** Maps a content bucket `storage-b.{root}` to its cover mirror `img.{root}`; null if no mirror exists. */
     fun coverHostFor(contentHost: String?): String? {

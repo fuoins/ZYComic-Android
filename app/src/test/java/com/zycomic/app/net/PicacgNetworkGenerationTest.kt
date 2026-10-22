@@ -102,21 +102,28 @@ class PicacgNetworkGenerationTest {
         assertFalse(PicacgRouteManager.selectImageHost("img.safedataplj.com"))
         assertTrue(PicacgRouteManager.selectImageHost("storage-b.safedataplj.com"))
         assertTrue(PicacgRouteManager.selectImageHost("storage-b.go2778.com"))
-        // Cover thumbnails bypass storage-b's cross-domain 301 and go straight to the img mirror, prefix removed.
+        // Cover thumbnails (tobeimg) become imgproxy UNSIGNED urls; the embedded base64 keeps the
+        // real origin (storage1/storage-b), so no token/query and no cross-bucket guess is needed.
         assertEquals(
-            "https://img.go2778.com/a%2Fb.jpg?x=%2F",
-            PicacgRouteManager.rewriteImageUrl("https://storage-b.picacomic.com/static/tobeimg/a%2Fb.jpg?x=%2F"),
+            "https://img.go2778.com/insecure/rs:fill:300:400:0/QUJD",
+            PicacgRouteManager.rewriteImageUrl("https://storage-b.picacomic.com/static/tobeimg/TOKEN/rs:fill:300:400:0/g:sm/QUJD.jpg"),
         )
-        // Content pages keep the selected storage bucket and their raw path.
+        // Content pages keep the selected storage bucket and their raw path (never go through imgproxy).
         assertEquals(
             "https://storage-b.go2778.com/static/tobs/sub_storage_1/x.jpg",
             PicacgRouteManager.rewriteImageUrl("https://storage-b.picacomic.com/static/tobs/sub_storage_1/x.jpg"),
         )
-        // Already an imgproxy URL and out-of-pool avatars are left untouched.
+        // Already an imgproxy URL is left untouched.
         val redirect = "https://img.safedataplj.com/signature/rs:fill:300:400/image.jpg"
         assertEquals(redirect, PicacgRouteManager.rewriteImageUrl(redirect))
-        val avatar = "https://storage1.picacomic.com/static/avatar.jpg"
-        assertEquals(avatar, PicacgRouteManager.rewriteImageUrl(avatar))
+        // storage1 direct files (avatars / non-tobeimg legacy covers) now route through the mirror too.
+        assertEquals(
+            "https://img.go2778.com/insecure/rs:fill:300:400:0/aHR0cHM6Ly9zdG9yYWdlMS5waWNhY29taWMuY29tL3N0YXRpYy9hdmF0YXIuanBn",
+            PicacgRouteManager.rewriteImageUrl("https://storage1.picacomic.com/static/avatar.jpg"),
+        )
+        // Hosts outside the Picacg bucket/mirror set remain untouched.
+        val external = "https://example.com/static/x.jpg"
+        assertEquals(external, PicacgRouteManager.rewriteImageUrl(external))
     }
 
     @Test
