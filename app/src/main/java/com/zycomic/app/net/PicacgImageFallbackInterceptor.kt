@@ -2,6 +2,7 @@ package com.zycomic.app.net
 
 import okhttp3.Interceptor
 import okhttp3.Response
+import okio.Buffer
 import java.io.IOException
 
 /**
@@ -12,7 +13,7 @@ import java.io.IOException
  * fetch a specific tile (cold origin fetch, cross-bucket 502, a stalled edge). Pinning only one
  * root is what made a fixed subset of covers/pages never load. [PicacgRouteManager.candidateImageUrls]
  * returns the per-root candidates already ranked by the speed test, so this interceptor walks them
- * on a non-image / error response and returns the first that actually serves an image.
+ * only after classified transport failures; a non-image response is returned without rotation.
  *
  * Non-Picacg or already-rewritten requests yield a single candidate and pass through unchanged.
  */
@@ -20,21 +21,12 @@ class PicacgImageFallbackInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val candidates = PicacgRouteManager.candidateImageUrls(original.url.toString())
-        val target = candidates.firstOrNull() ?: original.url.toString()
-
-        if (candidates.size <= 1) {
-            return chain.proceed(
-                original.newBuilder()
-                    .url(target)
-                    .header("User-Agent", UA)
-                    .header("Referer", REFERER)
-                    .build(),
-            )
-        }
+        val candidateUrls = candidates.ifEmpty { listOf(original.url.toString()) }
 
         var lastError: IOException? = null
-        for (candidate in candidates) {
-            val response = try {
+        for (candidate in candidateUrls) {
+            if (chain.call().isCanceled()) throw IOException("Picacg image request was cancelled")
+            val candidateResponse = try {
                 chain.proceed(
                     original.newBuilder()
                         .url(candidate)
@@ -43,22 +35,36 @@ class PicacgImageFallbackInterceptor : Interceptor {
                         .build(),
                 )
             } catch (e: IOException) {
+                if (!PicacgImagePayloadPolicy.mayTryNextSource(e, chain.call().isCanceled())) throw e
                 lastError = e
                 continue
             }
-            if (response.isUsableImage()) {
-                return response
+            // Client responses are content/auth/rate policy, not evidence that another route is healthier.
+            if (!candidateResponse.isSuccessful || candidateResponse.code in 400..499) return candidateResponse
+            val usable = try {
+                candidateResponse.isUsableImage()
+            } catch (e: IOException) {
+                candidateResponse.close()
+                if (!PicacgImagePayloadPolicy.mayTryNextSource(e, chain.call().isCanceled())) throw e
+                lastError = e
+                continue
             }
-            response.close()
+            if (usable) return candidateResponse
+            // A successful but empty, mislabeled, or non-image response is a payload failure, not a
+            // transport failure; preserve it for the caller rather than rotating to another source.
+            return candidateResponse
         }
         throw lastError ?: IOException("All Picacg image mirrors failed for ${original.url}")
     }
 
     private fun Response.isUsableImage(): Boolean {
-        if (!isSuccessful) return false
-        val type = header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
-        // Storage buckets and imgproxy always answer image/* on success; a 200 HTML/text body is an error page.
-        return type == null || type.startsWith("image/")
+        val type = header("Content-Type")
+        if (!isSuccessful || !PicacgImagePayloadPolicy.isImageContentType(type)) return false
+        val source = body?.source() ?: return false
+        source.request(PicacgImagePayloadPolicy.MAX_HEAD_BYTES.toLong())
+        val head = Buffer()
+        source.buffer.copyTo(head)
+        return PicacgImagePayloadPolicy.isUsableImage(code, type, head.readByteArray())
     }
 
     private companion object {

@@ -146,16 +146,8 @@ object PicacgSpeedTester {
                     publishProgress(Progress(Stage.PREPARING_API, total = apiUrls.size))
                     when {
                         cachedApi.isNotEmpty() || apiQuick -> emptyList()
-                        else -> apiUrls.flatMap { baseUrl ->
-                            val host = runCatching { URI(baseUrl).host }.getOrNull()
-                            if (host == null) {
-                                emptyList()
-                            } else {
-                                resolve(host).map { ip ->
-                                    val endpoint = DomainIp(host, ip)
-                                    ApiTarget(baseUrl, endpoint, apiIdentity(baseUrl, endpoint))
-                                }
-                            }
+                        else -> PicacgSpeedTestTargetPolicy.apiTargets(apiUrls, ::resolve).map { target ->
+                            ApiTarget(target.url, target.endpoint, apiIdentity(target.url, target.endpoint))
                         }
                     }
                 }
@@ -229,21 +221,13 @@ object PicacgSpeedTester {
                             blockedReason = "哔咔未配置任何正文图源（storage-b）；图源验证未运行"
                             emptyList()
                         }
-                        else -> PicacgRouteManager.imageHosts.flatMap { contentHost ->
-                            val coverHost = PicacgBuiltinNetwork.coverHostFor(contentHost)
-                            if (coverHost == null) {
-                                emptyList()
-                            } else {
-                                val coverTileUrl = PicacgBuiltinNetwork.speedTileUrl(coverHost)
-                                val contentTileUrl = PicacgBuiltinNetwork.speedTileContentUrl(contentHost)
-                                resolve(contentHost).flatMap { ip ->
-                                    val endpoint = DomainIp(contentHost, ip)
-                                    listOf(
-                                        ImageTarget(coverTileUrl, endpoint, imageIdentity(endpoint, content = false), content = false),
-                                        ImageTarget(contentTileUrl, endpoint, imageIdentity(endpoint, content = true), content = true),
-                                    )
-                                }
-                            }
+                        else -> PicacgSpeedTestTargetPolicy.imageTargets(PicacgRouteManager.imageHosts, ::resolve).map { target ->
+                            ImageTarget(
+                                target.url,
+                                target.endpoint,
+                                imageIdentity(target.endpoint, content = target.content),
+                                content = target.content,
+                            )
                         }
                     }
                 }
@@ -333,15 +317,17 @@ object PicacgSpeedTester {
                         // Keep the fastest IP per storage-b root for EACH service independently — covers
                         // (imgproxy) and reader pages (storage-b) — then order roots by that best probe.
                         // Both ranked lists are installed for automatic fallback; never a single winner.
-                        fun rankingOf(wantContent: Boolean): List<DomainIp> =
-                            imageSelection.filter { it.success && it.content == wantContent }
-                                .groupBy { it.endpoint.domain.lowercase() }
-                                .map { (_, probes) ->
-                                    val best = probes.minByOrNull(Probe::elapsedMs)!!
-                                    best.elapsedMs to best.endpoint
-                                }
-                                .sortedBy { it.first }
-                                .map { it.second }
+                        fun rankingOf(wantContent: Boolean): List<DomainIp> = PicacgSpeedTestTargetPolicy.ranking(
+                            imageSelection.map { probe ->
+                                PicacgSpeedTestTargetPolicy.ImageOutcome(
+                                    probe.endpoint,
+                                    content = probe.content,
+                                    success = probe.success,
+                                    elapsedMs = probe.elapsedMs,
+                                )
+                            },
+                            content = wantContent,
+                        )
                         val coverRanking = rankingOf(wantContent = false)
                         val contentRanking = rankingOf(wantContent = true)
                         if (!PicacgRouteManager.applyImageRankings(coverRanking, contentRanking)) {
@@ -442,7 +428,7 @@ object PicacgSpeedTester {
             ip = endpoint.ip,
             routeCondition = routeCondition(PicacgSpeedTestHistoryPolicy.IMAGE_ROUTE_CONDITION, endpoint),
             probeCondition = if (content) {
-                "GET-storage-b-page-tile;redirects-disabled;status-200;image-content-type;image-magic"
+                "GET-storage-b-reader-page-tile;redirects-disabled;status-200;image-content-type;image-magic"
             } else {
                 "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic"
             },
@@ -536,11 +522,16 @@ object PicacgSpeedTester {
         return Probe(endpoint, success, elapsedMs(start), code)
     }
 
-    internal suspend fun validateRuntimeImageEndpoint(endpoint: DomainIp): Boolean = withContext(Dispatchers.IO) {
+    internal suspend fun validateRuntimeImageEndpoint(endpoint: DomainIp, content: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (!RuntimeNetworkGate.isOnline()) return@withContext false
-        val mirror = PicacgBuiltinNetwork.coverHostFor(endpoint.domain) ?: return@withContext false
+        val url = if (content) {
+            PicacgBuiltinNetwork.speedTileContentUrl(endpoint.domain)
+        } else {
+            val mirror = PicacgBuiltinNetwork.coverHostFor(endpoint.domain) ?: return@withContext false
+            PicacgBuiltinNetwork.speedTileUrl(mirror)
+        }
         runInterruptible {
-            probeImage(PicacgBuiltinNetwork.speedTileUrl(mirror), endpoint, runtimeRecovery = true).success
+            probeImage(url, endpoint, content = content, runtimeRecovery = true).success
         }
     }
 
@@ -598,13 +589,13 @@ object PicacgSpeedTester {
                 guarded.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()).execute().use { response ->
                     code = response.code
                     contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
-                    if (response.code != 200 || contentType?.startsWith("image/") != true) {
+                    if (response.code != 200 || !PicacgImagePayloadPolicy.isImageContentType(contentType)) {
                         response.closeBodyQuietly()
                         false
                     } else {
                         val bytes = response.body?.byteStream()?.use { readImageHead(it, MAX_IMAGE_HEAD_BYTES) }
                             ?: throw IOException("Empty image body")
-                        validImage = hasImageMagic(bytes)
+                        validImage = PicacgImagePayloadPolicy.hasImageMagic(bytes)
                         PicacgNetworkPolicy.imageTileVerified(response.code, contentType, validImage == true)
                     }
                 }
@@ -640,24 +631,6 @@ object PicacgSpeedTester {
         return output.toByteArray()
     }
 
-    /** Magic-byte recognition for JPEG / PNG / GIF / WEBP; cheaper than decoding pixels and enough to rank sources. */
-    private fun hasImageMagic(bytes: ByteArray): Boolean {
-        if (bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return true
-        if (bytes.size >= 8 &&
-            bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()
-        ) {
-            return true
-        }
-        if (bytes.size >= 6 && bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte()) return true
-        if (bytes.size >= 12 &&
-            bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
-            bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() && bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
-        ) {
-            return true
-        }
-        return false
-    }
-
     private fun elapsedMs(startNanos: Long): Long = ((System.nanoTime() - startNanos) / 1_000_000L).coerceAtLeast(0L)
 
     private fun okhttp3.Response.closeBodyQuietly() = runCatching { body?.close() }
@@ -678,6 +651,7 @@ object PicacgSpeedTester {
 
     private fun Probe.toJson(probeType: String) = JSONObject().apply {
         put("probe", probeType)
+        if (probeType == "real_image_get") put("service", if (content) "body" else "cover")
         put("domain", endpoint.domain)
         put("ip", endpoint.ip)
         put("success", success)

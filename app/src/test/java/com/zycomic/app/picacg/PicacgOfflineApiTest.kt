@@ -181,7 +181,7 @@ class PicacgOfflineApiTest {
     }
 
     @Test
-    fun `favorites and detail resolve the same API thumbnail through the same Picacg host`() = runBlocking {
+    fun `favorites and detail preserve the same API thumbnail fileServer`() = runBlocking {
         PicacgRepository.installClientForTests(client)
         for (path in listOf("covers/same.jpg", "/static/covers/same.jpg")) {
             val comic = """{"_id":"same-comic","title":"Same comic","thumb":{"path":"$path","fileServer":"https://api-image.example"}}"""
@@ -194,7 +194,7 @@ class PicacgOfflineApiTest {
 
             assertEquals("same-comic", listed.id)
             assertEquals(detail.id, listed.id)
-            assertEquals("https://img.example/static/covers/same.jpg", listed.picx)
+            assertEquals("https://api-image.example/static/covers/same.jpg", listed.picx)
             assertEquals(detail.picx, listed.picx)
         }
     }
@@ -441,17 +441,25 @@ class PicacgOfflineApiTest {
     }
 
     @Test
-    fun `401 clears the captured session but not a replacement session`() = runBlocking {
+    fun `raw HTTP 401 does not clear captured or replacement session`() = runBlocking {
         responses += 401 to """{"code":401,"message":"expired","data":{}}"""
         val before = PicacgAuthStore.sessionRevision.value
         assertThrows(IOException::class.java) { runBlocking { client.request("/private") } }
-        assertEquals(before + 1, PicacgAuthStore.sessionRevision.value)
+        assertEquals(before, PicacgAuthStore.sessionRevision.value)
 
         replaceSessionBefore401 = true
         responses += 401 to """{"code":401,"message":"expired","data":{}}"""
         val prior = PicacgAuthStore.sessionRevision.value
         assertThrows(IOException::class.java) { runBlocking { client.request("/private") } }
         assertEquals(prior + 1, PicacgAuthStore.sessionRevision.value)
+    }
+
+    @Test
+    fun `explicit Picacg business expiry clears only captured session`() = runBlocking {
+        responses += 200 to """{"code":1005,"error":"1005","message":"expired","data":{}}"""
+        val before = PicacgAuthStore.sessionRevision.value
+        assertThrows(IOException::class.java) { runBlocking { client.request("/private") } }
+        assertEquals(before + 1, PicacgAuthStore.sessionRevision.value)
     }
 
     @Test
@@ -463,6 +471,8 @@ class PicacgOfflineApiTest {
         val empty = PicacgRepository.browse(1)
         assertFalse(empty.hasMore)
         assertTrue(empty.items.isEmpty())
+        // This test exercises parsing, not the fresh successful snapshot above.
+        PicacgRepository.installClientForTests(client)
         responses += 200 to """{"code":200,"data":{"comics":{"docs":[{"_id":"x"}],"pages":0}}}"""
         assertThrows(IOException::class.java) { runBlocking { PicacgRepository.browse(1) } }
         Unit

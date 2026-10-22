@@ -55,6 +55,13 @@ object PicacgRouteManager {
     val baseUrl: String get() = currentBaseUrl()
     fun currentBaseUrl(): String = _state.value.apiUrls.getOrNull(_state.value.apiIndex)?.let(::withTrailingSlash).orEmpty()
     val currentImageHost: String? get() = _state.value.imageHost
+    /** The active source is independent for covers and reader pages unless the user pinned a root. */
+    fun imageSourceFor(content: Boolean): String? {
+        val current = _state.value
+        if (isImageManuallyPinned) return current.imageHost
+        val ranking = if (content) current.contentRanking else current.coverRanking
+        return ranking.firstOrNull()?.domain ?: current.imageHost
+    }
     /** Compatibility name consumed by PicacgRepository. */
     val imageHost: String? get() = currentImageHost
     val apiUrls: List<String> get() = _state.value.apiUrls
@@ -124,8 +131,12 @@ object PicacgRouteManager {
             manualApi = manualApi,
             manualImage = manualImage,
         )
-        _state.value = next
+        // Publish a coherent rules/configuration snapshot before waking state observers.
+        apiRouteRules = apiRules
+        imageRouteRules = imageRules
+        dnsFallbackRules = emptyMap()
         routeConfigRevision++
+        _state.value = next
         prefs?.edit()?.apply {
             putString("configured_api_urls", JSONArray(normalizedUrls).toString())
             putString("configured_image_hosts", JSONArray(normalizedHosts).toString())
@@ -145,10 +156,6 @@ object PicacgRouteManager {
             persistEndpoint("api_pin", apiPin)
             persistEndpoint("image_pin", imagePin)
         }?.apply()
-        // Keep route-rule snapshots in memory only; source lists and rules always come from DevConfig's validated snapshot.
-        apiRouteRules = apiRules
-        imageRouteRules = imageRules
-        dnsFallbackRules = emptyMap()
     }
 
     @Volatile private var apiRouteRules: Map<String, List<String>> = emptyMap()
@@ -286,15 +293,24 @@ object PicacgRouteManager {
     }
 
     /** Previously tested candidates only; configured host ordering stays unchanged. */
-    fun runtimeImageRecoveryCandidates(expectedSource: String): List<DomainIp> {
+    fun runtimeImageRecoveryCandidates(
+        expectedSource: String,
+        service: PicacgImageService? = null,
+    ): List<DomainIp> {
         if (isImageManuallyPinned) return emptyList()
         val snapshot = PicacgSpeedTester.snapshot.value ?: return emptyList()
         if (snapshot.revision != configRevision) return emptyList()
         val index = imageHosts.indexOfFirst { it.equals(expectedSource, true) }
         if (index < 0) return emptyList()
-        return (1 until imageHosts.size).mapNotNull { offset ->
-            val host = imageHosts[(index + offset) % imageHosts.size]
-            snapshot.imageProbes.filter { it.success && it.endpoint.domain.equals(host, true) }
+        val pool = if (service == PicacgImageService.BODY) {
+            snapshot.imageProbes.filter { it.content }
+        } else if (service == PicacgImageService.COVER) {
+            snapshot.imageProbes.filterNot { it.content }
+        } else {
+            snapshot.imageProbes
+        }
+        return imageHosts.filterNot { it.equals(expectedSource, true) }.mapNotNull { host ->
+            pool.filter { it.success && it.endpoint.domain.equals(host, true) }
                 .minByOrNull { it.elapsedMs }?.endpoint
         }
     }
@@ -305,14 +321,30 @@ object PicacgRouteManager {
         expectedConfigRevision: Long,
         expectedPlatformRevision: Long,
         validatedEndpoint: DomainIp,
+        service: PicacgImageService? = null,
     ): Boolean {
         if (!RuntimeNetworkGate.isOnline() || configRevision != expectedConfigRevision ||
             !com.zycomic.app.platform.StartupPlatformPolicy.isEnabled(com.zycomic.app.platform.ContentPlatform.PICACG) ||
             com.zycomic.app.platform.StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
-            !currentImageHost.equals(expectedSource, true) || isImageManuallyPinned ||
-            validatedEndpoint !in runtimeImageRecoveryCandidates(expectedSource)
+            !imageSourceFor(service == PicacgImageService.BODY).equals(expectedSource, true) || isImageManuallyPinned ||
+            validatedEndpoint !in runtimeImageRecoveryCandidates(expectedSource, service)
         ) {
             return false
+        }
+        if (service != null) {
+            val current = _state.value
+            val oldRanking = if (service == PicacgImageService.BODY) current.contentRanking else current.coverRanking
+            val newRanking = (listOf(validatedEndpoint) + oldRanking.filterNot { it.domain.equals(validatedEndpoint.domain, true) })
+            prefs()?.edit()?.putString(
+                if (service == PicacgImageService.BODY) "content_ranking" else "cover_ranking",
+                encodeRanking(newRanking),
+            )?.apply()
+            _state.value = if (service == PicacgImageService.BODY) {
+                current.copy(contentRanking = newRanking, revision = current.revision + 1)
+            } else {
+                current.copy(coverRanking = newRanking, revision = current.revision + 1)
+            }
+            return true
         }
         if (!applyAutomaticImageEndpoint(validatedEndpoint)) return false
         return selectImageHost(validatedEndpoint.domain, manual = false)
@@ -382,7 +414,7 @@ object PicacgRouteManager {
         val state = _state.value
         val ranking = if (forContent) state.contentRanking else state.coverRanking
         val ranked = ranking.map { it.domain }.filter { d -> state.imageHosts.any { it.equals(d, true) } }
-        val manual = state.imageHost?.takeIf { host -> ranked.none { it.equals(host, true) } }
+        val manual = state.imageHost?.takeIf { host -> isImageManuallyPinned && ranked.none { it.equals(host, true) } }
         val rest = state.imageHosts.filter { h ->
             h != manual && ranked.none { it.equals(h, true) }
         }
@@ -621,11 +653,11 @@ object PicacgRouteManager {
     @Synchronized
     fun clearConfiguration() {
         val old = _state.value
-        _state.value = State(revision = old.revision + 1)
-        routeConfigRevision++
         apiRouteRules = emptyMap()
         imageRouteRules = emptyMap()
         dnsFallbackRules = emptyMap()
+        routeConfigRevision++
+        _state.value = State(revision = old.revision + 1)
         _verifiedImageSampleUrl = null
     }
 

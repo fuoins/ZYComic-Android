@@ -27,11 +27,15 @@ class ManwaSessionVerificationPolicyTest {
     }
 
     @Test
-    fun `only explicit HTTP 401 is session expiration evidence`() {
-        assertTrue(ManwaSessionVerificationPolicy.isExplicitUnauthorized(401))
-        assertFalse(ManwaSessionVerificationPolicy.isExplicitUnauthorized(403))
-        assertFalse(ManwaSessionVerificationPolicy.isExplicitUnauthorized(500))
-        assertFalse(ManwaSessionVerificationPolicy.isExplicitUnauthorized(0))
+    fun `authorization failures remain unknown and retain the current session identity`() {
+        val policy = ManwaSessionVerificationPolicy()
+        policy.restore("cached-account") {}
+        val ticket = policy.beginRefresh {}
+        var status = ManwaSessionStatus.VERIFIED
+        assertTrue(policy.markUnknown(ticket) { status = ManwaSessionStatus.UNKNOWN })
+        assertEquals(ManwaSessionStatus.UNKNOWN, status)
+        assertTrue(policy.isCurrent(ticket))
+        assertTrue(policy.commitVerified(ticket, "cached-account") {})
     }
 
     @Test
@@ -44,7 +48,6 @@ class ManwaSessionVerificationPolicyTest {
         assertFalse(ManwaSessionVerificationPolicy.isValidIdentity(""))
         assertFalse(ManwaSessionVerificationPolicy.isValidIdentity("0"))
         assertTrue(ManwaSessionVerificationPolicy.isValidIdentity("42"))
-        assertFalse(ManwaSessionVerificationPolicy.isExplicitUnauthorized(403))
     }
 
     @Test

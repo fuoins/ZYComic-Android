@@ -155,7 +155,7 @@ class PicacgRankBadgeContractTest(unittest.TestCase):
         # Rank is derived from the original indexed feed, not a sorted/transformed copy.
         for forbidden in ("mangas.sorted", "mangas.sortedBy", "mangas.reversed(", "mangas.shuffled("):
             self.assertNotIn(forbidden, screen)
-        self.assertIn("PicacgRepository.leaderboard(mode.timeframe!!)", screen)
+        self.assertIn("PicacgRepository.leaderboard(mode.timeframe!!, forceRefresh)", screen)
         self.assertIn("PicacgRepository.random()", screen)
         self.assertIn("PicacgRepository.browse(", screen)
         feed_modes = self.browse.split("internal enum class PicacgFeedMode", 1)[1].split("}", 1)[0]

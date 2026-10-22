@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
@@ -131,6 +132,8 @@ fun PicacgBrowseScreen(
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val session by PicacgAuthStore.sessionRevision.collectAsState()
     val blockKeywords by PicacgBlockKeywordStore.keywords.collectAsState()
+    val browseCacheRevision by PicacgRepository.browseCacheRevision.collectAsState()
+    val routeState by PicacgRouteManager.state.collectAsState()
     val presets = remember { mutableStateOf(PicacgBrowsePrefs.load(context)) }
     var mode by remember(session, tabId, initialFilter, pageMode) {
         mutableStateOf(
@@ -149,6 +152,7 @@ fun PicacgBrowseScreen(
     var loading by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf(false) }
     var error by remember(session, tabId, initialFilter, blockKeywords) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
+    var forceCacheRefresh by remember(session, tabId, initialFilter, pageMode) { mutableStateOf(false) }
     var showFilters by remember { mutableStateOf(false) }
     var showPresets by remember { mutableStateOf(false) }
     var draftFilter by remember { mutableStateOf(filter) }
@@ -174,11 +178,13 @@ fun PicacgBrowseScreen(
         }
     }
 
-    LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords) {
+    LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords, browseCacheRevision, routeState.revision) {
         if (!loggedIn) return@LaunchedEffect
         loading = true
         error = null
         try {
+            val forceRefresh = forceCacheRefresh
+            forceCacheRefresh = false
             val currentFilter = filter.normalized()
             val pageItems: List<Manga>
             val nextPageExists: Boolean
@@ -191,7 +197,7 @@ fun PicacgBrowseScreen(
                 PicacgFeedMode.LEADERBOARD_7D,
                 PicacgFeedMode.LEADERBOARD_30D,
                 -> {
-                    pageItems = if (page == 1) PicacgRepository.leaderboard(mode.timeframe!!) else emptyList()
+                    pageItems = if (page == 1) PicacgRepository.leaderboard(mode.timeframe!!, forceRefresh) else emptyList()
                     nextPageExists = false
                 }
                 PicacgFeedMode.LATEST, PicacgFeedMode.FILTERED -> {
@@ -203,6 +209,7 @@ fun PicacgBrowseScreen(
                         author = currentFilter.author.ifBlank { null },
                         creatorId = currentFilter.creatorId.ifBlank { null },
                         chineseTeam = currentFilter.chineseTeam.ifBlank { null },
+                        forceRefresh = forceRefresh,
                     )
                     pageItems = response.items
                     nextPageExists = response.hasMore
@@ -267,7 +274,10 @@ fun PicacgBrowseScreen(
                         item {
                             Column {
                                 Text(failure, color = MaterialTheme.colorScheme.error)
-                                TextButton(onClick = { refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
+                                TextButton(onClick = {
+                                    forceCacheRefresh = true
+                                    refresh++
+                                }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
                             }
                         }
                     }
@@ -277,7 +287,14 @@ fun PicacgBrowseScreen(
                     if (!loading && error == null && mangas.isEmpty()) item { Text(stringResource(KMR.strings.picacg_search_empty)) }
                     if (hasMore) {
                         item {
-                            TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
+                            TextButton(onClick = {
+                                if (error == null) {
+                                    page++
+                                } else {
+                                    forceCacheRefresh = true
+                                    refresh++
+                                }
+                            }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
                         }
                     }
                 }
@@ -292,7 +309,10 @@ fun PicacgBrowseScreen(
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             Column {
                                 Text(failure, color = MaterialTheme.colorScheme.error)
-                                TextButton(onClick = { refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
+                                TextButton(onClick = {
+                                    forceCacheRefresh = true
+                                    refresh++
+                                }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
                             }
                         }
                     }
@@ -304,7 +324,14 @@ fun PicacgBrowseScreen(
                     }
                     if (hasMore) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
-                            TextButton(onClick = { if (error == null) page++ else refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
+                            TextButton(onClick = {
+                                if (error == null) {
+                                    page++
+                                } else {
+                                    forceCacheRefresh = true
+                                    refresh++
+                                }
+                            }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_load_more)) }
                         }
                     }
                 }

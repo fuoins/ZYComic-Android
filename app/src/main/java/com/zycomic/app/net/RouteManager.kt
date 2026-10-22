@@ -1611,6 +1611,8 @@ object RouteManager {
     @Volatile private var apiRecoveryNextAllowedAt = 0L
     private var apiFailureEndpoint: DomainIp? = null
     private var apiFailureRevision: Long? = null
+    private var apiFailureNetworkRevision: Long? = null
+    private val apiRetryAfter = RuntimeRetryAfterPolicy()
 
     @Synchronized
     fun recordApiConnectionFailure(
@@ -1624,14 +1626,19 @@ object RouteManager {
             consecutiveFailures = 0
             apiFailureEndpoint = null
             apiFailureRevision = null
+            apiFailureNetworkRevision = null
             return
         }
         if (!isCurrentApiRequest(requestEndpoint, requestRevision)) return
+        if (apiRetryAfter.isBlocked(requestEndpoint)) return
         if (!RuntimeRecoveryPolicy.mayRecoverApi(method, error)) return
-        if (apiFailureEndpoint != requestEndpoint || apiFailureRevision != requestRevision) {
+        if (apiFailureEndpoint != requestEndpoint || apiFailureRevision != requestRevision ||
+            apiFailureNetworkRevision != requestNetworkRevision
+        ) {
             consecutiveFailures = 0
             apiFailureEndpoint = requestEndpoint
             apiFailureRevision = requestRevision
+            apiFailureNetworkRevision = requestNetworkRevision
         }
         if (++consecutiveFailures < 3 || !autoSelectEnabled || lineOverrideActive) return
         consecutiveFailures = 0
@@ -1666,7 +1673,7 @@ object RouteManager {
             } finally {
                 synchronized(this@RouteManager) {
                     apiRecoveryInFlight = false
-                    apiRecoveryNextAllowedAt = System.nanoTime() / 1_000_000L + if (switched) 30_000L else 10_000L
+                    apiRecoveryNextAllowedAt = System.nanoTime() / 1_000_000L + 30_000L
                 }
             }
         }
@@ -1685,6 +1692,7 @@ object RouteManager {
             !StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
             StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
             configRevision != expectedRevision || !autoSelectEnabled || lineOverrideActive ||
+            apiRetryAfter.isBlocked(DomainIp(expectedDomain, expectedIp)) ||
             !lineHost.equals(expectedDomain, true) ||
             !(lineIpFor(expectedDomain) ?: resolveIp(expectedDomain).firstOrNull().orEmpty()).equals(expectedIp, true)
         ) {
@@ -1708,6 +1716,27 @@ object RouteManager {
     @Synchronized
     fun recordApiSuccess(requestEndpoint: DomainIp, requestRevision: Long) {
         if (isCurrentApiRequest(requestEndpoint, requestRevision)) consecutiveFailures = 0
+    }
+
+    /** An HTTP response is connectivity evidence, but 429 additionally blocks endpoint probes until Retry-After. */
+    @Synchronized
+    fun recordApiResponse(
+        endpoint: DomainIp,
+        requestRevision: Long,
+        requestNetworkRevision: Long,
+        code: Int,
+        retryAfterHeader: String?,
+    ) {
+        if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != requestNetworkRevision ||
+            !isCurrentApiRequest(endpoint, requestRevision)
+        ) {
+            return
+        }
+        if (code == 429) apiRetryAfter.record(endpoint, retryAfterHeader)
+        consecutiveFailures = 0
+        apiFailureEndpoint = null
+        apiFailureRevision = null
+        apiFailureNetworkRevision = requestNetworkRevision
     }
 
     /** Set the DNS/IP rules from the active remote configuration. */

@@ -10,18 +10,25 @@ import okio.buffer
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Picacg's covers and reader pages feed only Picacg's recovery window. */
+/** Picacg covers and reader pages feed independent runtime recovery tracks. */
 internal class PicacgRuntimeImageInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val knownImage = PicacgRouteManager.imageHosts.any { it.equals(original.url.host, true) } ||
             PicacgBuiltinNetwork.isCoverHost(original.url.host)
         if (!knownImage) return chain.proceed(original)
-        val source = PicacgRouteManager.currentImageHost ?: return chain.proceed(original)
+        val readerRequest = original.tag(ReaderPage::class.java) != null
+        val service = if (readerRequest || PicacgBuiltinNetwork.isContentPath(original.url.encodedPath)) {
+            PicacgImageService.BODY
+        } else {
+            PicacgImageService.COVER
+        }
+        val content = service == PicacgImageService.BODY
+        val source = PicacgRouteManager.imageSourceFor(content) ?: return chain.proceed(original)
         val configRevision = PicacgRouteManager.configRevision
         val networkRevision = RuntimeNetworkGate.revision
         fun mayReport() = PicacgRouteManager.configRevision == configRevision &&
-            RuntimeNetworkGate.revision == networkRevision && PicacgRouteManager.currentImageHost.equals(source, true)
+            RuntimeNetworkGate.revision == networkRevision && PicacgRouteManager.imageSourceFor(content).equals(source, true)
         val targetUrl = if (PicacgBuiltinNetwork.isCoverHost(original.url.host)) {
             PicacgBuiltinNetwork.coverHostFor(source)?.let { original.url.newBuilder().host(it).build() }
                 ?: original.url
@@ -31,7 +38,6 @@ internal class PicacgRuntimeImageInterceptor : Interceptor {
         val request = original.newBuilder().url(targetUrl).build()
         RuntimeImageRateLimit.blockedResponse(RuntimeRecoveryPolicy.Platform.PICACG, request)?.let { return it }
         val attempt = original.tag(PageAttemptScope::class.java)
-        val readerRequest = original.tag(ReaderPage::class.java) != null
         if (attempt?.isCurrent == false) throw IOException("图片加载已取消")
         val registration = attempt?.registerCall(chain.call(), -1)
         val reported = AtomicBoolean()
@@ -41,12 +47,46 @@ internal class PicacgRuntimeImageInterceptor : Interceptor {
             ) {
                 return
             }
-            if (attempt == null && !readerRequest) {
-                RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.PICACG, source, original.url.toString(), true)
-            } else if (attempt != null && attempt.page.readerVisible) {
-                RuntimeImageRecovery.visibleReaderTransportFailure(RuntimeRecoveryPolicy.Platform.PICACG, source, original.url.toString()) {
-                    RuntimeImageRecovery.retryVisiblePageAfterAttempt(RuntimeRecoveryPolicy.Platform.PICACG, source, attempt)
-                }
+            when {
+                service == PicacgImageService.COVER && attempt == null && !readerRequest ->
+                    RuntimeImageRecovery.coverSample(
+                        RuntimeRecoveryPolicy.Platform.PICACG,
+                        source,
+                        original.url.toString(),
+                        failed = true,
+                        service = service,
+                    )
+                service == PicacgImageService.BODY && attempt != null && attempt.page.readerVisible ->
+                    RuntimeImageRecovery.visibleReaderTransportFailure(
+                        RuntimeRecoveryPolicy.Platform.PICACG,
+                        source,
+                        original.url.toString(),
+                        retryPage = {
+                            RuntimeImageRecovery.retryVisiblePageAfterAttempt(
+                                RuntimeRecoveryPolicy.Platform.PICACG,
+                                source,
+                                attempt,
+                                service = service,
+                            )
+                        },
+                        service = service,
+                    )
+            }
+        }
+        fun reportCoverSuccess(head: ByteArray, contentType: String?, actualHost: String) {
+            if (service == PicacgImageService.COVER &&
+                actualHost.equals(PicacgBuiltinNetwork.coverHostFor(source) ?: source, true) &&
+                PicacgImagePayloadPolicy.isUsableImage(200, contentType, head) &&
+                mayReport() && !chain.call().isCanceled() &&
+                reported.compareAndSet(false, true)
+            ) {
+                RuntimeImageRecovery.coverSample(
+                    RuntimeRecoveryPolicy.Platform.PICACG,
+                    source,
+                    original.url.toString(),
+                    failed = false,
+                    service = service,
+                )
             }
         }
         val response = try {
@@ -57,19 +97,25 @@ internal class PicacgRuntimeImageInterceptor : Interceptor {
             throw error
         }
         RuntimeImageRateLimit.record(RuntimeRecoveryPolicy.Platform.PICACG, response)
+        // HTTP errors (including 429) and bad payload/content-type responses must never drive rotation.
         if (!response.isSuccessful || response.header("Content-Type")?.startsWith("image/", true) != true || response.body == null) {
-            if (mayReport() && attempt == null && !readerRequest) {
-                RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.PICACG, source, original.url.toString(), false)
-            }
             registration?.close()
             return response
         }
         val body = response.body!!
+        val imageHead = Buffer()
         val observed = object : ForwardingSource(body.source()) {
             override fun read(sink: Buffer, byteCount: Long): Long = try {
+                val offset = sink.size
                 super.read(sink, byteCount).also { count ->
-                    if (mayReport() && count == -1L && attempt == null && !readerRequest && !chain.call().isCanceled() && reported.compareAndSet(false, true)) {
-                        RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.PICACG, source, original.url.toString(), false)
+                    if (count > 0L && imageHead.size < PicacgImagePayloadPolicy.MAX_HEAD_BYTES) {
+                        sink.copyTo(
+                            imageHead,
+                            offset = offset,
+                            byteCount = minOf(count, PicacgImagePayloadPolicy.MAX_HEAD_BYTES - imageHead.size),
+                        )
+                    } else if (count == -1L) {
+                        reportCoverSuccess(imageHead.readByteArray(), response.header("Content-Type"), response.request.url.host)
                     }
                 }
             } catch (error: IOException) {

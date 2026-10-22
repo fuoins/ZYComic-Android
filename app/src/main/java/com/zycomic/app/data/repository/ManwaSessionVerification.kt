@@ -118,9 +118,6 @@ internal class ManwaSessionVerificationPolicy {
         !loginPending && generation == ticket.generation && accountIdentity == ticket.accountIdentity
 
     companion object {
-        /** HTTP status alone can prove expiration only for the explicit unauthorized response. */
-        fun isExplicitUnauthorized(httpStatus: Int): Boolean = httpStatus == 401
-
         /** Empty and sentinel IDs cannot establish a verified profile; they are not proof of expiry. */
         fun isValidIdentity(identity: String): Boolean = identity.isNotEmpty() && identity != "0"
 

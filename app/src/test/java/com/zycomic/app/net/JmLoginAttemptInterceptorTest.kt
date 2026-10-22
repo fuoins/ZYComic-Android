@@ -23,11 +23,18 @@ class JmLoginAttemptInterceptorTest {
     }
 
     @Test
-    fun `current login HTTP 401 still clears its current authentication attempt`() {
+    fun `raw HTTP 401 does not clear the current login attempt`() {
         val attempt = JmAuthStore.beginLoginAttempt()
 
         unauthorizedClient().newCall(loginRequest(attempt)).execute().close()
 
+        assertTrue(JmAuthStore.isLoginCurrent(attempt))
+    }
+
+    @Test
+    fun `explicit JM business expiry code may clear the current login attempt`() {
+        val attempt = JmAuthStore.beginLoginAttempt()
+        businessUnauthorizedClient().newCall(loginRequest(attempt)).execute().close()
         assertFalse(JmAuthStore.isLoginCurrent(attempt))
     }
 
@@ -39,6 +46,20 @@ class JmLoginAttemptInterceptorTest {
 
         assertTrue(JmAuthStore.isLoginCurrent(attempt))
     }
+
+    private fun businessUnauthorizedClient(): OkHttpClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(false)
+        .addInterceptor(JmApiInterceptor(recordRouteHealth = false, allowAuthentication = false))
+        .addInterceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body("{\"code\":401,\"errorMsg\":\"expired\"}".toResponseBody())
+                .build()
+        }
+        .build()
 
     private fun unauthorizedClient(): OkHttpClient = OkHttpClient.Builder()
         .retryOnConnectionFailure(false)

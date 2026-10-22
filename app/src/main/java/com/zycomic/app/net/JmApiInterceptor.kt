@@ -59,16 +59,9 @@ class JmApiInterceptor internal constructor(
         if (isImage || isUnsigned || response.body == null) return response
 
         val raw = response.body!!.string()
+        // Raw HTTP authorization statuses are ambiguous WAF/proxy/service responses. They
+        // never mutate credentials; only an explicit business expiry code in a validated JSON envelope does.
         if (!response.isSuccessful) {
-            if (response.code == 401) {
-                when {
-                    session != null -> JmRequestSession.clearIfCurrent(session)
-                    loginAttempt != null -> {
-                        if (!loginAttempt.preserveSessionOnUnauthorized) JmAuthStore.clearIfCurrent(loginAttempt)
-                    }
-                    else -> JmAuthStore.clear()
-                }
-            }
             return response.newBuilder().body(raw.toResponseBody(response.body?.contentType())).build()
         }
 

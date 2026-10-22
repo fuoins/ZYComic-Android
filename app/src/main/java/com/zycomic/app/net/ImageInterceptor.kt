@@ -115,8 +115,6 @@ class ImageInterceptor : Interceptor {
         }
         if (mayReport() && transportFailure && scope == null) {
             RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = true)
-        } else if (mayReport() && scope == null && failure !is Outcome.Fail.Cancelled) {
-            RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = false)
         } else if (mayReport() && transportFailure && scope?.canRace == true && scope.page.readerVisible) {
             RuntimeImageRecovery.visibleReaderTransportFailure(
                 RuntimeRecoveryPolicy.Platform.MANWA,
@@ -231,6 +229,9 @@ class ImageInterceptor : Interceptor {
         }
     }
 
+    private fun isTransportRetryable(outcome: Outcome): Boolean =
+        outcome is Outcome.Fail.Io && RuntimeRecoveryPolicy.isTransportFailure(outcome.error)
+
     private fun sequentialCandidates(
         request: Request,
         originalUrl: String,
@@ -247,8 +248,7 @@ class ImageInterceptor : Interceptor {
                 if (scope != null) scope.coordinator.releasePrimaryAttempt()
             }
             outcomes += result
-            if (result is Outcome.Success) return outcomes
-            if (result is Outcome.Fail.Http && result.code == 429) return outcomes
+            if (result is Outcome.Success || !isTransportRetryable(result)) return outcomes
             if (scope?.isCurrent == false) return outcomes
         }
         return outcomes
@@ -327,8 +327,7 @@ class ImageInterceptor : Interceptor {
                 primaryFinished.set(true)
             }
             outcomes += primary
-            if (primary is Outcome.Success) return outcomes
-            if (primary is Outcome.Fail.Http && primary.code == 429) return outcomes
+            if (primary is Outcome.Success || !isTransportRetryable(primary)) return outcomes
             if (!scope.isCurrent) return outcomes
             if (primary is Outcome.Fail.Cancelled && !raceStarted.get()) return outcomes
 
@@ -342,7 +341,7 @@ class ImageInterceptor : Interceptor {
                         scope.coordinator.releasePrimaryAttempt()
                     }
                     outcomes += result
-                    if (result is Outcome.Success || result is Outcome.Fail.Cancelled || !scope.isCurrent) {
+                    if (result is Outcome.Success || !isTransportRetryable(result) || !scope.isCurrent) {
                         return outcomes
                     }
                 }
@@ -352,8 +351,7 @@ class ImageInterceptor : Interceptor {
             while (scope.isCurrent && (activeRaces.get() > 0 || completed.isNotEmpty())) {
                 val result = completed.poll(200, TimeUnit.MILLISECONDS) ?: continue
                 outcomes += result
-                if (result is Outcome.Success) return outcomes
-                if (result is Outcome.Fail.Http && result.code == 429) return outcomes
+                if (result is Outcome.Success || !isTransportRetryable(result)) return outcomes
             }
             scope.endRace()
 
@@ -366,8 +364,7 @@ class ImageInterceptor : Interceptor {
                     scope.coordinator.releasePrimaryAttempt()
                 }
                 outcomes += result
-                if (result is Outcome.Success || result is Outcome.Fail.Cancelled || !scope.isCurrent) return outcomes
-                if (result is Outcome.Fail.Http && result.code == 429) return outcomes
+                if (result is Outcome.Success || !isTransportRetryable(result) || !scope.isCurrent) return outcomes
             }
             return outcomes
         } finally {

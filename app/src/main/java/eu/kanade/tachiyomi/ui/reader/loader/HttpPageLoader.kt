@@ -773,8 +773,10 @@ internal class HttpPageLoader(
             } else {
                 val remainingEndpoints = remainingUntriedEndpoints(page)
                 val waitingForUnifiedRecovery = attempt?.canRace == true && page.readerVisible
-                val isRateLimited = httpStatusCode(e) == 429
-                if (!waitingForUnifiedRecovery && !isRateLimited &&
+                val httpStatus = httpStatusCode(e)
+                val mayRetryHttpFailure = httpStatus == null ||
+                    ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(httpStatus)
+                if (!waitingForUnifiedRecovery && mayRetryHttpFailure &&
                     attempt?.retryAfterFailure(remainingEndpoints.isNotEmpty()) == true
                 ) {
                     page.automaticRetryExhausted = false

@@ -46,7 +46,7 @@ internal object JmMyCommentsPolicy {
     }
 
     fun responseError(isSuccessful: Boolean, httpCode: Int, apiErrorMessage: String?): String? = when {
-        httpCode == 401 -> "JM 登录已失效，请重新登录"
+        httpCode == 401 || httpCode == 403 -> "JM 留言记录访问受限（HTTP $httpCode），请稍后刷新确认账号状态"
         !isSuccessful -> "JM 留言记录请求失败（HTTP $httpCode）"
         !apiErrorMessage.isNullOrBlank() -> "JM 留言记录请求失败：${apiErrorMessage.take(256)}"
         else -> null

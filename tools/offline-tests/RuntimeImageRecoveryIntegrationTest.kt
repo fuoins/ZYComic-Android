@@ -13,6 +13,10 @@ import java.util.concurrent.TimeUnit
 class RuntimeImageRecoveryIntegrationTest {
     @Test
     fun `offline gate platform isolation single flight and validated alternate routing`() {
+        PicacgRouteManager.apiValidations.set(0)
+        PicacgSpeedTester.probeCalls.set(0)
+        PicacgSpeedTester.coverProbeCalls.set(0)
+        PicacgSpeedTester.bodyProbeCalls.set(0)
         val platforms = RuntimeRecoveryPolicy.Platform.entries
         JmRouteManager.activeImageDomain = "jm-manual.test"
         val activeSources = mapOf(
@@ -42,6 +46,8 @@ class RuntimeImageRecoveryIntegrationTest {
         JmRouteManager.candidates = listOf(DomainIp("jm-alternate.test", "10.0.0.3"))
 
         PicacgRouteManager.currentImageHost = "picacg-active.test"
+        PicacgRouteManager.coverImageHost = "picacg-active.test"
+        PicacgRouteManager.bodyImageHost = "picacg-active.test"
         PicacgRouteManager.candidates = listOf(DomainIp("picacg-good.test", "10.0.0.4"))
         PicacgSpeedTester.probeResults[PicacgRouteManager.candidates.single()] = true
 
@@ -74,6 +80,64 @@ class RuntimeImageRecoveryIntegrationTest {
         } finally {
             SpeedTester.releaseProbe.countDown()
         }
+    }
+
+    @Test
+    fun `picacg cover and body use independent recovery tracks at the same source and candidate ip`() {
+        RuntimeNetworkGate.setOnline(true)
+        val active = "picacg-service-active.test"
+        val endpoint = DomainIp("picacg-service-alt.test", "198.51.100.77")
+        PicacgRouteManager.configRevision = 881L
+        PicacgRouteManager.currentImageHost = active
+        PicacgRouteManager.coverImageHost = active
+        PicacgRouteManager.bodyImageHost = active
+        PicacgRouteManager.coverCandidates = listOf(endpoint)
+        PicacgRouteManager.bodyCandidates = listOf(endpoint)
+        PicacgSpeedTester.probeResults[endpoint] = true
+        val apiBefore = PicacgRouteManager.apiValidations.get()
+        val probeBefore = PicacgSpeedTester.probeCalls.get()
+        val coverProbeBefore = PicacgSpeedTester.coverProbeCalls.get()
+        val bodyProbeBefore = PicacgSpeedTester.bodyProbeCalls.get()
+
+        repeat(2) { index ->
+            RuntimeImageRecovery.coverSample(
+                RuntimeRecoveryPolicy.Platform.PICACG,
+                active,
+                "https://img.picacomic.com/cover-$index.jpg",
+                failed = true,
+                service = PicacgImageService.COVER,
+            )
+        }
+        repeat(2) { index ->
+            RuntimeImageRecovery.visibleReaderTransportFailure(
+                RuntimeRecoveryPolicy.Platform.PICACG,
+                active,
+                "https://storage-b.picacomic.com/static/sub_storage_1/page-$index.jpg",
+                retryPage = {},
+                service = PicacgImageService.BODY,
+            )
+        }
+        assertTrue(waitUntil { PicacgRouteManager.bodyImageHost == endpoint.domain })
+        assertEquals(active, PicacgRouteManager.coverImageHost, "body recovery must not move covers")
+        assertEquals(apiBefore + 1, PicacgRouteManager.apiValidations.get())
+        assertEquals(probeBefore + 1, PicacgSpeedTester.probeCalls.get())
+        assertEquals(bodyProbeBefore + 1, PicacgSpeedTester.bodyProbeCalls.get())
+        assertEquals(coverProbeBefore, PicacgSpeedTester.coverProbeCalls.get())
+
+        RuntimeImageRecovery.coverSample(
+            RuntimeRecoveryPolicy.Platform.PICACG,
+            active,
+            "https://img.picacomic.com/cover-third.jpg",
+            failed = true,
+            service = PicacgImageService.COVER,
+        )
+        assertTrue(waitUntil { PicacgRouteManager.coverImageHost == endpoint.domain })
+        assertEquals(endpoint.domain, PicacgRouteManager.bodyImageHost, "cover recovery must not move reader pages")
+        assertEquals(apiBefore + 2, PicacgRouteManager.apiValidations.get())
+        assertEquals(probeBefore + 2, PicacgSpeedTester.probeCalls.get())
+        assertEquals(coverProbeBefore + 1, PicacgSpeedTester.coverProbeCalls.get())
+        assertEquals(bodyProbeBefore + 1, PicacgSpeedTester.bodyProbeCalls.get())
+        RuntimeNetworkGate.setOnline(false)
     }
 
     @Test

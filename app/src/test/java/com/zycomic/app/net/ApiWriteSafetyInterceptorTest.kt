@@ -40,10 +40,25 @@ class ApiWriteSafetyInterceptorTest {
     }
 
     @Test
-    fun `408 421 and 503 retry after zero do not replay writes and retain status`() {
-        for (code in listOf(408, 421, 503)) {
+    fun `408 421 and server errors never replay writes and report an ambiguous result`() {
+        for (code in listOf(408, 421, 500, 502, 503, 504)) {
             withServer(code, mapOf("Retry-After" to "0")) { url, count ->
-                safeClient().newCall(post(url)).execute().use { assertEquals(code, it.code) }
+                val error = runCatching { safeClient().newCall(post(url)).execute().close() }.exceptionOrNull()
+                assertTrue(error is IOException)
+                assertTrue(error?.message.orEmpty().contains("可能已成功，请刷新确认"))
+                assertEquals(1, count.get())
+            }
+        }
+    }
+
+    @Test
+    fun `marked mutating GET is not followed or retried`() {
+        for ((code, headers) in listOf(301 to mapOf("Location" to "/again"), 503 to mapOf("Retry-After" to "0"))) {
+            withServer(code, headers) { url, count ->
+                val request = Request.Builder().url(url).get().header("X-ZYComic-Unsafe-Write", "true").build()
+                val error = runCatching { safeClient().newCall(request).execute().close() }.exceptionOrNull()
+                assertTrue(error is IOException)
+                assertTrue(error?.message.orEmpty().contains("可能已成功，请刷新确认"))
                 assertEquals(1, count.get())
             }
         }

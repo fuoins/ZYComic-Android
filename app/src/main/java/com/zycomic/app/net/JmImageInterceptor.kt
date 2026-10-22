@@ -93,12 +93,10 @@ class JmImageInterceptor internal constructor(
                 }
                 RuntimeImageRateLimit.record(RuntimeRecoveryPolicy.Platform.JM, response)
                 if (response.code == 429) {
-                    // Preserve the server's Retry-After (and body); do not immediately try another host.
-                    if (scope == null && mayReport()) {
-                        RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, host, original.url.toString(), failed = false)
-                    }
+                    // Preserve Retry-After and the response; a status is not transport/image health evidence.
                     return response.newBuilder().request(original).build()
                 }
+                if (!response.isSuccessful) return response.newBuilder().request(original).build()
                 val isImage = response.header("Content-Type")?.substringBefore(';')
                     ?.startsWith("image/", ignoreCase = true) == true
                 if (response.isSuccessful && isImage) {
@@ -118,6 +116,9 @@ class JmImageInterceptor internal constructor(
                 lastStatus = response.code
                 response.close()
                 requireActive()
+                // A nominal HTTP success with non-image content is a local invalid response;
+                // do not rotate routes or report it as a successful cover sample.
+                throw IOException("JM image response did not contain a valid image payload")
             } catch (error: IOException) {
                 // Coil cover requests have no PageAttemptScope; Call cancellation is authoritative.
                 if (isCancelled()) throw error
@@ -129,7 +130,7 @@ class JmImageInterceptor internal constructor(
                 scope?.addNetworkTime(System.nanoTime() - startedAt)
             }
         }
-        if (mayReport() && lastError != null && RuntimeRecoveryPolicy.isConnectionFailure(lastError!!)) {
+        if (mayReport() && lastError != null && RuntimeRecoveryPolicy.isTransportFailure(lastError!!)) {
             if (scope == null) {
                 RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, activeCandidate, original.url.toString(), failed = true)
             } else if (scope.canRace && scope.page.readerVisible) {
@@ -145,9 +146,6 @@ class JmImageInterceptor internal constructor(
                     )
                 }
             }
-        }
-        if (mayReport() && scope == null && (lastError == null || !RuntimeRecoveryPolicy.isTransportFailure(lastError!!))) {
-            RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, activeCandidate, original.url.toString(), failed = false)
         }
         throw lastError ?: IOException("JM image request failed${lastStatus?.let { " (HTTP $it)" } ?: ""}")
     }

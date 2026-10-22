@@ -119,14 +119,25 @@ class PicacgClient(
         val code = json?.optInt("code", response.code) ?: response.code
         val message = json?.optString("message").orEmpty()
         val error = json?.optString("error").orEmpty()
-        if (response.code == 401 || error == "1005") {
+        // HTTP 401 is deliberately not proof of an expired account session (WAF/proxy
+        // responses are common). Only the explicit service business code 1005 on a
+        // successful JSON response may clear this request's captured credential revision.
+        if (error == "1005" && response.isSuccessful) {
             if (expectedRevision != null) clearSessionIfRevision(expectedRevision) else onUnauthorized()
             throw PicacgResponseException(response.code, code, error, message.ifBlank { "Picacg authorization expired" })
+        }
+        if (response.code == 401) {
+            throw PicacgResponseException(response.code, code, error, message.ifBlank { "HTTP 401" })
         }
         if (!response.isSuccessful || (code != 200 && code != 0)) {
             throw PicacgResponseException(response.code, code, error, message.ifBlank { "HTTP error" })
         }
-        val data = json?.optJSONObject("data") ?: if (allowMissingData) JSONObject() else throw IOException("Picacg response has no data; sign in is required")
+        if (json == null || !json.has("code") || json.optString("code").toIntOrNull() == null) {
+            throw IOException(
+                if (allowMissingData) RuntimeNetworkGate.ambiguousWriteMessage() else "Picacg response is empty or has an invalid JSON envelope",
+            )
+        }
+        val data = json.optJSONObject("data") ?: if (allowMissingData) JSONObject() else throw IOException("Picacg response has no data")
         return Envelope(code, message, error, data)
     }
 
@@ -141,7 +152,7 @@ class PicacgClient(
             return firstResponse
         }
 
-        if (!com.zycomic.app.net.isSafeApiRead(request.method)) {
+        if (!com.zycomic.app.net.isSafeApiRead(request)) {
             firstResponse.use { response ->
                 logRedirect(response)
                 throw IOException("${RuntimeNetworkGate.ambiguousWriteMessage()} (HTTP 301)")

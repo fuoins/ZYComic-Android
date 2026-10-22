@@ -17,6 +17,10 @@ class ReaderPlatformRetryPolicyTest {
         assertFalse(ReaderPlatformRetryPolicy.manualRetryLimitReached(3, manwaKey, picacgKey))
         assertTrue(ReaderPlatformRetryPolicy.manualRetryLimitReached(3, picacgKey, picacgKey))
         assertFalse(ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(429))
+        assertFalse(ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(401))
+        assertFalse(ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(403))
+        assertFalse(ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(404))
+        assertTrue(ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(500))
         assertTrue(ReaderPlatformRetryPolicy.shouldAutomaticallyRetryHttpFailure(503))
     }
 

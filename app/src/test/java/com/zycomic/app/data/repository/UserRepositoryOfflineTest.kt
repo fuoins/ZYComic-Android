@@ -120,12 +120,13 @@ class UserRepositoryOfflineTest {
                     ),
                 ),
             )
-            UserRepository.refreshUserInfo()
-            assertNull(UserRepository.userFlow.value)
-            assertFalse(UserRepository.isLoggedIn)
-            assertEquals(ManwaSessionStatus.EXPIRED, UserRepository.sessionStatusFlow.value)
-            assertNull(prefs.getString(USER_INFO_KEY, null))
-            assertTrue(cookies.getAll().isEmpty())
+            assertThrows(HttpException::class.java) { runBlocking { UserRepository.refreshUserInfo() } }
+            assertEquals(refreshed, UserRepository.userFlow.value)
+            assertTrue(UserRepository.isLoggedIn)
+            assertFalse(UserRepository.isSessionVerified)
+            assertEquals(ManwaSessionStatus.UNKNOWN, UserRepository.sessionStatusFlow.value)
+            assertEquals(refreshed, deserialize(prefs.getString(USER_INFO_KEY, null)))
+            assertEquals("cached", cookies.getAll().single().value)
 
             prefs.edit().putString(USER_INFO_KEY, serialize(cached)).apply()
             assertTrue(UserRepository.restoreLoginFromLocal())

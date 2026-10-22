@@ -6,10 +6,15 @@ import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
 import com.zycomic.app.picacg.filter.PicacgKeywordFilter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -19,6 +24,14 @@ import java.net.URLEncoder
 object PicacgRepository {
     @Volatile private var api: PicacgClient? = null
     private val pageCache = PicacgPageCache<PicacgImage>()
+    private val browseSnapshotCache = PicacgBrowseSnapshotCache<PicacgPage<Manga>>()
+    private val browseRefreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val browseRefreshLock = Any()
+    private val browseRefreshes = mutableMapOf<PicacgBrowseCacheKey, CompletableDeferred<PicacgPage<Manga>>>()
+    private val _browseCacheRevision = MutableStateFlow(0L)
+    val browseCacheRevision: StateFlow<Long> = _browseCacheRevision.asStateFlow()
+
+    @Volatile private var browseConfigGeneration = 0L
     private val _favouritesRevision = MutableStateFlow(0L)
     val favouritesRevision: StateFlow<Long> = _favouritesRevision.asStateFlow()
 
@@ -53,6 +66,8 @@ object PicacgRepository {
     internal fun installClientForTests(client: PicacgClient?) {
         synchronized(this) { api = client }
         synchronized(pageCache) { pageCache.clear() }
+        browseConfigGeneration += 1L
+        invalidateBrowseSnapshots()
     }
 
     private fun client(): PicacgClient = api ?: error("PicacgRepository.init(context) must be called first")
@@ -79,6 +94,7 @@ object PicacgRepository {
             throw PicacgLoginException(PicacgLoginFailure.UNKNOWN, "登录状态已变化，请重新登录。")
         }
         synchronized(pageCache) { pageCache.clear() }
+        invalidateBrowseSnapshots()
         return token
     }
 
@@ -109,6 +125,7 @@ object PicacgRepository {
     fun logout() {
         PicacgAuthStore.clear()
         synchronized(pageCache) { pageCache.clear() }
+        invalidateBrowseSnapshots()
         _favouritesRevision.update { it + 1L }
     }
 
@@ -132,9 +149,20 @@ object PicacgRepository {
         author: String? = null,
         creatorId: String? = null,
         chineseTeam: String? = null,
+        forceRefresh: Boolean = false,
     ): PicacgPage<Manga> {
         require(page >= 1) { "Picacg pages are one-based" }
         require(sort in SORT_VALUES) { "Unsupported Picacg sort value" }
+        val keywords = PicacgBlockKeywordStore.keywords.value.toList()
+        val key = browseCacheKey(
+            operation = if (category.isNullOrBlank()) "browse" else "category",
+            mode = if (category.isNullOrBlank()) "all" else "category",
+            query = listOfNotNull(category, tag, author, creatorId, chineseTeam).joinToString("&"),
+            sort = sort,
+            filters = listOf(category.orEmpty(), tag.orEmpty(), author.orEmpty(), creatorId.orEmpty(), chineseTeam.orEmpty()),
+            page = page,
+            keywords = keywords,
+        )
         val query = buildList {
             add("page=$page")
             addFilter("c", category)
@@ -144,27 +172,169 @@ object PicacgRepository {
             addFilter("ct", chineseTeam)
             add("s=${encode(sort)}")
         }.joinToString("&")
-        return comicList(client().request("/comics?$query").data, page, applyKeywordFilter = true)
+        return loadBrowseSnapshot(key, forceRefresh) {
+            val data = client().request("/comics?$query", expectedSessionRevision = key.condition.sessionRevision).data
+            comicList(data, page, applyKeywordFilter = true, blockedKeywords = keywords)
+        }
     }
 
-    suspend fun search(keyword: String, page: Int, sort: String = "ld", categories: List<String> = emptyList()): PicacgPage<Manga> {
+    suspend fun search(
+        keyword: String,
+        page: Int,
+        sort: String = "ld",
+        categories: List<String> = emptyList(),
+        forceRefresh: Boolean = false,
+    ): PicacgPage<Manga> {
         require(page >= 1) { "Picacg pages are one-based" }
         require(sort in SORT_VALUES) { "Unsupported Picacg sort value" }
+        val selectedCategories = categories.toList()
+        val keywords = PicacgBlockKeywordStore.keywords.value.toList()
+        val key = browseCacheKey(
+            operation = "search",
+            mode = "advanced",
+            query = keyword,
+            sort = sort,
+            filters = selectedCategories,
+            page = page,
+            keywords = keywords,
+        )
         val body = JSONObject()
             .put("keyword", keyword)
             .put("sort", sort)
-            .put("categories", JSONArray(categories))
-        val data = client().request("/comics/advanced-search?page=$page", "POST", body).data
-        return comicList(data, page, applyKeywordFilter = true)
+            .put("categories", JSONArray(selectedCategories))
+        return loadBrowseSnapshot(key, forceRefresh) {
+            val data = client().request(
+                "/comics/advanced-search?page=$page",
+                "POST",
+                body,
+                expectedSessionRevision = key.condition.sessionRevision,
+            ).data
+            comicList(data, page, applyKeywordFilter = true, blockedKeywords = keywords)
+        }
     }
 
-    suspend fun leaderboard(timeframe: String = "H24"): List<Manga> {
+    suspend fun leaderboard(timeframe: String = "H24", forceRefresh: Boolean = false): List<Manga> {
         require(timeframe in LEADERBOARD_TIMEFRAMES) { "Unsupported Picacg leaderboard timeframe" }
-        val data = client().request("/comics/leaderboard?tt=$timeframe&ct=VC").data
-        return filterDiscovery(data.comicArray("leaderboard"))
+        val keywords = PicacgBlockKeywordStore.keywords.value.toList()
+        val key = browseCacheKey("leaderboard", timeframe, timeframe, "", listOf("ct=VC"), 1, keywords)
+        return loadBrowseSnapshot(key, forceRefresh) {
+            val data = client().request(
+                "/comics/leaderboard?tt=$timeframe&ct=VC",
+                expectedSessionRevision = key.condition.sessionRevision,
+            ).data
+            PicacgPage(filterDiscovery(data.comicArray("leaderboard"), keywords), false, 1)
+        }.items
     }
 
-    suspend fun random(): List<Manga> = filterDiscovery(client().request("/comics/random").data.comicArray("random"))
+    /** Random discovery is deliberately never cached. */
+    suspend fun random(): List<Manga> {
+        val keywords = PicacgBlockKeywordStore.keywords.value.toList()
+        return filterDiscovery(client().request("/comics/random").data.comicArray("random"), keywords)
+    }
+
+    private fun browseCacheKey(
+        operation: String,
+        mode: String,
+        query: String,
+        sort: String,
+        filters: List<String>,
+        page: Int,
+        keywords: List<String>,
+    ): PicacgBrowseCacheKey {
+        val condition = PicacgBrowseCacheCondition(
+            sessionRevision = PicacgAuthStore.sessionRevision.value,
+            keywordRevision = PicacgBlockKeywordStore.revision.value,
+            routeConfigRevision = PicacgRouteManager.configRevision,
+            configGeneration = browseConfigGeneration,
+            blockedKeywords = keywords.toList(),
+        )
+        browseSnapshotCache.activate(condition)
+        return PicacgBrowseCacheKey(condition, operation, mode, query, sort, filters.toList(), page)
+    }
+
+    private suspend fun loadBrowseSnapshot(
+        key: PicacgBrowseCacheKey,
+        forceRefresh: Boolean,
+        load: suspend () -> PicacgPage<Manga>,
+    ): PicacgPage<Manga> {
+        ensureBrowseConditionCurrent(key)
+        when (val cached = browseSnapshotCache.get(key, System.currentTimeMillis())) {
+            is PicacgBrowseCacheLookup.Fresh -> {
+                if (!forceRefresh) {
+                    ensureBrowseConditionCurrent(key)
+                    return cached.value
+                }
+                refreshBrowseSnapshot(key, load)
+                ensureBrowseConditionCurrent(key)
+                return cached.value
+            }
+            is PicacgBrowseCacheLookup.Stale -> {
+                refreshBrowseSnapshot(key, load)
+                ensureBrowseConditionCurrent(key)
+                return cached.value
+            }
+            null -> return refreshBrowseSnapshot(key, load).await().also { ensureBrowseConditionCurrent(key) }
+        }
+    }
+
+    private fun browseConditionIsCurrent(condition: PicacgBrowseCacheCondition): Boolean =
+        condition.sessionRevision == PicacgAuthStore.sessionRevision.value &&
+            condition.keywordRevision == PicacgBlockKeywordStore.revision.value &&
+            condition.routeConfigRevision == PicacgRouteManager.configRevision &&
+            condition.configGeneration == browseConfigGeneration &&
+            condition.blockedKeywords == PicacgBlockKeywordStore.keywords.value
+
+    private fun ensureBrowseConditionCurrent(key: PicacgBrowseCacheKey) {
+        if (!browseConditionIsCurrent(key.condition)) {
+            throw CancellationException("Picacg browse conditions changed while loading")
+        }
+    }
+
+    private fun invalidateBrowseSnapshots() {
+        browseSnapshotCache.clear()
+        val pending = synchronized(browseRefreshLock) {
+            browseRefreshes.values.toList().also { browseRefreshes.clear() }
+        }
+        pending.forEach { it.cancel(CancellationException("Picacg browse cache conditions changed")) }
+    }
+
+    /** At most one fetch runs per exact condition; failed refreshes never replace the last success. */
+    private fun refreshBrowseSnapshot(
+        key: PicacgBrowseCacheKey,
+        load: suspend () -> PicacgPage<Manga>,
+    ): CompletableDeferred<PicacgPage<Manga>> = synchronized(browseRefreshLock) {
+        browseRefreshes[key]?.let { return@synchronized it }
+        val result = CompletableDeferred<PicacgPage<Manga>>()
+        val replacesExistingSnapshot = browseSnapshotCache.get(key, System.currentTimeMillis()) != null
+        browseRefreshes[key] = result
+        browseRefreshScope.launch {
+            try {
+                val value = load()
+                if (!browseConditionIsCurrent(key.condition)) {
+                    result.cancel(CancellationException("Picacg browse conditions changed while loading"))
+                    return@launch
+                }
+                if (browseSnapshotCache.put(key, value, System.currentTimeMillis()) && replacesExistingSnapshot) {
+                    _browseCacheRevision.update { it + 1L }
+                }
+                if (!browseConditionIsCurrent(key.condition)) {
+                    result.cancel(CancellationException("Picacg browse conditions changed while loading"))
+                    return@launch
+                }
+                result.complete(value)
+            } catch (cancelled: CancellationException) {
+                result.cancel(cancelled)
+                throw cancelled
+            } catch (failure: Exception) {
+                result.completeExceptionally(failure)
+            } finally {
+                synchronized(browseRefreshLock) {
+                    if (browseRefreshes[key] === result) browseRefreshes.remove(key)
+                }
+            }
+        }
+        result
+    }
 
     /** Returns the existing application Manga DTO, with chapter IDs and order from the confirmed API schema. */
     suspend fun detail(id: String): Manga {
@@ -383,18 +553,23 @@ object PicacgRepository {
         return loadProfile(requestSessionRevision)
     }
 
-    private fun comicList(data: JSONObject, page: Int = 1, applyKeywordFilter: Boolean = false): PicacgPage<Manga> {
+    private fun comicList(
+        data: JSONObject,
+        page: Int = 1,
+        applyKeywordFilter: Boolean = false,
+        blockedKeywords: List<String> = PicacgBlockKeywordStore.keywords.value,
+    ): PicacgPage<Manga> {
         val container = data.optJSONObject("comics") ?: data.optJSONObject("favourite") ?: data
         val docs = container.optJSONArray("docs") ?: container.optJSONArray("comics")
             ?: throw IOException("Picacg comic list response has no docs array")
         val items = docs.objects().map { it.toMap().toPicacgManga().withResolvedCover(it.optJSONObject("thumb")) }
         val pages = pageCount(container, "comic list")
-        return PicacgPage(if (applyKeywordFilter) filterDiscovery(items) else items, page < pages, page)
+        return PicacgPage(if (applyKeywordFilter) filterDiscovery(items, blockedKeywords) else items, page < pages, page)
     }
 
     /** Applies the current local policy at call time; pagination metadata deliberately remains server-derived. */
-    private fun filterDiscovery(items: List<Manga>): List<Manga> =
-        PicacgKeywordFilter.filterManga(items, PicacgBlockKeywordStore.keywords.value)
+    private fun filterDiscovery(items: List<Manga>, keywords: List<String> = PicacgBlockKeywordStore.keywords.value): List<Manga> =
+        PicacgKeywordFilter.filterManga(items, keywords)
 
     private suspend fun loadComicJson(id: String, expectedSessionRevision: Long? = null): JSONObject {
         require(id.isNotBlank() && !id.contains('/') && !id.contains('?')) { "Invalid Picacg comic id" }

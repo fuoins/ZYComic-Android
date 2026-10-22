@@ -69,8 +69,14 @@ fun DataStorageScreen(
         ScrollbarLazyColumn(contentPadding = contentPadding) {
             item {
                 TextPreferenceWidget(
-                    title = "图片缓存",
+                    title = stringResource(KMR.strings.picacg_image_cache_title),
                     subtitle = stringResource(KMR.strings.picacg_image_cache_size, cacheSize.first, cacheSize.second),
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(KMR.strings.picacg_body_cache_title),
+                    subtitle = stringResource(KMR.strings.picacg_body_cache_summary),
                 )
             }
             item {
@@ -81,7 +87,7 @@ fun DataStorageScreen(
             }
             item {
                 TextPreferenceWidget(
-                    title = "清除图片缓存",
+                    title = stringResource(KMR.strings.picacg_image_cache_clear_title),
                     subtitle = stringResource(KMR.strings.picacg_image_cache_clear_summary),
                     onPreferenceClick = {
                         DevConfig.clearImageCaches()
@@ -92,8 +98,8 @@ fun DataStorageScreen(
             }
             item {
                 TextPreferenceWidget(
-                    title = "启动时清除图片缓存",
-                    subtitle = "每次启动 App 自动清空图片缓存",
+                    title = stringResource(KMR.strings.picacg_image_cache_startup_title),
+                    subtitle = stringResource(KMR.strings.picacg_image_cache_startup_summary),
                     widget = {
                         Switch(
                             checked = autoClear,

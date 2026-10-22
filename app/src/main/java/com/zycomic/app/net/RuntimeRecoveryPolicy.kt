@@ -5,6 +5,7 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
+import java.net.ProtocolException
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -49,10 +50,22 @@ internal object RuntimeRecoveryPolicy {
     )
 
     /** Status errors and content/decode errors are not transport failures. */
-    fun isConnectionFailure(error: IOException): Boolean =
-        error is ConnectException || error is UnknownHostException ||
+    fun isConnectionFailure(error: IOException): Boolean {
+        if (error is ConnectException || error is UnknownHostException ||
             error is NoRouteToHostException || error is SocketTimeoutException || error is SocketException ||
             error is EOFException
+        ) {
+            return true
+        }
+        // OkHttp reports truncated HTTP bodies as ProtocolException rather than EOFException.
+        // Keep this narrow: malformed headers/protocol responses are not route-health evidence.
+        if (error is ProtocolException) {
+            val message = error.message.orEmpty().lowercase(java.util.Locale.ROOT)
+            return listOf("unexpected end of stream", "unexpected end of file", "unexpected eof").any(message::contains) ||
+                (message.contains("expected") && message.contains("bytes") && message.contains("received"))
+        }
+        return false
+    }
 
     /** Only explicit connection/socket failures count; generic IO, HTTP, decode and cancellation do not. */
     fun isTransportFailure(error: Throwable): Boolean {
@@ -63,7 +76,7 @@ internal object RuntimeRecoveryPolicy {
 
     /** Non-idempotent writes are never eligible for replay or connection-triggered route recovery. */
     fun mayRecoverApi(method: String, error: IOException): Boolean =
-        (method.equals("GET", true) || method.equals("HEAD", true)) && isConnectionFailure(error)
+        (method.equals("GET", true) || method.equals("HEAD", true)) && isTransportFailure(error)
 
     class Window {
         private val events = ArrayDeque<Sample>()

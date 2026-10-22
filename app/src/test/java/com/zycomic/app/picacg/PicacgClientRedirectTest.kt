@@ -12,6 +12,7 @@ import okio.Buffer
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.IOException
 
@@ -131,6 +132,30 @@ class PicacgClientRedirectTest {
             ),
             diagnostics,
         )
+    }
+
+    @Test
+    fun `empty HTML and invalid envelopes are not API success and writes are not replayed`() = runBlocking {
+        for (body in listOf("", "<html>edge error</html>", "{}", """{"code":"invalid"}""")) {
+            for (method in listOf("GET", "POST")) {
+                val requests = mutableListOf<Request>()
+                val client = testClient("https://api.example", listOf(Reply(200, body)), requests, mutableListOf())
+                val error = assertThrows(IOException::class.java) {
+                    runBlocking { client.request("/comics/action", method, if (method == "POST") JSONObject() else null, authenticated = false) }
+                }
+                assertEquals(1, requests.size)
+                if (method == "POST") assertTrue(error.message.orEmpty().contains(com.zycomic.app.net.RuntimeNetworkGate.ambiguousWriteMessage()))
+            }
+        }
+    }
+
+    @Test
+    fun `valid no-data write envelope remains supported without retry`() = runBlocking {
+        val requests = mutableListOf<Request>()
+        val client = testClient("https://api.example", listOf(Reply(200, """{"code":200}""")), requests, mutableListOf())
+        val result = client.request("/comics/action", "POST", JSONObject(), authenticated = false)
+        assertEquals(200, result.code)
+        assertEquals(1, requests.size)
     }
 
     private fun testClient(

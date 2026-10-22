@@ -215,7 +215,11 @@ internal object PicacgSpeedTestHistoryStorage {
             PicacgSpeedTestHistoryPolicy.API_PHASE -> hasRouteSource(identity.routeCondition, PicacgSpeedTestHistoryPolicy.API_ROUTE_CONDITION) &&
                 identity.probeCondition == "GET-root;redirects-disabled;accept-non-redirect-http-status"
             PicacgSpeedTestHistoryPolicy.IMAGE_PHASE -> hasRouteSource(identity.routeCondition, PicacgSpeedTestHistoryPolicy.IMAGE_ROUTE_CONDITION) &&
-                identity.probeCondition == "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic"
+                if (PicacgBuiltinNetwork.isContentPath(uri.rawPath)) {
+                    identity.probeCondition == "GET-storage-b-reader-page-tile;redirects-disabled;status-200;image-content-type;image-magic"
+                } else {
+                    identity.probeCondition == "GET-imgproxy-tile;redirects-disabled;status-200;image-content-type;image-magic"
+                }
             else -> false
         }
     }

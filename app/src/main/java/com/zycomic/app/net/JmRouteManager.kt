@@ -113,6 +113,9 @@ object JmRouteManager {
     private val failedImageEndpoints = ConcurrentHashMap.newKeySet<DomainIp>()
     private val imageTransportFailures = ConcurrentHashMap<DomainIp, Int>()
     private val apiEndpointRecovery = JmApiEndpointRecovery<ApiRecoveryGuard>()
+    private val apiRetryAfter = RuntimeRetryAfterPolicy()
+
+    @Volatile private var apiFailureNetworkRevision: Long? = null
 
     private data class ApiRecoveryGuard(
         val host: String,
@@ -135,6 +138,7 @@ object JmRouteManager {
     private val lineHealth = ConcurrentHashMap<String, Health>()
     private val imageHealth = ConcurrentHashMap<String, Health>()
 
+    val runtimeConfigRevision: Long get() = configRevision
     val lineHosts: List<String> get() = _state.value.lines
     val imageDomains: List<String> get() = _state.value.imageDomains
     val baseUrl: String get() = lineHosts.getOrNull(_state.value.lineIndex) ?: lineHosts.firstOrNull().orEmpty()
@@ -729,16 +733,26 @@ object JmRouteManager {
 
     /** Any HTTP response proves connectivity, even when the server returns an auth/WAF/rate-limit status. */
     @Synchronized
-    fun recordApiTransportResponse(endpoint: DomainIp) {
+    fun recordApiTransportResponse(endpoint: DomainIp) = recordApiTransportResponse(endpoint, 200, null)
+
+    @Synchronized
+    fun recordApiTransportResponse(endpoint: DomainIp, code: Int, retryAfterHeader: String?) {
+        apiFailureNetworkRevision = RuntimeNetworkGate.revision
         apiEndpointRecovery.recordResponse(endpoint)
+        if (code == 429) apiRetryAfter.record(endpoint, retryAfterHeader)
     }
 
     fun recordApiEndpointFailure(endpoint: DomainIp, detail: String) {
-        if (!RuntimeNetworkGate.isOnline()) {
+        if (!RuntimeNetworkGate.isOnline() || apiRetryAfter.isBlocked(endpoint)) {
             apiEndpointRecovery.clearFailures()
             return
         }
         val thresholdReached = synchronized(this) {
+            val networkRevision = RuntimeNetworkGate.revision
+            if (apiFailureNetworkRevision != networkRevision) {
+                apiEndpointRecovery.clearFailures()
+                apiFailureNetworkRevision = networkRevision
+            }
             val reached = apiEndpointRecovery.recordConnectionFailure(endpoint)
             val failures = apiEndpointRecovery.failureCount(endpoint)
             record("api_transport", endpoint.domain, "$detail；${endpoint.ip} 连接失败 $failures/$API_FAILURE_THRESHOLD")
@@ -755,7 +769,7 @@ object JmRouteManager {
 
     private fun captureApiRecovery(failed: DomainIp): JmApiEndpointRecovery.Candidate<ApiRecoveryGuard>? {
         if (!RuntimeNetworkGate.isOnline() || !StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
-            !apiEndpointRecovery.hasFailureThreshold(failed)
+            apiRetryAfter.isBlocked(failed) || !apiEndpointRecovery.hasFailureThreshold(failed)
         ) {
             return null
         }
@@ -801,7 +815,7 @@ object JmRouteManager {
             StartupPlatformPolicy.state.value.revision != guard.platformRevision ||
             configRevision != guard.configRevision || current.lineIndex != guard.lineIndex ||
             !current.autoSelect || manualLineEndpoint != guard.manualEndpoint || manualLineEndpoint != null ||
-            !apiEndpointRecovery.hasFailureThreshold(guard.current) ||
+            apiRetryAfter.isBlocked(guard.current) || !apiEndpointRecovery.hasFailureThreshold(guard.current) ||
             !hostFromUrl(current.lines.getOrNull(current.lineIndex).orEmpty()).equals(guard.host, true) ||
             !guard.host.equals(lineHost, true) || _speedTestSnapshot.value != guard.snapshot ||
             currentLineEndpoint(guard.host)?.normalizedForComparison() != guard.current.normalizedForComparison()

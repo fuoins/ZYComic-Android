@@ -40,9 +40,10 @@ class JmMyCommentsPolicyTest {
     }
 
     @Test
-    fun `HTTP and API failures remain errors including expired login`() {
+    fun `HTTP authorization failures do not infer expired login`() {
         assertEquals(null, JmMyCommentsPolicy.responseError(true, 200, null))
-        assertEquals("JM 登录已失效，请重新登录", JmMyCommentsPolicy.responseError(false, 401, null))
+        assertEquals("JM 留言记录访问受限（HTTP 401），请稍后刷新确认账号状态", JmMyCommentsPolicy.responseError(false, 401, null))
+        assertEquals("JM 留言记录访问受限（HTTP 403），请稍后刷新确认账号状态", JmMyCommentsPolicy.responseError(false, 403, null))
         assertEquals("JM 留言记录请求失败（HTTP 503）", JmMyCommentsPolicy.responseError(false, 503, null))
         assertEquals("JM 留言记录请求失败：session expired", JmMyCommentsPolicy.responseError(true, 200, "session expired"))
     }

@@ -37,6 +37,12 @@ class JmCheckInSafetyContractTest {
     }
 
     @Test
+    fun `check-in read retry never retries rate limited HTTP 429`() {
+        assertTrue(repository.contains("Regex(\"HTTP 5\\d{2}\").containsMatchIn(message)"))
+        assertTrue(!repository.contains("HTTP (429|5"))
+    }
+
+    @Test
     fun `closing account-bound screens disposes scope and cancels the active batch`() {
         assertTrue(profile.contains("remember(jmSessionRevision) { JmCheckInViewModel() }"))
         assertTrue(profile.contains("onDispose { jmCheckInViewModel.close() }"))

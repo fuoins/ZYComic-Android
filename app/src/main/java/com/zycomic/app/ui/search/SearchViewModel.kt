@@ -3,6 +3,7 @@ package com.zycomic.app.ui.search
 import android.content.Context
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.MangaRepository
+import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
@@ -113,6 +114,31 @@ class SearchViewModel(initialProvider: SearchProvider? = null) {
             PicacgBlockKeywordStore.keywords.collect { keywords ->
                 if (keywords != observedBlockKeywords) {
                     observedBlockKeywords = keywords
+                    if (provider.value == SearchProvider.PICACG && hasSearched) {
+                        clearSearchResults()
+                        if (PicacgAuthStore.loggedIn.value && keyword.value.isNotBlank()) doSearch()
+                    }
+                }
+            }
+        }
+        var observedBrowseCacheRevision = PicacgRepository.browseCacheRevision.value
+        scope.launch {
+            PicacgRepository.browseCacheRevision.collect { revision ->
+                if (revision != observedBrowseCacheRevision) {
+                    observedBrowseCacheRevision = revision
+                    val query = keyword.value.trim()
+                    if (provider.value == SearchProvider.PICACG && hasSearched && query.isNotBlank()) {
+                        startLoad(reset = true, query = query, selectedProvider = SearchProvider.PICACG, order = picacgSortCode.value, page = 1)
+                    }
+                }
+            }
+        }
+        var observedPicacgConfigRevision = PicacgRouteManager.configRevision
+        scope.launch {
+            PicacgRouteManager.state.collect {
+                val revision = PicacgRouteManager.configRevision
+                if (revision != observedPicacgConfigRevision) {
+                    observedPicacgConfigRevision = revision
                     if (provider.value == SearchProvider.PICACG && hasSearched) {
                         clearSearchResults()
                         if (PicacgAuthStore.loggedIn.value && keyword.value.isNotBlank()) doSearch()

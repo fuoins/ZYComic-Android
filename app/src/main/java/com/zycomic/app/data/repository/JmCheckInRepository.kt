@@ -286,7 +286,7 @@ object JmCheckInRepository {
             } catch (error: IOException) {
                 val message = error.message.orEmpty()
                 val retryableReadFailure = error is JmInvalidJsonResponseException ||
-                    Regex("HTTP (429|5\\d{2})").containsMatchIn(message)
+                    Regex("HTTP 5\\d{2}").containsMatchIn(message)
                 if (!retryableReadFailure) throw error
                 delay(9_000L)
                 verifySession(uid, revision)

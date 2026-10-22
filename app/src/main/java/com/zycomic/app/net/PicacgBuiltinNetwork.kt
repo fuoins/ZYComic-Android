@@ -153,8 +153,9 @@ object PicacgBuiltinNetwork {
     private val roleLabels = listOf("picaapi", "img", "storage-b", "storage1")
 
     /**
-     * Returns fixed client-owned rules plus vetted SmartDNS candidates for picacomic.com only.
-     * Baseline addresses always stay first and are never replaced by the remote response.
+     * Returns fixed client-owned rules plus one vetted SmartDNS candidate pool shared by every
+     * configured API, cover, and content host. Baseline addresses always stay first and are never
+     * replaced by the remote response; SmartDNS does not create hostname-specific pools.
      */
     fun rules(smartIps: List<String> = emptyList()): Map<String, List<String>> {
         val rules = linkedMapOf<String, List<String>>()
@@ -169,7 +170,7 @@ object PicacgBuiltinNetwork {
             .distinct()
             .toList()
         if (smartCandidates.isNotEmpty()) {
-            rules.keys.filter { isWithinDomain(it, "picacomic.com") }.forEach { host ->
+            rules.keys.forEach { host ->
                 rules[host] = (rules.getValue(host) + smartCandidates).distinct()
             }
         }

@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.net.PicacgRouteManager
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.picacg.filter.PicacgBlockKeywordStore
@@ -36,18 +37,33 @@ internal fun PicacgFilteredComicsDialog(filter: PicacgBrowseFilter, onOpen: (Str
     val session by PicacgAuthStore.sessionRevision.collectAsState()
     val loggedIn by PicacgAuthStore.loggedIn.collectAsState()
     val blockKeywords by PicacgBlockKeywordStore.keywords.collectAsState()
+    val browseCacheRevision by PicacgRepository.browseCacheRevision.collectAsState()
+    val routeState by PicacgRouteManager.state.collectAsState()
+    val routeConfigRevision = remember(routeState.revision) { PicacgRouteManager.configRevision }
     var comics by remember(session, filter, blockKeywords) { mutableStateOf<List<Manga>>(emptyList()) }
     var page by remember(session, filter, blockKeywords) { mutableStateOf(1) }
     var more by remember(session, filter, blockKeywords) { mutableStateOf(false) }
     var loading by remember(session, filter, blockKeywords) { mutableStateOf(false) }
     var error by remember(session, filter, blockKeywords) { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
-    LaunchedEffect(session, loggedIn, filter, page, refresh, blockKeywords) {
+    var forceCacheRefresh by remember(session, filter) { mutableStateOf(false) }
+    LaunchedEffect(session, loggedIn, filter, page, refresh, blockKeywords, browseCacheRevision, routeConfigRevision) {
         if (!loggedIn) return@LaunchedEffect
         loading = true
         error = null
         try {
-            val result = PicacgRepository.browse(page, filter.category, filter.sort, filter.tag, filter.author, filter.creatorId, filter.chineseTeam)
+            val forceRefresh = forceCacheRefresh
+            forceCacheRefresh = false
+            val result = PicacgRepository.browse(
+                page,
+                filter.category,
+                filter.sort,
+                filter.tag,
+                filter.author,
+                filter.creatorId,
+                filter.chineseTeam,
+                forceRefresh,
+            )
             if (sessionIsCurrent(session)) {
                 comics = PicacgCollectionPolicy.merge(comics, result.items, page == 1) { it.id }
                 more = result.hasMore
@@ -69,7 +85,10 @@ internal fun PicacgFilteredComicsDialog(filter: PicacgBrowseFilter, onOpen: (Str
                 if (loading) CircularProgressIndicator()
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = { refresh++ }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
+                    TextButton(onClick = {
+                        forceCacheRefresh = true
+                        refresh++
+                    }, enabled = !loading) { Text(stringResource(KMR.strings.picacg_retry)) }
                 }
                 LazyColumn(Modifier.weight(1f)) {
                     items(comics, key = { it.id }) { comic ->

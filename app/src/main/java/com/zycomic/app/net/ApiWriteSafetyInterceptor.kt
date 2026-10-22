@@ -9,7 +9,14 @@ import okio.buffer
 import java.io.IOException
 
 /** API methods that are safe to retry after a transport failure or redirect. */
+internal object UnsafeApiWrite
+
+private const val UNSAFE_API_WRITE_HEADER = "X-ZYComic-Unsafe-Write"
+
 internal fun isSafeApiRead(method: String): Boolean = method.equals("GET", true) || method.equals("HEAD", true)
+
+internal fun isSafeApiRead(request: okhttp3.Request): Boolean = isSafeApiRead(request.method) &&
+    request.tag(UnsafeApiWrite::class.java) == null && request.header(UNSAFE_API_WRITE_HEADER) == null
 
 /**
  * Prevents a POST/other write from being repeated by redirects or hidden transport retry,
@@ -19,8 +26,17 @@ internal class ApiWriteSafetyInterceptor(
     private val ambiguousMessage: () -> String = RuntimeNetworkGate::ambiguousWriteMessage,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        if (isSafeApiRead(request.method)) return chain.proceed(request)
+        val original = chain.request()
+        val isMarkedUnsafe = original.header(UNSAFE_API_WRITE_HEADER) != null
+        val request = if (isMarkedUnsafe) {
+            original.newBuilder()
+                .removeHeader(UNSAFE_API_WRITE_HEADER)
+                .tag(UnsafeApiWrite::class.java, UnsafeApiWrite)
+                .build()
+        } else {
+            original
+        }
+        if (isSafeApiRead(request)) return chain.proceed(request)
         val response = try {
             chain.proceed(request)
         } catch (error: IOException) {
@@ -35,7 +51,9 @@ internal class ApiWriteSafetyInterceptor(
         } else {
             response
         }
-        if (visibleResponse.code in 300..399 || visibleResponse.header(UnsafeWriteRedirectNetworkInterceptor.BLOCKED_HEADER) != null) {
+        if (visibleResponse.code in 300..399 || visibleResponse.code in setOf(408, 421) || visibleResponse.code in 500..599 ||
+            visibleResponse.header(UnsafeWriteRedirectNetworkInterceptor.BLOCKED_HEADER) != null
+        ) {
             val code = visibleResponse.code
             visibleResponse.close()
             throw IOException("${ambiguousMessage()} (HTTP $code)")
@@ -71,7 +89,7 @@ internal class UnsafeWriteRedirectNetworkInterceptor : Interceptor {
             .removeHeader(BLOCKED_HEADER)
             .removeHeader(ORIGINAL_STATUS_HEADER)
             .build()
-        if (isSafeApiRead(response.request.method)) return response
+        if (isSafeApiRead(response.request)) return response
         if (response.code in 300..399) {
             return response.newBuilder()
                 .headers(response.headers.newBuilder().removeAll("Location").add(BLOCKED_HEADER, "true").build())

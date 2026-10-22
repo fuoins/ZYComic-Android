@@ -39,7 +39,9 @@ internal object ReaderPlatformRetryPolicy {
     fun supportsEndpointFallback(platform: ReaderRetryPlatform): Boolean =
         platform == ReaderRetryPlatform.MANWA || platform == ReaderRetryPlatform.JM
 
-    fun shouldAutomaticallyRetryHttpFailure(statusCode: Int?): Boolean = statusCode != 429
+    /** Avoid retrying auth/not-found/rate-limit responses; only server failures may use bounded fallback. */
+    fun shouldAutomaticallyRetryHttpFailure(statusCode: Int?): Boolean =
+        statusCode != null && statusCode in 500..599
 
     fun manualRetryLimitReached(
         retryCount: Int,

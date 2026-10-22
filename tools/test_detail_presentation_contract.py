@@ -210,7 +210,7 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         self.assertIn("snapshotFlow { pagerState.settledPage }", host)
         self.assertIn("pagerState.animateScrollToPage(index)\n                                            vm.selectMainTab(index)", host)
         self.assertEqual(1, host.count("com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
-        self.assertEqual(1, self.browse.count("LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords)"))
+        self.assertEqual(1, self.browse.count("LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords, browseCacheRevision, routeState.revision)"))
 
     def test_category_and_custom_filter_pages_do_not_get_ranking_preview(self):
         host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()

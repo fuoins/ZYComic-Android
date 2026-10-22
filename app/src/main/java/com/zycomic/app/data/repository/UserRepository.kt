@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
-import retrofit2.HttpException
 import tachiyomi.core.common.util.system.logcat
 import java.io.IOException
 
@@ -266,8 +265,8 @@ object UserRepository {
     }
 
     /**
-     * Refresh /users/info. Only an explicit HTTP 401 expires the local session. All business,
-     * transport, and parsing failures remain unknown and preserve cached profile and cookies.
+     * Refresh /users/info. HTTP authorization errors can also come from an edge or challenge;
+     * without a verified service-expiry contract, retain the cached profile and cookies as unknown.
      */
     suspend fun verifyLogin() {
         try {
@@ -316,22 +315,6 @@ object UserRepository {
             }
             if (!committed) throw CancellationException("Manwa refresh was superseded by a newer session")
         } catch (e: CancellationException) {
-            throw e
-        } catch (e: HttpException) {
-            if (ManwaSessionVerificationPolicy.isExplicitUnauthorized(e.code())) {
-                val expired = sessionVerification.expire(ticket) {
-                    NetworkModule.cookieJar.clear()
-                    clearUserInfoLocal()
-                    _userFlow.value = null
-                    _sessionStatusFlow.value = ManwaSessionStatus.EXPIRED
-                }
-                if (expired) return
-                throw CancellationException("Manwa refresh was superseded by a newer session")
-            }
-            val current = sessionVerification.markUnknown(ticket) {
-                _sessionStatusFlow.value = ManwaSessionStatus.UNKNOWN
-            }
-            if (!current) throw CancellationException("Manwa refresh was superseded by a newer session")
             throw e
         } catch (e: Exception) {
             val current = sessionVerification.markUnknown(ticket) {

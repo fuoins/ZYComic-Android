@@ -1,11 +1,11 @@
 package com.zycomic.app.net
 
 import com.zycomic.app.data.dto.AddBlacklistRequest
-import com.zycomic.app.data.dto.BookBlacklistData
-import com.zycomic.app.data.dto.BookBlacklistRequest
 import com.zycomic.app.data.dto.ApiResponse
 import com.zycomic.app.data.dto.BatchFavoriteRequest
 import com.zycomic.app.data.dto.BlacklistResponse
+import com.zycomic.app.data.dto.BookBlacklistData
+import com.zycomic.app.data.dto.BookBlacklistRequest
 import com.zycomic.app.data.dto.ChapterContent
 import com.zycomic.app.data.dto.ClassResponse
 import com.zycomic.app.data.dto.FavoriteFolderRequest
@@ -15,8 +15,6 @@ import com.zycomic.app.data.dto.Folder
 import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.data.dto.ListData
 import com.zycomic.app.data.dto.LoginRequest
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.NewestResponse
 import com.zycomic.app.data.dto.PointLogResponse
@@ -26,8 +24,11 @@ import com.zycomic.app.data.dto.SearchResponse
 import com.zycomic.app.data.dto.User
 import com.zycomic.app.data.dto.WelfareRequest
 import com.zycomic.app.data.dto.WelfareResponse
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Headers
 import retrofit2.http.POST
 import retrofit2.http.Query
 
@@ -118,6 +119,8 @@ interface ApiService {
     @GET("api/index/wawaweise")
     suspend fun getWawaWise(): okhttp3.ResponseBody
 
+    /** This GET records an ad/task action and must never be replayed after an ambiguous result. */
+    @Headers("X-ZYComic-Unsafe-Write: true")
     @GET("ad_click")
     suspend fun adClick(
         @Query("group") group: String,

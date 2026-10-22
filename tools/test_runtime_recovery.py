@@ -89,9 +89,15 @@ internal object PicacgRouteManager {
     @Volatile var configRevision = 0L
     // Coordinator recovery only accepts an established active host; the real manager is nullable before configuration.
     @Volatile var currentImageHost: String = "picacg-active.test"
+    @Volatile var coverImageHost: String = "picacg-active.test"
+    @Volatile var bodyImageHost: String = "picacg-active.test"
     @Volatile var manualPinned = false
     @Volatile var switchedEndpoint: DomainIp? = null
+    @Volatile var switchedCoverEndpoint: DomainIp? = null
+    @Volatile var switchedBodyEndpoint: DomainIp? = null
     @Volatile var candidates: List<DomainIp> = emptyList()
+    @Volatile var coverCandidates: List<DomainIp> = emptyList()
+    @Volatile var bodyCandidates: List<DomainIp> = emptyList()
     data class State(val revision: Long = 0, val imageHost: String? = null)
     val state = MutableStateFlow(State())
     val apiBaseUrl = "https://picacg-api.test/"
@@ -113,11 +119,25 @@ internal object PicacgRouteManager {
         apiEndpoint = validatedCandidate.endpoint; apiSwitches.incrementAndGet(); return true
     }
     fun validateCurrentApi(): Boolean { apiValidations.incrementAndGet(); return true }
-    fun runtimeImageRecoveryCandidates(source: String) = if (manualPinned || source != currentImageHost) emptyList() else candidates
-    fun advanceRuntimeImageSourceAfterRecovery(source: String, config: Long, platform: Long, endpoint: DomainIp): Boolean {
-        if (!RuntimeNetworkGate.isOnline() || configRevision != config || manualPinned || source != currentImageHost || endpoint !in candidates) return false
-        switchedEndpoint = endpoint
-        currentImageHost = endpoint.domain
+    fun imageSourceFor(content: Boolean): String = if (content) bodyImageHost else coverImageHost
+    val imageHosts: List<String> get() = PicacgBuiltinNetwork.imageHosts + listOf(coverImageHost, bodyImageHost)
+    fun candidateImageUrls(url: String): List<String> = listOf(url)
+    fun runtimeImageRecoveryCandidates(source: String, service: PicacgImageService? = null): List<DomainIp> {
+        if (manualPinned) return emptyList()
+        val active = when (service) { PicacgImageService.BODY -> bodyImageHost; PicacgImageService.COVER -> coverImageHost; null -> currentImageHost }
+        val pool = when (service) { PicacgImageService.BODY -> bodyCandidates; PicacgImageService.COVER -> coverCandidates; null -> candidates }
+        return if (source == active) pool else emptyList()
+    }
+    fun advanceRuntimeImageSourceAfterRecovery(source: String, config: Long, platform: Long, endpoint: DomainIp,
+        service: PicacgImageService? = null): Boolean {
+        val active = when (service) { PicacgImageService.BODY -> bodyImageHost; PicacgImageService.COVER -> coverImageHost; null -> currentImageHost }
+        if (!RuntimeNetworkGate.isOnline() || configRevision != config || manualPinned || source != active ||
+            endpoint !in runtimeImageRecoveryCandidates(source, service)) return false
+        when (service) {
+            PicacgImageService.BODY -> { switchedBodyEndpoint = endpoint; bodyImageHost = endpoint.domain }
+            PicacgImageService.COVER -> { switchedCoverEndpoint = endpoint; coverImageHost = endpoint.domain }
+            null -> { switchedEndpoint = endpoint; currentImageHost = endpoint.domain }
+        }
         return true
     }
 }
@@ -141,13 +161,19 @@ internal object JmSpeedTester {
 }
 internal object PicacgSpeedTester {
     val probeCalls = AtomicInteger()
+    val coverProbeCalls = AtomicInteger()
+    val bodyProbeCalls = AtomicInteger()
     val apiProbeCalls = AtomicInteger()
     val apiProbeResults = java.util.concurrent.ConcurrentHashMap<DomainIp, Boolean>()
     fun validateRuntimeApiEndpoint(endpoint: DomainIp, url: String): Boolean {
         apiProbeCalls.incrementAndGet(); return apiProbeResults[endpoint] ?: false
     }
     val probeResults = java.util.concurrent.ConcurrentHashMap<DomainIp, Boolean>()
-    fun validateRuntimeImageEndpoint(endpoint: DomainIp): Boolean { probeCalls.incrementAndGet(); return probeResults[endpoint] ?: false }
+    fun validateRuntimeImageEndpoint(endpoint: DomainIp, content: Boolean = false): Boolean {
+        probeCalls.incrementAndGet()
+        if (content) bodyProbeCalls.incrementAndGet() else coverProbeCalls.incrementAndGet()
+        return probeResults[endpoint] ?: false
+    }
 }
 
 internal class ImageAttemptCoordinator : AutoCloseable {
@@ -164,7 +190,10 @@ internal class PageAttemptScope(
     val page: eu.kanade.tachiyomi.ui.reader.model.ReaderPage,
     val generation: Int,
     val coordinator: ImageAttemptCoordinator,
-)
+) {
+    val isCurrent: Boolean get() = page.generation.get() == generation
+    fun registerCall(call: okhttp3.Call, index: Int): AutoCloseable = AutoCloseable { }
+}
 
 internal object RuntimeRecoveryTestFixtures {
     fun enableAll() { StartupPlatformPolicy.state.value = StartupPlatformPolicy.State(revision = 0) }
@@ -182,6 +211,15 @@ def main() -> None:
 import kotlinx.coroutines.flow.MutableStateFlow
 enum class ContentPlatform { MANWA, JM, PICACG }
 object StartupPlatformPolicy { data class State(val revision: Long = 0); val state = MutableStateFlow(State()); fun isEnabled(platform: ContentPlatform) = true }
+""", encoding="utf-8")
+    android_base64_file = OUT / "AndroidBase64Stub.kt"
+    android_base64_file.write_text("""package android.util
+object Base64 {
+    const val URL_SAFE = 8
+    const val NO_WRAP = 2
+    const val NO_PADDING = 1
+    fun encodeToString(bytes: ByteArray, flags: Int): String = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+}
 """, encoding="utf-8")
     source_page_file = OUT / "SourcePageStub.kt"
     source_page_file.write_text("""package eu.kanade.tachiyomi.source.model
@@ -236,12 +274,18 @@ fun logcat(message: () -> String) = Unit
     reader_test = ROOT / "app/src/test/java/com/zycomic/app/reader"
     sources = [
         main / "DomainIp.kt",
+        main / "PicacgBuiltinNetwork.kt",
+        main / "PicacgImagePayloadPolicy.kt",
+        main / "PicacgSpeedTestTargetPolicy.kt",
+        main / "PicacgSmartDns.kt",
         main / "RuntimeNetworkPolicy.kt",
         main / "RuntimeRecoveryPolicy.kt",
         main / "RuntimeRetryAfterPolicy.kt",
         main / "JmApiEndpointRecovery.kt",
         main / "RuntimeImageRateLimit.kt",
         main / "RuntimeImageRecovery.kt",
+        main / "PicacgRuntimeImageInterceptor.kt",
+        main / "PicacgImageFallbackInterceptor.kt",
         main / "ApiWriteSafetyInterceptor.kt",
         main / "PicacgApiCandidatePolicy.kt",
         main / "PicacgApiFailureWindow.kt",
@@ -253,6 +297,7 @@ fun logcat(message: () -> String) = Unit
         reader / "ReaderPlatformRetryPolicy.kt",
         test / "RuntimeRecoveryIsolationTest.kt",
         ROOT / "tools/offline-tests/RuntimeImageRecoveryIntegrationTest.kt",
+        ROOT / "tools/offline-tests/PicacgSharedDnsPoolOfflineTest.kt",
         test / "ApiWriteSafetyInterceptorTest.kt",
         test / "PicacgApiCandidatePolicyTest.kt",
         test / "PicacgApiFailureWindowTest.kt",
@@ -261,6 +306,7 @@ fun logcat(message: () -> String) = Unit
         reader_test / "ReaderPlatformRetryPolicyTest.kt",
         STUBS,
         platform_file,
+        android_base64_file,
         source_page_file,
         reader_page_file,
         source_ids_file,

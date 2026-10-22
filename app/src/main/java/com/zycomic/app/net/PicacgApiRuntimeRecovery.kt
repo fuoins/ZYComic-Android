@@ -100,7 +100,7 @@ internal object PicacgApiRuntimeRecovery {
         PicacgRouteManager.configRevision == configRevision &&
         PicacgRouteManager.selectedApiHost.equals(failedHost, true) &&
         PicacgRouteManager.currentApiEndpointFor(failedHost)?.normalizedForComparison() == failedEndpoint.normalizedForComparison() &&
-        !PicacgRouteManager.isApiManuallyPinned
+        !PicacgRouteManager.isApiManuallyPinned && !retryAfter.isBlocked(failedEndpoint)
 
     private fun monotonicMillis(): Long = System.nanoTime() / NANOS_PER_MILLI
 
@@ -113,7 +113,7 @@ internal object PicacgApiRuntimeRecovery {
 internal class PicacgApiRuntimeRecoveryInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        if (!isSafeApiRead(request.method)) return chain.proceed(request)
+        if (!isSafeApiRead(request)) return chain.proceed(request)
         val endpoint = PicacgRouteManager.currentApiEndpointFor(request.url.host) ?: return chain.proceed(request)
         if (!RuntimeNetworkGate.isOnline()) return chain.proceed(request)
         val networkRevision = RuntimeNetworkGate.revision

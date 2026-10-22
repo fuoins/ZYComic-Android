@@ -29,6 +29,9 @@ class PicacgImageCacheStorageContractTest {
         assertTrue(screen.contains("KMR.strings.picacg_image_cache_size"))
         assertTrue(screen.contains("remember(cacheRevision) { imageDiskCacheSize() }"))
         assertTrue(screen.contains("cacheRevision++"))
+        assertTrue(screen.contains("KMR.strings.picacg_image_cache_title"))
+        assertTrue(screen.contains("KMR.strings.picacg_body_cache_title"))
+        assertTrue(screen.contains("KMR.strings.picacg_body_cache_summary"))
     }
 
     @Test
@@ -40,5 +43,9 @@ class PicacgImageCacheStorageContractTest {
         assertTrue(clearMethod.contains("PicacgImageLoader.clearCache(ctx)"))
         assertFalse(clearMethod.contains("JmCoverImageLoader"))
         assertFalse(clearMethod.contains("jm_cover_cache"))
+        assertFalse(clearMethod.contains("chapterCache"))
+        assertFalse(clearMethod.contains("ImageCacheManager"))
+        assertFalse(clearMethod.contains("ChapterCache"))
+        assertFalse(clearMethod.contains("deleteRecursively"))
     }
 }

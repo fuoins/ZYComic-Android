@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.net.ConnectException
+import java.net.ProtocolException
 import java.net.SocketTimeoutException
 
 class RuntimeRecoveryPolicyTest {
@@ -94,7 +95,12 @@ class RuntimeRecoveryPolicyTest {
         assertFalse(RuntimeRecoveryPolicy.isConnectionFailure(IOException("404/decode")))
         assertTrue(RuntimeRecoveryPolicy.isConnectionFailure(ConnectException("refused")))
         assertTrue(RuntimeRecoveryPolicy.isConnectionFailure(SocketTimeoutException("connect timeout")))
+        assertTrue(RuntimeRecoveryPolicy.isConnectionFailure(ProtocolException("unexpected end of stream")))
+        assertFalse(RuntimeRecoveryPolicy.isConnectionFailure(ProtocolException("malformed status line")))
+        assertFalse(RuntimeRecoveryPolicy.isConnectionFailure(ProtocolException("invalid Content-Length header")))
         assertFalse(RuntimeRecoveryPolicy.mayRecoverApi("POST", ConnectException("refused")))
         assertTrue(RuntimeRecoveryPolicy.mayRecoverApi("GET", ConnectException("refused")))
+        assertTrue(RuntimeRecoveryPolicy.mayRecoverApi("HEAD", IOException("transport wrapper", SocketTimeoutException("read timeout"))))
+        assertFalse(RuntimeRecoveryPolicy.mayRecoverApi("GET", IOException("decode wrapper", IllegalArgumentException("bad JSON"))))
     }
 }

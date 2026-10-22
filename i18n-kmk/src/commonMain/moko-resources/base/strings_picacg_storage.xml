@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="picacg_image_cache_size">Coil + 哔咔独立磁盘缓存占用：%1$s（哔咔 %2$s）</string>
-    <string name="picacg_image_cache_clear_summary">清除 Coil + 哔咔内存/磁盘缓存（不清理 JM 独立缓存），不影响收藏和历史</string>
+    <string name="picacg_image_cache_title">封面与列表图片缓存</string>
+    <string name="picacg_image_cache_clear_title">清除封面与列表图片缓存</string>
+    <string name="picacg_image_cache_size">Coil + 哔咔独立封面磁盘缓存：%1$s（哔咔 %2$s）；不包含阅读正文缓存</string>
+    <string name="picacg_image_cache_clear_summary">仅清除 Coil + 哔咔封面与列表图片的内存/磁盘缓存；不清除正文页、章节缓存、JM 独立缓存、收藏或历史</string>
+    <string name="picacg_body_cache_title">阅读正文与章节缓存</string>
+    <string name="picacg_body_cache_summary">与封面缓存分开管理，清除封面缓存或线路错误恢复不会删除已成功加载的正文页和章节</string>
+    <string name="picacg_image_cache_startup_title">启动时清除封面与列表图片缓存</string>
+    <string name="picacg_image_cache_startup_summary">每次启动仅清除封面与列表图片缓存，不清除阅读正文与章节缓存</string>
 </resources>
