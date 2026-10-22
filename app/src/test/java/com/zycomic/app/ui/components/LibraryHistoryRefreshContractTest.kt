@@ -13,14 +13,19 @@ class LibraryHistoryRefreshContractTest {
     }
 
     @Test
-    fun `Picacg refresh support stays visible while busy is passed separately`() {
+    fun `Picacg favorites keeps refresh action without a separate spinner and disables it while busy`() {
         val screen = source("PicacgLibraryScreen")
         assertTrue(screen.contains("refreshSupported = !history,"))
         assertTrue(screen.contains("refreshBusy = loading || removingSelected,"))
         assertTrue(screen.contains("refreshEnabled = loggedIn,"))
-        assertTrue(screen.contains("refreshIndicatorSeparate = true,"))
-        assertTrue(screen.contains("refreshEnabledWhileBusy = loading && !removingSelected,"))
+        assertFalse(screen.contains("refreshIndicatorSeparate = true,"))
+        assertFalse(screen.contains("refreshEnabledWhileBusy = loading && !removingSelected,"))
+        assertTrue(screen.contains("onRefresh = {"))
+        assertTrue(screen.contains("loading && comics.isEmpty() -> LoadingScreen("))
         assertFalse(screen.contains("refreshSupported = !history && loggedIn && !loading"))
+        val toolbar = source("LibraryHistoryToolbar")
+        assertTrue(toolbar.contains("refreshEnabledWhileBusy: Boolean = false,"))
+        assertTrue(toolbar.contains("enabled = refreshEnabled && (!refreshBusy || refreshEnabledWhileBusy)"))
     }
 
     @Test

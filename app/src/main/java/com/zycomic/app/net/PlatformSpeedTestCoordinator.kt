@@ -4,7 +4,9 @@ import android.content.Context
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -48,6 +50,17 @@ object PlatformSpeedTestCoordinator {
     private val completedPhases = CompletedSpeedTestPhases()
     private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
     private val fullTestRequest = FullSpeedTestRequest<List<PlatformSpeedTestReport>>()
+
+    private val startupRequest = StartupSpeedTestRequest<SpeedTestRunKey, List<PlatformSpeedTestReport>>(
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
+
+    /** App warm-up and UI waiters share the same startup worker without resetting progress. */
+    suspend fun awaitStartup(): List<PlatformSpeedTestReport> = startupRequest.run(::currentKey) {
+        var publishedKey: SpeedTestRunKey? = null
+        val result = execute(isStartupRun = true, onCompleted = { publishedKey = it })
+        checkNotNull(publishedKey) to result
+    }
 
     /** Splash requests share one full test even while waiting behind the automatic startup run. */
     suspend fun retestAllEnabled(): List<PlatformSpeedTestReport> = fullTestRequest.run {
@@ -99,6 +112,20 @@ object PlatformSpeedTestCoordinator {
         isStartupRun: Boolean = false,
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
+    ): List<PlatformSpeedTestReport> {
+        startupRequest.invalidate()
+        return execute(forceFresh, remoteConfigUpdated, onlyPlatform, notifyCompletion, isStartupRun, onProgress, onStageProgress)
+    }
+
+    private suspend fun execute(
+        forceFresh: Boolean = false,
+        remoteConfigUpdated: Boolean = false,
+        onlyPlatform: ContentPlatform? = null,
+        notifyCompletion: Boolean = true,
+        isStartupRun: Boolean = false,
+        onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
+        onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
+        onCompleted: ((SpeedTestRunKey) -> Unit)? = null,
     ): List<PlatformSpeedTestReport> = withContext(Dispatchers.IO) {
         // First install and explicit retests still wait. A cached automatic run may
         // measure speculatively, but each tester must cross beforeApply before selection.
@@ -255,6 +282,7 @@ object PlatformSpeedTestCoordinator {
                                                     }
                                                 },
                                             )
+                                            if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
                                             if (status == "tested") {
                                                 _progressText.value = manwaProgressMessage(SpeedTester.progress.value)
@@ -288,6 +316,7 @@ object PlatformSpeedTestCoordinator {
                                                     }
                                                 },
                                             )
+                                            if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             picacgSnapshot = snapshot.takeIf { PicacgSpeedTester.snapshot.value == it && generationIsCurrent() }
                                             picacgSnapshot?.let { current ->
                                                 publishPicacgMeasuredChecks(current)
@@ -318,6 +347,7 @@ object PlatformSpeedTestCoordinator {
                                                     publishJmCheckProgress(progress)
                                                 }
                                             }
+                                            if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             val snapshot = run.snapshot
                                             val submission = run.submission
                                             val complete = submission?.isComplete(
@@ -333,6 +363,7 @@ object PlatformSpeedTestCoordinator {
                                     } catch (e: CancellationException) {
                                         throw e
                                     } catch (_: Exception) {
+                                        if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                         status = "incomplete"
                                         reason = "本轮检测失败，保留当前选择"
                                         if (platform == ContentPlatform.PICACG) checkMaccms(null)
@@ -346,8 +377,10 @@ object PlatformSpeedTestCoordinator {
                                     }
                                 }
                                 report(platform, status, reason, picacgSnapshot).also { platformReport ->
-                                    publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
-                                    blockUnresolvedChecks(platform)
+                                    if (generationIsCurrent()) {
+                                        publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
+                                        blockUnresolvedChecks(platform)
+                                    }
                                 }
                             }
                         }.awaitAll()
@@ -378,6 +411,7 @@ object PlatformSpeedTestCoordinator {
                             it.platform in measuredPlatforms && SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun, it.status)
                         }.forEach { _completions.emit(it) }
                     }
+                    onCompleted?.invoke(key)
                     runCompleted = true
                     return@withLock result
                 }

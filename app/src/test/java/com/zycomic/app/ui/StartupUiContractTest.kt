@@ -58,11 +58,24 @@ class StartupUiContractTest {
         assertTrue(startupSwitches.contains("LinearProgressIndicator("))
         assertTrue(startupSwitches.contains("startupChecksProgress(checkStatuses)"))
         assertTrue(startupSwitches.contains("startupChecksPassed(checkStatuses)"))
-        assertTrue(startupSwitches.contains("}/6"))
+        assertTrue(startupSwitches.contains("}/\${checkStatuses.size}"))
         val row = mainActivity.substringAfter("private fun StartupSwitch(")
         assertTrue(row.contains("status?.message ?: \"等待测速\""))
         assertTrue(row.contains("progress = { status.fraction }"))
         assertFalse(mainActivity.contains("NetworkMaintenanceNotice"))
+    }
+
+    @Test
+    fun `startup warmup and auto selection share the startup speed test generation`() {
+        val app = File(root, "app/src/main/java/eu/kanade/tachiyomi/App.kt").readText()
+        val warmup = app.substringAfter("val warmup = launch {").substringBefore("var configurationUpdated = false")
+        assertTrue(warmup.contains("PlatformSpeedTestCoordinator.awaitStartup()"))
+        assertFalse(warmup.contains("PlatformSpeedTestCoordinator.run("))
+
+        val settings = File(root, "app/src/main/java/com/zycomic/app/ui/settings/SettingsViewModel.kt").readText()
+        val autoSelect = settings.substringAfter("suspend fun autoSelectFastest()").substringBefore("companion object")
+        assertTrue(autoSelect.contains("PlatformSpeedTestCoordinator.awaitStartup()"))
+        assertFalse(autoSelect.contains("PlatformSpeedTestCoordinator.run("))
     }
 
     @Test
@@ -87,20 +100,23 @@ class StartupUiContractTest {
         assertEquals("重新完整测速", strings["startup_retest_all"])
         assertEquals("网络配置", strings["startup_network_status_title"])
         assertEquals(
-            "三个平台源本身晚上就卡，建议早 6 点、晚 5 点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。",
+            "三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。",
             strings["startup_guidance_copy"],
         )
         assertEquals("本身晚上就卡", strings["startup_guidance_evening"])
-        assertEquals("早 6 点、晚 5 点", strings["startup_guidance_time"])
+        assertEquals("早6点到晚5点", strings["startup_guidance_time"])
         assertEquals("首次", strings["startup_guidance_first"])
+        assertEquals("神秘的网络层优化", strings["startup_guidance_network_optimization"])
         assertTrue(measurementPage.indexOf("KMR.strings.startup_retest_all") < measurementPage.indexOf("StartupGuidanceCard()"))
         val card = mainActivity.substringAfter("private fun StartupGuidanceCard()").substringBefore("@Composable")
-        listOf("copy", "evening", "time", "first").forEach {
+        listOf("copy", "evening", "time", "first", "network_optimization").forEach {
             assertTrue(card.contains("KMR.strings.startup_guidance_$it"))
         }
-        assertTrue(card.contains("listOf(evening, time, first)"))
+        assertTrue(card.contains("listOf(evening, time, first, networkOptimization)"))
         assertTrue(card.contains("addStyle("))
-        assertTrue(card.contains("if (phrase == time) FontWeight.ExtraBold else FontWeight.Bold"))
+        assertTrue(card.contains("phrase == time || isNetworkOptimization) FontWeight.ExtraBold"))
+        assertTrue(card.contains("MaterialTheme.colorScheme.tertiary"))
+        assertTrue(card.contains("MaterialTheme.colorScheme.tertiaryContainer"))
         assertTrue(card.contains("MaterialTheme.colorScheme.primaryContainer"))
         assertTrue(card.contains("color = MaterialTheme.colorScheme.surfaceContainer"))
         assertTrue(card.contains("lineHeight = 18.sp"))

@@ -173,7 +173,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             com.zycomic.app.net.SpeedTestTimingLog.start(com.zycomic.app.net.SpeedTestTimingLog.Scope.STARTUP).use { timings ->
                 val warmup = launch {
                     try {
-                        com.zycomic.app.net.PlatformSpeedTestCoordinator.run()
+                        com.zycomic.app.net.PlatformSpeedTestCoordinator.awaitStartup()
                     } catch (error: kotlinx.coroutines.CancellationException) {
                         throw error
                     } catch (_: Exception) {

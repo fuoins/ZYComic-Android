@@ -838,16 +838,26 @@ private fun StartupGuidanceCard() {
     val evening = stringResource(KMR.strings.startup_guidance_evening)
     val time = stringResource(KMR.strings.startup_guidance_time)
     val first = stringResource(KMR.strings.startup_guidance_first)
+    val networkOptimization = stringResource(KMR.strings.startup_guidance_network_optimization)
     val emphasizedCopy = buildAnnotatedString {
         append(copy)
-        listOf(evening, time, first).forEach { phrase ->
+        listOf(evening, time, first, networkOptimization).forEach { phrase ->
             val start = copy.indexOf(phrase)
             if (start >= 0) {
+                val isNetworkOptimization = phrase == networkOptimization
                 addStyle(
                     SpanStyle(
-                        fontWeight = if (phrase == time) FontWeight.ExtraBold else FontWeight.Bold,
-                        color = if (phrase == time) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        background = if (phrase == time) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Unspecified,
+                        fontWeight = if (phrase == time || isNetworkOptimization) FontWeight.ExtraBold else FontWeight.Bold,
+                        color = when {
+                            isNetworkOptimization -> MaterialTheme.colorScheme.tertiary
+                            phrase == time -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        background = when {
+                            isNetworkOptimization -> MaterialTheme.colorScheme.tertiaryContainer
+                            phrase == time -> MaterialTheme.colorScheme.primaryContainer
+                            else -> androidx.compose.ui.graphics.Color.Unspecified
+                        },
                     ),
                     start,
                     start + phrase.length,

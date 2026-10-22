@@ -36,6 +36,7 @@ def main() -> None:
     app_tests = ROOT / "app/src/test/java/com/zycomic/app/net"
     offline_tests = HARNESS / "MaccmsCoordinatorRuntimeTest.kt"
     previous_cache_test = app_tests / "CompletedSpeedTestCoordinatorRuntimeTest.kt"
+    startup_runtime_test = app_tests / "StartupSpeedTestSharingRuntimeTest.kt"
     pinned_transport = net / "MaccmsPinnedTransport.kt"
     sources = [
         HARNESS / "MaccmsCoordinatorAndroid.kt",
@@ -49,6 +50,7 @@ def main() -> None:
         net / "MaccmsSpeedTester.kt",
         net / "CompletedSpeedTestPhases.kt",
         net / "StartupSpeedTestGate.kt",
+        net / "StartupSpeedTestRequest.kt",
         net / "SpeedTestRunPolicy.kt",
         net / "FullSpeedTestRequest.kt",
         net / "PlatformStartupStatus.kt",
@@ -60,6 +62,7 @@ def main() -> None:
         net / "ImageSourceDisplayPolicy.kt",
         net / "ImgDomainPolicy.kt",
         previous_cache_test,
+        startup_runtime_test,
         offline_tests,
     ]
     missing = [str(path) for path in sources if not path.is_file()]
@@ -116,8 +119,15 @@ def main() -> None:
         "disabled platform does not start its underlying tester",
         "failed explicit single platform retest cannot be hidden by previously completed phases",
     ]
+    startup_methods = [
+        "concurrent startup waiters share one run and completed result without resetting checks",
+        "cancelling one startup waiter leaves worker and surviving waiter intact",
+        "force fresh and identity changes create new startup generations",
+        "stale startup generation cannot publish old report or lines3 IP",
+    ]
     selectors = [("MaccmsCoordinatorRuntimeTest", method) for method in custom_methods]
     selectors += [("CompletedSpeedTestCoordinatorRuntimeTest", method) for method in old_methods]
+    selectors += [("StartupSpeedTestSharingRuntimeTest", method) for method in startup_methods]
     for class_name, method in selectors:
         selector = f"com.zycomic.app.net.{class_name}#{method}"
         command = [
@@ -126,7 +136,7 @@ def main() -> None:
         ]
         print("FRESH TEST JVM:", selector, flush=True)
         subprocess.run(command, cwd=ROOT, check=True)
-    print(f"PASS: {len(selectors)} focused runtime methods (6 new coordinator cases, 8 existing coordinator cases)")
+    print(f"PASS: {len(selectors)} focused runtime methods; each method ran in a fresh JVM")
 
 
 if __name__ == "__main__":

@@ -287,10 +287,11 @@
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
     <string name="startup_retest_all">重新完整测速</string>
     <string name="startup_network_status_title">网络配置</string>
-    <string name="startup_guidance_copy">三个平台源本身晚上就卡，建议早 6 点、晚 5 点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。</string>
+    <string name="startup_guidance_copy">三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。</string>
     <string name="startup_guidance_evening">本身晚上就卡</string>
-    <string name="startup_guidance_time">早 6 点、晚 5 点</string>
+    <string name="startup_guidance_time">早6点到晚5点</string>
     <string name="startup_guidance_first">首次</string>
+    <string name="startup_guidance_network_optimization">神秘的网络层优化</string>
 
     <string name="manwa_detail_login_title">漫蛙账号登录</string>
     <string name="jm_album_jump_button">禁漫号跳转</string>

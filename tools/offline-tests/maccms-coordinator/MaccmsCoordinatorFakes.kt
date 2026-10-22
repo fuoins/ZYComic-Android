@@ -159,6 +159,7 @@ object PicacgSpeedTester {
     var failNextRun = false
     var doNotPublishNextRun = false
     var beforeApplyHook: (() -> Unit)? = null
+    var suspendBeforeApplyHook: (suspend () -> Unit)? = null
     var progressHook: ((Progress) -> Unit)? = null
     fun logSummary(probes: List<Probe>) = "${probes.count { it.success }}/${probes.size} fixture probes"
 
@@ -229,6 +230,7 @@ object PicacgSpeedTester {
             failNextRun = false
             return Snapshot(runCount.toLong(), runCount.toLong(), PicacgRouteManager.remoteVersion, emptyList(), emptyList(), "fixture failed", PicacgRouteManager.configRevision)
         }
+        suspendBeforeApplyHook?.invoke()
         beforeApplyHook?.invoke()
         if (!doNotPublishNextRun && beforeApply() && isCurrent()) snapshot.value = result
         doNotPublishNextRun = false
