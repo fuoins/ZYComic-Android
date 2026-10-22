@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -157,6 +158,35 @@ object PlatformSpeedTestCoordinator {
                     }
                     val measuredPlatforms = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
                     val result = coroutineScope {
+                        // Recommendations are a separate route group, never Picacg lines3 or image sources.
+                        // Awaited by this scope, including splash full-retest requests and network changes.
+                        launch {
+                            if (StartupPlatformPolicy.isEnabled(policy, ContentPlatform.PICACG) &&
+                                (onlyPlatform == null || onlyPlatform == ContentPlatform.PICACG)
+                            ) {
+                                publishStartupCheck(StartupCheckPhase.MACCMS_LINE, StartupCheckResult.RUNNING)
+                                try {
+                                    val measured = MaccmsSpeedTester.run(
+                                        quick = reuseLines,
+                                        isCurrent = ::generationIsCurrent,
+                                        beforeApply = ::beforeApply,
+                                    )
+                                    if (generationIsCurrent()) {
+                                        publishStartupCheck(
+                                            StartupCheckPhase.MACCMS_LINE,
+                                            if (measured.probes.any { it.success }) StartupCheckResult.SUCCESS else StartupCheckResult.FAILED,
+                                            "匿名 HTTPS HEAD 根路径连通性；未验证推荐 API",
+                                        )
+                                    }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (_: Exception) {
+                                    if (generationIsCurrent()) {
+                                        publishStartupCheck(StartupCheckPhase.MACCMS_LINE, StartupCheckResult.FAILED, "Maccms 连通性检测失败，保留独立线路选择")
+                                    }
+                                }
+                            }
+                        }
                         listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).map { platform ->
                             async {
                                 if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
@@ -485,6 +515,7 @@ object PlatformSpeedTestCoordinator {
     private fun StartupCheckPhase.platform(): ContentPlatform = when (this) {
         StartupCheckPhase.MANWA_LINE, StartupCheckPhase.MANWA_IMAGE -> ContentPlatform.MANWA
         StartupCheckPhase.PICACG_LINE, StartupCheckPhase.PICACG_IMAGE -> ContentPlatform.PICACG
+        StartupCheckPhase.MACCMS_LINE -> ContentPlatform.PICACG
         StartupCheckPhase.JM_LINE, StartupCheckPhase.JM_IMAGE -> ContentPlatform.JM
     }
 

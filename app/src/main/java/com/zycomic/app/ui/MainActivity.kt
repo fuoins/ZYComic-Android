@@ -267,6 +267,7 @@ private enum class SettingsDialog {
     DeveloperSettings,
     SpeedTest,
     PicacgSpeedTestLog,
+    MaccmsSpeedTestLog,
     JmSpeedTestLog,
     DataStorage,
     About,
@@ -683,6 +684,7 @@ fun AppContent(
                     onClose = { settingsDialog = null },
                     onOpenManwaSpeedTest = openSpeedTest,
                     onOpenPicacgSpeedTest = openPicacgSpeedTestLog,
+                    onOpenMaccmsSpeedTest = { settingsDialog = SettingsDialog.MaccmsSpeedTestLog },
                     onOpenJmSpeedTest = openJmSpeedTestLog,
                     onCheckUpdates = { settingsVm.checkRemoteConfig() },
                 )
@@ -702,6 +704,14 @@ fun AppContent(
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 com.zycomic.app.ui.settings.PicacgSpeedTestLogScreen(onClose = { settingsDialog = SettingsDialog.DeveloperSettings })
+            }
+        }
+        SettingsDialog.MaccmsSpeedTestLog -> {
+            Dialog(
+                onDismissRequest = { settingsDialog = SettingsDialog.DeveloperSettings },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                com.zycomic.app.ui.settings.MaccmsSpeedTestLogScreen(onClose = { settingsDialog = SettingsDialog.DeveloperSettings })
             }
         }
         SettingsDialog.JmSpeedTestLog -> {
@@ -888,7 +898,7 @@ private fun StartupPlatformSwitches() {
             modifier = Modifier.fillMaxWidth().height(6.dp),
         )
         Text(
-            "通过 ${startupChecksPassed(checkStatuses)}/6",
+            "通过 ${startupChecksPassed(checkStatuses)}/${checkStatuses.size}",
             modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

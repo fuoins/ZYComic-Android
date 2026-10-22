@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.zycomic.app.data.dto.Manga
+import com.zycomic.app.picacg.MaccmsRecommendationHttpException
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.picacg.PicacgComicState
 import com.zycomic.app.picacg.PicacgDetailCache
@@ -147,7 +148,12 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            if (sessionIsCurrent(session)) relatedError = recommendationFailure
+            if (sessionIsCurrent(session)) {
+                relatedError = recommendationFailure + when (failure) {
+                    is MaccmsRecommendationHttpException -> " (HTTP ${failure.statusCode})"
+                    else -> ""
+                }
+            }
         } finally {
             relatedLoading = false
         }

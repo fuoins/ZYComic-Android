@@ -19,15 +19,17 @@ class LibraryHistoryRefreshContractTest {
         assertTrue(screen.contains("refreshBusy = loading || removingSelected,"))
         assertTrue(screen.contains("refreshEnabled = loggedIn,"))
         assertTrue(screen.contains("refreshIndicatorSeparate = true,"))
+        assertTrue(screen.contains("refreshEnabledWhileBusy = loading && !removingSelected,"))
         assertFalse(screen.contains("refreshSupported = !history && loggedIn && !loading"))
     }
 
     @Test
-    fun `shared toolbar renders the busy indicator inside a disabled refresh action`() {
+    fun `shared toolbar can keep refresh clickable while showing a busy indicator`() {
         val toolbar = source("LibraryHistoryToolbar")
         assertTrue(toolbar.contains("refreshEnabled: Boolean = true,"))
         assertTrue(toolbar.contains("refreshIndicatorSeparate: Boolean = false,"))
-        assertTrue(toolbar.contains("enabled = refreshEnabled && !refreshBusy"))
+        assertTrue(toolbar.contains("refreshEnabledWhileBusy: Boolean = false,"))
+        assertTrue(toolbar.contains("enabled = refreshEnabled && (!refreshBusy || refreshEnabledWhileBusy)"))
         assertTrue(toolbar.contains("busy = refreshBusy"))
         assertTrue(toolbar.contains("busyIndicatorSeparate = refreshIndicatorSeparate"))
         assertTrue(toolbar.contains("IconButton(onClick = onClick, enabled = enabled"))
@@ -37,11 +39,15 @@ class LibraryHistoryRefreshContractTest {
     }
 
     @Test
-    fun `Picacg history selection action stays present but cannot enter selection without rows`() {
+    fun `Picacg history selection action is enabled before rows arrive and mode survives loading`() {
         val screen = source("PicacgLocalHistoryScreen")
         assertTrue(screen.contains("selectionSupported = true,"))
-        assertTrue(screen.contains("selectionEnabled = allRows != null && rows.isNotEmpty(),"))
-        assertTrue(screen.contains("onEnterSelection = { if (allRows != null && rows.isNotEmpty()) selectionMode = true },"))
+        assertTrue(screen.contains("selectionEnabled = true,"))
+        assertTrue(screen.contains("onEnterSelection = { selectionMode = true },"))
+        assertTrue(screen.contains("val allRows by historyFlow.collectAsState(initial = null)"))
+        val rowLoadingLifecycle = screen.substringAfter("val allRows by historyFlow.collectAsState(initial = null)")
+            .substringBefore("fun exitSelection()")
+        assertFalse(rowLoadingLifecycle.contains("selectionMode = false"))
         val toolbar = source("LibraryHistoryToolbar")
         assertTrue(toolbar.contains("selectionEnabled: Boolean = true,"))
         assertTrue(toolbar.contains("enabled = selectionEnabled"))

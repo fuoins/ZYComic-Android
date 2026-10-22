@@ -54,6 +54,7 @@ fun DeveloperSettingsScreen(
     onOpenManwaSpeedTest: () -> Unit,
     onOpenJmSpeedTest: () -> Unit,
     onOpenPicacgSpeedTest: () -> Unit,
+    onOpenMaccmsSpeedTest: () -> Unit,
     onCheckUpdates: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -229,6 +230,14 @@ fun DeveloperSettingsScreen(
                     subtitle = "查看哔咔独立线路与图源域名/IP、测速结果并导出诊断",
                     icon = Icons.Outlined.Speed,
                     onPreferenceClick = onOpenPicacgSpeedTest,
+                )
+            }
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(KMR.strings.maccms_speed_log_title),
+                    subtitle = stringResource(KMR.strings.maccms_speed_log_summary),
+                    icon = Icons.Outlined.Speed,
+                    onPreferenceClick = onOpenMaccmsSpeedTest,
                 )
             }
             item {

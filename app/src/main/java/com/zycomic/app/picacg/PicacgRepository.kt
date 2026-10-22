@@ -23,7 +23,7 @@ import java.net.URLEncoder
 /** Public Picacg data facade; no methods fall back to Manwa or JM. */
 object PicacgRepository {
     @Volatile private var api: PicacgClient? = null
-    private val recommendationApi = MaccmsRecommendationClient()
+    private val recommendationApi = MaccmsRecommendationRouter
     private val pageCache = PicacgPageCache<PicacgImage>()
     private val browseSnapshotCache = PicacgBrowseSnapshotCache<PicacgPage<Manga>>()
     private val browseRefreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

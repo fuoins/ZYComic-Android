@@ -245,6 +245,7 @@ fun PicacgLibraryScreen(
                 refreshBusy = loading || removingSelected,
                 refreshEnabled = loggedIn,
                 refreshIndicatorSeparate = true,
+                refreshEnabledWhileBusy = loading && !removingSelected,
                 filterSupported = !history && loggedIn,
                 onRefresh = {
                     page = 1

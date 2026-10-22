@@ -650,4 +650,27 @@
     <string name="jm_speed_test_incomplete">禁漫测速未完成：%1$s</string>
     <string name="jm_speed_test_missing_result">本轮未返回完整提交结果</string>
     <string name="jm_speed_test_cancelled">禁漫测速已取消</string>
+    <string name="maccms_speed_log_title">Maccms 推荐线路测速日志</string>
+    <string name="maccms_speed_log_summary">独立推荐线路、连通性结果、故障切换与日志导出</string>
+    <string name="maccms_speed_log_scope">匿名 HTTPS HEAD 根路径；HTTP 200–499（不含重定向）仅表示连通。未使用有效漫画 ID 验证推荐 API，404 不代表线路死亡。与哔咔 API、封面和阅读图源完全独立。</string>
+    <string name="maccms_speed_log_quick">开屏快测按历史最快前五个候选检测；当前线路池只有三条，因此快测与完整测速均至多检测三条。</string>
+    <string name="maccms_speed_log_current">当前线路：%1$s</string>
+    <string name="maccms_speed_log_none">尚无测速记录</string>
+    <string name="maccms_speed_log_running">检测中；下方保留上轮结果</string>
+    <string name="maccms_speed_log_full">完整重新测速</string>
+    <string name="maccms_speed_log_export">导出独立日志</string>
+    <string name="maccms_speed_log_exported">Maccms 日志已导出</string>
+    <string name="maccms_speed_log_export_failed">Maccms 日志导出失败</string>
+    <string name="maccms_speed_log_failed">Maccms 连通性检测失败</string>
+    <string name="maccms_speed_log_result">%1$s · %2$s · HTTP %3$s</string>
+    <string name="maccms_speed_log_reachable">连通</string>
+    <string name="maccms_speed_log_unreachable">失败</string>
+    <string name="maccms_speed_log_round">上轮：%1$s · %2$s</string>
+    <string name="maccms_speed_log_quick_mode">快测</string>
+    <string name="maccms_speed_log_full_mode">完整测速</string>
+    <string name="maccms_speed_log_events">近期推荐请求与故障切换（最多显示 20 条）</string>
+    <string name="maccms_speed_log_request_ok">推荐请求成功</string>
+    <string name="maccms_speed_log_request_failed">推荐请求失败</string>
+    <string name="maccms_speed_log_request_result">%1$s · %2$s · HTTP %3$s · %4$d ms</string>
+    <string name="maccms_speed_log_failover">故障切换：%1$s → %2$s</string>
 </resources>

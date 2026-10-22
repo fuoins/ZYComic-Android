@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test
 
 class StartupCheckStatusTest {
     @Test
-    fun `six stages start in fixed order with zero passes`() {
+    fun `seven stages start in fixed order with zero passes`() {
         val statuses = initialStartupCheckStatuses()
 
         assertEquals(
@@ -16,6 +16,7 @@ class StartupCheckStatusTest {
                 StartupCheckPhase.PICACG_IMAGE,
                 StartupCheckPhase.JM_LINE,
                 StartupCheckPhase.JM_IMAGE,
+                StartupCheckPhase.MACCMS_LINE,
             ),
             statuses.map { it.phase },
         )
@@ -44,17 +45,26 @@ class StartupCheckStatusTest {
             assertEquals(0f, startupChecksProgress(statuses), result.name)
         }
         val partial = updateStartupCheckStatus(initialStartupCheckStatuses(), StartupCheckPhase.JM_LINE, StartupCheckResult.SUCCESS)
-        assertEquals(1f / 6f, startupChecksProgress(partial))
+        assertEquals(1f / 7f, startupChecksProgress(partial))
         assertEquals(1f, startupChecksProgress(initialStartupCheckStatuses().map { it.copy(result = StartupCheckResult.SUCCESS) }))
     }
 
     @Test
     fun `new round clears prior successes and duplicate phases do not advance twice`() {
         val old = initialStartupCheckStatuses().map { it.copy(result = StartupCheckResult.SUCCESS) }
-        assertEquals(6, startupChecksPassed(old + old))
+        assertEquals(7, startupChecksPassed(old + old))
         assertEquals(0f, startupChecksProgress(initialStartupCheckStatuses()))
         val current = updateStartupCheckStatus(initialStartupCheckStatuses(), StartupCheckPhase.PICACG_IMAGE, StartupCheckResult.NO_SAMPLE)
         assertEquals(StartupCheckResult.NO_SAMPLE, current.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.result)
         assertEquals(0, startupChecksPassed(current))
+    }
+
+    @Test
+    fun `maccms success does not change picacg api or image check states`() {
+        val initial = initialStartupCheckStatuses()
+        val updated = updateStartupCheckStatus(initial, StartupCheckPhase.MACCMS_LINE, StartupCheckResult.SUCCESS)
+        assertEquals(initial.filter { it.phase != StartupCheckPhase.MACCMS_LINE }, updated.filter { it.phase != StartupCheckPhase.MACCMS_LINE })
+        assertEquals(1, startupChecksPassed(updated))
+        assertEquals(1f / 7f, startupChecksProgress(updated))
     }
 }

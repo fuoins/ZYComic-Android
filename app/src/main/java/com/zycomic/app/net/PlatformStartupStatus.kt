@@ -2,7 +2,7 @@ package com.zycomic.app.net
 
 import com.zycomic.app.platform.ContentPlatform
 
-/** Six fixed startup checks, kept separate from the per-platform live progress below each switch. */
+/** Independent startup checks, kept separate from the per-platform live progress below each switch. */
 enum class StartupCheckPhase(val label: String) {
     MANWA_LINE("漫蛙线路"),
     MANWA_IMAGE("漫蛙图域名"),
@@ -10,6 +10,7 @@ enum class StartupCheckPhase(val label: String) {
     PICACG_IMAGE("哔咔图域名"),
     JM_LINE("禁漫线路"),
     JM_IMAGE("禁漫图域名"),
+    MACCMS_LINE("Maccms 推荐连通性"),
 }
 
 enum class StartupCheckResult(val label: String) {
@@ -44,7 +45,7 @@ fun updateStartupCheckStatus(
 fun startupChecksPassed(statuses: List<StartupCheckStatus>): Int =
     statuses.distinctBy { it.phase }.count { it.result == StartupCheckResult.SUCCESS }
 
-/** Fixed six-stage denominator; failures, skipped work and history never advance it. */
+/** Fixed check denominator; failures, skipped work and history never advance it. */
 fun startupChecksProgress(statuses: List<StartupCheckStatus>): Float =
     startupChecksPassed(statuses).toFloat() / StartupCheckPhase.entries.size
 

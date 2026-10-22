@@ -38,7 +38,7 @@ class MaccmsRecommendationClient internal constructor(
                 .build()
             val request = Request.Builder().url(url).get().build()
             http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("Maccms recommendation request failed (${response.code})")
+                if (!response.isSuccessful) throw MaccmsRecommendationHttpException(response.code)
                 parseIds(response.body?.string().orEmpty(), comicId)
             }
         }
@@ -47,13 +47,12 @@ class MaccmsRecommendationClient internal constructor(
     private fun parseIds(body: String, selfId: String): List<String> {
         val root = try {
             when {
-                body.isBlank() -> return emptyList()
                 body.trimStart().startsWith("[") -> JSONArray(body)
-                body.trimStart().startsWith("{") -> JSONObject(body).optJSONArray("data") ?: return emptyList()
-                else -> return emptyList()
+                body.trimStart().startsWith("{") -> parseEnvelope(JSONObject(body))
+                else -> throw IOException("Maccms recommendation response is not a JSON array")
             }
-        } catch (_: Exception) {
-            return emptyList()
+        } catch (failure: org.json.JSONException) {
+            throw IOException("Invalid Maccms recommendation JSON", failure)
         }
 
         val seen = mutableSetOf(selfId.lowercase(Locale.ROOT))
@@ -67,8 +66,26 @@ class MaccmsRecommendationClient internal constructor(
         return ids
     }
 
+    private fun parseEnvelope(response: JSONObject): JSONArray {
+        // The documented endpoint uses code=0 and a top-level recommendations array, not data.
+        if (response.has("code") && response.opt("code") != 0) {
+            throw IOException("Maccms recommendation response indicates failure")
+        }
+        if (response.has("recommendations")) {
+            if (response.opt("code") != 0) throw IOException("Maccms recommendation response has no success code")
+            return response.optJSONArray("recommendations")
+                ?: throw IOException("Maccms recommendation response has no recommendations array")
+        }
+        // Retain support for the legacy envelope without confusing it with documented responses.
+        return response.optJSONArray("data")
+            ?: throw IOException("Maccms recommendation response has no recommendations array")
+    }
+
     private companion object {
         val PRODUCTION_BASE_URL: HttpUrl = "https://macapi1.com/".toHttpUrl()
         val COMIC_ID = Regex("[0-9a-fA-F]{24}")
     }
 }
+
+internal class MaccmsRecommendationHttpException(val statusCode: Int) :
+    IOException("Maccms recommendation request failed (HTTP $statusCode)")

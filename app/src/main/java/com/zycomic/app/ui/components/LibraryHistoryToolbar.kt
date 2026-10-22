@@ -56,6 +56,7 @@ fun LibraryHistoryToolbar(
     selectionEnabled: Boolean = true,
     refreshEnabled: Boolean = true,
     refreshIndicatorSeparate: Boolean = false,
+    refreshEnabledWhileBusy: Boolean = false,
 ) {
     val slotWidth = LibraryHistoryToolbarPolicy.ACTION_SLOT_WIDTH_DP.dp
     val platformSelectorWidth = LibraryHistoryToolbarPolicy.COMPACT_PLATFORM_SELECTOR_WIDTH_DP.dp
@@ -82,7 +83,7 @@ fun LibraryHistoryToolbar(
                         description = "刷新",
                         icon = Icons.Outlined.Refresh,
                         width = slotWidth,
-                        enabled = refreshEnabled && !refreshBusy,
+                        enabled = refreshEnabled && (!refreshBusy || refreshEnabledWhileBusy),
                         busy = refreshBusy,
                         busyIndicatorSeparate = refreshIndicatorSeparate,
                     )

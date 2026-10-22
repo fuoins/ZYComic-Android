@@ -69,6 +69,9 @@ class DetailPresentationContractTest(unittest.TestCase):
         self.assertIn("relatedLoading = false", related_effect)
         self.assertIn("KMR.strings.picacg_recommendations_empty", related_effect)
         self.assertIn("relatedError = recommendationFailure", related_effect)
+        self.assertIn('is MaccmsRecommendationHttpException -> " (HTTP ${failure.statusCode})"', related_effect)
+        recommendation_failure = related_effect.split("catch (failure: Exception)", 1)[1].split("finally", 1)[0]
+        self.assertNotIn("error =", recommendation_failure)
 
     def test_actions_appear_above_synopsis_and_tags(self):
         description = self.picacg.index("MangaDetailDescription(detail.text)")
@@ -173,17 +176,24 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         cls.loader = (JAVA / "ui/components/PicacgMangaCard.kt").read_text()
         cls.config = (JAVA / "net/DevConfig.kt").read_text()
 
-    def test_history_selection_remains_present_with_real_disabled_semantics(self):
+    def test_history_selection_is_enabled_before_rows_arrive(self):
         self.assertIn("selectionSupported = true,", self.history)
-        self.assertIn("selectionEnabled = allRows != null && rows.isNotEmpty(),", self.history)
+        self.assertIn("selectionEnabled = true,", self.history)
+        self.assertIn("onEnterSelection = { selectionMode = true },", self.history)
+        loading_lifecycle = self.history.split("val allRows by historyFlow.collectAsState(initial = null)", 1)[1].split("fun exitSelection()", 1)[0]
+        self.assertNotIn("selectionMode = false", loading_lifecycle)
         self.assertIn("selectionEnabled: Boolean = true,", self.toolbar)
         self.assertIn("enabled = selectionEnabled,", self.toolbar)
         self.assertIn("IconButton(onClick = onClick, enabled = enabled", self.toolbar)
 
-    def test_favorites_refresh_remains_visible_even_when_logged_out_or_busy(self):
+    def test_favorites_refresh_remains_visible_and_clickable_while_loading(self):
         for contract in ("refreshSupported = !history,", "refreshEnabled = loggedIn,", "refreshBusy = loading || removingSelected,", "refreshIndicatorSeparate = true,"):
             self.assertIn(contract, self.library)
-        self.assertIn("enabled = refreshEnabled && !refreshBusy", self.toolbar)
+        self.assertIn("refreshEnabledWhileBusy = loading && !removingSelected,", self.library)
+        self.assertIn("enabled = refreshEnabled && (!refreshBusy || refreshEnabledWhileBusy)", self.toolbar)
+        refresh_handler = self.library.split("onRefresh = {", 1)[1].split("},", 1)[0]
+        self.assertIn("refresh++", refresh_handler)
+        self.assertNotIn("if (loading)", refresh_handler)
         self.assertIn("if (busy && !busyIndicatorSeparate)", self.toolbar)
         independent = self.toolbar.split("Box(contentAlignment = Alignment.Center)", 1)[1]
         self.assertLess(independent.index("Icon(imageVector = icon"), independent.index("if (busy)"))
