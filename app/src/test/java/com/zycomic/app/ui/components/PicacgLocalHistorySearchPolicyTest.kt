@@ -11,10 +11,13 @@ import tachiyomi.domain.manga.interactor.GetCustomMangaInfo
 import tachiyomi.domain.manga.model.MangaCover
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.addSingletonFactory
+import uy.kohesive.injekt.api.get
 import java.util.Date
 
 class PicacgLocalHistorySearchPolicyTest {
     companion object {
+        private const val PICACG_SOURCE_ID = 300L
+
         @JvmStatic
         @BeforeClass
         fun bindCustomMangaInfoForJvm() {
@@ -75,8 +78,4 @@ class PicacgLocalHistorySearchPolicyTest {
             lastModified = 0,
         ),
     )
-
-    private companion object {
-        const val PICACG_SOURCE_ID = 300L
-    }
 }
