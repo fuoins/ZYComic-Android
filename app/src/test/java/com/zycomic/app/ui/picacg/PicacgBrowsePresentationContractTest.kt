@@ -18,7 +18,7 @@ class PicacgBrowsePresentationContractTest {
         assertTrue(initialMode.contains("PicacgFeedMode.LEADERBOARD_24H"))
         assertFalse(initialMode.contains("PicacgFeedMode.LATEST"))
         assertEquals(1, Regex("LazyRow\\(").findAll(source).count())
-        val rankingRow = source.substringAfter("if (pageMode == PicacgBrowsePageMode.RANKING)").substringBefore("if (loading")
+        val rankingRow = source.substringAfter("internal fun PicacgRankingChips(").substringBefore("fun PicacgBrowseScreen(")
         assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_24H"))
         assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_7D"))
         assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_30D"))
@@ -32,6 +32,40 @@ class PicacgBrowsePresentationContractTest {
         assertTrue(rankingRowPosition < loginPromptPosition)
         assertTrue(rankingRowPosition < source.indexOf("if (loading && mangas.isEmpty())"))
         assertTrue(source.contains("val displayOnly = pageMode != PicacgBrowsePageMode.CATEGORY"))
+    }
+
+    @Test
+    fun `pager preview renders only static ranking controls before tab selection settles`() {
+        val browse = File(root, "app/src/main/java/com/zycomic/app/ui/browse/BrowseScreen.kt").readText()
+        val picacgPage = browse.substringAfter("if (tabPlatform == ContentPlatform.PICACG)").substringBefore("if (item?.kind == TabKind.SPECIAL")
+        val preview = picacgPage.substringAfter("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)")
+        assertTrue(picacgPage.contains("if (page == vm.mainTab.value) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
+        assertTrue(preview.contains("com.zycomic.app.ui.picacg.PicacgRankingChips()"))
+        assertFalse(preview.contains("PicacgBrowseScreen("))
+        assertFalse(preview.contains("LaunchedEffect"))
+        assertFalse(preview.contains("Repository"))
+        assertTrue(browse.contains("snapshotFlow { pagerState.settledPage }"))
+        assertTrue(browse.contains("pagerState.animateScrollToPage(index)\n                                            vm.selectMainTab(index)"))
+        assertTrue(picacgPage.contains("BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY"))
+        assertTrue(picacgPage.contains("item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME"))
+    }
+
+    @Test
+    fun `shared ranking controls have no data effects and preserve order and default`() {
+        val rankingRow = source.substringAfter("internal fun PicacgRankingChips(").substringBefore("fun PicacgBrowseScreen(")
+        val modes = rankingRow.substringAfter("items = listOf(").substringBefore("),")
+        assertEquals(
+            listOf("LEADERBOARD_24H", "LEADERBOARD_7D", "LEADERBOARD_30D", "RANDOM", "LATEST"),
+            Regex("PicacgFeedMode\\.(\\w+)").findAll(modes).map { it.groupValues[1] }.toList(),
+        )
+        assertTrue(rankingRow.contains("selectedMode: PicacgFeedMode = PicacgFeedMode.LEADERBOARD_24H"))
+        assertTrue(rankingRow.contains("onSelectMode: (PicacgFeedMode) -> Unit = {}"))
+        assertTrue(rankingRow.contains("CompactBrowseFilterChip("))
+        assertFalse(rankingRow.contains("LaunchedEffect"))
+        assertFalse(rankingRow.contains("Repository"))
+        assertTrue(source.contains("LEADERBOARD_24H(\"H24\")"))
+        assertTrue(source.contains("LEADERBOARD_7D(\"D7\")"))
+        assertTrue(source.contains("LEADERBOARD_30D(\"D30\")"))
     }
 
     @Test

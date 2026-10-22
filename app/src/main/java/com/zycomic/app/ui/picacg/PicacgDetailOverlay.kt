@@ -1,5 +1,6 @@
 package com.zycomic.app.ui.picacg
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
@@ -86,6 +90,7 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
     var relatedError by remember(selectedId, session) { mutableStateOf<String?>(null) }
     var error by remember(selectedId, session) { mutableStateOf<String?>(null) }
     var busy by remember(selectedId, session) { mutableStateOf(false) }
+    var chapterAscending by remember(selectedId) { mutableStateOf(false) }
     var refreshing by remember(selectedId, session, loggedIn) { mutableStateOf(loggedIn) }
     var refresh by remember { mutableStateOf(0) }
     var login by remember { mutableStateOf(false) }
@@ -281,10 +286,40 @@ fun PicacgDetailOverlay(bookId: String, onClose: () -> Unit) {
                                         item { Text(stringResource(KMR.strings.picacg_no_chapters), modifier = Modifier.padding(horizontal = 16.dp)) }
                                     } else {
                                         item {
-                                            MangaDetailChapterGrid(
-                                                chapters = detail.chapterList,
-                                                onChapterClick = { chapter -> openChapter(detail, chapter.id) },
-                                            )
+                                            Column {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text("共 ${detail.chapterList.size} 章", style = MaterialTheme.typography.bodyMedium)
+                                                    Row(
+                                                        modifier = Modifier.clickable { chapterAscending = !chapterAscending },
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Filled.SwapVert,
+                                                            contentDescription = "切换排序",
+                                                            modifier = Modifier.size(18.dp),
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Text(
+                                                            if (chapterAscending) "升序" else "降序",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
+                                                }
+                                                MangaDetailChapterGrid(
+                                                    chapters = if (chapterAscending) {
+                                                        detail.chapterList.sortedBy { it.sort }
+                                                    } else {
+                                                        detail.chapterList.sortedByDescending { it.sort }
+                                                    },
+                                                    onChapterClick = { chapter -> openChapter(detail, chapter.id) },
+                                                )
+                                            }
                                         }
                                     }
                                     // Header and chapter section each occupy one item, so recommendations begin at index 2.

@@ -18,19 +18,39 @@ internal object RuntimeImageRecovery {
     private val window = RuntimeRecoveryPolicy.Window()
     private val retryCallbacks = RuntimeRecoveryPolicy.RetryCallbacks()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    // One gate per platform prevents simultaneous failures on stale sources from swinging routes.
     private val gates = ConcurrentHashMap<RuntimeRecoveryPolicy.Platform, RuntimeRecoveryPolicy.Gate>()
+    private data class Revision(val config: Long, val platforms: Long, val network: Long = RuntimeNetworkGate.revision)
+    private val revisions = ConcurrentHashMap<RuntimeRecoveryPolicy.Platform, Revision>()
+
+    @Synchronized
+    private fun acceptSample(platform: RuntimeRecoveryPolicy.Platform): Boolean {
+        if (!RuntimeNetworkGate.isOnline()) {
+            window.clear(platform)
+            retryCallbacks.clear(platform)
+            revisions.remove(platform)
+            return false
+        }
+        val current = Revision(configRevision(platform), StartupPlatformPolicy.state.value.revision)
+        if (revisions.put(platform, current) != current) {
+            window.clear(platform)
+            retryCallbacks.clear(platform)
+        }
+        return true
+    }
 
     fun coverSample(platform: RuntimeRecoveryPolicy.Platform, source: String, resource: String, failed: Boolean) {
+        if (!source.equals(activeSource(platform), true)) return
+        if (!acceptSample(platform)) return
         val sample = RuntimeRecoveryPolicy.Sample(
             platform,
             source,
             resource,
             RuntimeRecoveryPolicy.SampleKind.COVER,
             failed,
-            System.nanoTime() / 1_000_000L,
+            monotonicMillis(),
         )
-        if (!window.record(sample)) return
+        val thresholdReached = window.record(sample)
+        if (!failed || !thresholdReached) return
         recover(platform, source)
     }
 
@@ -40,15 +60,25 @@ internal object RuntimeImageRecovery {
         resource: String,
         retryPage: () -> Unit,
     ) {
+        if (!source.equals(activeSource(platform), true)) return
+        if (!acceptSample(platform)) return
+        val revision = revisions[platform] ?: return
         val sample = RuntimeRecoveryPolicy.Sample(
             platform,
             source,
             resource,
             RuntimeRecoveryPolicy.SampleKind.VISIBLE_READER_PAGE,
             failed = true,
-            atMs = System.nanoTime() / 1_000_000L,
+            atMs = monotonicMillis(),
         )
-        retryCallbacks.record(platform, source, resource, sample.atMs, retryPage)
+        retryCallbacks.record(platform, source, resource, sample.atMs) {
+            if (RuntimeNetworkGate.isOnline() && revision.config == configRevision(platform) &&
+                revision.platforms == StartupPlatformPolicy.state.value.revision &&
+                revision.network == RuntimeNetworkGate.revision && isEnabled(platform)
+            ) {
+                retryPage()
+            }
+        }
         scope.launch {
             delay(RETRY_CALLBACK_WINDOW_MS)
             retryCallbacks.expire(monotonicMillis())
@@ -57,7 +87,7 @@ internal object RuntimeImageRecovery {
         recover(platform, source)
     }
 
-    /** Poll only this failed page; stale/hidden generations are discarded and never retained. */
+    /** Poll only this failed page; stale/hidden configurations and generations are discarded. */
     fun retryVisiblePageAfterAttempt(
         platform: RuntimeRecoveryPolicy.Platform,
         previousSource: String,
@@ -65,12 +95,16 @@ internal object RuntimeImageRecovery {
     ) {
         val page = attempt.page
         val expectedGeneration = attempt.generation
+        val expectedRevision = Revision(configRevision(platform), StartupPlatformPolicy.state.value.revision)
         val polls = AtomicInteger()
         val futureRef = AtomicReference<java.util.concurrent.ScheduledFuture<*>?>()
         val task = attempt.coordinator.scheduleWatchdog {
             val currentSource = activeSource(platform)
             val sourceChanged = currentSource.isNotBlank() && !currentSource.equals(previousSource, ignoreCase = true)
-            val fresh = RuntimeRecoveryPolicy.mayRetryVisiblePage(
+            val current = expectedRevision.config == configRevision(platform) &&
+                expectedRevision.platforms == StartupPlatformPolicy.state.value.revision &&
+                expectedRevision.network == RuntimeNetworkGate.revision && isEnabled(platform)
+            val fresh = current && RuntimeNetworkGate.isOnline() && RuntimeRecoveryPolicy.mayRetryVisiblePage(
                 expectedGeneration = expectedGeneration,
                 currentGeneration = page.generation.get(),
                 visible = page.readerVisible,
@@ -81,14 +115,12 @@ internal object RuntimeImageRecovery {
             if (fresh) {
                 page.chapter.pageLoader?.retryAfterRuntimeRecovery(page, expectedGeneration)
                 futureRef.get()?.cancel(false)
-            } else if (polls.incrementAndGet() > MAX_RETRY_POLLS || page.generation.get() != expectedGeneration ||
-                !page.readerVisible || !sourceChanged
+            } else if (!current || !RuntimeNetworkGate.isOnline() || polls.incrementAndGet() > MAX_RETRY_POLLS ||
+                page.generation.get() != expectedGeneration || !page.readerVisible || !sourceChanged
             ) {
                 futureRef.get()?.cancel(false)
-                return@scheduleWatchdog
             }
         }
-        // scheduleWatchdog is periodic; bound it even when the attempt remains stuck or the page goes stale.
         task?.let { future ->
             futureRef.set(future)
             attempt.coordinator.watchdog.schedule({ future.cancel(false) }, RETRY_POLL_WINDOW_MS, TimeUnit.MILLISECONDS)
@@ -98,7 +130,8 @@ internal object RuntimeImageRecovery {
     private fun recover(platform: RuntimeRecoveryPolicy.Platform, source: String) {
         val expectedConfigRevision = configRevision(platform)
         val expectedPlatformRevision = StartupPlatformPolicy.state.value.revision
-        if (!isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision)) {
+        val expectedNetworkRevision = RuntimeNetworkGate.revision
+        if (!isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision, expectedNetworkRevision)) {
             retryCallbacks.clear(platform, source)
             return
         }
@@ -106,18 +139,45 @@ internal object RuntimeImageRecovery {
         if (!gate.tryAcquire(monotonicMillis())) return
         scope.launch {
             try {
-                if (!isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision)) return@launch
+                if (!isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision, expectedNetworkRevision)) return@launch
+                val candidates = when (platform) {
+                    RuntimeRecoveryPolicy.Platform.MANWA -> RouteManager.runtimeImageRecoveryCandidates(source)
+                    RuntimeRecoveryPolicy.Platform.JM -> JmRouteManager.runtimeImageRecoveryCandidates(source)
+                    RuntimeRecoveryPolicy.Platform.PICACG -> PicacgRouteManager.runtimeImageRecoveryCandidates(source)
+                }
+                if (candidates.isEmpty()) return@launch
                 val apiHealthy = when (platform) {
                     RuntimeRecoveryPolicy.Platform.MANWA -> NetworkModule.validateCurrentApi()
                     RuntimeRecoveryPolicy.Platform.JM -> JmNetworkModule.validateCurrentApi()
+                    RuntimeRecoveryPolicy.Platform.PICACG -> PicacgRouteManager.validateCurrentApi()
                 }
-                if (!apiHealthy || !isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision)) return@launch
+                if (!apiHealthy || !isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision, expectedNetworkRevision)) return@launch
+                val endpoint = candidates.firstOrNull { candidate ->
+                    if (!isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision, expectedNetworkRevision)) return@firstOrNull false
+                    when (platform) {
+                        RuntimeRecoveryPolicy.Platform.MANWA -> SpeedTester.probeForDeprecatedScan(
+                            candidate,
+                            image = true,
+                            imageSamplePath = RouteManager.loadProbeImgPath(),
+                            runtimeRecovery = true,
+                        )
+                        RuntimeRecoveryPolicy.Platform.JM -> JmSpeedTester.probeForDeprecatedScan(
+                            candidate,
+                            image = true,
+                            configuredLineUrl = JmRouteManager.baseUrl,
+                            runtimeRecovery = true,
+                        )
+                        RuntimeRecoveryPolicy.Platform.PICACG -> PicacgSpeedTester.validateRuntimeImageEndpoint(candidate)
+                    }
+                } ?: return@launch
+                if (!isCurrentRoute(platform, source, expectedConfigRevision, expectedPlatformRevision, expectedNetworkRevision)) return@launch
                 val switched = when (platform) {
                     RuntimeRecoveryPolicy.Platform.MANWA -> {
                         val changed = RouteManager.advanceRuntimeImageSourceAfterRecovery(
                             source,
                             expectedConfigRevision,
                             expectedPlatformRevision,
+                            endpoint,
                         )
                         if (changed) NetworkModule.rebindImageRoute("image transport recovery")
                         changed
@@ -126,14 +186,19 @@ internal object RuntimeImageRecovery {
                         source,
                         expectedConfigRevision,
                         expectedPlatformRevision,
+                        endpoint,
+                    )
+                    RuntimeRecoveryPolicy.Platform.PICACG -> PicacgRouteManager.advanceRuntimeImageSourceAfterRecovery(
+                        source,
+                        expectedConfigRevision,
+                        expectedPlatformRevision,
+                        endpoint,
                     )
                 }
-                if (switched) {
-                    retryCallbacks.take(platform, source, monotonicMillis()).forEach { retry -> retry() }
-                } else {
-                    retryCallbacks.clear(platform, source)
-                }
+                if (switched) retryCallbacks.take(platform, source, monotonicMillis()).forEach { it() }
             } finally {
+                retryCallbacks.clear(platform, source)
+                window.clear(platform)
                 gate.release(monotonicMillis())
             }
         }
@@ -144,21 +209,30 @@ internal object RuntimeImageRecovery {
         source: String,
         expectedConfigRevision: Long,
         expectedPlatformRevision: Long,
-    ): Boolean =
-        source.isNotBlank() && activeSource(platform).equals(source, ignoreCase = true) &&
-            configRevision(platform) == expectedConfigRevision &&
-            StartupPlatformPolicy.isEnabled(
-                if (platform == RuntimeRecoveryPolicy.Platform.MANWA) ContentPlatform.MANWA else ContentPlatform.JM,
-            ) && StartupPlatformPolicy.state.value.revision == expectedPlatformRevision
+        expectedNetworkRevision: Long,
+    ): Boolean = RuntimeNetworkGate.isOnline() && source.isNotBlank() &&
+        activeSource(platform).equals(source, ignoreCase = true) && configRevision(platform) == expectedConfigRevision &&
+        isEnabled(platform) && StartupPlatformPolicy.state.value.revision == expectedPlatformRevision &&
+        RuntimeNetworkGate.revision == expectedNetworkRevision
+
+    private fun isEnabled(platform: RuntimeRecoveryPolicy.Platform): Boolean = StartupPlatformPolicy.isEnabled(
+        when (platform) {
+            RuntimeRecoveryPolicy.Platform.MANWA -> ContentPlatform.MANWA
+            RuntimeRecoveryPolicy.Platform.JM -> ContentPlatform.JM
+            RuntimeRecoveryPolicy.Platform.PICACG -> ContentPlatform.PICACG
+        },
+    )
 
     private fun configRevision(platform: RuntimeRecoveryPolicy.Platform): Long = when (platform) {
         RuntimeRecoveryPolicy.Platform.MANWA -> RouteManager.configRevision
         RuntimeRecoveryPolicy.Platform.JM -> JmRouteManager.currentSpeedTestConfigRevision()
+        RuntimeRecoveryPolicy.Platform.PICACG -> PicacgRouteManager.configRevision
     }
 
     private fun activeSource(platform: RuntimeRecoveryPolicy.Platform): String = when (platform) {
         RuntimeRecoveryPolicy.Platform.MANWA -> RouteManager.imgRewriteTarget ?: RouteManager.imgHost
         RuntimeRecoveryPolicy.Platform.JM -> JmRouteManager.activeImageDomain
+        RuntimeRecoveryPolicy.Platform.PICACG -> PicacgRouteManager.currentImageHost.orEmpty()
     }
 
     private fun monotonicMillis(): Long = System.nanoTime() / 1_000_000L

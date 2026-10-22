@@ -17,7 +17,7 @@ import java.io.IOException
 
 class PicacgClientRedirectTest {
     @Test
-    fun `safe HTTP 301 preserves POST body and signature`() = runBlocking {
+    fun `safe HTTP 301 preserves GET path query and signature`() = runBlocking {
         val requests = mutableListOf<Request>()
         val bodies = mutableListOf<String?>()
         val client = testClient(
@@ -29,25 +29,20 @@ class PicacgClientRedirectTest {
             requests = requests,
             bodies = bodies,
         )
-        val body = JSONObject().put("email", "reader@example.com").put("password", "offline")
-
-        client.request("/login?x=1", method = "POST", body = body, authenticated = false)
+        client.request("/login?x=1", authenticated = false)
 
         assertEquals(2, requests.size)
         assertEquals(listOf("http", "https"), requests.map { it.url.scheme })
-        assertEquals(listOf("POST", "POST"), requests.map { it.method })
-        assertEquals(listOf(body.toString(), body.toString()), bodies)
-        assertEquals(
-            listOf("application/json; charset=UTF-8", "application/json; charset=UTF-8"),
-            requests.map { it.header("Content-Type") },
-        )
+        assertEquals(listOf("GET", "GET"), requests.map { it.method })
+        assertEquals(listOf(null, null), bodies)
+        assertEquals(listOf(null, null), requests.map { it.header("Content-Type") })
         assertEquals(requests[0].header("signature"), requests[1].header("signature"))
         assertEquals(requests[0].url.encodedPath, requests[1].url.encodedPath)
         assertEquals(requests[0].url.encodedQuery, requests[1].url.encodedQuery)
     }
 
     @Test
-    fun `sign-in diagnostics identify API base and redact request query and body`() = runBlocking {
+    fun `sign-in write redirect is not followed and diagnostics redact request query and body`() = runBlocking {
         val requests = mutableListOf<Request>()
         val diagnostics = mutableListOf<String>()
         val client = testClient(
@@ -61,12 +56,16 @@ class PicacgClientRedirectTest {
             diagnostics = diagnostics,
         )
 
-        client.request(
-            "/auth/sign-in?marker=private-query",
-            method = "POST",
-            body = JSONObject().put("password", "offline-test-value"),
-            authenticated = false,
-        )
+        val error = assertThrows(IOException::class.java) {
+            runBlocking {
+                client.request(
+                    "/auth/sign-in?marker=private-query",
+                    method = "POST",
+                    body = JSONObject().put("password", "offline-test-value"),
+                    authenticated = false,
+                )
+            }
+        }
 
         assertEquals(
             listOf(
@@ -75,7 +74,9 @@ class PicacgClientRedirectTest {
             ),
             diagnostics,
         )
-        assertEquals(2, requests.size)
+        assertEquals(1, requests.size)
+        assertEquals("POST", requests.single().method)
+        assertEquals(com.zycomic.app.net.RuntimeNetworkGate.ambiguousWriteMessage(), error.message?.substringBefore(" (HTTP"))
     }
 
     @Test

@@ -589,8 +589,14 @@ object JmSpeedTester {
     }
 
     /** Reuses JM's API/image validation while avoiding speed-test persistence and route selection. */
-    internal suspend fun probeForDeprecatedScan(endpoint: DomainIp, image: Boolean, configuredLineUrl: String): Boolean =
+    internal suspend fun probeForDeprecatedScan(
+        endpoint: DomainIp,
+        image: Boolean,
+        configuredLineUrl: String,
+        runtimeRecovery: Boolean = false,
+    ): Boolean =
         withContext(Dispatchers.IO) {
+            if (runtimeRecovery && !RuntimeNetworkGate.isOnline()) return@withContext false
             if (!isIpLiteral(endpoint.ip)) return@withContext false
             val configuredIps = if (image) JmRouteManager.resolveImageIp(endpoint.domain) else JmRouteManager.resolveLineIp(endpoint.domain)
             if (configuredIps.none { it.trim().equals(endpoint.ip, ignoreCase = true) }) return@withContext false
@@ -598,7 +604,13 @@ object JmSpeedTester {
                 return@withContext false
             }
             val probeClient = JmNetworkModule.newProbeClient()
-            val routed = newDiagnosticProbeClientForIp(probeClient, endpoint, image)
+            val routed = newDiagnosticProbeClientForIp(probeClient, endpoint, image).let { probe ->
+                if (runtimeRecovery) {
+                    probe.newBuilder().addInterceptor(RuntimeImageProbeGuard(RuntimeRecoveryPolicy.Platform.JM, endpoint)).build()
+                } else {
+                    probe
+                }
+            }
             val client = if (image) {
                 routed
             } else {

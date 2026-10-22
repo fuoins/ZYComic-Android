@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -26,6 +27,8 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.net.PicacgImageFallbackInterceptor
 import com.zycomic.app.net.PicacgRouteManager
+import com.zycomic.app.net.PicacgRuntimeImageInterceptor
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -65,7 +68,17 @@ object PicacgImageLoader {
         .cookieJar(okhttp3.CookieJar.NO_COOKIES)
         .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
         .dns(PicacgRouteManager.dns())
-        // Walks every measured mirror root on failure, so a fixed subset of covers never stays broken.
+        .addInterceptor(
+            Interceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .url(PicacgRouteManager.rewriteImageUrl(chain.request().url.toString()))
+                    .header("User-Agent", "okhttp/3.8.1")
+                    .header("Referer", "https://www.picacomic.com/")
+                    .build()
+                chain.proceed(request)
+            },
+        )
+        .addInterceptor(PicacgRuntimeImageInterceptor())
         .addInterceptor(PicacgImageFallbackInterceptor())
         .build()
 }
@@ -79,6 +92,7 @@ fun PicacgMangaCard(
     manga: Manga,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    rank: Int? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val rawPicacgCoverUrl = manga.picx.ifBlank { manga.pic }
@@ -100,6 +114,7 @@ fun PicacgMangaCard(
                     error = { CoverError(Modifier.fillMaxSize()) },
                 )
             }
+            rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }
         }
         Text(
             text = manga.name,

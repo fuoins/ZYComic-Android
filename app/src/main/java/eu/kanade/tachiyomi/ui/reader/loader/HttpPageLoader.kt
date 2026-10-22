@@ -10,9 +10,12 @@ import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.normalizedForComparison
 import com.zycomic.app.reader.PicacgReaderPreloadPolicy
 import com.zycomic.app.reader.PicacgSource
+import com.zycomic.app.reader.ReaderPlatformRetryPolicy
+import com.zycomic.app.reader.ReaderRetryPlatform
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
+import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
@@ -71,7 +74,7 @@ internal class HttpPageLoader(
     private val dataSaver = DataSaver(source, sourcePreferences)
     private val activeScopes = ConcurrentHashMap<ReaderPage, PageAttemptScope>()
     private val activeWorkerJobs = ConcurrentHashMap<ReaderPage, Job>()
-    private val pendingRuntimeRecoveryRetries = ConcurrentHashMap<ReaderPage, Int>()
+    private val pendingRuntimeRecoveryRetries = ConcurrentHashMap<ReaderPage, RuntimeRecoveryRetry>()
     private val pendingDisposition = ConcurrentHashMap<ReaderPage, ImageCancelReason>()
     private val terminalErrors = ConcurrentHashMap<ReaderPage, Throwable>()
     private val decodeFailures = ConcurrentHashMap<String, AtomicInteger>()
@@ -144,7 +147,7 @@ internal class HttpPageLoader(
 
     override suspend fun getPages(): List<ReaderPage> {
         val pages = try {
-            if (RouteManager.useFastestImgForAll) {
+            if (ReaderPlatformRetryPolicy.platform(source.id) != ReaderRetryPlatform.MANWA || RouteManager.useFastestImgForAll) {
                 source.getPageList(chapter.chapter)
             } else {
                 chapterCache.getPageListFromCache(chapter.chapter.toDomainChapter()!!)
@@ -456,16 +459,14 @@ internal class HttpPageLoader(
 
     override fun retryPage(page: ReaderPage) {
         successfullyCachedPages.remove(page)
-        val isJm = source === com.zycomic.app.reader.JmSource
-        val sourceKey = if (isJm) {
-            "jm:${com.zycomic.app.net.JmRouteManager.activeImageDomain}"
-        } else {
-            RouteManager.imgRewriteTarget ?: RouteManager.imgHost
-        }
+        val platform = ReaderPlatformRetryPolicy.platform(source.id)
+        val isJm = platform == ReaderRetryPlatform.JM
+        val sourceKey = ReaderPlatformRetryPolicy.currentBudgetKey(source.id)
         if (page.retryBudgetSource != sourceKey) {
             page.retryBudgetSource = sourceKey
             page.manualRetryCount.set(0)
             page.automaticRetryRound.set(1)
+            page.attemptedImageEndpoints.clear()
             page.endpointsAttemptedInRound.set(0)
             page.automaticRetryExhausted = false
             page.imageUrl?.let(decodeFailures::remove)
@@ -492,7 +493,7 @@ internal class HttpPageLoader(
         val imageUrl = page.imageUrl
         if (!imageUrl.isNullOrBlank()) {
             chapterCache.remove(imageUrl)
-            ImageCacheManager.remove(imageUrl)
+            if (platform == ReaderRetryPlatform.MANWA) ImageCacheManager.remove(imageUrl)
         }
         page.stream = null
         page.slow = false
@@ -507,32 +508,53 @@ internal class HttpPageLoader(
     }
 
     override fun retryAfterRuntimeRecovery(page: ReaderPage, expectedGeneration: Int) {
-        if (isRecycled || !schedulingEnabled || page !in visiblePages || !page.readerVisible ||
-            page.generation.get() != expectedGeneration
+        val platform = ReaderPlatformRetryPolicy.platform(source.id)
+        val budgetKey = ReaderPlatformRetryPolicy.currentBudgetKey(source.id)
+        if (!ReaderPlatformRetryPolicy.mayRestoreRuntimeFailure(
+                platform = platform,
+                currentBudgetKey = budgetKey,
+                expectedBudgetKey = budgetKey,
+                currentGeneration = page.generation.get(),
+                expectedGeneration = expectedGeneration,
+                isVisible = page in visiblePages && page.readerVisible,
+                isFailed = page.status is Page.State.Error,
+                isRecycled = isRecycled,
+                schedulingEnabled = schedulingEnabled,
+            )
         ) {
             return
         }
-        pendingRuntimeRecoveryRetries[page] = expectedGeneration
+        pendingRuntimeRecoveryRetries[page] = RuntimeRecoveryRetry(expectedGeneration, budgetKey)
         finishPendingRuntimeRecoveryRetry(page)
     }
 
     private fun finishPendingRuntimeRecoveryRetry(page: ReaderPage) {
-        val expectedGeneration = pendingRuntimeRecoveryRetries[page] ?: return
-        if (isRecycled || !schedulingEnabled || page !in visiblePages || !page.readerVisible ||
-            page.generation.get() != expectedGeneration
+        val pending = pendingRuntimeRecoveryRetries[page] ?: return
+        val platform = ReaderPlatformRetryPolicy.platform(source.id)
+        if (!ReaderPlatformRetryPolicy.mayRestoreRuntimeFailure(
+                platform = platform,
+                currentBudgetKey = ReaderPlatformRetryPolicy.currentBudgetKey(source.id),
+                expectedBudgetKey = pending.expectedBudgetKey,
+                currentGeneration = page.generation.get(),
+                expectedGeneration = pending.expectedGeneration,
+                isVisible = page in visiblePages && page.readerVisible,
+                isFailed = page.status is Page.State.Error,
+                isRecycled = isRecycled,
+                schedulingEnabled = schedulingEnabled,
+            )
         ) {
-            pendingRuntimeRecoveryRetries.remove(page, expectedGeneration)
+            pendingRuntimeRecoveryRetries.remove(page, pending)
             return
         }
         if (page.activeAttempt.get() != null || page.status !is Page.State.Error ||
-            !pendingRuntimeRecoveryRetries.remove(page, expectedGeneration)
+            !pendingRuntimeRecoveryRetries.remove(page, pending)
         ) {
             return
         }
 
         page.imageUrl?.let {
             chapterCache.remove(it)
-            ImageCacheManager.remove(it)
+            if (platform == ReaderRetryPlatform.MANWA) ImageCacheManager.remove(it)
         }
         page.attemptedImageEndpoints.clear()
         page.endpointsAttemptedInRound.set(0)
@@ -557,7 +579,7 @@ internal class HttpPageLoader(
         val wasActive = cancelPage(page, ImageCancelReason.USER_RETRY, requeue = count < 2)
         if (!wasActive) synchronized(page) { page.generation.incrementAndGet() }
         chapterCache.remove(imageUrl)
-        ImageCacheManager.remove(imageUrl)
+        if (ReaderPlatformRetryPolicy.platform(source.id) == ReaderRetryPlatform.MANWA) ImageCacheManager.remove(imageUrl)
         page.stream = null
         if (count >= 2) {
             if (!wasActive) {
@@ -751,7 +773,10 @@ internal class HttpPageLoader(
             } else {
                 val remainingEndpoints = remainingUntriedEndpoints(page)
                 val waitingForUnifiedRecovery = attempt?.canRace == true && page.readerVisible
-                if (!waitingForUnifiedRecovery && attempt?.retryAfterFailure(remainingEndpoints.isNotEmpty()) == true) {
+                val isRateLimited = httpStatusCode(e) == 429
+                if (!waitingForUnifiedRecovery && !isRateLimited &&
+                    attempt?.retryAfterFailure(remainingEndpoints.isNotEmpty()) == true
+                ) {
                     page.automaticRetryExhausted = false
                     page.status = Page.State.Queue
                     page.loadStatus = ReaderPageLoadStatus.Queued
@@ -759,8 +784,12 @@ internal class HttpPageLoader(
                 } else {
                     page.slow = false
                     page.loadStatus = ReaderPageLoadStatus.Idle
-                    page.automaticRetryExhausted = remainingEndpoints.isEmpty() ||
-                        page.automaticRetryRound.get() >= PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS
+                    page.automaticRetryExhausted = ReaderPlatformRetryPolicy.supportsEndpointFallback(
+                        ReaderPlatformRetryPolicy.platform(source.id),
+                    ) && (
+                        remainingEndpoints.isEmpty() ||
+                            page.automaticRetryRound.get() >= PageAttemptScope.MAX_AUTOMATIC_RETRY_ROUNDS
+                        )
                     page.status = Page.State.Error(e)
                 }
             }
@@ -810,11 +839,20 @@ internal class HttpPageLoader(
     }
 
     private fun remainingUntriedEndpoints(page: ReaderPage): List<com.zycomic.app.net.DomainIp> {
-        val host = runCatching { java.net.URI(page.imageUrl.orEmpty()).host }.getOrNull() ?: return emptyList()
-        val tried = page.attemptedImageEndpoints.mapTo(HashSet()) { it.normalizedForComparison() }
-        if (source === com.zycomic.app.reader.JmSource) {
-            return com.zycomic.app.net.JmRouteManager.imageRetryEndpoints(tried)
+        when (ReaderPlatformRetryPolicy.platform(source.id)) {
+            ReaderRetryPlatform.PICACG -> return emptyList()
+            ReaderRetryPlatform.OTHER -> return emptyList()
+            ReaderRetryPlatform.JM -> {
+                val tried = page.attemptedImageEndpoints.mapTo(HashSet()) { it.normalizedForComparison() }
+                return com.zycomic.app.net.JmRouteManager.imageRetryEndpoints(tried).filter {
+                    it.domain.equals(com.zycomic.app.net.JmRouteManager.activeImageDomain, true)
+                }
+            }
+            ReaderRetryPlatform.MANWA -> Unit
         }
+        val host = RouteManager.imgRewriteTarget
+            ?: runCatching { java.net.URI(page.imageUrl.orEmpty()).host }.getOrNull() ?: return emptyList()
+        val tried = page.attemptedImageEndpoints.mapTo(HashSet()) { it.normalizedForComparison() }
         return RouteManager.imageRetryEndpoints(host, tried)
             .mapNotNull { candidate ->
                 candidate ?: runCatching {
@@ -822,12 +860,21 @@ internal class HttpPageLoader(
                         .firstOrNull()?.let { com.zycomic.app.net.DomainIp(host, it) }
                 }.getOrNull()
             }
-            .filter { it.normalizedForComparison() !in tried && RouteManager.isImgEndpointAvailable(it) }
+            .filter { it.domain.equals(host, true) && it.normalizedForComparison() !in tried && RouteManager.isImgEndpointAvailable(it) }
             .distinctBy { it.normalizedForComparison() }
     }
 
     private fun owns(page: ReaderPage, generation: Int): Boolean =
         schedulingEnabled && !isRecycled && page.generation.get() == generation
+
+    private fun httpStatusCode(error: Throwable): Int? {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is HttpException) return cause.code
+            cause = cause.cause
+        }
+        return null
+    }
 
     /** Decode a bounded preview so a complete HTTP body with a valid header but corrupt pixels cannot become Ready. */
     private fun validateCachedImage(file: java.io.File): Boolean {
@@ -866,4 +913,6 @@ internal class HttpPageLoader(
             return if (priorityOrder != 0) priorityOrder else queueToken.compareTo(other.queueToken)
         }
     }
+
+    private data class RuntimeRecoveryRetry(val expectedGeneration: Int, val expectedBudgetKey: String)
 }

@@ -15,8 +15,29 @@ import java.util.concurrent.CancellationException
 internal object RuntimeRecoveryPolicy {
     private const val WINDOW_MS = 10_000L
 
-    enum class Platform { MANWA, JM }
+    enum class Platform { MANWA, JM, PICACG }
     enum class SampleKind { COVER, VISIBLE_READER_PAGE }
+    enum class FailureKind { CANCELLED, CONNECTION, RATE_LIMIT, AUTH, NOT_FOUND, SERVER, HTTP, DECODE_OR_CACHE }
+
+    fun classifyFailure(error: Throwable? = null, httpCode: Int? = null, cancelled: Boolean = false): FailureKind {
+        val causes = generateSequence(error) { it.cause }.take(32).toList()
+        if (cancelled || causes.any {
+                it is CancellationException || (it is InterruptedIOException && it !is SocketTimeoutException)
+            }
+        ) {
+            return FailureKind.CANCELLED
+        }
+        if (httpCode != null) {
+            return when (httpCode) {
+                429 -> FailureKind.RATE_LIMIT
+                401, 403 -> FailureKind.AUTH
+                404 -> FailureKind.NOT_FOUND
+                in 500..599 -> FailureKind.SERVER
+                else -> FailureKind.HTTP
+            }
+        }
+        return if (error != null && isTransportFailure(error)) FailureKind.CONNECTION else FailureKind.DECODE_OR_CACHE
+    }
 
     data class Sample(
         val platform: Platform,
@@ -35,16 +56,9 @@ internal object RuntimeRecoveryPolicy {
 
     /** Only explicit connection/socket failures count; generic IO, HTTP, decode and cancellation do not. */
     fun isTransportFailure(error: Throwable): Boolean {
-        if (error is CancellationException) return false
-        if (error is InterruptedIOException && error !is SocketTimeoutException) return false
-        var cause: Throwable? = error
-        while (cause != null) {
-            if (cause is CancellationException) return false
-            if (cause is InterruptedIOException && cause !is SocketTimeoutException) return false
-            if (cause is IOException && isConnectionFailure(cause)) return true
-            cause = cause.cause
-        }
-        return false
+        val causes = generateSequence(error) { it.cause }.take(32).toList()
+        if (causes.any { it is CancellationException || (it is InterruptedIOException && it !is SocketTimeoutException) }) return false
+        return causes.any { it is IOException && isConnectionFailure(it) }
     }
 
     /** Non-idempotent writes are never eligible for replay or connection-triggered route recovery. */
@@ -70,6 +84,9 @@ internal object RuntimeRecoveryPolicy {
 
         @Synchronized
         fun clear() = events.clear()
+
+        @Synchronized
+        fun clear(platform: Platform) = events.removeAll { it.platform == platform }
     }
 
     /** Keeps only the latest retry callback per failed resource for one recovery window. */
@@ -96,6 +113,11 @@ internal object RuntimeRecoveryPolicy {
         @Synchronized
         fun clear(platform: Platform, source: String) {
             groups.remove(Key(platform, source.lowercase()))
+        }
+
+        @Synchronized
+        fun clear(platform: Platform) {
+            groups.keys.removeAll { it.platform == platform }
         }
 
         @Synchronized

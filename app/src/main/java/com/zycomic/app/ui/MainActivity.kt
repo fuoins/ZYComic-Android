@@ -1,5 +1,6 @@
 package com.zycomic.app.ui
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -73,6 +74,7 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.reader.ReaderDetailRoute
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.browse.BrowseViewModel
 import com.zycomic.app.ui.components.NetworkMaintenanceNotice
@@ -111,8 +113,20 @@ import android.graphics.Color as AndroidColor
 
 class MainActivity : BaseActivity() {
 
+    companion object {
+        fun newReaderDetailIntent(context: Context, sourceId: Long, mangaUrl: String): Intent? {
+            val bookId = ReaderDetailRoute.bookId(sourceId, mangaUrl) ?: return null
+            return Intent(context, MainActivity::class.java).apply {
+                action = ReaderDetailRoute.ACTION
+                putExtra(ReaderDetailRoute.EXTRA_BOOK_ID, bookId)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+        }
+    }
+
     // 最近一次由桌面快捷方式请求打开的底部 tab；-1 表示普通启动/已消费，不改变默认页。
     private var shortcutTab by mutableIntStateOf(-1)
+    private var readerDetailBookId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +135,7 @@ class MainActivity : BaseActivity() {
 
         // 桌面快捷方式冷启动直达对应底部 tab
         shortcutTab = intent?.shortcutTab() ?: -1
+        readerDetailBookId = intent?.readerDetailBookId()
 
         StartupPlatformPolicy.load(this)
         ContentPlatformAccentPrefs.init(this)
@@ -141,6 +156,11 @@ class MainActivity : BaseActivity() {
                             isLaunch = savedInstanceState == null,
                             shortcutTab = shortcutTab,
                             onShortcutTabConsumed = { shortcutTab = -1 },
+                            readerDetailBookId = readerDetailBookId,
+                            onReaderDetailConsumed = {
+                                readerDetailBookId = null
+                                intent?.removeExtra(ReaderDetailRoute.EXTRA_BOOK_ID)
+                            },
                         )
                     } else {
                         RemoteConfigGate(routeConfigState) {
@@ -172,6 +192,7 @@ class MainActivity : BaseActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.shortcutTab()?.let { shortcutTab = it }
+        intent.readerDetailBookId()?.let { readerDetailBookId = it }
     }
 }
 
@@ -228,6 +249,13 @@ private fun Intent.shortcutTab(): Int? = when (action) {
     else -> null
 }
 
+private fun Intent.readerDetailBookId(): String? =
+    if (action == ReaderDetailRoute.ACTION) {
+        getStringExtra(ReaderDetailRoute.EXTRA_BOOK_ID)?.takeIf { it.isNotBlank() }
+    } else {
+        null
+    }
+
 /** 设置子页面 Dialog 标识 */
 private enum class SettingsDialog {
     Appearance,
@@ -251,6 +279,8 @@ fun AppContent(
     isLaunch: Boolean,
     shortcutTab: Int,
     onShortcutTabConsumed: () -> Unit,
+    readerDetailBookId: String? = null,
+    onReaderDetailConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -296,6 +326,15 @@ fun AppContent(
     var searchKeyword by remember { mutableStateOf("") }
     var searchProvider by remember { mutableStateOf<SearchProvider?>(null) }
     var pendingTag by remember { mutableStateOf<String?>(null) }
+
+    // Reader routes carry the remote ID and platform prefix, never the local database row ID.
+    LaunchedEffect(readerDetailBookId) {
+        val bookId = readerDetailBookId ?: return@LaunchedEffect
+        showSearch = false
+        loginOpen = false
+        if (detailStack.lastOrNull() != bookId) openDetail(bookId)
+        onReaderDetailConsumed()
+    }
 
     var loginPlatform by remember { mutableStateOf<ContentPlatform?>(null) }
     val openLogin: (ContentPlatform?) -> Unit = { requestedPlatform ->

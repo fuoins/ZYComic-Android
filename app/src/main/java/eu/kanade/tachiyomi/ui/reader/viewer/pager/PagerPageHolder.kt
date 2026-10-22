@@ -6,7 +6,8 @@ import android.graphics.Bitmap
 import android.view.LayoutInflater
 import androidx.annotation.ColorInt
 import androidx.core.view.isVisible
-import com.zycomic.app.net.RouteManager
+import com.zycomic.app.reader.ReaderPlatformRetryPolicy
+import com.zycomic.app.reader.readerFailureMessage
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
@@ -482,8 +483,12 @@ class PagerPageHolder(
             errorLayout = ReaderErrorBinding.inflate(LayoutInflater.from(context), this, true)
             errorLayout?.actionRetry?.viewer = viewer
             errorLayout?.actionRetry?.setOnClickListener {
-                val exhausted = page.manualRetryCount.get() >= 3 &&
-                    page.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
+                val sourceId = viewer.activity.viewModel.manga?.source ?: 0L
+                val exhausted = ReaderPlatformRetryPolicy.manualRetryLimitReached(
+                    page.manualRetryCount.get(),
+                    page.retryBudgetSource,
+                    ReaderPlatformRetryPolicy.currentBudgetKey(sourceId),
+                )
                 if (exhausted) {
                     viewer.activity.showMenu()
                 } else {
@@ -492,8 +497,12 @@ class PagerPageHolder(
                 }
             }
         }
-        val exhausted = page.manualRetryCount.get() >= 3 &&
-            page.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
+        val sourceId = viewer.activity.viewModel.manga?.source ?: 0L
+        val exhausted = ReaderPlatformRetryPolicy.manualRetryLimitReached(
+            page.manualRetryCount.get(),
+            page.retryBudgetSource,
+            ReaderPlatformRetryPolicy.currentBudgetKey(sourceId),
+        )
         errorLayout?.actionRetry?.text = when {
             exhausted -> "重新测速 / 切换图源"
             page.automaticRetryExhausted -> "重试下一轮"
@@ -514,8 +523,9 @@ class PagerPageHolder(
             }
         }
 
-        val errorMessage = with(context) { error?.formattedMessage }
+        val formattedError = with(context) { error?.formattedMessage }
             ?: context.stringResource(MR.strings.decode_image_error)
+        val errorMessage = context.readerFailureMessage(error, formattedError) ?: formattedError
         errorLayout?.errorMessage?.text = if (page.automaticRetryExhausted) {
             "$errorMessage\n已测试 ${page.attemptedImageEndpoints.size} 个节点"
         } else {

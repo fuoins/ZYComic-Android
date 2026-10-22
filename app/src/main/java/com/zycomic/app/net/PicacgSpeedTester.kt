@@ -489,7 +489,7 @@ object PicacgSpeedTester {
     }
 
     /** Diagnostic-only adapter: validates the same API/image response without publishing or selecting routes. */
-    internal suspend fun probeForDeprecatedScan(endpoint: DomainIp, url: String, image: Boolean): Boolean =
+    internal suspend fun probeForDeprecatedScan(endpoint: DomainIp, url: String, image: Boolean, runtimeRecovery: Boolean = false): Boolean =
         withContext(Dispatchers.IO) {
             val urlHost = runCatching { URI(url).host }.getOrNull() ?: return@withContext false
             if (!urlHost.equals(endpoint.domain, ignoreCase = true)) return@withContext false
@@ -501,7 +501,17 @@ object PicacgSpeedTester {
                 return@withContext false
             }
             runInterruptible {
-                val client = PicacgRouteManager.newDiagnosticPinnedClient(baseProbeClient, endpoint)
+                val pinnedClient = PicacgRouteManager.newDiagnosticPinnedClient(baseProbeClient, endpoint)
+                val client = if (runtimeRecovery && !image) {
+                    pinnedClient.newBuilder().addInterceptor { chain ->
+                        if (!PicacgApiRuntimeRecovery.isProbeAllowed(endpoint)) throw java.io.IOException("API recovery probe paused")
+                        chain.proceed(chain.request()).also { response ->
+                            PicacgApiRuntimeRecovery.recordProbeResponse(endpoint, response.code, response.header("Retry-After"))
+                        }
+                    }.build()
+                } else {
+                    pinnedClient
+                }
                 try {
                     if (image) probeImage(url, endpoint, client).success else probeApi(url, endpoint, client).success
                 } finally {
@@ -526,11 +536,29 @@ object PicacgSpeedTester {
         return Probe(endpoint, success, elapsedMs(start), code)
     }
 
+    internal suspend fun validateRuntimeImageEndpoint(endpoint: DomainIp): Boolean = withContext(Dispatchers.IO) {
+        if (!RuntimeNetworkGate.isOnline()) return@withContext false
+        val mirror = PicacgBuiltinNetwork.coverHostFor(endpoint.domain) ?: return@withContext false
+        runInterruptible {
+            probeImage(PicacgBuiltinNetwork.speedTileUrl(mirror), endpoint, runtimeRecovery = true).success
+        }
+    }
+
+    /** Validates a previously successful API probe at its exact configured IP without changing rankings. */
+    internal suspend fun validateRuntimeApiEndpoint(endpoint: DomainIp, url: String): Boolean = withContext(Dispatchers.IO) {
+        if (!RuntimeNetworkGate.isOnline() || runCatching { URI(url).host.equals(endpoint.domain, true) }.getOrDefault(false).not()) {
+            return@withContext false
+        }
+        if (!PicacgApiRuntimeRecovery.isProbeAllowed(endpoint)) return@withContext false
+        probeForDeprecatedScan(endpoint, url, image = false, runtimeRecovery = true)
+    }
+
     private fun probeImage(
         url: String,
         endpoint: DomainIp,
         clientOverride: OkHttpClient? = null,
         content: Boolean = false,
+        runtimeRecovery: Boolean = false,
     ): Probe {
         val start = System.nanoTime()
         var code: Int? = null
@@ -558,9 +586,16 @@ object PicacgSpeedTester {
                     }
                         ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
                 }
+            val guarded = if (runtimeRecovery) {
+                client.newBuilder().addInterceptor(
+                    RuntimeImageProbeGuard(RuntimeRecoveryPolicy.Platform.PICACG, DomainIp(URI(url).host, endpoint.ip)),
+                ).build()
+            } else {
+                client
+            }
             // Fetch one tile and validate status + content-type + image magic on the head bytes.
             fun fetchTile(testUrl: String): Boolean =
-                client.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()).execute().use { response ->
+                guarded.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()).execute().use { response ->
                     code = response.code
                     contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
                     if (response.code != 200 || contentType?.startsWith("image/") != true) {

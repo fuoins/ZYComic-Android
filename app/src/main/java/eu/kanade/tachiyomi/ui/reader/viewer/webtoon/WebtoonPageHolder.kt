@@ -11,7 +11,8 @@ import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updateMargins
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
-import com.zycomic.app.net.RouteManager
+import com.zycomic.app.reader.ReaderPlatformRetryPolicy
+import com.zycomic.app.reader.readerFailureMessage
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
@@ -314,8 +315,12 @@ class WebtoonPageHolder(
             errorLayout?.root?.layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, (parentHeight * 0.8).toInt())
             errorLayout?.actionRetry?.setOnClickListener {
                 val current = page ?: return@setOnClickListener
-                val exhausted = current.manualRetryCount.get() >= 3 &&
-                    current.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
+                val sourceId = viewer.activity.viewModel.manga?.source ?: 0L
+                val exhausted = ReaderPlatformRetryPolicy.manualRetryLimitReached(
+                    current.manualRetryCount.get(),
+                    current.retryBudgetSource,
+                    ReaderPlatformRetryPolicy.currentBudgetKey(sourceId),
+                )
                 if (exhausted) {
                     viewer.activity.showMenu()
                 } else {
@@ -325,8 +330,12 @@ class WebtoonPageHolder(
             }
         }
         val current = page
-        val exhausted = current != null && current.manualRetryCount.get() >= 3 &&
-            current.retryBudgetSource == (RouteManager.imgRewriteTarget ?: RouteManager.imgHost)
+        val sourceId = viewer.activity.viewModel.manga?.source ?: 0L
+        val exhausted = current != null && ReaderPlatformRetryPolicy.manualRetryLimitReached(
+            current.manualRetryCount.get(),
+            current.retryBudgetSource,
+            ReaderPlatformRetryPolicy.currentBudgetKey(sourceId),
+        )
         errorLayout?.actionRetry?.text = when {
             exhausted -> "重新测速 / 切换图源"
             current?.automaticRetryExhausted == true -> "重试下一轮"
@@ -346,8 +355,9 @@ class WebtoonPageHolder(
             }
         }
 
-        val errorMessage = with(context) { error?.formattedMessage }
+        val formattedError = with(context) { error?.formattedMessage }
             ?: context.stringResource(MR.strings.decode_image_error)
+        val errorMessage = context.readerFailureMessage(error, formattedError) ?: formattedError
         errorLayout?.errorMessage?.text = if (current?.automaticRetryExhausted == true) {
             "$errorMessage\n已测试 ${current.attemptedImageEndpoints.size} 个节点"
         } else {

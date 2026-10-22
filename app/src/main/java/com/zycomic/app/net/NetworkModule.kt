@@ -48,6 +48,7 @@ object NetworkModule {
     /** 初始化网络模块（必须在首次使用前调用，传入 Application context） */
     fun init(context: android.content.Context) {
         appContext = context.applicationContext
+        RuntimeNetworkGate.init(context.applicationContext)
     }
 
     /** 全局 CookieJar 实例（所有线路共享，持久化到 SharedPreferences） */
@@ -119,6 +120,9 @@ object NetworkModule {
                 },
             )
             .enableTrustAll()
+            .retryOnConnectionFailure(false)
+            .addInterceptor(ApiWriteSafetyInterceptor())
+            .addNetworkInterceptor(UnsafeWriteRedirectNetworkInterceptor())
             .applyNetworkConfig(withFailover = true)
             .build()
     }
@@ -236,6 +240,8 @@ object NetworkModule {
 
     /** Validate a previously measured API endpoint using a safe GET before any atomic route switch. */
     suspend fun validateApiEndpoint(endpoint: DomainIp): Boolean = withContext(Dispatchers.IO) {
+        if (!RuntimeNetworkGate.isOnline()) return@withContext false
+        val networkRevision = RuntimeNetworkGate.revision
         if (apiProbeRetryAfter.isBlocked(endpoint)) return@withContext false
         runCatching {
             val base = newLineProbeClient()
@@ -253,7 +259,9 @@ object NetworkModule {
                     runCatching { java.net.URI(it).host.equals(endpoint.domain, true) }.getOrDefault(false)
                 } ?: "https://${endpoint.domain}"
                 val request = okhttp3.Request.Builder().url(baseUrl.trimEnd('/') + "/api/classes/index").get().build()
+                if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != networkRevision) return@withContext false
                 client.newCall(request).execute().use { response ->
+                    if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != networkRevision) return@use false
                     if (response.code == 429) apiProbeRetryAfter.record(endpoint, response.header("Retry-After"))
                     if (!response.isSuccessful) return@use false
                     val text = response.body?.string()?.trim().orEmpty()

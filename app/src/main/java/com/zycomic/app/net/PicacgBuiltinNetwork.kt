@@ -113,7 +113,7 @@ object PicacgBuiltinNetwork {
     fun coverInsecureFromOrigin(originUrl: String, coverHost: String): String {
         val b64 = Base64.encodeToString(
             originUrl.toByteArray(Charsets.UTF_8),
-            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
         )
         return "https://${coverHost.trim().lowercase(Locale.ROOT)}/insecure/rs:fill:300:400:0/$b64"
     }

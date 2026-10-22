@@ -506,8 +506,11 @@ object PicacgRepository {
         val path = apiPath.ifBlank { picx }
         // Keep the API's real fileServer (storage1/storage-b); RouteManager mirrors the true bucket.
         val fileServer = thumb?.optString("fileServer")?.takeIf { it.isNotBlank() && it != "null" }
-        val resolved = if (path.isBlank()) ""
-        else PicacgImageUrl.resolveWithFileServer(path, fileServer, PicacgRouteManager.currentImageHost.orEmpty())
+        val resolved = if (path.isBlank()) {
+            ""
+        } else {
+            PicacgImageUrl.resolveWithFileServer(path, fileServer, PicacgRouteManager.currentImageHost.orEmpty())
+        }
         if (apiPath.isNotBlank() && resolved.isNotBlank()) PicacgRouteManager.setVerifiedImageSampleUrlFromApiResponse(resolved)
         return copy(picx = resolved)
     }

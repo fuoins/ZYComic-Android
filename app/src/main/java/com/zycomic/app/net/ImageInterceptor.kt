@@ -17,7 +17,6 @@ import tachiyomi.decoder.ImageDecoder
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
-import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
@@ -42,6 +41,9 @@ class ImageInterceptor : Interceptor {
         if (!isImageRequest(originalUrl)) return chain.proceed(original)
 
         val scope = original.tag(PageAttemptScope::class.java)
+        val configRevision = RouteManager.configRevision
+        val networkRevision = RuntimeNetworkGate.revision
+        fun mayReport() = RouteManager.configRevision == configRevision && RuntimeNetworkGate.revision == networkRevision
         val cacheReadStartedAt = System.nanoTime()
         val cachedImage = ImageCacheManager.get(originalUrl)
         scope?.addCacheTime(System.nanoTime() - cacheReadStartedAt)
@@ -82,6 +84,9 @@ class ImageInterceptor : Interceptor {
             .header("Connection", "keep-alive")
             .build()
 
+        RuntimeImageRateLimit.blockedResponse(RuntimeRecoveryPolicy.Platform.MANWA, imgReq)?.let {
+            return it.newBuilder().request(original).build()
+        }
         var endpoints = resolveCandidates(imgReq.url.host, scope)
         if (endpoints.isEmpty() && scope?.page?.manualRetryCount?.get()?.let { it > 0 } == true) {
             val recovered = tryRecoveryProbe(imgReq, imgReq.url.host, scope)
@@ -98,7 +103,7 @@ class ImageInterceptor : Interceptor {
         val success = outcomes.filterIsInstance<Outcome.Success>().firstOrNull()
         val recoverySource = imgTarget ?: imgReq.url.host
         if (success != null) {
-            if (scope == null) {
+            if (scope == null && mayReport()) {
                 RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = false)
             }
             return buildResponse(original, success.responseFile, success.mimeType)
@@ -108,9 +113,11 @@ class ImageInterceptor : Interceptor {
         val transportFailure = outcomes.isNotEmpty() && outcomes.all {
             it is Outcome.Fail.Io && RuntimeRecoveryPolicy.isTransportFailure(it.error)
         }
-        if (transportFailure && scope == null) {
+        if (mayReport() && transportFailure && scope == null) {
             RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = true)
-        } else if (transportFailure && scope?.canRace == true && scope.page.readerVisible) {
+        } else if (mayReport() && scope == null && failure !is Outcome.Fail.Cancelled) {
+            RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.MANWA, recoverySource, originalUrl, failed = false)
+        } else if (mayReport() && transportFailure && scope?.canRace == true && scope.page.readerVisible) {
             RuntimeImageRecovery.visibleReaderTransportFailure(
                 RuntimeRecoveryPolicy.Platform.MANWA,
                 recoverySource,
@@ -165,6 +172,7 @@ class ImageInterceptor : Interceptor {
 
     /** One bounded 2KB probe, reserved at most once per domain/minute and only after manual retry. */
     private fun tryRecoveryProbe(request: Request, domain: String, scope: PageAttemptScope): DomainIp? {
+        if (!RuntimeNetworkGate.isOnline()) return null
         if (!scope.coordinator.tryAcquirePrimary()) return null
         var client: okhttp3.OkHttpClient? = null
         var registration: Closeable? = null
@@ -456,6 +464,7 @@ class ImageInterceptor : Interceptor {
             networkStartedAt = System.nanoTime()
             logcat { "Image request started: page=$pageLabel attempt=${attemptId + 1} round=$retryRound" }
             call.execute().use { response ->
+                RuntimeImageRateLimit.record(RuntimeRecoveryPolicy.Platform.MANWA, response)
                 if (!response.isSuccessful) {
                     scope?.addNetworkTime(System.nanoTime() - networkStartedAt)
                     networkStartedAt = 0L
@@ -544,12 +553,8 @@ class ImageInterceptor : Interceptor {
             ImageCacheManager.abortAttempt(rawTemp)
             val cancellation = scope?.reasonFor(call)
             if (cancellation != null || scope?.isCurrent == false) return Outcome.Fail.Cancelled
-            val kind = when (io) {
-                is SocketTimeoutException -> ImgEndpointFailure.SLOW
-                is ConnectException, is java.net.UnknownHostException -> ImgEndpointFailure.DEAD
-                else -> ImgEndpointFailure.TRANSIENT
-            }
-            if (RuntimeRecoveryPolicy.isTransportFailure(io)) RouteManager.markImgEndpointFailed(endpoint, kind)
+            // A page failure is not evidence that a shared endpoint is unhealthy. Only the
+            // multi-resource recovery window may validate and change the platform source.
             return Outcome.Fail.Io(io)
         } catch (e: Exception) {
             if (networkStartedAt != 0L) {

@@ -728,17 +728,18 @@ private fun BrowseTabContent(
     val tabPlatform = item?.platformId ?: platform
     val picacgOrientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     if (tabPlatform == ContentPlatform.PICACG) {
+        val pageMode = when (item?.pageType) {
+            BrowsePageType.PICACG_RANKING -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
+            BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
+            else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
+        }
         if (page == vm.mainTab.value) {
             com.zycomic.app.ui.picacg.PicacgBrowseScreen(
                 onOpenManga = onOpenManga,
                 onRequireLogin = onRequireLogin,
                 tabId = item?.id.orEmpty(),
                 initialFilter = item?.picacgFilter,
-                pageMode = when (item?.pageType) {
-                    BrowsePageType.PICACG_RANKING -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
-                    BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
-                    else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
-                },
+                pageMode = pageMode,
                 displayMode = displayMode,
                 gridColumns = gridColumns,
                 orientation = picacgOrientation,
@@ -746,6 +747,11 @@ private fun BrowseTabContent(
                 onSetDisplayMode = vm::setDisplayMode,
                 onSetGridColumns = { vm.setGridColumns(it, picacgOrientation) },
             )
+        } else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING) {
+            // Compose only the static header during the swipe; keep data effects in the selected page.
+            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.zycomic.app.ui.picacg.PicacgRankingChips()
+            }
         } else {
             Box(Modifier.fillMaxSize())
         }

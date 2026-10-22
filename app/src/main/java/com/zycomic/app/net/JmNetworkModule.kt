@@ -122,9 +122,11 @@ object JmNetworkModule {
             .followRedirects(false)
             .followSslRedirects(false)
             .retryOnConnectionFailure(false)
+            .addInterceptor(ApiWriteSafetyInterceptor())
             .addInterceptor(JmApiInterceptor())
             .addInterceptor(JmImageInterceptor())
             .addInterceptor(JmEndpointTransportInterceptor())
+            .addNetworkInterceptor(UnsafeWriteRedirectNetworkInterceptor())
             .addNetworkInterceptor(JmApiResponseInterceptor())
             .build()
     }

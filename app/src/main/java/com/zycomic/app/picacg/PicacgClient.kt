@@ -1,5 +1,9 @@
 package com.zycomic.app.picacg
 
+import com.zycomic.app.net.ApiWriteSafetyInterceptor
+import com.zycomic.app.net.PicacgApiRuntimeRecoveryInterceptor
+import com.zycomic.app.net.RuntimeNetworkGate
+import com.zycomic.app.net.UnsafeWriteRedirectNetworkInterceptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -42,6 +46,9 @@ class PicacgClient(
             .retryOnConnectionFailure(false)
             .followRedirects(false)
             .followSslRedirects(false)
+            .addInterceptor(PicacgApiRuntimeRecoveryInterceptor())
+            .addInterceptor(ApiWriteSafetyInterceptor())
+            .addNetworkInterceptor(UnsafeWriteRedirectNetworkInterceptor())
             .build()
 
     data class Envelope(val code: Int, val message: String, val error: String, val data: JSONObject)
@@ -90,8 +97,9 @@ class PicacgClient(
                 builder.post((body?.toString() ?: "{}").toRequestBody(JSON_MEDIA_TYPE))
                 builder.header("Content-Type", "application/json; charset=UTF-8")
             } else {
+                require(method.equals("GET", true) || method.equals("HEAD", true)) { "Only GET, HEAD, and POST Picacg requests are supported" }
                 require(body == null) { "Only POST Picacg requests may have a body" }
-                builder.get()
+                if (method.equals("HEAD", true)) builder.head() else builder.get()
             }
             val response = executeWithSafeRedirect(builder.build())
             response.use { response ->
@@ -131,6 +139,13 @@ class PicacgClient(
                 throw IOException("Picacg redirect rejected (${firstResponse.code})")
             }
             return firstResponse
+        }
+
+        if (!com.zycomic.app.net.isSafeApiRead(request.method)) {
+            firstResponse.use { response ->
+                logRedirect(response)
+                throw IOException("${RuntimeNetworkGate.ambiguousWriteMessage()} (HTTP 301)")
+            }
         }
 
         val redirectUrl = firstResponse.use { response ->

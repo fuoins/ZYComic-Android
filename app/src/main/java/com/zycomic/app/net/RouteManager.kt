@@ -1302,6 +1302,7 @@ object RouteManager {
         get() {
             val target = imgRewriteTarget ?: imgHost
             pinnedImgIp?.takeIf { pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
+            runtimeRecoveryImgEndpoint?.takeIf { pinnedImgDomain.isNullOrBlank() && it.domain.equals(target, true) }?.let { return it.ip }
             if (useFastestImgForAll) {
                 return fastestImgEndpoint?.takeIf { it.domain.equals(target, ignoreCase = true) }?.ip
             }
@@ -1322,13 +1323,30 @@ object RouteManager {
 
     @Volatile private var runtimeRecoveryImgDomain: String? = null
 
+    @Volatile private var runtimeRecoveryImgEndpoint: DomainIp? = null
+
+    /** Keep configured domain ordering; only previously successful endpoints are eligible. */
+    fun runtimeImageRecoveryCandidates(expectedSource: String): List<DomainIp> {
+        if (!useFastestImgForAll || !pinnedImgDomain.isNullOrBlank()) return emptyList()
+        val currentIndex = imgDomains.indexOfFirst { it.equals(expectedSource, true) }
+        if (currentIndex < 0) return emptyList()
+        val measured = rankedSuccessfulImgEndpoints()
+        return (1 until imgDomains.size).mapNotNull { offset ->
+            val domain = imgDomains[(currentIndex + offset) % imgDomains.size]
+            measured.firstOrNull {
+                it.domain.equals(domain, true) && it !in _speedTestSnapshot.value.imageUntestedEndpoints
+            }
+        }
+    }
+
     @Synchronized
     fun advanceRuntimeImageSourceAfterRecovery(
         expectedSource: String,
         expectedConfigRevision: Long,
         expectedPlatformRevision: Long,
+        validatedEndpoint: DomainIp,
     ): Boolean {
-        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
+        if (!RuntimeNetworkGate.isOnline() || !StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
             configRevision != expectedConfigRevision ||
             StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
             !(imgRewriteTarget ?: imgHost).equals(expectedSource, true) ||
@@ -1336,9 +1354,9 @@ object RouteManager {
         ) {
             return false
         }
-        val current = runtimeRecoveryImgDomain ?: imgRewriteTarget ?: imgDomains.getOrNull(imgIndex)
-        val currentIndex = imgDomains.indexOfFirst { it.equals(current, true) }.takeIf { it >= 0 } ?: imgIndex
-        runtimeRecoveryImgDomain = imgDomains[(currentIndex + 1) % imgDomains.size]
+        if (validatedEndpoint !in runtimeImageRecoveryCandidates(expectedSource)) return false
+        runtimeRecoveryImgEndpoint = validatedEndpoint
+        runtimeRecoveryImgDomain = validatedEndpoint.domain
         return true
     }
 
@@ -1386,6 +1404,7 @@ object RouteManager {
         val index = imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
         if (index < 0) return false
         runtimeRecoveryImgDomain = null
+        runtimeRecoveryImgEndpoint = null
         if (pinnedImgDomain.isNullOrBlank()) setImgHost(index)
         return true
     }
@@ -1396,6 +1415,7 @@ object RouteManager {
         pinnedImgDomain = null
         pinnedImgIp = null
         runtimeRecoveryImgDomain = null
+        runtimeRecoveryImgEndpoint = null
         imgOverrideActive = false
         persistPinnedImgDomain(null, null)
         notifyImgPinDisplayChanged()
@@ -1440,6 +1460,7 @@ object RouteManager {
         if (!target.equals(domain, ignoreCase = true)) return null
         pinnedImgIp?.takeIf { pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
         if (!useFastestImgForAll) return null
+        runtimeRecoveryImgEndpoint?.takeIf { pinnedImgDomain.isNullOrBlank() && it.domain.equals(target, true) }?.let { return it.ip }
         return fastestImgEndpoint?.takeIf { it.domain.equals(target, ignoreCase = true) }?.ip
     }
 
@@ -1597,7 +1618,14 @@ object RouteManager {
         error: java.io.IOException,
         requestEndpoint: DomainIp,
         requestRevision: Long,
+        requestNetworkRevision: Long = RuntimeNetworkGate.revision,
     ) {
+        if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != requestNetworkRevision) {
+            consecutiveFailures = 0
+            apiFailureEndpoint = null
+            apiFailureRevision = null
+            return
+        }
         if (!isCurrentApiRequest(requestEndpoint, requestRevision)) return
         if (!RuntimeRecoveryPolicy.mayRecoverApi(method, error)) return
         if (apiFailureEndpoint != requestEndpoint || apiFailureRevision != requestRevision) {
@@ -1613,6 +1641,7 @@ object RouteManager {
         val failedIp = lineIpFor(failedDomain) ?: resolveIp(failedDomain).firstOrNull().orEmpty()
         val expectedRevision = configRevision
         val expectedPlatformRevision = StartupPlatformPolicy.state.value.revision
+        val expectedNetworkRevision = RuntimeNetworkGate.revision
         apiRecoveryInFlight = true
         CoroutineScope(Dispatchers.IO).launch {
             var switched = false
@@ -1626,8 +1655,9 @@ object RouteManager {
                     .sortedBy { it.value }
                     .map { it.key }
                     .firstOrNull()
-                if (endpoint != null && NetworkModule.validateApiEndpoint(endpoint) &&
-                    switchToValidatedApiEndpoint(endpoint, failedDomain, failedIp, expectedRevision, expectedPlatformRevision)
+                if (endpoint != null && RuntimeNetworkGate.isOnline() && RuntimeNetworkGate.revision == expectedNetworkRevision &&
+                    NetworkModule.validateApiEndpoint(endpoint) &&
+                    switchToValidatedApiEndpoint(endpoint, failedDomain, failedIp, expectedRevision, expectedPlatformRevision, expectedNetworkRevision)
                 ) {
                     NetworkModule.rebuildApi("API connection recovery")
                     NetworkModule.cookieJar.syncToAllLines()
@@ -1649,8 +1679,10 @@ object RouteManager {
         expectedIp: String,
         expectedRevision: Long,
         expectedPlatformRevision: Long,
+        expectedNetworkRevision: Long,
     ): Boolean {
-        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
+        if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != expectedNetworkRevision ||
+            !StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA) ||
             StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
             configRevision != expectedRevision || !autoSelectEnabled || lineOverrideActive ||
             !lineHost.equals(expectedDomain, true) ||
@@ -1774,6 +1806,7 @@ object RouteManager {
     @Synchronized
     fun clearSpeedTestResults() {
         runtimeRecoveryImgDomain = null
+        runtimeRecoveryImgEndpoint = null
         lastLineDelays = emptyMap()
         lastImgDelays = emptyMap()
         lastLineIpDelays = emptyMap()

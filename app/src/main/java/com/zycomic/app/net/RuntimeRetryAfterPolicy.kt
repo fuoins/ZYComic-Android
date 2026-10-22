@@ -11,13 +11,16 @@ internal class RuntimeRetryAfterPolicy(
 ) {
     private val deadlines = ConcurrentHashMap<DomainIp, Long>()
 
-    fun isBlocked(endpoint: DomainIp): Boolean {
+    fun remainingDelayMs(endpoint: DomainIp): Long {
         val key = endpoint.normalizedForComparison()
-        val deadline = deadlines[key] ?: return false
-        if (monotonicMs() < deadline) return true
+        val deadline = deadlines[key] ?: return 0L
+        val now = monotonicMs()
+        if (now < deadline) return deadline - now
         deadlines.remove(key, deadline)
-        return false
+        return 0L
     }
+
+    fun isBlocked(endpoint: DomainIp): Boolean = remainingDelayMs(endpoint) > 0L
 
     fun record(endpoint: DomainIp, retryAfter: String?) {
         val value = retryAfter?.trim()?.takeIf { it.isNotEmpty() } ?: return

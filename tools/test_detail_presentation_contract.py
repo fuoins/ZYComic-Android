@@ -1,7 +1,6 @@
 from pathlib import Path
+import re
 import unittest
-
-
 ROOT = Path(__file__).resolve().parents[1]
 JAVA = ROOT / "app/src/main/java/com/zycomic/app"
 
@@ -177,6 +176,50 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         self.assertLess(tabs, login)
         self.assertLess(tabs, loading)
         self.assertEqual(1, self.browse.count("LazyRow("))
+
+    def test_ranking_pager_preview_exists_before_selected_data_page(self):
+        host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()
+        page = host.split("if (tabPlatform == ContentPlatform.PICACG)", 1)[1].split("if (item?.kind == TabKind.SPECIAL", 1)[0]
+        selected, preview = page.split("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)", 1)
+        self.assertIn("if (page == vm.mainTab.value) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen(", selected)
+        self.assertIn("pageMode = pageMode,", selected)
+        self.assertIn("com.zycomic.app.ui.picacg.PicacgRankingChips()", preview)
+        self.assertIn("padding(horizontal = 12.dp, vertical = 8.dp)", preview)
+        for forbidden in ("PicacgBrowseScreen(", "Repository", "LaunchedEffect", "selectMainTab"):
+            self.assertNotIn(forbidden, preview)
+
+    def test_static_ranking_controls_keep_all_five_modes_order_and_default(self):
+        row = self.browse.split("internal fun PicacgRankingChips(", 1)[1].split("fun PicacgBrowseScreen(", 1)[0]
+        modes = row.split("items = listOf(", 1)[1].split("),", 1)[0]
+        self.assertEqual(
+            ["LEADERBOARD_24H", "LEADERBOARD_7D", "LEADERBOARD_30D", "RANDOM", "LATEST"],
+            re.findall(r"PicacgFeedMode\.(\w+)", modes),
+        )
+        for contract in ("selectedMode: PicacgFeedMode = PicacgFeedMode.LEADERBOARD_24H", "onSelectMode: (PicacgFeedMode) -> Unit = {}", "CompactBrowseFilterChip(", '"日榜"', '"周榜"', '"月榜"', "KMR.strings.picacg_random", "KMR.strings.picacg_latest"):
+            self.assertIn(contract, row)
+        for mapping in ('LEADERBOARD_24H("H24")', 'LEADERBOARD_7D("D7")', 'LEADERBOARD_30D("D30")'):
+            self.assertIn(mapping, self.browse)
+        for forbidden in ("Repository", "LaunchedEffect", "collectAsState"):
+            self.assertNotIn(forbidden, row)
+        active = self.browse.split("if (pageMode == PicacgBrowsePageMode.RANKING)", 1)[1].split("if (!loggedIn)", 1)[0]
+        self.assertIn("PicacgRankingChips(selectedMode = mode)", active)
+        self.assertIn('selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter)', active)
+
+    def test_pager_selection_still_waits_for_settle_without_prefetch(self):
+        host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()
+        self.assertIn("snapshotFlow { pagerState.settledPage }", host)
+        self.assertIn("pagerState.animateScrollToPage(index)\n                                            vm.selectMainTab(index)", host)
+        self.assertEqual(1, host.count("com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
+        self.assertEqual(1, self.browse.count("LaunchedEffect(session, loggedIn, tabId, mode, filter, page, refresh, pageMode, blockKeywords)"))
+
+    def test_category_and_custom_filter_pages_do_not_get_ranking_preview(self):
+        host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()
+        page = host.split("if (tabPlatform == ContentPlatform.PICACG)", 1)[1].split("if (item?.kind == TabKind.SPECIAL", 1)[0]
+        self.assertIn("BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY", page)
+        self.assertIn("item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME", page)
+        preview = page.split("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)", 1)[1]
+        self.assertIn("} else {\n            Box(Modifier.fillMaxSize())", preview)
+        self.assertEqual(1, preview.count("PicacgRankingChips()"))
 
     def test_picacg_disk_cache_is_counted_and_statistics_refresh_after_clear(self):
         for contract in ("PicacgImageLoader.diskCacheDirectory(context)", "coilBytes + picacgBytes", "KMR.strings.picacg_image_cache_size", "cacheRevision++", "remember(cacheRevision) { imageDiskCacheSize() }"):

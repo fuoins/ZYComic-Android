@@ -18,8 +18,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -55,6 +56,7 @@ import com.zycomic.app.ui.components.FilterSection
 import com.zycomic.app.ui.components.MangaGridSkeleton
 import com.zycomic.app.ui.components.PicacgCollectionPolicy
 import com.zycomic.app.ui.components.PicacgImageLoader
+import com.zycomic.app.ui.components.PicacgRankBadge
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
@@ -62,13 +64,47 @@ import kotlinx.coroutines.CancellationException
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
-private enum class PicacgFeedMode(val timeframe: String? = null) {
+internal enum class PicacgFeedMode(val timeframe: String? = null) {
     LEADERBOARD_24H("H24"),
     LEADERBOARD_7D("D7"),
     LEADERBOARD_30D("D30"),
     RANDOM,
     LATEST,
     FILTERED,
+}
+
+/** Static ranking controls; the pager preview uses the no-op callback until selection settles. */
+@Composable
+internal fun PicacgRankingChips(
+    selectedMode: PicacgFeedMode = PicacgFeedMode.LEADERBOARD_24H,
+    onSelectMode: (PicacgFeedMode) -> Unit = {},
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(
+            items = listOf(
+                PicacgFeedMode.LEADERBOARD_24H,
+                PicacgFeedMode.LEADERBOARD_7D,
+                PicacgFeedMode.LEADERBOARD_30D,
+                PicacgFeedMode.RANDOM,
+                PicacgFeedMode.LATEST,
+            ),
+            key = { it.name },
+        ) { item ->
+            val title = when (item) {
+                PicacgFeedMode.LEADERBOARD_24H -> "日榜"
+                PicacgFeedMode.LEADERBOARD_7D -> "周榜"
+                PicacgFeedMode.LEADERBOARD_30D -> "月榜"
+                PicacgFeedMode.RANDOM -> stringResource(KMR.strings.picacg_random)
+                PicacgFeedMode.LATEST -> stringResource(KMR.strings.picacg_latest)
+                else -> error("Unexpected Picacg ranking mode: $item")
+            }
+            com.zycomic.app.ui.browse.CompactBrowseFilterChip(
+                selected = selectedMode == item,
+                onClick = { onSelectMode(item) },
+                label = { Text(title) },
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -201,33 +237,8 @@ fun PicacgBrowseScreen(
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (pageMode == PicacgBrowsePageMode.RANKING) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(
-                    items = listOf(
-                        PicacgFeedMode.LEADERBOARD_24H,
-                        PicacgFeedMode.LEADERBOARD_7D,
-                        PicacgFeedMode.LEADERBOARD_30D,
-                        PicacgFeedMode.RANDOM,
-                        PicacgFeedMode.LATEST,
-                    ),
-                    key = { it.name },
-                ) { item ->
-                    val title = when (item) {
-                        PicacgFeedMode.LEADERBOARD_24H -> "日榜"
-                        PicacgFeedMode.LEADERBOARD_7D -> "周榜"
-                        PicacgFeedMode.LEADERBOARD_30D -> "月榜"
-                        PicacgFeedMode.RANDOM -> stringResource(KMR.strings.picacg_random)
-                        PicacgFeedMode.LATEST -> stringResource(KMR.strings.picacg_latest)
-                        else -> error("Unexpected Picacg ranking mode: $item")
-                    }
-                    com.zycomic.app.ui.browse.CompactBrowseFilterChip(
-                        selected = mode == item,
-                        onClick = {
-                            selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter)
-                        },
-                        label = { Text(title) },
-                    )
-                }
+            PicacgRankingChips(selectedMode = mode) { item ->
+                selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter)
             }
         }
         if (!loggedIn) {
@@ -260,8 +271,8 @@ fun PicacgBrowseScreen(
                             }
                         }
                     }
-                    items(mangas, key = { it.id }) { manga ->
-                        PicacgBrowseComicListItem(manga) { onOpenManga("picacg:${manga.id}") }
+                    itemsIndexed(mangas, key = { _, manga -> manga.id }) { index, manga ->
+                        PicacgBrowseComicListItem(manga = manga, rank = if (mode.timeframe != null) index + 1 else null) { onOpenManga("picacg:${manga.id}") }
                     }
                     if (!loading && error == null && mangas.isEmpty()) item { Text(stringResource(KMR.strings.picacg_search_empty)) }
                     if (hasMore) {
@@ -285,8 +296,8 @@ fun PicacgBrowseScreen(
                             }
                         }
                     }
-                    items(mangas, key = { it.id }) { manga ->
-                        PicacgBrowseComicGridItem(manga = manga, displayMode = displayMode) { onOpenManga("picacg:${manga.id}") }
+                    itemsIndexed(mangas, key = { _, manga -> manga.id }) { index, manga ->
+                        PicacgBrowseComicGridItem(manga = manga, displayMode = displayMode, rank = if (mode.timeframe != null) index + 1 else null) { onOpenManga("picacg:${manga.id}") }
                     }
                     if (!loading && error == null && mangas.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) { Text(stringResource(KMR.strings.picacg_search_empty)) }
@@ -440,9 +451,9 @@ private fun PicacgBrowseFilter.summary(): String = listOf(category, tag, author,
     .ifBlank { sort }
 
 @Composable
-private fun PicacgBrowseComicGridItem(manga: Manga, displayMode: Int, onClick: () -> Unit) {
+private fun PicacgBrowseComicGridItem(manga: Manga, displayMode: Int, rank: Int?, onClick: () -> Unit) {
     if (displayMode == 1) {
-        com.zycomic.app.ui.components.PicacgMangaCard(manga = manga, onClick = onClick)
+        com.zycomic.app.ui.components.PicacgMangaCard(manga = manga, onClick = onClick, rank = rank)
         return
     }
     val context = LocalContext.current
@@ -460,6 +471,7 @@ private fun PicacgBrowseComicGridItem(manga: Manga, displayMode: Int, onClick: (
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }
         if (displayMode == 0) {
             Text(
                 text = manga.name,
@@ -475,20 +487,25 @@ private fun PicacgBrowseComicGridItem(manga: Manga, displayMode: Int, onClick: (
 }
 
 @Composable
-private fun PicacgBrowseComicListItem(manga: Manga, onClick: () -> Unit) {
+private fun PicacgBrowseComicListItem(manga: Manga, rank: Int?, onClick: () -> Unit) {
     val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SubcomposeAsyncImage(
-            model = manga.picx.ifBlank { manga.pic },
-            contentDescription = manga.name,
-            imageLoader = PicacgImageLoader.get(context),
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.width(68.dp).aspectRatio(0.72f).clip(RoundedCornerShape(8.dp))
+        Box(
+            Modifier.width(68.dp).aspectRatio(0.72f).clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
-        )
+        ) {
+            SubcomposeAsyncImage(
+                model = manga.picx.ifBlank { manga.pic },
+                contentDescription = manga.name,
+                imageLoader = PicacgImageLoader.get(context),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(manga.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(manga.author.ifBlank { manga.categoryName }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)

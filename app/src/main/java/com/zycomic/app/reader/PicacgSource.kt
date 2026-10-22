@@ -1,7 +1,9 @@
 package com.zycomic.app.reader
 
+import com.zycomic.app.net.PageAttemptScope
 import com.zycomic.app.net.PicacgImageFallbackInterceptor
 import com.zycomic.app.net.PicacgRouteManager
+import com.zycomic.app.net.PicacgRuntimeImageInterceptor
 import com.zycomic.app.picacg.PicacgRepository
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.source.model.Filter
@@ -38,9 +40,9 @@ object PicacgSource : HttpSource() {
             .callTimeout(90, TimeUnit.SECONDS)
             .dns(PicacgRouteManager.dns())
             .cookieJar(okhttp3.CookieJar.NO_COOKIES)
-            // A reader page that fails on the fastest mirror automatically retries the other roots.
-            .addInterceptor(PicacgImageFallbackInterceptor())
             .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
+            .addInterceptor(PicacgRuntimeImageInterceptor())
+            .addInterceptor(PicacgImageFallbackInterceptor())
             .build()
     }
 
@@ -115,7 +117,10 @@ object PicacgSource : HttpSource() {
         ?: page.url.takeIf(String::isNotBlank) ?: throw IOException("Picacg page has no URL")
 
     override suspend fun getImage(page: Page): Response {
-        val request = Request.Builder().url(PicacgRouteManager.rewriteImageUrl(getImageUrl(page))).headers(headers).get().build()
+        val request = Request.Builder().url(PicacgRouteManager.rewriteImageUrl(getImageUrl(page))).headers(headers)
+            .tag(PageAttemptScope::class.java, (page as? ReaderPage)?.activeAttempt?.get())
+            .tag(ReaderPage::class.java, page as? ReaderPage)
+            .get().build()
         val call = client.newCall(request)
         // KMK --> UI observation only: keep this source's client, URL and request policy unchanged.
         val readerPage = page as? ReaderPage

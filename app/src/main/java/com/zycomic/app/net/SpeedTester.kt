@@ -292,8 +292,10 @@ object SpeedTester {
         endpoint: DomainIp,
         image: Boolean,
         imageSamplePath: String?,
+        runtimeRecovery: Boolean = false,
     ): Boolean = withContext(Dispatchers.IO) {
-        if (image && imageSamplePath.isNullOrBlank()) return@withContext false
+        if (runtimeRecovery && !RuntimeNetworkGate.isOnline()) return@withContext false
+        if (image && imageSamplePath.isNullOrBlank() && !runtimeRecovery) return@withContext false
         if (RouteManager.customRule.entries.none { (domain, addresses) ->
                 domain.equals(endpoint.domain, ignoreCase = true) &&
                     addresses.any { it.trim().equals(endpoint.ip, ignoreCase = true) }
@@ -308,7 +310,13 @@ object SpeedTester {
                 ?: return@withContext false
         }
         val client = if (image) NetworkModule.newSpeedTestClient() else NetworkModule.newLineProbeClient()
-        val routed = NetworkModule.newDiagnosticProbeClientForIp(client, endpoint.domain, endpoint.ip)
+        val routed = NetworkModule.newDiagnosticProbeClientForIp(client, endpoint.domain, endpoint.ip).let { probe ->
+            if (runtimeRecovery) {
+                probe.newBuilder().addInterceptor(RuntimeImageProbeGuard(RuntimeRecoveryPolicy.Platform.MANWA, endpoint)).build()
+            } else {
+                probe
+            }
+        }
         try {
             if (image) {
                 measureImg(routed, endpoint.domain) { imageSamplePath }.delayMs < MAX

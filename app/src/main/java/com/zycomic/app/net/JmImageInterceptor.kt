@@ -32,6 +32,9 @@ class JmImageInterceptor internal constructor(
         val original = chain.request()
         if (!original.url.encodedPath.startsWith("/media/")) return chain.proceed(original)
 
+        val configRevision = JmRouteManager.currentSpeedTestConfigRevision()
+        val networkRevision = RuntimeNetworkGate.revision
+        fun mayReport() = JmRouteManager.currentSpeedTestConfigRevision() == configRevision && RuntimeNetworkGate.revision == networkRevision
         val threshold = original.url.queryParameter(SCRAMBLE_QUERY)
             ?.toIntOrNull() ?: JmImagePolicy.DEFAULT_SCRAMBLE_THRESHOLD
         val path = original.url.encodedPath
@@ -75,6 +78,9 @@ class JmImageInterceptor internal constructor(
                 .header("X-Requested-With", JmApiInterceptor.PACKAGE_NAME)
                 .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
                 .build()
+            RuntimeImageRateLimit.blockedResponse(RuntimeRecoveryPolicy.Platform.JM, request)?.let {
+                return it.newBuilder().request(original).build()
+            }
             val startedAt = System.nanoTime()
             scope?.endpointRequestStarted((scope.page.endpointsAttemptedInRound.get() - 1).coerceAtLeast(0), PageAttemptScope.MAX_ENDPOINTS_PER_ROUND)
             try {
@@ -85,8 +91,12 @@ class JmImageInterceptor internal constructor(
                     response.close()
                     requireActive()
                 }
+                RuntimeImageRateLimit.record(RuntimeRecoveryPolicy.Platform.JM, response)
                 if (response.code == 429) {
                     // Preserve the server's Retry-After (and body); do not immediately try another host.
+                    if (scope == null && mayReport()) {
+                        RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, host, original.url.toString(), failed = false)
+                    }
                     return response.newBuilder().request(original).build()
                 }
                 val isImage = response.header("Content-Type")?.substringBefore(';')
@@ -96,7 +106,7 @@ class JmImageInterceptor internal constructor(
                         val restored = restoreScrambledImage(response, scramble, scope)
                         requireActive()
                         recordImageSuccess(host)
-                        if (scope == null) {
+                        if (scope == null && mayReport()) {
                             RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, host, original.url.toString(), failed = false)
                         }
                         restored
@@ -119,9 +129,9 @@ class JmImageInterceptor internal constructor(
                 scope?.addNetworkTime(System.nanoTime() - startedAt)
             }
         }
-        if (lastError != null && RuntimeRecoveryPolicy.isConnectionFailure(lastError!!)) {
+        if (mayReport() && lastError != null && RuntimeRecoveryPolicy.isConnectionFailure(lastError!!)) {
             if (scope == null) {
-                RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, JmRouteManager.activeImageDomain, original.url.toString(), failed = true)
+                RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, activeCandidate, original.url.toString(), failed = true)
             } else if (scope.canRace && scope.page.readerVisible) {
                 RuntimeImageRecovery.visibleReaderTransportFailure(
                     RuntimeRecoveryPolicy.Platform.JM,
@@ -135,6 +145,9 @@ class JmImageInterceptor internal constructor(
                     )
                 }
             }
+        }
+        if (mayReport() && scope == null && (lastError == null || !RuntimeRecoveryPolicy.isTransportFailure(lastError!!))) {
+            RuntimeImageRecovery.coverSample(RuntimeRecoveryPolicy.Platform.JM, activeCandidate, original.url.toString(), failed = false)
         }
         throw lastError ?: IOException("JM image request failed${lastStatus?.let { " (HTTP $it)" } ?: ""}")
     }

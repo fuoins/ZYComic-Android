@@ -8,6 +8,7 @@ class LineFailoverInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val revision = RouteManager.configRevision
+        val networkRevision = RuntimeNetworkGate.revision
         val endpoint = DomainIp(
             request.url.host,
             RouteManager.lineIpFor(request.url.host) ?: RouteManager.resolveIp(request.url.host).firstOrNull().orEmpty(),
@@ -18,7 +19,7 @@ class LineFailoverInterceptor : Interceptor {
             response
         } catch (error: IOException) {
             if (!chain.call().isCanceled()) {
-                RouteManager.recordApiConnectionFailure(request.method, error, endpoint, revision)
+                RouteManager.recordApiConnectionFailure(request.method, error, endpoint, revision, networkRevision)
             }
             throw error
         }

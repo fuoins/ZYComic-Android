@@ -120,6 +120,7 @@ object JmRouteManager {
         val candidate: DomainIp,
         val configRevision: Long,
         val platformRevision: Long,
+        val networkRevision: Long,
         val lineIndex: Int,
         val manualEndpoint: DomainIp?,
         val snapshot: SpeedTestSnapshot,
@@ -474,14 +475,29 @@ object JmRouteManager {
         record("image", resolved, if (selected == null) "恢复 JM 图床自动选择" else "手动选择 JM 图床${currentImageEndpoint(resolved)?.let { " · ${it.ip}" }.orEmpty()}")
     }
 
+    /** Preserve configured source order and validate only the endpoint the loader would actually use. */
+    fun runtimeImageRecoveryCandidates(expectedSource: String): List<DomainIp> {
+        if (pinnedImageDomain != null) return emptyList()
+        val index = imageDomains.indexOfFirst { it.equals(expectedSource, true) }
+        if (index < 0) return emptyList()
+        val snapshot = _speedTestSnapshot.value
+        return (1 until imageDomains.size).mapNotNull { offset ->
+            currentImageEndpoint(imageDomains[(index + offset) % imageDomains.size])?.takeIf { endpoint ->
+                snapshot.imageIpDelaysMs[endpoint]?.let { it >= 0 && it < Long.MAX_VALUE } == true &&
+                    snapshot.imageIpVerdicts[endpoint] == JmSpeedTester.ImgVerdict.OK
+            }
+        }
+    }
+
     /** Advance only an automatic JM image route; a persisted manual domain is never overridden. */
     @Synchronized
     fun advanceRuntimeImageDomainAfterRecovery(
         expectedSource: String,
         expectedConfigRevision: Long,
         expectedPlatformRevision: Long,
+        validatedEndpoint: DomainIp,
     ): Boolean {
-        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+        if (!RuntimeNetworkGate.isOnline() || !StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
             StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
             currentSpeedTestConfigRevision() != expectedConfigRevision ||
             !_state.value.imageDomain.equals(expectedSource, true)
@@ -489,9 +505,8 @@ object JmRouteManager {
             return false
         }
         if (pinnedImageDomain != null || imageDomains.size < 2) return false
-        val current = _state.value.imageDomain
-        val index = imageDomains.indexOfFirst { it.equals(current, true) }.takeIf { it >= 0 } ?: 0
-        val next = imageDomains[(index + 1) % imageDomains.size]
+        if (validatedEndpoint !in runtimeImageRecoveryCandidates(expectedSource)) return false
+        val next = validatedEndpoint.domain
         _state.value = _state.value.copy(imageDomain = next)
         publishEndpointSelection()
         record("image_recovery", next, "连续图像传输失败后切换 JM 自动图源")
@@ -719,6 +734,10 @@ object JmRouteManager {
     }
 
     fun recordApiEndpointFailure(endpoint: DomainIp, detail: String) {
+        if (!RuntimeNetworkGate.isOnline()) {
+            apiEndpointRecovery.clearFailures()
+            return
+        }
         val thresholdReached = synchronized(this) {
             val reached = apiEndpointRecovery.recordConnectionFailure(endpoint)
             val failures = apiEndpointRecovery.failureCount(endpoint)
@@ -735,7 +754,11 @@ object JmRouteManager {
     }
 
     private fun captureApiRecovery(failed: DomainIp): JmApiEndpointRecovery.Candidate<ApiRecoveryGuard>? {
-        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) || !apiEndpointRecovery.hasFailureThreshold(failed)) return null
+        if (!RuntimeNetworkGate.isOnline() || !StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+            !apiEndpointRecovery.hasFailureThreshold(failed)
+        ) {
+            return null
+        }
         val current = _state.value
         val host = hostFromUrl(current.lines.getOrNull(current.lineIndex) ?: return null)
         if (!current.autoSelect || !host.equals(failed.domain, true) || !host.equals(lineHost, true)) return null
@@ -763,6 +786,7 @@ object JmRouteManager {
             candidate = candidate,
             configRevision = configRevision,
             platformRevision = StartupPlatformPolicy.state.value.revision,
+            networkRevision = RuntimeNetworkGate.revision,
             lineIndex = current.lineIndex,
             manualEndpoint = manual,
             snapshot = snapshot,
@@ -772,7 +796,8 @@ object JmRouteManager {
 
     private fun commitApiRecovery(guard: ApiRecoveryGuard): Boolean = synchronized(this) {
         val current = _state.value
-        if (!StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
+        if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != guard.networkRevision ||
+            !StartupPlatformPolicy.isEnabled(ContentPlatform.JM) ||
             StartupPlatformPolicy.state.value.revision != guard.platformRevision ||
             configRevision != guard.configRevision || current.lineIndex != guard.lineIndex ||
             !current.autoSelect || manualLineEndpoint != guard.manualEndpoint || manualLineEndpoint != null ||

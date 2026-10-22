@@ -33,6 +33,14 @@ object PicacgRouteManager {
         val coverRanking: List<DomainIp> = emptyList(),
         val remoteVersion: Int? = null,
         val revision: Long = 0L,
+        val manualApi: Boolean = false,
+        val manualImage: Boolean = false,
+    )
+
+    internal data class ApiRecoveryCandidate(
+        val url: String,
+        val endpoint: DomainIp,
+        val snapshot: PicacgSpeedTester.Snapshot,
     )
 
     private const val PREFS_NAME = "zycomic_picacg_route"
@@ -57,8 +65,8 @@ object PicacgRouteManager {
     val remoteVersion: Int? get() = _state.value.remoteVersion
     /** Changes only when authoritative route pools/rules are installed or cleared, not on selection. */
     val configRevision: Long get() = routeConfigRevision
-    val isApiManuallyPinned: Boolean get() = prefs()?.getBoolean("manual_api_selection", false) == true
-    val isImageManuallyPinned: Boolean get() = prefs()?.getBoolean("manual_image_selection", false) == true
+    val isApiManuallyPinned: Boolean get() = _state.value.manualApi || prefs()?.getBoolean("manual_api_selection", false) == true
+    val isImageManuallyPinned: Boolean get() = _state.value.manualImage || prefs()?.getBoolean("manual_image_selection", false) == true
 
     private fun prefs() = DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -113,6 +121,8 @@ object PicacgRouteManager {
             pinnedImage = imagePin,
             remoteVersion = version,
             revision = old.revision + 1,
+            manualApi = manualApi,
+            manualImage = manualImage,
         )
         _state.value = next
         routeConfigRevision++
@@ -171,6 +181,8 @@ object PicacgRouteManager {
             coverRanking = restoredCover,
             contentRanking = restoredContent,
             revision = old.revision + 1,
+            manualApi = prefs.getBoolean("manual_api_selection", false),
+            manualImage = prefs.getBoolean("manual_image_selection", false),
         )
     }
 
@@ -182,8 +194,86 @@ object PicacgRouteManager {
         if (index < 0) return false
         prefs()?.edit()?.putBoolean("manual_api_selection", manual)
             ?.apply { if (manual) putString("selected_api_host", hostOf(state.apiUrls[index])) else remove("selected_api_host") }?.apply()
-        _state.value = state.copy(apiIndex = index, revision = state.revision + 1)
+        _state.value = state.copy(apiIndex = index, revision = state.revision + 1, manualApi = manual)
         return true
+    }
+
+    /** Ordered configured API alternates; never overrides a user's fixed host selection. */
+    internal fun apiRecoveryCandidates(expectedHost: String): List<ApiRecoveryCandidate> {
+        if (isApiManuallyPinned || !RuntimeNetworkGate.isOnline()) return emptyList()
+        val current = _state.value
+        val index = current.apiUrls.indexOfFirst { hostOf(it).equals(expectedHost, true) }
+        if (index < 0 || index != current.apiIndex) return emptyList()
+        val snapshot = PicacgSpeedTester.snapshot.value ?: return emptyList()
+        if (snapshot.revision != configRevision) return emptyList()
+        val committedEndpoint = current.pinnedApi?.takeIf { it.domain.equals(expectedHost, true) } ?: return emptyList()
+        return PicacgApiCandidatePolicy.candidates(
+            apiUrls = current.apiUrls,
+            currentIndex = index,
+            expectedHost = expectedHost,
+            committedEndpoint = committedEndpoint,
+            probes = snapshot.apiProbes.map { PicacgApiProbeEndpoint(it.endpoint, it.success, it.elapsedMs) },
+            snapshotRevision = snapshot.revision,
+            configRevision = configRevision,
+            apiRouteRules = apiRouteRules,
+            manual = isApiManuallyPinned,
+            online = RuntimeNetworkGate.isOnline(),
+        ).map { candidate ->
+            ApiRecoveryCandidate(candidate.url, candidate.endpoint, snapshot)
+        }
+    }
+
+    /** Commit only a configured alternate already confirmed by a safe API probe. */
+    @Synchronized
+    internal fun advanceRuntimeApiAfterRecovery(
+        expectedHost: String,
+        expectedEndpoint: DomainIp,
+        expectedConfigRevision: Long,
+        expectedNetworkRevision: Long,
+        expectedPlatformRevision: Long,
+        validatedCandidate: ApiRecoveryCandidate,
+    ): Boolean {
+        if (!RuntimeNetworkGate.isOnline() || RuntimeNetworkGate.revision != expectedNetworkRevision ||
+            configRevision != expectedConfigRevision || isApiManuallyPinned ||
+            !com.zycomic.app.platform.StartupPlatformPolicy.isEnabled(com.zycomic.app.platform.ContentPlatform.PICACG) ||
+            com.zycomic.app.platform.StartupPlatformPolicy.state.value.revision != expectedPlatformRevision
+        ) {
+            return false
+        }
+        val current = _state.value
+        val activeUrl = current.apiUrls.getOrNull(current.apiIndex).orEmpty()
+        if (!hostOf(activeUrl).equals(expectedHost, true) ||
+            current.pinnedApi?.normalizedForComparison() != expectedEndpoint.normalizedForComparison() ||
+            PicacgSpeedTester.snapshot.value != validatedCandidate.snapshot ||
+            validatedCandidate.snapshot.revision != expectedConfigRevision ||
+            validatedCandidate !in apiRecoveryCandidates(expectedHost)
+        ) {
+            return false
+        }
+        val candidateIndex = current.apiUrls.indexOfFirst { it.equals(validatedCandidate.url, true) }
+        if (candidateIndex < 0 || candidateIndex == current.apiIndex) return false
+        _state.value = current.copy(
+            apiIndex = candidateIndex,
+            pinnedApi = validatedCandidate.endpoint,
+            revision = current.revision + 1,
+        )
+        return true
+    }
+
+    /** Returns only the endpoint currently committed to the active API host. */
+    fun currentApiEndpointFor(host: String): DomainIp? = _state.value.let { current ->
+        current.pinnedApi?.takeIf { it.domain.equals(host, true) && hostOf(current.apiUrls.getOrNull(current.apiIndex).orEmpty()).equals(host, true) }
+    }
+
+    /** Read-only health probe reusing the same exact-IP diagnostic path as the existing speed test. */
+    suspend fun validateCurrentApi(): Boolean {
+        if (!RuntimeNetworkGate.isOnline()) return false
+        val url = currentBaseUrl()
+        val host = runCatching { URI(url).host }.getOrNull() ?: return false
+        val endpoint = currentApiEndpointFor(host) ?: return false
+        val networkRevision = RuntimeNetworkGate.revision
+        val valid = PicacgSpeedTester.validateRuntimeApiEndpoint(endpoint, url)
+        return valid && RuntimeNetworkGate.isOnline() && RuntimeNetworkGate.revision == networkRevision
     }
 
     @Synchronized
@@ -191,8 +281,41 @@ object PicacgRouteManager {
         val candidate = _state.value.imageHosts.firstOrNull { it.equals(host.trim(), true) } ?: return false
         prefs()?.edit()?.putBoolean("manual_image_selection", manual)
             ?.apply { if (manual) putString("selected_image_host", candidate) else remove("selected_image_host") }?.apply()
-        _state.value = _state.value.copy(imageHost = candidate, revision = _state.value.revision + 1)
+        _state.value = _state.value.copy(imageHost = candidate, revision = _state.value.revision + 1, manualImage = manual)
         return true
+    }
+
+    /** Previously tested candidates only; configured host ordering stays unchanged. */
+    fun runtimeImageRecoveryCandidates(expectedSource: String): List<DomainIp> {
+        if (isImageManuallyPinned) return emptyList()
+        val snapshot = PicacgSpeedTester.snapshot.value ?: return emptyList()
+        if (snapshot.revision != configRevision) return emptyList()
+        val index = imageHosts.indexOfFirst { it.equals(expectedSource, true) }
+        if (index < 0) return emptyList()
+        return (1 until imageHosts.size).mapNotNull { offset ->
+            val host = imageHosts[(index + offset) % imageHosts.size]
+            snapshot.imageProbes.filter { it.success && it.endpoint.domain.equals(host, true) }
+                .minByOrNull { it.elapsedMs }?.endpoint
+        }
+    }
+
+    @Synchronized
+    fun advanceRuntimeImageSourceAfterRecovery(
+        expectedSource: String,
+        expectedConfigRevision: Long,
+        expectedPlatformRevision: Long,
+        validatedEndpoint: DomainIp,
+    ): Boolean {
+        if (!RuntimeNetworkGate.isOnline() || configRevision != expectedConfigRevision ||
+            !com.zycomic.app.platform.StartupPlatformPolicy.isEnabled(com.zycomic.app.platform.ContentPlatform.PICACG) ||
+            com.zycomic.app.platform.StartupPlatformPolicy.state.value.revision != expectedPlatformRevision ||
+            !currentImageHost.equals(expectedSource, true) || isImageManuallyPinned ||
+            validatedEndpoint !in runtimeImageRecoveryCandidates(expectedSource)
+        ) {
+            return false
+        }
+        if (!applyAutomaticImageEndpoint(validatedEndpoint)) return false
+        return selectImageHost(validatedEndpoint.domain, manual = false)
     }
 
     /** Pin an API request to a host/IP pair obtained from the configured rules or measured DNS. */
@@ -321,7 +444,7 @@ object PicacgRouteManager {
                 putString("image_pin_domain", endpoint?.domain)
                 putString("image_pin_ip", endpoint?.ip)
             }?.apply()
-            _state.value = current.copy(pinnedImage = endpoint, revision = current.revision + 1)
+            _state.value = current.copy(pinnedImage = endpoint, revision = current.revision + 1, manualImage = manual)
         }
         return true
     }
@@ -394,7 +517,7 @@ object PicacgRouteManager {
             .build()
     }
 
-    /**
+    /*
      * Rewrites every Picacg image bucket host to a reachable mirror. Credentials, query and fragment
      * are preserved for content paths.
      *
@@ -487,8 +610,10 @@ object PicacgRouteManager {
             runCatching {
                 val uri = URI(candidate)
                 uri.scheme in setOf("http", "https") && uri.host != null &&
-                    (PicacgBuiltinNetwork.isImageBucketHost(uri.host) ||
-                        PicacgBuiltinNetwork.isCoverHost(uri.host))
+                    (
+                        PicacgBuiltinNetwork.isImageBucketHost(uri.host) ||
+                            PicacgBuiltinNetwork.isCoverHost(uri.host)
+                        )
             }.getOrDefault(false)
         }
     }
