@@ -1,6 +1,10 @@
 package com.zycomic.app.net
 
 import android.content.Context
+import android.util.Base64
+import io.mockk.every
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -23,6 +27,10 @@ class PicacgNetworkGenerationTest {
 
     @Before
     fun initialize() {
+        mockkStatic(Base64::class)
+        every { Base64.encodeToString(any(), any()) } answers {
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(firstArg<ByteArray>())
+        }
         PicacgRouteManager.clearConfiguration()
         clearPicacgPreferences()
         PicacgNetworkGeneration.restore(null)
@@ -32,6 +40,7 @@ class PicacgNetworkGenerationTest {
     fun clear() {
         PicacgRouteManager.clearConfiguration()
         clearPicacgPreferences()
+        unmockkStatic(Base64::class)
     }
 
     private fun clearPicacgPreferences() {
@@ -79,7 +88,7 @@ class PicacgNetworkGenerationTest {
         assertEquals(2, calls)
         assertEquals(6, PicacgRouteManager.remoteVersion)
         assertEquals(listOf("104.20.42.9", "172.66.173.71", "104.17.102.145"), PicacgRouteManager.resolveIps("picaapi.picacomic.com"))
-        assertEquals(listOf("104.21.42.75", "172.67.159.59"), PicacgRouteManager.resolveIps("storage-b.go2778.com"))
+        assertEquals(listOf("104.21.42.75", "172.67.159.59", "104.17.102.145"), PicacgRouteManager.resolveIps("storage-b.go2778.com"))
     }
 
     @Test

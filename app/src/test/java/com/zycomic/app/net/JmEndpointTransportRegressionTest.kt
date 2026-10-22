@@ -1,11 +1,8 @@
 package com.zycomic.app.net
 
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import io.mockk.every
-import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -149,29 +146,13 @@ class JmEndpointTransportRegressionTest {
 }
 
 internal object JmTransportNetworkTestFixture {
-    private val online = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val context = mockk<Context>()
-    private val connectivity = mockk<ConnectivityManager>()
-    private val network = mockk<Network>()
-    private val capabilities = mockk<NetworkCapabilities>()
-
-    init {
-        every { context.applicationContext } returns context
-        every { context.getSystemService(Context.CONNECTIVITY_SERVICE) } returns connectivity
-        every { connectivity.registerDefaultNetworkCallback(any()) } returns Unit
-        every { connectivity.activeNetwork } returns network
-        every { connectivity.getNetworkCapabilities(network) } returns capabilities
-        every { capabilities.hasCapability(any()) } answers { online.get() }
-        RuntimeNetworkGate.init(context)
-    }
-
     fun enable() {
-        online.set(true)
+        mockkObject(RuntimeNetworkGate)
+        every { RuntimeNetworkGate.isOnline() } returns true
         check(RuntimeNetworkGate.isOnline())
     }
 
     fun reset() {
-        online.set(false)
-        check(!RuntimeNetworkGate.isOnline())
+        unmockkObject(RuntimeNetworkGate)
     }
 }
