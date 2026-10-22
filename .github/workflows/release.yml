@@ -109,6 +109,14 @@ jobs:
           assert counts['tests'] > 0 and counts['failures'] == 0 and counts['errors'] == 0
           PY
 
+      - name: Save release unit test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-unit-test-reports-${{ github.run_id }}
+          path: app/build/test-results/testReleaseUnitTest/TEST-*.xml
+          if-no-files-found: ignore
+
       - name: Decode release keystore
         if: ${{ !inputs.validate_only }}
         env:

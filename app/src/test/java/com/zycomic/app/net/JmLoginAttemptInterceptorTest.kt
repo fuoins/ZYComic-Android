@@ -6,8 +6,10 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.IOException
 
 class JmLoginAttemptInterceptorTest {
     @Test
@@ -34,7 +36,9 @@ class JmLoginAttemptInterceptorTest {
     @Test
     fun `explicit JM business expiry code may clear the current login attempt`() {
         val attempt = JmAuthStore.beginLoginAttempt()
-        businessUnauthorizedClient().newCall(loginRequest(attempt)).execute().close()
+        assertThrows(IOException::class.java) {
+            businessUnauthorizedClient().newCall(loginRequest(attempt)).execute().close()
+        }
         assertFalse(JmAuthStore.isLoginCurrent(attempt))
     }
 

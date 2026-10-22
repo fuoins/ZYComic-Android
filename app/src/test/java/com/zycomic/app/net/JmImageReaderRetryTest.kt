@@ -54,8 +54,7 @@ class JmImageReaderRetryTest {
                 502
             }
             val first = scope(page, coordinator)
-            val error = assertThrows(IOException::class.java) { load(client, first) }
-            assertTrue(error.message.orEmpty().contains("HTTP 502"))
+            assertEquals(502, load(client, first))
             assertEquals(1, page.endpointsAttemptedInRound.get())
             assertEquals(listOf(hosts.first()), visited)
             assertFalse(first.retryAfterFailure(false))
@@ -78,7 +77,7 @@ class JmImageReaderRetryTest {
                     status
                 }
                 val attempt = scope(page, coordinator)
-                assertThrows(IOException::class.java) { load(client, attempt) }
+                assertEquals(status, load(client, attempt))
                 assertEquals(listOf(hosts.first()), visited)
                 assertFalse(attempt.retryAfterFailure(false))
                 assertTrue(failures.isEmpty())
@@ -94,7 +93,7 @@ class JmImageReaderRetryTest {
             val failures = mutableListOf<Pair<String, String>>()
             val client = client(hosts, failures) { 502 }
             val attempt = scope(page, coordinator)
-            assertThrows(IOException::class.java) { load(client, attempt) }
+            assertEquals(502, load(client, attempt))
             assertEquals(1, page.endpointsAttemptedInRound.get())
             assertFalse(attempt.retryAfterFailure(false))
             assertEquals(1, page.automaticRetryRound.get())
@@ -147,9 +146,8 @@ class JmImageReaderRetryTest {
             visited += request.url.host
             502
         }
-        assertThrows(IOException::class.java) {
-            client.newCall(Request.Builder().url("https://${hosts.first()}/media/albums/123_3x4.jpg").build()).execute().close()
-        }
+        client.newCall(Request.Builder().url("https://${hosts.first()}/media/albums/123_3x4.jpg").build())
+            .execute().use { assertEquals(502, it.code) }
         assertEquals(listOf(hosts.first()), visited)
         assertTrue(failures.isEmpty())
     }
@@ -160,10 +158,10 @@ class JmImageReaderRetryTest {
     private fun remaining(hosts: List<String>, page: ReaderPage): Boolean =
         hosts.any { DomainIp(it, "").normalizedForComparison() !in page.attemptedImageEndpoints }
 
-    private fun load(client: OkHttpClient, attempt: PageAttemptScope) {
+    private fun load(client: OkHttpClient, attempt: PageAttemptScope): Int {
         client.newCall(
             Request.Builder().url(IMAGE_URL).tag(PageAttemptScope::class.java, attempt).build(),
-        ).execute().use { assertTrue(it.isSuccessful) }
+        ).execute().use { return it.code }
     }
 
     private fun client(

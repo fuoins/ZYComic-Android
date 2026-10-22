@@ -1,11 +1,26 @@
 package com.zycomic.app.ui.components
 
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.BeforeClass
 import org.junit.Test
 import tachiyomi.domain.history.model.HistoryWithRelations
+import tachiyomi.domain.manga.interactor.GetCustomMangaInfo
 import tachiyomi.domain.manga.model.MangaCover
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.addSingletonFactory
 
 class PicacgLocalHistoryPolicyTest {
+    companion object {
+        @JvmStatic
+        @BeforeClass
+        fun bindCustomMangaInfoForJvm() {
+            if (runCatching { Injekt.get<GetCustomMangaInfo>() }.isFailure) {
+                Injekt.addSingletonFactory { mockk<GetCustomMangaInfo>(relaxed = true) }
+            }
+        }
+    }
+
     @Test
     fun `remote identity is parsed from source URL never from local database id`() {
         assertEquals("remote123", PicacgLocalHistoryPolicy.comicId("/comic/remote123", PICACG_SOURCE_ID, PICACG_SOURCE_ID))

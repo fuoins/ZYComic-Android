@@ -1,5 +1,9 @@
 package com.zycomic.app.picacg
 
+import com.zycomic.app.net.RuntimeNetworkGate
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -10,13 +14,26 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import org.json.JSONObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.io.IOException
 
 class PicacgClientRedirectTest {
+    @BeforeEach
+    fun stubAndroidBackedWriteMessage() {
+        mockkObject(RuntimeNetworkGate)
+        every { RuntimeNetworkGate.ambiguousWriteMessage() } returns AMBIGUOUS_WRITE_MESSAGE
+    }
+
+    @AfterEach
+    fun restoreRuntimeNetworkGate() {
+        unmockkObject(RuntimeNetworkGate)
+    }
+
     @Test
     fun `safe HTTP 301 preserves GET path query and signature`() = runBlocking {
         val requests = mutableListOf<Request>()
@@ -196,4 +213,8 @@ class PicacgClientRedirectTest {
     }
 
     private data class Reply(val code: Int, val body: String = "", val location: String? = null)
+
+    private companion object {
+        const val AMBIGUOUS_WRITE_MESSAGE = "Write may have succeeded; refresh to confirm"
+    }
 }

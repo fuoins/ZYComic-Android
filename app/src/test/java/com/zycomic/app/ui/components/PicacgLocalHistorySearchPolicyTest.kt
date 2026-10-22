@@ -1,14 +1,29 @@
 package com.zycomic.app.ui.components
 
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 import tachiyomi.domain.history.model.HistoryWithRelations
+import tachiyomi.domain.manga.interactor.GetCustomMangaInfo
 import tachiyomi.domain.manga.model.MangaCover
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.addSingletonFactory
 import java.util.Date
 
 class PicacgLocalHistorySearchPolicyTest {
+    companion object {
+        @JvmStatic
+        @BeforeClass
+        fun bindCustomMangaInfoForJvm() {
+            if (runCatching { Injekt.get<GetCustomMangaInfo>() }.isFailure) {
+                Injekt.addSingletonFactory { mockk<GetCustomMangaInfo>(relaxed = true) }
+            }
+        }
+    }
+
     @Test
     fun `search matches title author category or tag case insensitively`() {
         assertTrue(matches("  STAR ", title = "Star Journey"))

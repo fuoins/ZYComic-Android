@@ -62,11 +62,13 @@ class PicacgBuiltinNetworkTest {
     }
 
     @Test
-    fun `smart candidates only augment picacomic root and descendants`() {
+    fun `smart candidates augment every fixed root and role alias without replacing baseline`() {
         val rules = PicacgBuiltinNetwork.rules(listOf(" 1.1.1.1 ", "1.1.1.1", "10.0.0.1", "not-an-ip"))
         assertEquals(listOf("104.20.42.9", "172.66.173.71", "1.1.1.1"), rules["picacomic.com"])
         assertEquals(rules["picacomic.com"], rules["storage1.picacomic.com"])
-        assertEquals(listOf("104.21.42.75", "172.67.159.59"), rules["go2778.com"])
-        assertEquals(listOf("104.21.75.42", "172.67.213.2"), rules["safedataplj.com"])
+        assertEquals(listOf("104.21.42.75", "172.67.159.59", "1.1.1.1"), rules["go2778.com"])
+        assertEquals(rules["go2778.com"], rules["storage-b.go2778.com"])
+        assertEquals(listOf("104.21.75.42", "172.67.213.2", "1.1.1.1"), rules["safedataplj.com"])
+        assertEquals(rules["safedataplj.com"], rules["img.safedataplj.com"])
     }
 }

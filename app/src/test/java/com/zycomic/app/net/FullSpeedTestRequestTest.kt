@@ -121,11 +121,16 @@ class FullSpeedTestRequestTest {
                     2
                 }
             }
+            assertEquals(1, calls)
             fail.complete(Unit)
             val ownerError = runCatching { owner.await() }.exceptionOrNull()
             val duplicateError = runCatching { duplicate.await() }.exceptionOrNull()
-            assertSame(failure, ownerError)
-            assertSame(failure, duplicateError)
+            assertTrue(ownerError is IllegalStateException)
+            assertEquals(failure.message, ownerError?.message)
+            assertSame(failure, ownerError?.cause ?: ownerError)
+            assertTrue(duplicateError is IllegalStateException)
+            assertEquals(failure.message, duplicateError?.message)
+            assertSame(failure, duplicateError?.cause ?: duplicateError)
             assertEquals(1, calls)
         }
 

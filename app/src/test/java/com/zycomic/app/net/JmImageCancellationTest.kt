@@ -12,6 +12,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.ForwardingSource
 import okio.buffer
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -22,6 +23,13 @@ import java.io.IOException
 
 /** Real OkHttp application-interceptor chain; the terminal interceptor never opens a socket. */
 class JmImageCancellationTest {
+    private var networkGateEnabled = false
+
+    @AfterEach
+    fun resetNetworkGate() {
+        if (networkGateEnabled) JmTransportNetworkTestFixture.reset()
+    }
+
     @Test
     fun `cancelled unscoped cover cannot poison endpoints used by later search and browse covers`() {
         val health = Health()
@@ -229,6 +237,8 @@ class JmImageCancellationTest {
 
     @Test
     fun `genuine connection failure records transport failure without trying another source`() {
+        networkGateEnabled = true
+        JmTransportNetworkTestFixture.enable()
         val health = Health()
         val visited = mutableListOf<String>()
         val client = client(health) { chain ->
@@ -251,7 +261,7 @@ class JmImageCancellationTest {
             visited += chain.request().url.host
             response(chain, code = 503)
         }
-        assertThrows(IOException::class.java) { client.newCall(request()).execute().close() }
+        client.newCall(request()).execute().use { assertEquals(503, it.code) }
         assertEquals(listOf(FIRST), visited)
         assertTrue(health.endpointFailures.isEmpty())
         assertTrue(health.hostFailures.isEmpty())

@@ -1,11 +1,18 @@
 package com.zycomic.app.net
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import io.mockk.every
+import io.mockk.mockk
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -15,8 +22,17 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class JmEndpointTransportRegressionTest {
+    private var networkGateEnabled = false
+
+    @AfterEach
+    fun resetNetworkGate() {
+        if (networkGateEnabled) JmTransportNetworkTestFixture.reset()
+    }
+
     @Test
     fun `DNS and failure attribution stay pinned when selected endpoint changes during request`() {
+        networkGateEnabled = true
+        JmTransportNetworkTestFixture.enable()
         val server = server(200)
         val selected = AtomicReference(DomainIp("race.local", "127.0.0.1"))
         val endpointReads = AtomicInteger()
@@ -60,6 +76,8 @@ class JmEndpointTransportRegressionTest {
 
     @Test
     fun `failed bootstrap is attributed to actual DNS IP but is not persisted`() {
+        networkGateEnabled = true
+        JmTransportNetworkTestFixture.enable()
         val persisted = AtomicInteger()
         val failure = AtomicReference<DomainIp>()
         val dns = JmNetworkModule.singleAddressDns(
@@ -127,5 +145,33 @@ class JmEndpointTransportRegressionTest {
                 .build()
         }
         start()
+    }
+}
+
+internal object JmTransportNetworkTestFixture {
+    private val online = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val context = mockk<Context>()
+    private val connectivity = mockk<ConnectivityManager>()
+    private val network = mockk<Network>()
+    private val capabilities = mockk<NetworkCapabilities>()
+
+    init {
+        every { context.applicationContext } returns context
+        every { context.getSystemService(Context.CONNECTIVITY_SERVICE) } returns connectivity
+        every { connectivity.registerDefaultNetworkCallback(any()) } returns Unit
+        every { connectivity.activeNetwork } returns network
+        every { connectivity.getNetworkCapabilities(network) } returns capabilities
+        every { capabilities.hasCapability(any()) } answers { online.get() }
+        RuntimeNetworkGate.init(context)
+    }
+
+    fun enable() {
+        online.set(true)
+        check(RuntimeNetworkGate.isOnline())
+    }
+
+    fun reset() {
+        online.set(false)
+        check(!RuntimeNetworkGate.isOnline())
     }
 }

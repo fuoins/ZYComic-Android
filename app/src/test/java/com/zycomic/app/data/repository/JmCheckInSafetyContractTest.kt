@@ -38,8 +38,10 @@ class JmCheckInSafetyContractTest {
 
     @Test
     fun `check-in read retry never retries rate limited HTTP 429`() {
-        assertTrue(repository.contains("Regex(\"HTTP 5\\d{2}\").containsMatchIn(message)"))
-        assertTrue(!repository.contains("HTTP (429|5"))
+        val readRetryPolicy = repository.substringAfter("private suspend fun <T> executeRead")
+            .substringBefore("private fun verifySession")
+        assertTrue(readRetryPolicy.contains("""Regex("HTTP 5\\d{2}").containsMatchIn(message)"""))
+        assertTrue(!readRetryPolicy.contains("HTTP (429|5"))
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.zycomic.app.net
 
+import android.content.Context
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -15,11 +16,31 @@ import org.junit.Before
 import org.junit.Test
 
 class PicacgNetworkGenerationTest {
+    private val preferenceFiles = listOf(
+        "zycomic_picacg_network_generation",
+        "zycomic_picacg_route",
+    )
+
     @Before
-    fun initialize() = PicacgNetworkGeneration.restore(null)
+    fun initialize() {
+        PicacgRouteManager.clearConfiguration()
+        clearPicacgPreferences()
+        PicacgNetworkGeneration.restore(null)
+    }
 
     @After
-    fun clear() = PicacgRouteManager.clearConfiguration()
+    fun clear() {
+        PicacgRouteManager.clearConfiguration()
+        clearPicacgPreferences()
+    }
+
+    private fun clearPicacgPreferences() {
+        DevConfig.appContext?.let { context ->
+            preferenceFiles.forEach { name ->
+                context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
+            }
+        }
+    }
 
     @Test
     fun firstFailedCheckStillFetchesOnceAndUnchangedChecksDoNotRepeat() = runBlocking {
@@ -102,6 +123,7 @@ class PicacgNetworkGenerationTest {
         assertFalse(PicacgRouteManager.selectImageHost("img.safedataplj.com"))
         assertTrue(PicacgRouteManager.selectImageHost("storage-b.safedataplj.com"))
         assertTrue(PicacgRouteManager.selectImageHost("storage-b.go2778.com"))
+        assertEquals("storage-b.go2778.com", PicacgRouteManager.currentImageHost)
         // Cover thumbnails (tobeimg) become imgproxy UNSIGNED urls; the embedded base64 keeps the
         // real origin (storage1/storage-b), so no token/query and no cross-bucket guess is needed.
         assertEquals(
