@@ -107,6 +107,7 @@ object PicacgSpeedTester {
         forceFresh: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onApiPublished: (DomainIp?) -> Unit = {},
         onProgress: (Progress) -> Unit = {},
     ): Snapshot = withContext(Dispatchers.IO) {
         runLock.withLock {
@@ -209,6 +210,26 @@ object PicacgSpeedTester {
                     }
                 }
 
+                // Publish the authoritative current-round API binding before any image work.
+                // Probe progress alone cannot cross the configuration barrier or prove selection.
+                var publishedLine: DomainIp? = null
+                if (beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
+                    val apiSelection = if (apiQuick) freshApiHistory.map { it.toProbe() } else apiResults
+                    val fastest = apiSelection.filter(Probe::success).minByOrNull(Probe::elapsedMs)
+                    if (fastest != null && !PicacgRouteManager.isApiManuallyPinned) {
+                        val fastestUrl = apiUrls.firstOrNull { runCatching { URI(it).host.equals(fastest.endpoint.domain, true) }.getOrDefault(false) }
+                        if (fastestUrl != null) {
+                            PicacgRouteManager.selectApiUrl(fastestUrl, manual = false)
+                            PicacgRouteManager.applyAutomaticApiEndpoint(fastest.endpoint)
+                        }
+                    }
+                    publishedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
+                        PicacgRouteManager.selectedApiEndpoint,
+                        apiResults.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
+                    ) { endpoint -> apiResults.any { it.endpoint == endpoint && it.testedThisRound && it.success } }
+                    if (isCurrent()) onApiPublished(publishedLine)
+                }
+
                 var blockedReason: String? = null
                 // Each root × IP is probed twice with fixed, auth-free tiles: a cover probe on the
                 // imgproxy node (storage-b + storage1 tiles) and a reader-page probe on the storage-b
@@ -303,15 +324,6 @@ object PicacgSpeedTester {
                 val probeOrder = compareBy<Probe>({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip })
                 var result = Snapshot(started, finished, activeVersion, apiResults.sortedWith(probeOrder), imageResults.sortedWith(probeOrder), blockedReason, revision)
                 if (beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
-                    val apiSelection = if (apiQuick) freshApiHistory.map { it.toProbe() } else apiResults
-                    val fastest = apiSelection.filter(Probe::success).minByOrNull(Probe::elapsedMs)
-                    if (fastest != null && !PicacgRouteManager.isApiManuallyPinned) {
-                        val fastestUrl = apiUrls.firstOrNull { runCatching { URI(it).host.equals(fastest.endpoint.domain, true) }.getOrDefault(false) }
-                        if (fastestUrl != null) {
-                            PicacgRouteManager.selectApiUrl(fastestUrl, manual = false)
-                            PicacgRouteManager.applyAutomaticApiEndpoint(fastest.endpoint)
-                        }
-                    }
                     val imageSelection = if (imageQuick) freshImageHistory.map { it.toProbe() } else imageResults
                     if (!PicacgRouteManager.isImageManuallyPinned) {
                         // Keep the fastest IP per storage-b root for EACH service independently — covers
@@ -375,10 +387,7 @@ object PicacgSpeedTester {
                         }
                     }
                     result = result.copy(
-                        roundSelectedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
-                            PicacgRouteManager.selectedApiEndpoint,
-                            apiResults.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
-                        ) { endpoint -> apiResults.any { it.endpoint == endpoint && it.testedThisRound && it.success } },
+                        roundSelectedLine = publishedLine,
                         roundSelectedImage = SpeedTestLogSelectionPolicy.selectedEndpoint(
                             PicacgRouteManager.selectedImageEndpoint,
                             imageResults.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),

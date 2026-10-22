@@ -58,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -121,6 +122,12 @@ fun BrowseScreen(
     onOpenSearch: (String, SearchProvider?) -> Unit,
     onRequireLogin: () -> Unit,
 ) {
+    // KMK --> Cancel delayed Manwa retries when this page leaves composition.
+    DisposableEffect(vm) {
+        vm.onBrowseVisible()
+        onDispose { vm.onBrowseHidden() }
+    }
+    // KMK <--
     LegacyBrowseScreen(vm, pendingTag, onPendingTagConsumed, onOpenManga, onOpenSearch, onRequireLogin)
 }
 

@@ -160,6 +160,7 @@ object PicacgSpeedTester {
     var doNotPublishNextRun = false
     var beforeApplyHook: (() -> Unit)? = null
     var suspendBeforeApplyHook: (suspend () -> Unit)? = null
+    var suspendBeforeImagesHook: (suspend () -> Unit)? = null
     var progressHook: ((Progress) -> Unit)? = null
     fun logSummary(probes: List<Probe>) = "${probes.count { it.success }}/${probes.size} fixture probes"
 
@@ -172,6 +173,7 @@ object PicacgSpeedTester {
         forceFresh: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onApiPublished: (DomainIp?) -> Unit = {},
         onProgress: (Progress) -> Unit = {},
     ): Snapshot {
         runCount++
@@ -232,7 +234,13 @@ object PicacgSpeedTester {
         }
         suspendBeforeApplyHook?.invoke()
         beforeApplyHook?.invoke()
-        if (!doNotPublishNextRun && beforeApply() && isCurrent()) snapshot.value = result
+        val canCommitApi = !doNotPublishNextRun && beforeApply() && isCurrent()
+        if (canCommitApi) {
+            PicacgRouteManager.selectedApiEndpoint = selectedLine
+            onApiPublished(selectedLine)
+            suspendBeforeImagesHook?.invoke()
+        }
+        if (canCommitApi && beforeApply() && isCurrent()) snapshot.value = result
         doNotPublishNextRun = false
         return result
     }

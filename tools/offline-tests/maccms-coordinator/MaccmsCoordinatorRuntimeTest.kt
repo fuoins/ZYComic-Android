@@ -3,7 +3,11 @@ package com.zycomic.app.net
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -42,21 +46,33 @@ class MaccmsCoordinatorRuntimeTest {
         }
     }
 
+    private suspend fun awaitHealth(ip: String?) {
+        withTimeout(5_000) {
+            while (MaccmsSpeedTester.snapshot.value.completedAtEpochMs == null ||
+                MaccmsSpeedTester.snapshot.value.lines3Ip != ip || MaccmsSpeedTester.running.value
+            ) {
+                yield()
+            }
+        }
+    }
+
     @Test
     fun `complete phase cache still publishes a fresh current round IP for Maccms`() = runBlocking {
         configure()
         PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
         val firstIp = PicacgSpeedTester.snapshot.value?.roundSelectedLine?.ip
         assertNotNull(firstIp)
+        awaitHealth(firstIp)
         assertBinding(firstIp, 0)
 
         val secondRoundStart = MaccmsProbeRecorder.invocations.size
-        PlatformSpeedTestCoordinator.run()
+        PlatformSpeedTestCoordinator.run(onlyPlatform = ContentPlatform.PICACG)
 
         val currentIp = PicacgSpeedTester.snapshot.value?.roundSelectedLine?.ip
         assertNotNull(currentIp)
         assertNotEquals(firstIp, currentIp, "reuseApi=false must produce a current-round selection")
-        assertEquals(listOf(false to false, false to true), PicacgSpeedTester.reuseFlags)
+        awaitHealth(currentIp)
+        assertEquals(listOf(false to false, false to false), PicacgSpeedTester.reuseFlags)
         assertBinding(currentIp, secondRoundStart)
         assertEquals(6, MaccmsProbeRecorder.invocations.size)
         assertTrue(MaccmsProbeRecorder.invocations.take(3).all { it.ip == firstIp })
@@ -82,6 +98,7 @@ class MaccmsCoordinatorRuntimeTest {
         val current = PicacgSpeedTester.snapshot.value?.roundSelectedLine?.ip
         assertNotNull(current)
         assertNotEquals(old.ip, current)
+        awaitHealth(current)
         assertBinding(current, 0)
         assertFalse(MaccmsProbeRecorder.invocations.any { it.ip == old.ip })
     }
@@ -107,6 +124,11 @@ class MaccmsCoordinatorRuntimeTest {
         assertEquals("incomplete", reports.single { it.platform == "哔咔" }.status)
         assertBinding(null, 0)
         assertEquals(old, PicacgSpeedTester.snapshot.value?.roundSelectedLine, "failed fixture leaves old published snapshot intact")
+        assertEquals(
+            StartupCheckResult.NOT_TESTED,
+            PlatformSpeedTestCoordinator.startupCheckStatuses.value.single { it.phase == StartupCheckPhase.MACCMS_LINE }.result,
+            "a stale historical API IP must not create a shared readiness tick",
+        )
     }
 
     @Test
@@ -115,6 +137,7 @@ class MaccmsCoordinatorRuntimeTest {
         PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
         val publishedBefore = PicacgSpeedTester.snapshot.value
         val oldIp = publishedBefore?.roundSelectedLine?.ip
+        awaitHealth(oldIp)
         assertBinding(oldIp, 0)
         val unpublishedRoundStart = MaccmsProbeRecorder.invocations.size
         PicacgSpeedTester.doNotPublishNextRun = true
@@ -128,6 +151,10 @@ class MaccmsCoordinatorRuntimeTest {
         assertBinding(null, unpublishedRoundStart)
         assertEquals(3, MaccmsProbeRecorder.invocations.size, "only the first published round may reach host transports")
         assertFalse(MaccmsProbeRecorder.invocations.any { it.ip == returnedCandidateIp })
+        assertEquals(
+            StartupCheckResult.NOT_TESTED,
+            PlatformSpeedTestCoordinator.startupCheckStatuses.value.single { it.phase == StartupCheckPhase.MACCMS_LINE }.result,
+        )
     }
 
     @Test
@@ -148,6 +175,7 @@ class MaccmsCoordinatorRuntimeTest {
         assertEquals(2, PicacgSpeedTester.runCount, "stale generation must retry after config revision changes")
         val currentIp = PicacgSpeedTester.snapshot.value?.roundSelectedLine?.ip
         assertNotNull(currentIp)
+        awaitHealth(currentIp)
         assertBinding(currentIp, 0)
         assertEquals(3, MaccmsProbeRecorder.invocations.size, "stale generation must not invoke the transport")
     }
@@ -180,6 +208,91 @@ class MaccmsCoordinatorRuntimeTest {
         assertBinding(null, 0)
         assertEquals(old.ip, PicacgSpeedTester.snapshot.value?.roundSelectedLine?.ip, "the old published result remains only old state")
         assertFalse(PlatformSpeedTestCoordinator.running.value)
+    }
+
+    @Test
+    fun `API line is published and shared readiness ticks before blocked image work`() = runBlocking {
+        configure()
+        val enteredImages = CompletableDeferred<Unit>()
+        val releaseImages = CompletableDeferred<Unit>()
+        PicacgSpeedTester.suspendBeforeImagesHook = {
+            enteredImages.complete(Unit)
+            releaseImages.await()
+        }
+
+        val run = async { PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true) }
+        withTimeout(5_000) { enteredImages.await() }
+        val apiIp = PicacgRouteManager.selectedApiEndpoint?.ip
+        assertNotNull(apiIp)
+        assertEquals(apiIp, MaccmsSpeedTester.routeSelection().lines3Ip)
+        val sharedReady = PlatformSpeedTestCoordinator.startupCheckStatuses.value
+            .single { it.phase == StartupCheckPhase.MACCMS_LINE }
+        assertEquals(StartupCheckResult.SUCCESS, sharedReady.result)
+        assertTrue(sharedReady.detail.orEmpty().contains("另行后台检测"))
+
+        releaseImages.complete(Unit)
+        withTimeout(5_000) { run.await() }
+        awaitHealth(apiIp)
+    }
+
+    @Test
+    fun `blocked background health cannot delay run and failures are logged without clearing readiness`() = runBlocking {
+        configure()
+        val healthEntered = CompletableDeferred<Unit>()
+        val releaseHealth = CompletableDeferred<Unit>()
+        MaccmsSpeedTester.installProbeTransportForTests { host, ip ->
+            MaccmsProbeRecorder.invocations += MaccmsProbeRecorder.Invocation(host, ip)
+            healthEntered.complete(Unit)
+            releaseHealth.await()
+            throw IllegalStateException("fixture health failure")
+        }
+        android.util.Log.warnings.clear()
+
+        val reports = withTimeout(5_000) { PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true) }
+        assertEquals("tested", reports.single { it.platform == "哔咔" }.status)
+        withTimeout(5_000) { healthEntered.await() }
+        val sharedReady = PlatformSpeedTestCoordinator.startupCheckStatuses.value
+            .single { it.phase == StartupCheckPhase.MACCMS_LINE }
+        assertEquals(StartupCheckResult.SUCCESS, sharedReady.result)
+        assertTrue(sharedReady.detail.orEmpty().contains("另行后台检测"))
+
+        releaseHealth.complete(Unit)
+        withTimeout(5_000) {
+            while (android.util.Log.warnings.none { it.contains("Maccms background health check failed") }) yield()
+        }
+        assertEquals(
+            StartupCheckResult.SUCCESS,
+            PlatformSpeedTestCoordinator.startupCheckStatuses.value.single { it.phase == StartupCheckPhase.MACCMS_LINE }.result,
+            "health failure must not clear the independent shared-route readiness tick",
+        )
+        assertTrue(android.util.Log.warnings.any { it.contains("fixture health failure") })
+    }
+
+    @Test
+    fun `retired health from old key cannot overwrite current binding`() = runBlocking {
+        configure()
+        val oldHealthEntered = CompletableDeferred<Unit>()
+        val neverReleaseOld = CompletableDeferred<Unit>()
+        MaccmsSpeedTester.installProbeTransportForTests { host, ip ->
+            MaccmsProbeRecorder.invocations += MaccmsProbeRecorder.Invocation(host, ip)
+            if (ip == "192.0.2.11") {
+                oldHealthEntered.complete(Unit)
+                neverReleaseOld.await()
+            }
+            MaccmsSpeedTester.Probe(host, 2, true, 204)
+        }
+
+        PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
+        withTimeout(5_000) { oldHealthEntered.await() }
+        PicacgRouteManager.configRevision++
+        val second = PlatformSpeedTestCoordinator.run()
+        assertEquals("tested", second.single { it.platform == "哔咔" }.status)
+        val latestIp = PicacgSpeedTester.snapshot.value?.roundSelectedLine?.ip
+        assertNotNull(latestIp)
+        assertNotEquals("192.0.2.11", latestIp)
+        awaitHealth(latestIp)
+        assertEquals(latestIp, MaccmsSpeedTester.routeSelection().lines3Ip)
+        assertTrue(MaccmsProbeRecorder.invocations.filter { it.ip != "192.0.2.11" }.all { it.ip == latestIp })
     }
 }
 

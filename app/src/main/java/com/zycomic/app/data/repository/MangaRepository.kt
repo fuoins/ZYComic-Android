@@ -4,6 +4,7 @@ import com.zycomic.app.data.AllTags
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.dto.TagItem
 import com.zycomic.app.net.NetworkModule
+import kotlinx.coroutines.CancellationException
 import java.io.IOException
 
 /**
@@ -166,6 +167,8 @@ object MangaRepository {
         while (pagesLoaded < maxPages) {
             val raw = try {
                 loadFunc(currentPage)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // 加载出错时，如果已有结果就返回，否则抛出
                 if (result.isNotEmpty()) break

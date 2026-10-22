@@ -6,6 +6,7 @@ import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -50,6 +52,8 @@ object PlatformSpeedTestCoordinator {
     private val completedPhases = CompletedSpeedTestPhases()
     private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
     private val fullTestRequest = FullSpeedTestRequest<List<PlatformSpeedTestReport>>()
+    private val healthScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var maccmsHealthJob: Job? = null
 
     private val startupRequest = StartupSpeedTestRequest<SpeedTestRunKey, List<PlatformSpeedTestReport>>(
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
@@ -134,6 +138,14 @@ object PlatformSpeedTestCoordinator {
         }
         DevConfig.awaitUsableRouteConfig()
         lock.withLock {
+            val requestedKey = currentKey()
+            if (SpeedTestRunPolicy.canSkip(completedKey, requestedKey, forceFresh, onlyPlatform != null, remoteConfigUpdated)) {
+                // Check after acquiring the lock: queued duplicates reuse the completed round
+                // without clearing its progress, checkmarks or current-round shared IP.
+                onCompleted?.invoke(requestedKey)
+                return@withLock _reports.value
+            }
+            completedKey = null
             _running.value = true
             _progressText.value = null
             _jmProgress.value = null
@@ -182,38 +194,33 @@ object PlatformSpeedTestCoordinator {
                         startupConfig.awaitConfigurationUpdated()
                         return generationIsCurrent()
                     }
-                    // No prior-run IP may serve recommendations while this round chooses lines3.
-                    if (StartupPlatformPolicy.isEnabled(policy, ContentPlatform.PICACG) &&
-                        (onlyPlatform == null || onlyPlatform == ContentPlatform.PICACG)
-                    ) {
+                    // A new Picacg generation retires both the binding and its health worker.
+                    if (onlyPlatform == null || onlyPlatform == ContentPlatform.PICACG) {
+                        maccmsHealthJob?.cancel()
                         MaccmsSpeedTester.invalidateLines3Ip()
                     }
-                    suspend fun checkMaccms(lines3Ip: String?) {
+                    fun publishMaccmsRoute(lines3Ip: String?) {
                         if (!generationIsCurrent()) return
-                        publishStartupCheck(StartupCheckPhase.MACCMS_LINE, StartupCheckResult.RUNNING)
-                        try {
-                            val measured = MaccmsSpeedTester.run(
-                                quick = reuseLines,
-                                lines3Ip = lines3Ip,
-                                isCurrent = ::generationIsCurrent,
-                                beforeApply = ::beforeApply,
-                            )
-                            if (generationIsCurrent()) {
-                                publishStartupCheck(
-                                    StartupCheckPhase.MACCMS_LINE,
-                                    when {
-                                        measured.probes.none { it.tested } -> StartupCheckResult.NOT_TESTED
-                                        measured.probes.any { it.success } -> StartupCheckResult.SUCCESS
-                                        else -> StartupCheckResult.FAILED
-                                    },
-                                    if (measured.lines3Ip == null) "本轮未选出 lines3 IP，Maccms 未检测；不回退 DNS" else "复用本轮 lines3 IP；匿名 HTTPS HEAD 根路径连通性，未验证推荐 API",
+                        val binding = MaccmsSpeedTester.bindLines3Ip(lines3Ip)
+                        publishStartupCheck(
+                            StartupCheckPhase.MACCMS_LINE,
+                            if (binding != null) StartupCheckResult.SUCCESS else StartupCheckResult.NOT_TESTED,
+                            if (binding != null) "本轮共享 lines3 IP 已就绪；域名真实连通性另行后台检测，不代表推荐 API 通过" else "本轮未选出有效 lines3 IP；不回退旧 IP 或 DNS",
+                        )
+                        // Not a child of the startup coroutineScope: host timeouts never delay entry.
+                        // Only real probes update the independent Maccms health history.
+                        maccmsHealthJob = healthScope.launch {
+                            try {
+                                MaccmsSpeedTester.run(
+                                    quick = reuseLines,
+                                    lines3Ip = lines3Ip,
+                                    isCurrent = { generationIsCurrent() && (binding == null || MaccmsSpeedTester.isLines3BindingCurrent(binding)) },
+                                    beforeApply = ::beforeApply,
                                 )
-                            }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (_: Exception) {
-                            if (generationIsCurrent()) {
-                                publishStartupCheck(StartupCheckPhase.MACCMS_LINE, StartupCheckResult.FAILED, "Maccms 连通性检测失败，保留独立线路选择")
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                android.util.Log.w("PlatformSpeedTest", "Maccms background health check failed", e)
                             }
                         }
                     }
@@ -308,6 +315,7 @@ object PlatformSpeedTestCoordinator {
                                                 forceFresh = forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
+                                                onApiPublished = { endpoint -> publishMaccmsRoute(endpoint?.ip) },
                                                 onProgress = { progress ->
                                                     if (generationIsCurrent()) {
                                                         _progressText.value = picacgProgressMessage(progress)
@@ -321,8 +329,10 @@ object PlatformSpeedTestCoordinator {
                                             picacgSnapshot?.let { current ->
                                                 publishPicacgMeasuredChecks(current)
                                             }
-                                            // Only the returned, published snapshot proves current-run selection.
-                                            checkMaccms(picacgSnapshot?.roundSelectedLine?.ip)
+                                            // The API callback already bound the current round before image work.
+                                            if (picacgSnapshot == null && MaccmsSpeedTester.routeSelection().lines3Ip == null) {
+                                                publishMaccmsRoute(null)
+                                            }
                                             status = if (picacgSnapshot?.complete == true) "tested" else "incomplete"
                                             reason = if (snapshot.complete) {
                                                 "API 根路径 HTTP 200–499（不含 3xx）：${PicacgSpeedTester.logSummary(snapshot.apiProbes)}；" +
@@ -366,7 +376,7 @@ object PlatformSpeedTestCoordinator {
                                         if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                         status = "incomplete"
                                         reason = "本轮检测失败，保留当前选择"
-                                        if (platform == ContentPlatform.PICACG) checkMaccms(null)
+                                        if (platform == ContentPlatform.PICACG && MaccmsSpeedTester.routeSelection().lines3Ip == null) publishMaccmsRoute(null)
                                         failRunningChecks(platform, "本轮检测失败")
                                         if (platform == ContentPlatform.MANWA) {
                                             val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
@@ -419,6 +429,13 @@ object PlatformSpeedTestCoordinator {
                 emptyList()
             } finally {
                 if (!runCompleted) {
+                    if (onlyPlatform == null || onlyPlatform == ContentPlatform.PICACG) {
+                        maccmsHealthJob?.cancel()
+                        MaccmsSpeedTester.invalidateLines3Ip()
+                        if (StartupPlatformPolicy.isEnabled(ContentPlatform.PICACG)) {
+                            publishStartupCheck(StartupCheckPhase.MACCMS_LINE, StartupCheckResult.INTERRUPTED, "本轮中断，共享线路已失效")
+                        }
+                    }
                     _startupSummary.value = "三平台测速未完成"
                     _platformStartupStatuses.value = _platformStartupStatuses.value.mapValues { (_, status) ->
                         if (status.running) status.copy(message = "测速中断", running = false) else status

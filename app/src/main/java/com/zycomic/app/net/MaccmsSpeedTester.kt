@@ -69,6 +69,18 @@ object MaccmsSpeedTester {
         currentLines3Ip = null
         generation++
     }
+
+    /** Route readiness is not a host reachability result and must never synthesize probes. */
+    internal fun bindLines3Ip(ip: String?): Long? = synchronized(lock) {
+        currentLines3Ip = ip?.takeIf { MaccmsPinnedTransport.address(it) != null }
+        generation++
+        generation.takeIf { currentLines3Ip != null }
+    }
+
+    internal fun isLines3BindingCurrent(expectedGeneration: Long): Boolean = synchronized(lock) {
+        generation == expectedGeneration && currentLines3Ip != null
+    }
+
     private val history = loadHistory()
     private val runtimeEvents = loadRuntimeEvents()
 
@@ -103,6 +115,8 @@ object MaccmsSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
     ): Snapshot = runMutex.withLock {
+        // A queued health check must not probe or publish an already retired binding.
+        if (!isCurrent()) return@withLock Snapshot()
         _running.value = true
         try {
             val startingGeneration = synchronized(lock) { generation }

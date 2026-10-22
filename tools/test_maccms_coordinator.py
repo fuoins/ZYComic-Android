@@ -36,6 +36,7 @@ def main() -> None:
         "MaccmsCoordinatorRuntimeTest",
     ]
     tests = [HARNESS / f"{name}.kt" for name in test_names]
+    tests.append(ROOT / "app/src/test/java/com/zycomic/app/net/SpeedTestRunPolicyTest.kt")
     sources = [HARNESS / name for name in [
         "MaccmsCoordinatorAndroid.kt", "MaccmsCoordinatorConnectivity.kt", "Log.kt",
         "MaccmsCoordinatorPlatform.kt", "MaccmsCoordinatorFakes.kt", "MaccmsOfflineProbeExtension.kt",
@@ -60,7 +61,7 @@ def main() -> None:
             else:
                 assert current_class, path
                 selectors.append(f"com.zycomic.app.net.{current_class}#{match.group(2)}")
-    assert len(selectors) == 23, f"Expected all 23 coordinator contract methods, found {len(selectors)}"
+    assert len(selectors) == 36, f"Expected all 36 coordinator and run-policy contract methods, found {len(selectors)}"
     stdlib = jar("org.jetbrains.kotlin", "kotlin-stdlib", "2.2.21")
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.10.2")
     junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")

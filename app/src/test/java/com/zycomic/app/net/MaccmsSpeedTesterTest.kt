@@ -178,7 +178,7 @@ class MaccmsSpeedTesterTest {
             )
             assertEquals(0, beforeApplyCalls.get(), "beforeApply is not called after isCurrent becomes false")
             assertEquals(before, MaccmsSpeedTester.snapshot.value)
-            assertEquals(3, result.probes.size)
+            assertTrue(result.probes.isEmpty(), "a retired queued round must not probe any host")
         } finally {
             MaccmsSpeedTester.resetProbeTransportForTests()
         }
@@ -255,6 +255,53 @@ class MaccmsSpeedTesterTest {
             )
             assertNotEquals(route, MaccmsSpeedTester.currentRoute())
         } finally {
+            MaccmsSpeedTester.resetProbeTransportForTests()
+        }
+    }
+
+    @Test
+    fun `binding a shared IP is immediately usable but never invents host health results`() {
+        val before = MaccmsSpeedTester.snapshot.value
+        val historyCount = MaccmsSpeedTester.logJson().getJSONArray("history").length()
+        val binding = requireNotNull(MaccmsSpeedTester.bindLines3Ip("192.0.2.70"))
+        assertTrue(MaccmsSpeedTester.isLines3BindingCurrent(binding))
+        assertEquals("192.0.2.70", MaccmsSpeedTester.routeSelection().lines3Ip)
+        assertEquals(before, MaccmsSpeedTester.snapshot.value, "readiness must not report domain probes as successful")
+        assertEquals(historyCount, MaccmsSpeedTester.logJson().getJSONArray("history").length())
+        MaccmsSpeedTester.invalidateLines3Ip()
+        assertFalse(MaccmsSpeedTester.isLines3BindingCurrent(binding))
+        assertEquals(null, MaccmsSpeedTester.routeSelection().lines3Ip)
+        assertEquals(null, MaccmsSpeedTester.bindLines3Ip("not-an-ip.example"))
+        assertEquals(null, MaccmsSpeedTester.routeSelection().lines3Ip)
+    }
+
+    @Test
+    fun `new binding retires in-flight host health results even for the same IP`() = runBlocking {
+        val binding = requireNotNull(MaccmsSpeedTester.bindLines3Ip("192.0.2.71"))
+        val before = MaccmsSpeedTester.snapshot.value
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        MaccmsSpeedTester.installProbeTransportForTests { route, _ ->
+            entered.complete(Unit)
+            release.await()
+            probe(route, 5)
+        }
+        try {
+            val old = async {
+                MaccmsSpeedTester.run(
+                    lines3Ip = "192.0.2.71",
+                    isCurrent = { MaccmsSpeedTester.isLines3BindingCurrent(binding) },
+                )
+            }
+            entered.await()
+            val newBinding = requireNotNull(MaccmsSpeedTester.bindLines3Ip("192.0.2.71"))
+            release.complete(Unit)
+            old.await()
+            assertTrue(MaccmsSpeedTester.isLines3BindingCurrent(newBinding))
+            assertEquals(before, MaccmsSpeedTester.snapshot.value, "an old health result cannot overwrite a new route binding")
+            assertEquals("192.0.2.71", MaccmsSpeedTester.routeSelection().lines3Ip)
+        } finally {
+            release.complete(Unit)
             MaccmsSpeedTester.resetProbeTransportForTests()
         }
     }

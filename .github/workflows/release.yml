@@ -89,11 +89,20 @@ jobs:
           echo "Release source SHA: $SHA"
           grep -E 'version(Code|Name) =' app/build.gradle.kts
 
+      - name: Apply and verify official formatting
+        run: |
+          ./gradlew spotlessApply --console=plain
+          ./gradlew spotlessCheck --console=plain
+          git diff --exit-code
+
       - name: Isolated JVM contract tests
         run: |
           ./gradlew -p tools/offline-tests prepareHarnessDependencies --console=plain
           python3 tools/test_maccms_coordinator.py
           python3 tools/test_picacg_repository.py
+          python3 tools/test_manwa_first_page_retry.py
+          python3 tools/test_maccms_routes.py
+          python3 tools/test_picacg_startup_publication.py
 
       - name: Release unit tests
         env:
@@ -170,7 +179,8 @@ jobs:
           "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
           grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "versionCode='11'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='12'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.zycomic.app'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
           test -s app/build/outputs/mapping/release/mapping.txt
           {
@@ -188,19 +198,18 @@ jobs:
         if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 4.0.0 正式版
+          ZYComic 4.1.0 正式版
 
-          本次更新（相对 v3.0.0）
-          - 完善哔咔注册、账号资料、自动签到、关键词屏蔽，以及浏览、搜索、排行、书库和历史界面。
-          - 优化哔咔缓存首屏、封面与正文图源选择、图片加载及跨镜像恢复。
-          - 统一详情页展示，完善阅读器目录增量加载、详情导航与加载进度。
-          - 优化三平台启动检测、测速日志及线路诊断，支持配置升级时复用身份未变的端点记录，并提供完整重测入口。
-          - 修复哔咔相关推荐与 Maccms 线路隔离，Maccms 请求固定使用本轮 lines3 IP 并保留正确的 Host/TLS 校验。
-          - 合并重复启动测速请求，移除哔咔收藏刷新多余的加载指示，更新启动引导文案与重点提示。
+          本次更新（相对 v4.0.0）
+          - 修复漫蛙首次进入时部分临时连接失败：仅对安全 GET 首屏请求自动重试一次，保留取消、页面、账号、配置与网络变化保护，不扩大到登录或其他写操作。
+          - 优化 Maccms 开屏勾选：本轮哔咔 lines3 IP 正式选定并绑定后，立即显示“共享线路就绪”，不再等待哔咔图源测试结束。
+          - 保留 Maccms 三个域名各自的后台 HTTPS 测活与真实结果日志，不阻塞进入应用；共享线路就绪不代表域名测活或推荐 API 已通过。
+          - Maccms 继续固定使用本轮共享 IP，保留各域名的 Host/SNI 与 TLS 校验；无本轮有效 IP 时不打勾，不回退旧 IP 或 DNS。
+          - 修复整轮测速完成后重复启动五端点快测：同一配置、网络与平台状态下复用已完成整轮，保留勾选进度；真正变化及手动完整或单平台重测仍正常执行。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 版本：4.0.0（versionCode 11），正式包名 com.zycomic.app。
+          - 版本：4.1.0（versionCode 12），正式包名 com.zycomic.app。
           - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
 

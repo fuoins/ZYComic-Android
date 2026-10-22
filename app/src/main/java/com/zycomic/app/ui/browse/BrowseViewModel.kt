@@ -7,6 +7,8 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.net.RouteManager
+import com.zycomic.app.net.RuntimeNetworkGate
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.ContentPlatformPrefs
@@ -329,6 +331,37 @@ class BrowseViewModel {
 
     private val requestSeq = java.util.concurrent.atomic.AtomicLong(0)
     private var currentJob: Job? = null
+    // KMK --> The retry belongs to the visible browse load, never to a global client.
+    private var browseVisible = false
+
+    fun onBrowseVisible() {
+        browseVisible = true
+        val item = tabs.getOrNull(mainTab.value) ?: return
+        val state = stateFor(mainTab.value)
+        if (item.platformId == ContentPlatform.MANWA && !isIndependentRanking(item) &&
+            !state.loaded && !state.loading.value && state.error.value == null
+        ) {
+            refresh()
+        }
+    }
+
+    fun onBrowseHidden() {
+        browseVisible = false
+        cancelManwaLoad()
+    }
+
+    private fun cancelManwaLoad() {
+        requestSeq.incrementAndGet()
+        currentJob?.cancel()
+        currentJob = null
+        tabs.indices.filter { tabs[it].platformId == ContentPlatform.MANWA }.forEach { tab ->
+            stateFor(tab).also {
+                it.loading.value = false
+                it.appending.value = false
+            }
+        }
+    }
+    // KMK <--
 
     val dateOptions: List<Pair<String, String>> = buildDateOptions()
 
@@ -340,7 +373,8 @@ class BrowseViewModel {
         tabs.getOrNull(mainTab.value)?.let { bindPlatform(it.platformId, allowIndependentRanking = isIndependentRanking(it)) }
         BrowseTabStore.saveSelectedTab(mainTab.value)
         bindFilterFor(mainTab.value)
-        if (currentPlatform.value != ContentPlatform.PICACG) refresh()
+        // Manwa starts when BrowseScreen becomes visible; hidden startup tabs must not retry.
+        if (currentPlatform.value == ContentPlatform.JM) refresh()
     }
 
     private fun isIndependentRanking(item: BrowseTabItem): Boolean =
@@ -362,6 +396,7 @@ class BrowseViewModel {
         if (!canSelect(item)) return
         if (mainTab.value == tab && currentPlatform.value == item.platformId) return
         val platformChanged = currentPlatform.value != item.platformId
+        if (mainTab.value != tab) cancelManwaLoad()
         bindPlatform(item.platformId, allowIndependentRanking = isIndependentRanking(item))
         if (platformChanged) {
             selectionMode.value = false
@@ -382,17 +417,8 @@ class BrowseViewModel {
     private fun bindPlatform(platform: ContentPlatform, allowIndependentRanking: Boolean = false) {
         if (!allowIndependentRanking && !StartupPlatformPolicy.isEnabled(platform)) return
         if (currentPlatform.value == platform) return
-        currentJob?.cancel()
-        requestSeq.incrementAndGet()
+        cancelManwaLoad()
         val previous = currentPlatform.value
-        if (previous == ContentPlatform.MANWA) {
-            tabs.indices.filter { tabs[it].platformId == previous }.forEach { tab ->
-                stateFor(tab).also {
-                    it.loading.value = false
-                    it.appending.value = false
-                }
-            }
-        }
         prefs.edit()
             .putBoolean("browse_filter_expanded_${previous.id}", filterExpanded.value)
             .apply()
@@ -593,7 +619,8 @@ class BrowseViewModel {
             ts.appending.value = false
             ts.jmJob = scope.launch { doLoadJm(reset = true, tab = tab) }
         } else {
-            currentJob?.cancel()
+            if (!browseVisible) return
+            cancelManwaLoad()
             currentJob = scope.launch { doLoad(reset = true, tab = tab) }
         }
     }
@@ -626,6 +653,7 @@ class BrowseViewModel {
         val item = tabs[tab]
         val reqId = requestSeq.incrementAndGet()
         if (reset) {
+            ts.loaded = false
             ts.currentPage = 1
             ts.hasMore.value = true
             ts.loading.value = true
@@ -634,27 +662,42 @@ class BrowseViewModel {
         } else {
             ts.appending.value = true
         }
+        // KMK --> Freeze parameters and context for both attempts of this logical load.
+        val session = UserRepository.captureBrowseSession()
+        val configRevision = RouteManager.configRevision
+        val networkRevision = RuntimeNetworkGate.revision
+        val date = newestDate.value
+        val rank = rankType.value
+        val filter = sessionFilters.get("${item.platformId.id}:${item.id}") { item.filter ?: FilterSnapshot() }
+        fun isCurrentLoad() = browseVisible && reqId == requestSeq.get() &&
+            currentPlatform.value == ContentPlatform.MANWA && mainTab.value == tab &&
+            tabs.getOrNull(tab) == item && canSelect(item) &&
+            RouteManager.configRevision == configRevision && RuntimeNetworkGate.revision == networkRevision &&
+            UserRepository.isCurrentBrowseSession(session)
+        val retry = ManwaFirstPageRetry(enabled = reset, isCurrent = ::isCurrentLoad)
+        // KMK <--
         try {
             val target = if (reset) 30 else 15
             var lastInvoked = ts.currentPage
-
+            var firstPageTotal: Int? = null
             val rawLoader: suspend (Int) -> List<Manga> = { p ->
                 lastInvoked = p
-                when (item.kind) {
-                    TabKind.SPECIAL -> when (item.pageType) {
-                        BrowsePageType.LATEST -> MangaRepository.getNewest(p, newestDate.value, 30).first
-                        BrowsePageType.RANKING -> MangaRepository.getRank(rankType.value, p)
-                        else -> MangaRepository.getNewest(p, newestDate.value, 30).first
-                    }
-                    TabKind.FILTER -> {
-                        val f = sessionFilters.get("${item.platformId.id}:${item.id}") { item.filter ?: FilterSnapshot() }
-                        MangaRepository.getClasses(
+                retry.run {
+                    when (item.kind) {
+                        TabKind.SPECIAL -> when (item.pageType) {
+                            BrowsePageType.RANKING -> MangaRepository.getRank(rank, p)
+                            else -> MangaRepository.getNewest(p, date, 30).let { (list, total) ->
+                                if (p == 1) firstPageTotal = total
+                                list
+                            }
+                        }
+                        TabKind.FILTER -> MangaRepository.getClasses(
                             page = p,
-                            gender = f.gender,
-                            tag = f.tags.joinToString(","),
-                            area = f.area,
-                            end = f.end,
-                            st = f.st,
+                            gender = filter.gender,
+                            tag = filter.tags.joinToString(","),
+                            area = filter.area,
+                            end = filter.end,
+                            st = filter.st,
                         )
                     }
                 }
@@ -666,19 +709,18 @@ class BrowseViewModel {
                 rawLoader(ts.currentPage)
             }
 
-            if (reqId != requestSeq.get()) return
-            if (!canSelect(item)) return
+            if (!isCurrentLoad()) return
             ts.currentPage = lastInvoked + 1
-
             if (item.kind == TabKind.SPECIAL && item.pageType == BrowsePageType.LATEST && reset) {
-                newestNums.value = MangaRepository.getNewest(1, newestDate.value, 30).second
+                firstPageTotal?.let { newestNums.value = it }
             }
-
             ts.mangas.value = if (reset) result else ts.mangas.value + result
             ts.loaded = true
             if (result.isEmpty()) ts.hasMore.value = false
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            if (reqId != requestSeq.get()) return
+            if (!isCurrentLoad()) return
             if (reset) ts.error.value = e.message ?: "加载失败"
         } finally {
             if (reqId == requestSeq.get()) {

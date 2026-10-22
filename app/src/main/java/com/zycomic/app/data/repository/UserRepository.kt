@@ -45,6 +45,13 @@ object UserRepository {
     }
     private val sessionVerification = ManwaSessionVerificationPolicy()
 
+    // KMK --> Fence browse reads without changing authentication confidence.
+    internal fun captureBrowseSession(): ManwaSessionVerificationPolicy.Ticket = sessionVerification.beginRefresh {}
+
+    internal fun isCurrentBrowseSession(ticket: ManwaSessionVerificationPolicy.Ticket): Boolean =
+        sessionVerification.isCurrent(ticket)
+    // KMK <--
+
     private const val KEY_USER_INFO = "user_info_json"
 
     /** 必须在 App.onCreate 中调用一次，初始化 SharedPreferences。 */

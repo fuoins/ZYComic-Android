@@ -20,6 +20,8 @@ val harnessCoordinates = listOf(
     "com.squareup.okhttp3:okhttp-jvm:5.3.2",
     "com.squareup.okhttp3:mockwebserver3:5.3.2",
     "com.squareup.okio:okio-jvm:3.16.4",
+    "com.squareup.okhttp3:okhttp:4.12.0",
+    "com.squareup.okio:okio-jvm:3.6.0",
     "org.json:json:20240303",
     "org.junit.platform:junit-platform-console-standalone:1.10.2",
 )

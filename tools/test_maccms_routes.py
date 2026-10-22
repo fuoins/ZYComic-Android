@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """Compile/run focused Maccms tests with cached dependencies; never invokes Gradle or downloads."""
 from pathlib import Path
+import os
 import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE = Path.home() / ".gradle/caches/modules-2/files-2.1"
-LOCAL_DEPS = Path("/tmp/jm-targeted-check/deps")
+DEPS = ROOT / "tools/offline-tests/build/deps"
+CACHE = Path(os.environ.get("GRADLE_USER_HOME", Path.home() / ".gradle")) / "caches/modules-2/files-2.1"
 OUT = Path("/tmp/jm-maccms-offline-tests")
 CLASSES = OUT / "classes"
 
 
 def jar(group: str, name: str, version: str) -> str:
+    prepared = DEPS / f"{name}-{version}.jar"
+    if prepared.is_file():
+        return str(prepared)
     matches = sorted((CACHE / group / name / version).rglob("*.jar"))
-    local = LOCAL_DEPS / f"{name}-{version}.jar"
-    if not matches and local.is_file():
-        matches = [local]
     if not matches:
         raise RuntimeError(
-            f"Cached dependency not found: {group}:{name}:{version}; this runner is offline"
+            f"Missing {group}:{name}:{version}; run prepareHarnessDependencies first"
         )
     return str(matches[0])
 
@@ -44,14 +45,14 @@ def source_contracts() -> None:
         for contract in ("isCurrent =", "beforeApply ="):
             if contract not in text:
                 raise AssertionError(f"Maccms coordinator call is missing {contract}")
-        if "checkMaccms(picacgSnapshot?.roundSelectedLine?.ip)" not in text:
-            raise AssertionError("Maccms must consume only the current returned Picacg selection")
-        if "checkMaccms(null)" not in text or "MaccmsSpeedTester.invalidateLines3Ip()" not in text:
+        if "onApiPublished = { endpoint -> publishMaccmsRoute(endpoint?.ip) }" not in text:
+            raise AssertionError("Maccms must consume the formally published current-round API selection")
+        if "publishMaccmsRoute(null)" not in text or "MaccmsSpeedTester.invalidateLines3Ip()" not in text:
             raise AssertionError("Missing current-run invalidation or no-IP path")
-        if text.index("val snapshot = PicacgSpeedTester.run(") >= text.index("checkMaccms(picacgSnapshot?.roundSelectedLine?.ip)"):
-            raise AssertionError("Maccms must run after this round's Picacg selection")
+        if "maccmsHealthJob = healthScope.launch" not in text or "MaccmsSpeedTester.bindLines3Ip(lines3Ip)" not in text:
+            raise AssertionError("Route readiness must be independent of background host health probes")
         cache_branch = text.split("if (linesDone && imagesDone) {", 1)[1].split("measuredPlatforms.add", 1)[0]
-        if "platform != ContentPlatform.PICACG" not in cache_branch or "checkMaccms(null)" in cache_branch:
+        if "platform != ContentPlatform.PICACG" not in cache_branch or "publishMaccmsRoute(null)" in cache_branch:
             raise AssertionError("A completed Picacg report must not skip current-round IP revalidation")
         picacg_run = text.split("val snapshot = PicacgSpeedTester.run(", 1)[1].split("picacgSnapshot =", 1)[0]
         if "reuseApi = false" not in picacg_run:
@@ -127,10 +128,8 @@ object DevConfig { var appContext: android.content.Context? = null }
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.8.0")
     okhttp = jar("com.squareup.okhttp3", "okhttp-jvm", "5.3.2")
     okio = jar("com.squareup.okio", "okio-jvm", "3.16.4")
-    json = str(LOCAL_DEPS / "json-20240303.jar")
-    junit = "/tmp/jm-targeted-check/junit-console.jar"
-    if not Path(json).is_file() or not Path(junit).is_file():
-        raise RuntimeError("Cached JSON/JUnit runner jar missing; this runner is offline")
+    json = jar("org.json", "json", "20240303")
+    junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")
     compiler = ":".join([
         jar("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.2.21"),
         stdlib,

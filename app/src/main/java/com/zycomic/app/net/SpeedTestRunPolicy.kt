@@ -16,7 +16,8 @@ internal object SpeedTestRunPolicy {
         current: SpeedTestRunKey,
         forceFresh: Boolean,
         platformOnly: Boolean,
-    ): Boolean = !forceFresh && !platformOnly && completed == current
+        remoteConfigUpdated: Boolean = false,
+    ): Boolean = !forceFresh && !platformOnly && !remoteConfigUpdated && completed == current
 
     /** Each tester validates its history's configuration version, not the current endpoint pool. */
     fun canFastTest(

@@ -54,8 +54,9 @@ class PicacgSpeedTesterRuntimeTest {
         )
         PicacgSpeedTestHistoryStorage.saveApi(history)
         setResponses((0..4).associate { "api$it.picacg.test" to 503 })
+        val published = mutableListOf<DomainIp?>()
 
-        val snapshot = PicacgSpeedTester.run(fastApi = true)
+        val snapshot = PicacgSpeedTester.run(fastApi = true, onApiPublished = published::add)
 
         assertEquals(emptyList<String>(), values("runtimeTestResolutions"))
         assertEquals((0..4).map { "api$it.picacg.test" }.toSet(), values("runtimeTestRequests").toSet())
@@ -70,6 +71,7 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(emptyList<PicacgSpeedTester.Probe>(), snapshot.imageProbes)
         assertTrue(snapshot.imageBlockedReason.orEmpty().contains("正文图源"), "with no configured content source the image stage is blocked")
         assertEquals(emptyList<String>(), values("runtimeTestApiSelections"), "stale success and untested sixth row must not be selected")
+        assertEquals(listOf(null), published, "historical success and untested rows cannot be published as the current API")
 
         val refreshed = PicacgSpeedTestHistoryStorage.loadApi()
         assertEquals(7, refreshed.measurements.size, "quick refresh must not append duplicates")
@@ -142,6 +144,8 @@ class PicacgSpeedTesterRuntimeTest {
         PicacgSpeedTestHistoryStorage.saveApi(oldHistory)
         var currentChecks = 0
         var checksWhenApplyInvalidated = -1
+        var beforeApplyCalls = 0
+        val published = mutableListOf<DomainIp?>()
 
         PicacgSpeedTester.run(
             isCurrent = {
@@ -149,17 +153,69 @@ class PicacgSpeedTesterRuntimeTest {
                 true
             },
             beforeApply = {
+                beforeApplyCalls++
                 checksWhenApplyInvalidated = currentChecks
                 invokeRoute("invalidateRuntimeTestRevision")
                 true
             },
+            onApiPublished = published::add,
         )
 
-        assertEquals(1, checksWhenApplyInvalidated, "the one earlier check guards the probe itself")
-        assertEquals(2, currentChecks, "the final current-generation check runs after beforeApply")
+        assertEquals(2, checksWhenApplyInvalidated, "the probe and API publication barrier each check the current generation")
+        assertEquals(2, beforeApplyCalls, "API publication and final snapshot each cross beforeApply")
+        assertEquals(3, currentChecks, "the API barrier and final snapshot each recheck the current generation")
+        assertTrue(published.isEmpty(), "a configuration revision race must not publish the API line")
         assertNull(PicacgSpeedTester.snapshot.value)
         assertEquals(oldHistory, PicacgSpeedTestHistoryStorage.loadApi(), "rejected generation cannot publish history")
         assertEquals(listOf("only.picacg.test"), values("runtimeTestRequests"))
+    }
+
+    @Test
+    fun `fresh successful API is published before image preparation and matches final snapshot`() = runBlocking {
+        val url = "https://fresh.picacg.test"
+        val freshIp = "192.0.2.51"
+        configure(listOf(url), mapOf(host(url) to listOf(freshIp)), version = 5)
+        val events = mutableListOf<String>()
+        val published = mutableListOf<DomainIp?>()
+
+        val snapshot = PicacgSpeedTester.run(
+            onApiPublished = { endpoint ->
+                events += "published"
+                published += endpoint
+            },
+            onProgress = { progress ->
+                if (progress.stage == PicacgSpeedTester.Stage.PREPARING_IMAGES) events += "preparing-images"
+            },
+        )
+
+        val publishedEndpoint = requireNotNull(published.single())
+        assertNotNull(publishedEndpoint)
+        assertEquals(DomainIp(host(url), freshIp), publishedEndpoint)
+        assertTrue(events.indexOf("published") in 0 until events.indexOf("preparing-images"), "API publication must precede image preparation")
+        assertEquals(publishedEndpoint, snapshot.roundSelectedLine)
+        assertEquals(publishedEndpoint, PicacgSpeedTester.snapshot.value?.roundSelectedLine)
+        assertTrue(snapshot.apiProbes.any { it.endpoint == publishedEndpoint && it.testedThisRound && it.success })
+        assertEquals(listOf("fresh.picacg.test"), values("runtimeTestApiSelections"))
+    }
+
+    @Test
+    fun `rejected beforeApply does not invoke API publication callback`() = runBlocking {
+        val url = "https://rejected.picacg.test"
+        configure(listOf(url), mapOf(host(url) to listOf("192.0.2.61")), version = 6)
+        val published = mutableListOf<DomainIp?>()
+        var beforeApplyCalls = 0
+
+        PicacgSpeedTester.run(
+            beforeApply = {
+                beforeApplyCalls++
+                false
+            },
+            onApiPublished = published::add,
+        )
+
+        assertEquals(2, beforeApplyCalls, "both API publication and final snapshot are gated")
+        assertTrue(published.isEmpty(), "a rejected API publication barrier must not invoke the callback")
+        assertNull(PicacgSpeedTester.snapshot.value)
     }
 
     private fun configure(urls: List<String>, ips: Map<String, List<String>>, version: Int) {

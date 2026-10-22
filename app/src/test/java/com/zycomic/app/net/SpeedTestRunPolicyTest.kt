@@ -59,6 +59,7 @@ class SpeedTestRunPolicyTest {
     @Test
     fun `actual remote config update forces full test without duplicate completed run`() {
         assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = true))
         assertFalse(SpeedTestRunPolicy.canFastTest(true, false, remoteConfigUpdated = true))
         assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
     }

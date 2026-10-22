@@ -10,7 +10,7 @@ enum class StartupCheckPhase(val label: String) {
     PICACG_IMAGE("哔咔图域名"),
     JM_LINE("禁漫线路"),
     JM_IMAGE("禁漫图域名"),
-    MACCMS_LINE("Maccms 推荐连通性"),
+    MACCMS_LINE("Maccms 共享线路就绪"),
 }
 
 enum class StartupCheckResult(val label: String) {

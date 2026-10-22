@@ -39,7 +39,7 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
     }
 
     @Test
-    fun `completed config update is not repeated as a quick test by duplicate startup`() = runBlocking {
+    fun `completed config update duplicate does not rerun any tester`() = runBlocking {
         PicacgRouteManager.verifiedImageSampleUrl = "https://img.picacg.test/chapter/cover.jpg"
 
         val first = PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
@@ -51,12 +51,12 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
 
         val duplicate = PlatformSpeedTestCoordinator.run()
 
-        assertEquals(listOf(1, 2, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
+        assertEquals(listOf(1, 1, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
         assertEquals(listOf(false), SpeedTester.reuseLines)
         assertEquals(listOf(false to false), JmSpeedTester.reuseFlags)
-        assertEquals(2, PicacgSpeedTester.apiProbeCount)
+        assertEquals(1, PicacgSpeedTester.apiProbeCount)
         assertEquals(1, PicacgSpeedTester.imageProbeCount)
-        assertEquals(listOf(false to false, false to true), PicacgSpeedTester.reuseFlags)
+        assertEquals(listOf(false to false), PicacgSpeedTester.reuseFlags)
         assertTrue(duplicate.all { it.status == "tested" })
     }
 
@@ -161,5 +161,20 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
         assertEquals(1, SpeedTester.runCount)
         assertEquals(1, JmSpeedTester.runCount)
         assertEquals("tested", automaticRetry.single { it.platform == "哔咔" }.status)
+    }
+
+    @Test
+    fun `completed same-key ordinary run preserves reports checks and adds no API probes`() = runBlocking {
+        PicacgRouteManager.verifiedImageSampleUrl = "https://img.picacg.test/chapter/cover.jpg"
+        val completed = PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
+        assertTrue(completed.all { it.status == "tested" })
+        val checks = PlatformSpeedTestCoordinator.startupCheckStatuses.value
+        val counts = listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount, PicacgSpeedTester.apiProbeCount)
+
+        val duplicate = PlatformSpeedTestCoordinator.run()
+
+        assertEquals(completed, duplicate)
+        assertEquals(counts, listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount, PicacgSpeedTester.apiProbeCount))
+        assertEquals(checks, PlatformSpeedTestCoordinator.startupCheckStatuses.value)
     }
 }
