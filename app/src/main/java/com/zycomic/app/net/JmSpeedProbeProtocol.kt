@@ -12,8 +12,8 @@ internal object JmSpeedProbeProtocol {
     const val LINE_PATH = "/setting?app_img_shunt=1&express=&lang=TW"
     const val IMAGE_PATH = "/media/albums/553653_3x4.jpg"
 
-    /** 图片探活只需读取文件头魔数（JPEG 3B / PNG 8B / GIF 6B / WEBP 12B），128B 已留 10 倍余量。 */
-    const val IMAGE_PROBE_BYTES = 128L
+    /** Bounded image-body sample; this verifies a prefix, not a full download or full image decode. */
+    const val IMAGE_PROBE_BYTES = BoundedImageProbeSampler.DEFAULT_MAX_BYTES * 1L
 
     /** Accepts only a complete, decrypted JSON object or array—not an API envelope or scalar. */
     fun isValidDecryptedJson(payload: String): Boolean {

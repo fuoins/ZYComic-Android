@@ -175,9 +175,12 @@ internal object AdaptiveSpeedProbe {
             )
         }
 
-        private fun confidence(history: History?): Boolean =
-            (history?.successes ?: 0) >= 2 && history!!.latencyMs in 0 until Long.MAX_VALUE &&
+        private fun healthyHistory(history: History?): Boolean =
+            (history?.successes ?: 0) > 0 && history!!.failures == 0 && history.latencyMs in 0 until Long.MAX_VALUE &&
                 now() - history.lastMeasuredAt in 0..86_400_000L
+
+        private fun confidence(history: History?): Boolean =
+            healthyHistory(history) && history!!.successes >= 2
 
         /** Saturating exponential backoff: base, 2*base, 4*base ... cap; no shifts or arithmetic overflow. */
         private fun cooldownFor(failures: Int): Long {
@@ -275,12 +278,11 @@ internal object AdaptiveSpeedProbe {
             fun eligible(candidate: Candidate<T>) = (candidate.allTimes?.cooldownUntil ?: 0L) <= now()
             // Use recent successful history even when it is strong; confidence controls ranking, not baseline eligibility.
             // With no same-scope history, two valid current results are enough; never invent a global 1.5s ceiling.
-            val baseline = ordered.asSequence()
-                .mapNotNull { it.allTimes }
-                .filter {
-                    it.successes > 0 && it.failures == 0 && it.latencyMs in 0 until Long.MAX_VALUE &&
-                        now() - it.lastMeasuredAt in 0..86_400_000L
-                }
+            // Compare like-for-like time windows first: a mixed day/night average can hide a real slowdown.
+            val localBaselines = ordered.mapNotNull { it.history?.takeIf(::healthyHistory) }
+            val baseline = localBaselines.ifEmpty {
+                ordered.mapNotNull { it.allTimes?.takeIf(::healthyHistory) }
+            }.asSequence()
                 .map { it.latencyMs }
                 .sorted()
                 .take(2)
@@ -311,6 +313,9 @@ internal object AdaptiveSpeedProbe {
             val results = mutableListOf<Pair<T, R>>()
             var latestAttemptStamp = ordered.maxOfOrNull { lastAttempt(it.allTimes) } ?: 0L
             var good = 0
+            var usable = 0
+            val requireIndependentBackup = ordered.map { independenceKey(it.target) }.distinct().size >= 2
+            val goodGroups = mutableSetOf<String>()
             var dispatched = 0
             var completed = 0
             var inFlight = 0
@@ -348,8 +353,8 @@ internal object AdaptiveSpeedProbe {
                                     dispatched++
                                     inFlight++
                                     ordered.removeAt(next).also { usedGroups += independenceKey(it.target) }
-                                } else if (!explorationOnly && inFlight == 0) {
-                                    // Only service recovery may wait for cooling peers within the run budget.
+                                } else if (!explorationOnly && inFlight == 0 && usable == 0) {
+                                    // Wait only when service is unavailable, not to perfect an already usable pool.
                                     waitMs = (ordered.minOf { it.allTimes?.cooldownUntil ?: 0L } - now()).coerceAtLeast(1L)
                                     null
                                 } else {
@@ -461,7 +466,11 @@ internal object AdaptiveSpeedProbe {
                             completed++
                             inFlight--
                             if (result != null) results += candidate.target to result
-                            if (ok && elapsedMs(result!!) in 0L..fastThresholdMs) good++
+                            if (ok) usable++
+                            if (ok && elapsedMs(result!!) in 0L..fastThresholdMs) {
+                                // Aliases sharing one IP are not two independent healthy routes.
+                                if (!requireIndependentBackup || goodGroups.add(independenceKey(candidate.target))) good++
+                            }
                             changed.complete(Unit)
                             changed = CompletableDeferred()
                         }
@@ -484,13 +493,14 @@ internal object AdaptiveSpeedProbe {
             val valid = results.filter { !sampleInvalid(it.second) && success(it.second) }
             val selected = valid.minByOrNull { elapsedMs(it.second) }
             emit(
-                "dispatched=$dispatched; completed=$completed; untested=${ordered.size}; explorationOnly=$explorationOnly; stop=${when {
-                    !quick -> "full-complete"
-                    remaining() <= 0L -> "run-budget"
-                    good >= 2 -> "enough-current-successes"
-                    ordered.isNotEmpty() -> "cooldown-deferred-to-next-run"
-                    else -> "pool-exhausted"
-                }}; finalBasis=current-round-valid-only; selectedCandidate=${selected?.first?.let(key)}; historyApplied=false",
+                "dispatched=$dispatched; completed=$completed; untested=${ordered.size}; explorationOnly=$explorationOnly; " +
+                    "usable=$usable; independentFastGroups=${goodGroups.size}; stop=${when {
+                        !quick -> "full-complete"
+                        remaining() <= 0L -> "run-budget"
+                        good >= 2 -> "enough-current-successes"
+                        ordered.isNotEmpty() -> "cooldown-deferred-to-next-run"
+                        else -> "pool-exhausted"
+                    }}; finalBasis=current-round-valid-only; selectedCandidate=${selected?.first?.let(key)}; historyApplied=false",
             )
             results.toList()
         }

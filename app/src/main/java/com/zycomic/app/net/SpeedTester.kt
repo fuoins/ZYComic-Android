@@ -18,7 +18,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okio.Buffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -34,8 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 线路探活：[NetworkModule.newLineProbeClient]（挂 [ManwaInterceptor]）打匿名用户信息接口
  *   `/api/users/info`（约 41B），完整经过 追加通用参数 → 签 devid/X-Token → gzip → AES 解密，
  *   仅当 2xx **且解密后是合法 JSON** 才计成功；
- * - 图域探活：先打固定真实封面（[PROBE_COVER_PATH]，带 Range 只取文件头 128B），
- *   仅当 200/206 且确为图片/非文本二进制才计成功：VPN 下返回 403/HTML 挑战页的图域会被自然淘汰。
+ * - 图域探活：先打固定真实封面（[PROBE_COVER_PATH]，带 Range 最多取 32 KiB），
+ *   仅当 200/206 且采样正文符合图片/密文策略才计成功；这是有界前缀验证，不等同于完整下载/解码。
  *
  * 线程约束（重要）：本对象所有对外方法都是 suspend 且**整体在 [Dispatchers.IO] 上执行**。
  * 之前只有单次测量走 IO，而阶段 1 选完线路后的 `NetworkModule.rebuild()` 留在调用方线程，
@@ -49,11 +48,7 @@ object SpeedTester {
     private const val MAX = Long.MAX_VALUE
     private val probeScheduler = SpeedTestProbeBudget.scheduler
 
-    /**
-     * 图域探活只取文件头：图片魔数最多需 12B（WEBP），取 128B 留 10 倍余量；
-     * 线路 JSON 判定只看首字节 `{`，同样够用。响应体真正的下载量由 Range/接口体积决定。
-     */
-    private const val PROBE_BYTES = 128L
+    private const val IMAGE_PROBE_BYTES = BoundedImageProbeSampler.DEFAULT_MAX_BYTES * 1L
 
     /**
      * 线路探活路径：匿名用户信息接口（与抓包、[ApiService.userInfo] 同源）。
@@ -110,7 +105,7 @@ object SpeedTester {
             .build()
 
     /**
-     * 图域探活请求：[probePath] 为封面/样本相对路径时打该 URL（带 Range 只取文件头 128B），
+     * 图域探活请求：[probePath] 为封面/样本相对路径时打该 URL（带 Range 最多取 32 KiB），
      * 传 null 表示根路径兜底（仍按图片/非文本严格判负）。
      *
      * Referer 用**固定 canonical 域** [ManwaInterceptor.REFERER]，不用"当前线路 origin"：
@@ -125,9 +120,10 @@ object SpeedTester {
             .header("Referer", ManwaInterceptor.REFERER)
             .header("Accept", "image/*,*/*;q=0.8")
             .header("Connection", "keep-alive")
+            .header("Cache-Control", "no-cache, no-store")
         if (probePath != null) {
             builder.url("https://$domain$probePath")
-            builder.header("Range", "bytes=0-${PROBE_BYTES - 1}")
+            builder.header("Range", "bytes=0-${IMAGE_PROBE_BYTES - 1}")
         } else {
             builder.url("https://$domain/")
         }
@@ -331,7 +327,7 @@ object SpeedTester {
         measureLine(client, lineRequest(lineUrl))
 
     /**
-     * 通用单次探活。计时口径：从发起请求到**读完响应头（图域 128B / 线路即接口全文）**——线路探活时
+     * 通用单次探活。计时口径：从发起请求到**读完图片有界采样正文 / 线路接口全文**——线路探活时
      * [ManwaInterceptor] 是应用拦截器，`execute()` 返回前已完成 gzip 解压与 AES 解密，
      * 所以这个耗时天然包含"解密完成"，反映的是真实 API 链路。
      */
@@ -356,7 +352,15 @@ object SpeedTester {
                         contentType = resp.header("Content-Type")
                             ?.lowercase(java.util.Locale.ROOT)
                             ?.takeIf(String::isNotBlank)
-                        val head = readHead(resp, PROBE_BYTES)
+                        val head = if (strictImage) {
+                            resp.body?.let { body ->
+                                body.byteStream().use { input ->
+                                    BoundedImageProbeSampler.read(input, body.contentLength())
+                                }
+                            } ?: ByteArray(0)
+                        } else {
+                            resp.body?.bytes() ?: ByteArray(0)
+                        }
                         val failureCategory = when {
                             code !in 200..299 -> SpeedTestFailureCategory.HTTP_STATUS
                             requireJson && !isJsonLike(head) -> SpeedTestFailureCategory.INVALID_JSON
@@ -425,25 +429,9 @@ object SpeedTester {
         else -> SpeedTestFailureCategory.OTHER
     }
 
-    /**
-     * 读取响应前 [maxBytes] 字节。
-     *
-     * 用 `Source.read(sink, n)` 而不是 `BufferedSource.readByteArray(n)`：后者要求**凑满** n 字节，
-     * 遇到比 n 短的响应（小封面、几十~上百字节的错误 JSON）会抛 EOFException，
-     * 把"其实成功/确实是 404"误判成"网络异常"，进而丢掉图域探活的 404 回退逻辑。
-     */
-    private fun readHead(resp: okhttp3.Response, maxBytes: Long): ByteArray =
-        runCatching {
-            resp.body?.source()?.use { src ->
-                val buf = Buffer()
-                src.read(buf, maxBytes)
-                buf.readByteArray()
-            } ?: ByteArray(0)
-        }.getOrDefault(ByteArray(0))
-
-    /** 解密后的线路响应必须是 JSON 对象（被重置/未鉴权/假 200 的 HTML 或空 body 一律判负）。 */
+    /** 解密后的线路响应必须是完整 JSON 对象；仅以 `{` 开头的截断/伪响应不应放行。 */
     private fun isJsonLike(head: ByteArray): Boolean =
-        String(head, Charsets.UTF_8).trimStart().startsWith("{")
+        SpeedProbeResponseValidation.isJsonObject(head)
 
     /**
      * 判断探活响应是否像图片：图片 content-type / 图片魔数直接通过；
@@ -1080,7 +1068,7 @@ object SpeedTester {
                 imagePreparationTiming.close()
                 val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES_INCLUDING_SAMPLE)
                 val imageResults = adaptiveSession.run(
-                    scope = "MANWA:image",
+                    scope = "MANWA:image-body-32k-v2",
                     candidates = imageProbeTargets,
                     key = ::imageKey,
                     quick = quickImageRetest,
@@ -1144,7 +1132,7 @@ object SpeedTester {
                 if (quickImageRetest && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < MAX }) {
                     val measured = imageResults.mapTo(hashSetOf()) { it.first }
                     adaptiveSession.deferExploration(
-                        scope = "MANWA:image",
+                        scope = "MANWA:image-body-32k-v2",
                         candidates = imageProbeTargets.filterNot { it in measured },
                         key = ::imageKey,
                         success = { it.verdict == ImgVerdict.OK && it.delayMs < MAX },

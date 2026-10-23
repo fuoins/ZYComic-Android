@@ -41,6 +41,8 @@ class AdaptiveStartupRecoveryTest {
         network: String = "wifi",
         startedAt: Long,
         now: () -> Long,
+        budgetMs: Long = 10_000L,
+        monotonicMs: () -> Long = { 0L },
         concurrency: Int = 1,
         explorationIntervalMs: Long = 60 * 60_000L,
         explorationLimit: Int = 2,
@@ -48,12 +50,12 @@ class AdaptiveStartupRecoveryTest {
         networkIdentity = network,
         startedAtEpochMs = startedAt,
         store = store,
-        budgetMs = 10_000L,
+        budgetMs = budgetMs,
         concurrency = concurrency,
         attemptTimeoutMs = 1_000L,
         cooldownMs = 100L,
         now = now,
-        monotonicMs = { 0L },
+        monotonicMs = monotonicMs,
         zone = ZoneId.of("UTC"),
         explorationIntervalMs = explorationIntervalMs,
         explorationLimit = explorationLimit,
@@ -121,6 +123,129 @@ class AdaptiveStartupRecoveryTest {
             35L
         }
         assertEquals(listOf("current", "independent"), tried)
+    }
+
+    @Test
+    fun `current bucket health sets fast threshold instead of slower all times history`() = runBlocking {
+        val store = MemoryStore()
+        val clock = at("2025-01-01T12:00:00Z")
+        val currentBucket = "06:20-18:20"
+        store.history[historyKey(currentBucket, "wifi", "bucket-threshold", "current")] =
+            AdaptiveSpeedProbe.History(successes = 2, latencyMs = 100L, lastMeasuredAt = clock)
+        store.history[historyKey("all-times", "wifi", "bucket-threshold", "current")] =
+            AdaptiveSpeedProbe.History(successes = 2, latencyMs = 2_000L, lastMeasuredAt = clock)
+        val tried = mutableListOf<String>()
+
+        session(store, startedAt = clock, now = { clock }).run(
+            scope = "bucket-threshold",
+            candidates = listOf("current", "slower-a", "slower-b", "faster"),
+            key = { it },
+            quick = true,
+            success = { it > 0L },
+            elapsedMs = { it },
+        ) { endpoint ->
+            tried += endpoint
+            if (endpoint == "faster") 50L else 800L
+        }
+
+        assertEquals(
+            listOf("current", "slower-a", "slower-b", "faster"),
+            tried,
+            "800ms results exceed the 200ms threshold derived from the healthy current bucket; the faster peer must still be tried",
+        )
+    }
+
+    @Test
+    fun `two successful peers sharing an IP do not replace an independent unknown peer`() = runBlocking {
+        val store = MemoryStore()
+        val clock = at("2025-01-01T12:00:00Z")
+        for (endpoint in listOf("current", "same-ip")) {
+            store.history[historyKey("06:20-18:20", "wifi", "shared-ip", endpoint)] =
+                AdaptiveSpeedProbe.History(successes = 2, latencyMs = 40L, lastMeasuredAt = clock)
+        }
+        val tried = mutableListOf<String>()
+
+        session(store, startedAt = clock, now = { clock }).run(
+            scope = "shared-ip",
+            candidates = listOf("same-ip", "independent", "current"),
+            key = { it },
+            quick = true,
+            success = { it > 0L },
+            elapsedMs = { it },
+            preferredKeys = setOf("current"),
+            independenceKey = { if (it == "independent") "ip-b" else "ip-a" },
+        ) { endpoint ->
+            tried += endpoint
+            30L
+        }
+
+        assertEquals(listOf("current", "same-ip", "independent"), tried)
+    }
+
+    @Test
+    fun `available success returns without waiting for a cooling failure even when slower than fast threshold`() = runBlocking {
+        val store = MemoryStore()
+        val clock = at("2025-01-01T12:00:00Z")
+        store.history[historyKey("06:20-18:20", "wifi", "cooldown-independent", "available")] =
+            AdaptiveSpeedProbe.History(successes = 2, latencyMs = 100L, lastMeasuredAt = clock)
+        store.history[historyKey("06:20-18:20", "wifi", "cooldown-independent", "cooling-failure")] =
+            AdaptiveSpeedProbe.History(failures = 2, cooldownUntil = clock + 5_000L, lastMeasuredAt = clock)
+        val tried = mutableListOf<String>()
+
+        val results = withTimeout(500L) {
+            session(
+                store,
+                startedAt = clock,
+                now = { clock },
+                budgetMs = 8_000L,
+                monotonicMs = { System.nanoTime() / 1_000_000L },
+            ).run(
+                scope = "cooldown-independent",
+                candidates = listOf("cooling-failure", "available"),
+                key = { it },
+                quick = true,
+                success = { it > 0L },
+                elapsedMs = { it },
+            ) { endpoint ->
+                tried += endpoint
+                800L
+            }
+        }
+
+        assertEquals(listOf("available"), tried)
+        assertEquals(listOf("available" to 800L), results)
+    }
+
+    @Test
+    fun `failed current bucket history is not used as a healthy fast threshold`() = runBlocking {
+        val store = MemoryStore()
+        val clock = at("2025-01-01T12:00:00Z")
+        for (endpoint in listOf("failed-a", "failed-b")) {
+            val failedHistory = AdaptiveSpeedProbe.History(
+                successes = 2,
+                latencyMs = 100L,
+                lastMeasuredAt = clock,
+                failures = 1,
+            )
+            store.history[historyKey("06:20-18:20", "wifi", "failed-threshold", endpoint)] = failedHistory
+            store.history[historyKey("all-times", "wifi", "failed-threshold", endpoint)] = failedHistory
+        }
+        val tried = mutableListOf<String>()
+
+        session(store, startedAt = clock, now = { clock }).run(
+            scope = "failed-threshold",
+            candidates = listOf("failed-a", "failed-b", "unknown"),
+            key = { it },
+            quick = true,
+            success = { it > 0L },
+            elapsedMs = { it },
+            preferredKeys = setOf("failed-a", "failed-b"),
+        ) { endpoint ->
+            tried += endpoint
+            800L
+        }
+
+        assertEquals(listOf("failed-a", "failed-b"), tried, "with no healthy history there is no invented 200ms threshold")
     }
 
     @Test

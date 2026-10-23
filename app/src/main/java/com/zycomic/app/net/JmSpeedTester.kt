@@ -371,7 +371,7 @@ object JmSpeedTester {
                         val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES)
                         phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageTargetsToProbe.size)
                         val imageResults = adaptiveSession.run(
-                            scope = "JM:image",
+                            scope = "JM:image-body-32k-v2",
                             candidates = imageTargetsToProbe,
                             key = { endpoint -> imageIdentity(endpoint).toString() },
                             quick = quickImages,
@@ -418,7 +418,7 @@ object JmSpeedTester {
                         if (quickImages && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < Long.MAX_VALUE }) {
                             val measuredKeys = imageResults.mapTo(hashSetOf()) { (endpoint, _) -> imageIdentity(endpoint).toString() }
                             adaptiveSession.deferExploration(
-                                scope = "JM:image",
+                                scope = "JM:image-body-32k-v2",
                                 candidates = imageTargetsToProbe.filterNot { imageIdentity(it).toString() in measuredKeys },
                                 key = { imageIdentity(it).toString() },
                                 success = { it.verdict == ImgVerdict.OK && it.delayMs < Long.MAX_VALUE },
@@ -729,7 +729,12 @@ object JmSpeedTester {
             .header("Referer", JmApiInterceptor.REFERER)
             .header("X-Requested-With", JmApiInterceptor.PACKAGE_NAME)
             .header("Accept", if (image) "image/*,*/*;q=0.8" else "application/json")
-            .apply { if (image) header("Range", "bytes=0-${JmSpeedProbeProtocol.IMAGE_PROBE_BYTES - 1}") }
+            .apply {
+                if (image) {
+                    header("Range", "bytes=0-${JmSpeedProbeProtocol.IMAGE_PROBE_BYTES - 1}")
+                    header("Cache-Control", "no-cache, no-store")
+                }
+            }
             .build()
         val started = System.nanoTime()
         fun elapsed() = (System.nanoTime() - started) / 1_000_000L
@@ -746,9 +751,10 @@ object JmSpeedTester {
                     response.use {
                         // API bodies are already signed/decrypted by JmApiInterceptor; never inspect the raw envelope.
                         val body = if (image) {
-                            response.body?.source()?.let { source ->
-                                source.request(JmSpeedProbeProtocol.IMAGE_PROBE_BYTES)
-                                source.buffer.clone().readByteArray(minOf(source.buffer.size, JmSpeedProbeProtocol.IMAGE_PROBE_BYTES))
+                            response.body?.let { responseBody ->
+                                responseBody.byteStream().use { input ->
+                                    BoundedImageProbeSampler.read(input, responseBody.contentLength())
+                                }
                             } ?: ByteArray(0)
                         } else {
                             response.body?.bytes() ?: ByteArray(0)

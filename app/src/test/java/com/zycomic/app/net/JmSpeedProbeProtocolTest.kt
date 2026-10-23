@@ -11,7 +11,8 @@ class JmSpeedProbeProtocolTest {
     fun `uses the expected signed API and image paths`() {
         assertEquals("/setting?app_img_shunt=1&express=&lang=TW", JmSpeedProbeProtocol.LINE_PATH)
         assertEquals("/media/albums/553653_3x4.jpg", JmSpeedProbeProtocol.IMAGE_PATH)
-        assertEquals(128L, JmSpeedProbeProtocol.IMAGE_PROBE_BYTES)
+        assertEquals(32 * 1024L, JmSpeedProbeProtocol.IMAGE_PROBE_BYTES)
+        assertEquals(BoundedImageProbeSampler.DEFAULT_MAX_BYTES, JmSpeedProbeProtocol.IMAGE_PROBE_BYTES.toInt())
     }
 
     @Test
