@@ -145,6 +145,10 @@ class JmTwoStageRuntimeTest {
         val image = DomainIp("img.example", "198.51.100.1")
         val revision = JmRouteManager.currentSpeedTestConfigRevision()
         val selection = JmRouteManager.endpointSelection.value
+        // Simulate endpoints remembered from the previous round, then change only the IP pool
+        // (same hosts, same config version); remembered addresses must be dropped by the refresh.
+        JmRouteManager.rememberImageEndpoint(image)
+        JmRouteManager.rememberLineEndpoint(endpoint)
         JmRouteManager.applyRemoteConfig(lines, images, mapOf("api.example" to listOf("192.0.2.9"), "img.example" to listOf("198.51.100.9")), 100)
         assertFalse(JmRouteManager.applyMeasuredLineRoute(endpoint, revision, StartupPlatformPolicy.state.value.revision))
         assertFalse(JmRouteManager.applyMeasuredImageRoute(image, revision, StartupPlatformPolicy.state.value.revision))
@@ -158,6 +162,18 @@ class JmTwoStageRuntimeTest {
         assertFalse(JmRouteManager.applyMeasuredImageRoute(DomainIp("img.example", "198.51.100.9"), currentRevision, platformRevision))
         assertNotNull(selection)
     }
+
+    @Test
+    fun `same-version route pool replacement drops remembered and measured old endpoints`() = runBlocking {
+        configure(size = 2)
+        JmSpeedTester.run() // Leaves measured results (and a remembered selection) for the old .1/.2 pool.
+        // A config refresh that keeps the version number but replaces every IP must not reuse the
+        // previous snapshot/remembered IP; it must fall through to the freshly configured pool.
+        JmRouteManager.applyRemoteConfig(lines, images, mapOf("api.example" to listOf("192.0.2.9"), "img.example" to listOf("198.51.100.9")), 100)
+        assertEquals("198.51.100.9", JmRouteManager.currentImageEndpoint()?.ip)
+        assertEquals("192.0.2.9", JmRouteManager.selectedLineEndpoint?.ip)
+    }
+
     @Test
     fun `real image endpoint can qualify when all API probes fail`() = runBlocking {
         configure(size = 2)

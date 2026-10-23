@@ -9,6 +9,7 @@ object JmImageEndpointSelectionPolicy {
         verdicts: Map<DomainIp, JmSpeedTester.ImgVerdict>,
         manualEndpoint: DomainIp?,
         excluded: Set<DomainIp> = emptySet(),
+        allowedIps: Set<String>? = null,
     ): DomainIp? = JmEndpointSelectionPolicy.select(
         domain = domain,
         configuredDomains = configuredDomains,
@@ -16,5 +17,6 @@ object JmImageEndpointSelectionPolicy {
         successful = { verdicts[it] == JmSpeedTester.ImgVerdict.OK },
         manualEndpoint = manualEndpoint,
         excluded = excluded,
+        allowedIps = allowedIps,
     )
 }

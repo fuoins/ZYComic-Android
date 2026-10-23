@@ -11,12 +11,14 @@ object JmEndpointSelectionPolicy {
         successful: (DomainIp) -> Boolean,
         manualEndpoint: DomainIp? = null,
         excluded: Set<DomainIp> = emptySet(),
+        allowedIps: Set<String>? = null,
     ): DomainIp? {
         if (configuredDomains.none { it.equals(domain, ignoreCase = true) }) return null
         val candidates = delays.keys.filter { endpoint ->
             endpoint.domain.equals(domain, ignoreCase = true) && endpoint.ip.isNotBlank() &&
                 excluded.none { it.normalizedForComparison() == endpoint.normalizedForComparison() } && delays[endpoint]?.let { it >= 0L && it < Long.MAX_VALUE } == true &&
-                successful(endpoint)
+                successful(endpoint) &&
+                (allowedIps == null || allowedIps.contains(endpoint.ip.trim().lowercase(Locale.ROOT)))
         }
         if (manualEndpoint != null && manualEndpoint.domain.equals(domain, ignoreCase = true)) {
             candidates.firstOrNull { it.ip.equals(manualEndpoint.ip, ignoreCase = true) }?.let { return it }

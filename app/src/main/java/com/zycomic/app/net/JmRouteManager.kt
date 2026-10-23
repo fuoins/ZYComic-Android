@@ -227,6 +227,18 @@ object JmRouteManager {
             lastImageEndpoint = null
             prefs?.edit()?.remove("selected_image_endpoint_domain")?.remove("selected_image_endpoint_ip")?.apply()
         }
+        // A hostname that survives the refresh may still point at a stale IP: when the remote
+        // route pool changes (same domain, replaced IPs — even with an unchanged config version),
+        // a remembered endpoint whose IP is no longer configured must be dropped, or routing keeps
+        // using an obsolete address and never falls back to the freshly configured pool.
+        if (lastLineEndpoint?.let { endpoint -> isStaleIp(endpoint, resolveLineIp(endpoint.domain)) } == true) {
+            lastLineEndpoint = null
+            prefs?.edit()?.remove("selected_line_endpoint_domain")?.remove("selected_line_endpoint_ip")?.apply()
+        }
+        if (lastImageEndpoint?.let { endpoint -> isStaleIp(endpoint, resolveImageIp(endpoint.domain)) } == true) {
+            lastImageEndpoint = null
+            prefs?.edit()?.remove("selected_image_endpoint_domain")?.remove("selected_image_endpoint_ip")?.apply()
+        }
         if (savedLineEndpoint == null) prefs?.edit()?.remove("manual_line_endpoint_domain")?.remove("manual_line_endpoint_ip")?.apply()
         if (savedImageEndpoint == null) prefs?.edit()?.remove("manual_image_endpoint_domain")?.remove("manual_image_endpoint_ip")?.apply()
         val lineIndex = when {
@@ -370,9 +382,10 @@ object JmRouteManager {
     /** Exactly one measured successful IP for a lines2 host, honoring an available manual pin. */
     fun currentLineEndpoint(domain: String = lineHost): DomainIp? {
         if (_state.value.autoSelect) {
-            liveProbeLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) }?.let { return it }
+            liveProbeLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) && !isStaleIp(it, resolveLineIp(domain)) }?.let { return it }
         }
         val snapshot = _speedTestSnapshot.value
+        val allowedLineIps = resolveLineIp(domain).filter(::isLiteralIp).map { it.trim().lowercase(Locale.ROOT) }.toSet()
         val selected = JmEndpointSelectionPolicy.select(
             domain = domain,
             configuredDomains = lineHosts.map(::hostFromUrl),
@@ -380,12 +393,14 @@ object JmRouteManager {
             successful = { true },
             manualEndpoint = manualLineEndpoint,
             excluded = failedLineEndpoints,
+            allowedIps = allowedLineIps.takeIf { it.isNotEmpty() },
         )
         if (selected != null) return selected
         // Once a fresh result exists for this host it is authoritative; do not retry failed IPs via DNS rules.
-        if (snapshot.lineIpDelaysMs.keys.any { it.domain.equals(domain, true) }) return null
-        manualLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) }?.let { return it }
-        lastLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) }?.let { return it }
+        // A snapshot that only holds IPs the new route pool no longer configures is not authoritative here.
+        if (snapshot.lineIpDelaysMs.keys.any { it.domain.equals(domain, true) && !isStaleIp(it, resolveLineIp(domain)) }) return null
+        manualLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) && !isStaleIp(it, resolveLineIp(domain)) }?.let { return it }
+        lastLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) && !isStaleIp(it, resolveLineIp(domain)) }?.let { return it }
         return lineRouteRules.entries.firstOrNull { it.key.equals(domain, true) }?.value
             ?.firstOrNull { isLiteralIp(it) && !isFailed(DomainIp(domain, it), failedLineEndpoints) }
             ?.let { DomainIp(domain, it) }
@@ -995,9 +1010,10 @@ object JmRouteManager {
 
     fun currentImageEndpoint(domain: String = activeImageDomain): DomainIp? {
         if (pinnedImageDomain == null) {
-            liveProbeImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) }?.let { return it }
+            liveProbeImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) && !isStaleIp(it, resolveImageIp(domain)) }?.let { return it }
         }
         val snapshot = _speedTestSnapshot.value
+        val allowedImageIps = resolveImageIp(domain).filter(::isLiteralIp).map { it.trim().lowercase(Locale.ROOT) }.toSet()
         val selected = JmEndpointSelectionPolicy.select(
             domain = domain,
             configuredDomains = imageDomains,
@@ -1005,11 +1021,12 @@ object JmRouteManager {
             successful = { snapshot.imageIpVerdicts[it] == JmSpeedTester.ImgVerdict.OK },
             manualEndpoint = manualImageEndpoint,
             excluded = failedImageEndpoints,
+            allowedIps = allowedImageIps.takeIf { it.isNotEmpty() },
         )
         if (selected != null) return selected
-        if (snapshot.imageIpDelaysMs.keys.any { it.domain.equals(domain, true) }) return null
-        manualImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) }?.let { return it }
-        lastImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) }?.let { return it }
+        if (snapshot.imageIpDelaysMs.keys.any { it.domain.equals(domain, true) && !isStaleIp(it, resolveImageIp(domain)) }) return null
+        manualImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) && !isStaleIp(it, resolveImageIp(domain)) }?.let { return it }
+        lastImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) && !isStaleIp(it, resolveImageIp(domain)) }?.let { return it }
         return imageRouteRules.entries.firstOrNull { it.key.equals(domain, true) }?.value
             ?.firstOrNull { isLiteralIp(it) && !isFailed(DomainIp(domain, it), failedImageEndpoints) }
             ?.let { DomainIp(domain, it) }
@@ -1149,6 +1166,16 @@ object JmRouteManager {
     private fun isLiteralIp(value: String): Boolean =
         value.isNotBlank() && (value.all { it.isDigit() || it == '.' } || ':' in value) &&
             runCatching { java.net.InetAddress.getByName(value) }.isSuccess
+
+    /**
+     * True only when a host has an explicit literal-IP route pool and the remembered endpoint's
+     * IP is no longer in that pool. Hosts configured without literal IPs resolve dynamically, so
+     * they are never treated as stale here.
+     */
+    private fun isStaleIp(endpoint: DomainIp, configured: List<String>): Boolean {
+        val literalIps = configured.filter(::isLiteralIp)
+        return literalIps.isNotEmpty() && literalIps.none { it.equals(endpoint.ip, ignoreCase = true) }
+    }
 
     private fun storedEndpoint(domain: String?, ip: String?, configured: List<String>): DomainIp? {
         if (domain.isNullOrBlank() || ip.isNullOrBlank() || !isLiteralIp(ip.trim()) || configured.none { it.equals(domain, true) }) return null
