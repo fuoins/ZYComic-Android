@@ -2,6 +2,7 @@ package com.zycomic.app.ui.browse
 
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.ui.picacg.PicacgBrowseFilter
+import com.zycomic.app.ui.picacg.PicacgRankingMode
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -57,6 +58,7 @@ data class BrowseTabItem(
     val pageType: BrowsePageType? = null,
     val platformId: ContentPlatform = ContentPlatform.MANWA,
     val picacgFilter: PicacgBrowseFilter? = null,
+    val picacgRankingMode: PicacgRankingMode = PicacgRankingMode.H24,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -65,7 +67,10 @@ data class BrowseTabItem(
         put("builtin", builtin)
         put("platformId", platformId.id)
         if (platformId == ContentPlatform.MANWA) filter?.let { put("filter", it.toJson()) }
-        if (platformId == ContentPlatform.PICACG) picacgFilter?.normalized()?.let { put("picacgFilter", it.toJson()) }
+        if (platformId == ContentPlatform.PICACG) {
+            picacgFilter?.normalized()?.let { put("picacgFilter", it.toJson()) }
+            put("picacgRankingMode", picacgRankingMode.name)
+        }
         pageType?.let { put("pageType", it.name) }
     }
 
@@ -81,13 +86,20 @@ data class BrowseTabItem(
             } else {
                 null
             }
-            val picacgFilter = if (kind == TabKind.FILTER && platformId == ContentPlatform.PICACG && !o.optBoolean("builtin", false)) {
+            val id = o.optString("id")
+            val picacgFilter = if (
+                platformId == ContentPlatform.PICACG &&
+                ((kind == TabKind.FILTER && !o.optBoolean("builtin", false)) || id == "picacg_category" || pageType == BrowsePageType.PICACG_CATEGORY)
+            ) {
                 o.optJSONObject("picacgFilter")?.let { PicacgBrowseFilter.fromJson(it) } ?: PicacgBrowseFilter()
             } else {
                 null
             }
+            val rankingMode = runCatching {
+                PicacgRankingMode.valueOf(o.optString("picacgRankingMode", PicacgRankingMode.H24.name))
+            }.getOrDefault(PicacgRankingMode.H24)
             return BrowseTabItem(
-                id = o.optString("id"),
+                id = id,
                 name = o.optString("name"),
                 kind = kind,
                 builtin = o.optBoolean("builtin", false),
@@ -95,7 +107,17 @@ data class BrowseTabItem(
                 pageType = pageType,
                 platformId = platformId,
                 picacgFilter = picacgFilter,
+                picacgRankingMode = rankingMode,
             )
         }
     }
 }
+
+/** Internal IDs, not editable tab titles, determine Picacg tab behavior. */
+fun BrowseTabItem.isPicacgRanking(): Boolean =
+    platformId == ContentPlatform.PICACG &&
+        (id == "picacg_home" || id == "picacg_ranking" || pageType == BrowsePageType.PICACG_RANKING)
+
+fun BrowseTabItem.isPicacgCategory(): Boolean =
+    platformId == ContentPlatform.PICACG &&
+        (id == "picacg_category" || pageType == BrowsePageType.PICACG_CATEGORY)

@@ -31,6 +31,8 @@ object PlatformSpeedTestCoordinator {
     val reports = _reports.asStateFlow()
     private val _running = MutableStateFlow(false)
     val running = _running.asStateFlow()
+    private val _foregroundReady = MutableStateFlow(false)
+    val foregroundReady = _foregroundReady.asStateFlow()
     private val _progressText = MutableStateFlow<String?>(null)
     val progressText = _progressText.asStateFlow()
     private val _startupSummary = MutableStateFlow<String?>(null)
@@ -59,17 +61,31 @@ object PlatformSpeedTestCoordinator {
     private val startupRequest = StartupSpeedTestRequest<SpeedTestRunKey, List<PlatformSpeedTestReport>>(
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
+    private val fullStartupRequest = StartupSpeedTestRequest<SpeedTestRunKey, List<PlatformSpeedTestReport>>(
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        reuseCompleted = false,
+    )
 
     /** App warm-up and UI waiters share the same startup worker without resetting progress. */
-    suspend fun awaitStartup(): List<PlatformSpeedTestReport> = startupRequest.run(::currentKey) {
+    suspend fun awaitStartup(): List<PlatformSpeedTestReport> = startupRequest.runUntilReady(::currentKey) { ready ->
         var publishedKey: SpeedTestRunKey? = null
-        val result = execute(isStartupRun = true, onCompleted = { publishedKey = it })
+        val result = execute(isStartupRun = true, onCompleted = { publishedKey = it }, onForegroundReady = { ready(it, emptyList()) })
         checkNotNull(publishedKey) to result
     }
 
     /** Splash requests share one full test even while waiting behind the automatic startup run. */
     suspend fun retestAllEnabled(): List<PlatformSpeedTestReport> = fullTestRequest.run {
-        run(forceFresh = true, isStartupRun = true)
+        fullStartupRequest.runUntilReady(::currentKey) { ready ->
+            startupRequest.invalidate()
+            var publishedKey: SpeedTestRunKey? = null
+            val result = execute(
+                forceFresh = true,
+                isStartupRun = true,
+                onCompleted = { publishedKey = it },
+                onForegroundReady = { ready(it, emptyList()) },
+            )
+            checkNotNull(publishedKey) to result
+        }
     }
 
     internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
@@ -142,6 +158,7 @@ object PlatformSpeedTestCoordinator {
         onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
     ): List<PlatformSpeedTestReport> {
         startupRequest.invalidate()
+        _foregroundReady.value = false
         return execute(forceFresh, remoteConfigUpdated, onlyPlatform, notifyCompletion, isStartupRun, onProgress, onStageProgress)
     }
 
@@ -154,6 +171,7 @@ object PlatformSpeedTestCoordinator {
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, SpeedTester.ImgVerdict>) -> Unit)? = null,
         onStageProgress: ((SpeedTester.Progress) -> Unit)? = null,
         onCompleted: ((SpeedTestRunKey) -> Unit)? = null,
+        onForegroundReady: ((SpeedTestRunKey) -> Unit)? = null,
     ): List<PlatformSpeedTestReport> = withContext(Dispatchers.IO) {
         // First install and explicit retests still wait. A cached automatic run may
         // measure speculatively, but each tester must cross beforeApply before selection.
@@ -166,6 +184,7 @@ object PlatformSpeedTestCoordinator {
             if (SpeedTestRunPolicy.canSkip(completedKey, requestedKey, forceFresh, onlyPlatform != null, remoteConfigUpdated)) {
                 // Check after acquiring the lock: queued duplicates reuse the completed round
                 // without clearing its progress, checkmarks or current-round shared IP.
+                _foregroundReady.value = true
                 onCompleted?.invoke(requestedKey)
                 return@withLock _reports.value
             }
@@ -182,6 +201,7 @@ object PlatformSpeedTestCoordinator {
                     _jmProgress.value = null
                     val policy = StartupPlatformPolicy.state.value
                     val key = currentKey()
+                    _foregroundReady.value = false
                     _platformStartupStatuses.value = ContentPlatform.entries.associateWith { platform ->
                         when {
                             !StartupPlatformPolicy.isEnabled(policy, platform) -> PlatformStartupStatus("未启用，已跳过")
@@ -214,6 +234,18 @@ object PlatformSpeedTestCoordinator {
                     )
                     val version = DevConfig.remoteVersion()
                     fun generationIsCurrent() = key == currentKey() && version == DevConfig.remoteVersion()
+                    val foregroundPlatforms = java.util.concurrent.ConcurrentHashMap.newKeySet<ContentPlatform>()
+                    val requiredPlatforms = ContentPlatform.entries.filter {
+                        StartupPlatformPolicy.isEnabled(policy, it) && (onlyPlatform == null || onlyPlatform == it)
+                    }.toSet()
+                    fun platformReady(platform: ContentPlatform, publishEarly: Boolean = true) {
+                        if (!generationIsCurrent() || startupConfig.configurationUpdated == null) return
+                        foregroundPlatforms.add(platform)
+                        if (foregroundPlatforms.containsAll(requiredPlatforms)) {
+                            _foregroundReady.value = true
+                            if (publishEarly) onForegroundReady?.invoke(key)
+                        }
+                    }
                     suspend fun beforeApply(): Boolean {
                         startupConfig.awaitConfigurationUpdated()
                         return generationIsCurrent()
@@ -225,6 +257,7 @@ object PlatformSpeedTestCoordinator {
                     }
                     fun publishMaccmsRoute(lines3Ip: String?) {
                         if (!generationIsCurrent()) return
+                        maccmsHealthJob?.cancel()
                         val binding = MaccmsSpeedTester.bindLines3Ip(lines3Ip)
                         publishStartupCheck(
                             StartupCheckPhase.MACCMS_LINE,
@@ -280,6 +313,7 @@ object PlatformSpeedTestCoordinator {
                                         // must revalidate its lines before binding the independent Maccms pool.
                                         if (cached != null && platform != ContentPlatform.PICACG) {
                                             publishPlatformStatus(platform, platformCompletionStatus(cached), running = false)
+                                            platformReady(platform)
                                             return@async cached
                                         }
                                     }
@@ -304,6 +338,7 @@ object PlatformSpeedTestCoordinator {
                                                 reconcileConfig = !forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
+                                                onRouteReady = { platformReady(platform) },
                                                 onStageProgress = { progress ->
                                                     if (generationIsCurrent()) {
                                                         when (progress.phase) {
@@ -346,6 +381,7 @@ object PlatformSpeedTestCoordinator {
                                                 forceFresh = forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
+                                                onRouteReady = { platformReady(platform) },
                                                 onApiPublished = { endpoint -> publishMaccmsRoute(endpoint?.ip) },
                                                 onProgress = { progress ->
                                                     if (generationIsCurrent()) {
@@ -387,7 +423,7 @@ object PlatformSpeedTestCoordinator {
                                             }
                                             publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {
-                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
+                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply, onRouteReady = { platformReady(platform) }) { progress ->
                                                 if (generationIsCurrent()) {
                                                     when (progress.phase) {
                                                         JmSpeedTestProgress.Phase.TESTING_LINES -> jmLineProgress = progress
@@ -437,6 +473,8 @@ object PlatformSpeedTestCoordinator {
                                     if (generationIsCurrent()) {
                                         publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
                                         blockUnresolvedChecks(platform)
+                                        // Exhausted/blocked platforms settle only when their real work ends.
+                                        platformReady(platform, publishEarly = false)
                                     }
                                 }
                             }
@@ -445,6 +483,7 @@ object PlatformSpeedTestCoordinator {
                     // Even all-disabled/failed warm-ups must wait for authoritative config.
                     startupConfig.awaitConfigurationUpdated()
                     if (!generationIsCurrent()) continue
+                    _foregroundReady.value = true
                     _reports.value = result
                     _startupSummary.value = startupSummary(result)
                     listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).forEach { platform ->

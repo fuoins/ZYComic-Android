@@ -75,7 +75,6 @@ import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.StartupCheckResult
-import com.zycomic.app.net.startupChecksPassed
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
@@ -350,11 +349,11 @@ fun AppContent(
     val configRetest by com.zycomic.app.net.RemoteConfigFetcher.configRetest.collectAsState()
     val remoteInfo by settingsVm.remoteInfo.collectAsState()
     val platformTestSummary by PlatformSpeedTestCoordinator.startupSummary.collectAsState()
-    val platformTestsRunning by PlatformSpeedTestCoordinator.running.collectAsState()
+    val foregroundRoutesReady by PlatformSpeedTestCoordinator.foregroundReady.collectAsState()
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     var fullSpeedTestRequested by remember { mutableStateOf(false) }
     val speedTestScope = rememberCoroutineScope()
-    val blockingSpeedTest = speedTesting || fullSpeedTestRequested || configRetest?.duringStartup == true
+    val blockingSpeedTest = speedTesting || fullSpeedTestRequested || (configRetest?.duringStartup == true && !foregroundRoutesReady)
 
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
     var onboardingDone by remember {
@@ -904,11 +903,10 @@ private fun StartupPlatformSwitches() {
         }
         Spacer(modifier = Modifier.height(8.dp))
         LinearProgressIndicator(
-            progress = { com.zycomic.app.net.startupChecksProgress(checkStatuses) },
             modifier = Modifier.fillMaxWidth().height(6.dp),
         )
         Text(
-            stringResource(KMR.strings.startup_checks_ready_count, startupChecksPassed(checkStatuses), checkStatuses.size),
+            stringResource(KMR.strings.startup_quick_test_running),
             modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -983,7 +981,11 @@ private fun StartupSwitch(
                 Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = accent)
                     Text(
-                        status?.message ?: "等待测速",
+                        if (status?.running == true) {
+                            stringResource(KMR.strings.startup_quick_test_running)
+                        } else {
+                            status?.message ?: "等待测速"
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1000,15 +1002,7 @@ private fun StartupSwitch(
                 )
             }
             if (status?.running == true) {
-                if (status.fraction == null) {
-                    LinearProgressIndicator(color = accent, modifier = Modifier.fillMaxWidth().height(3.dp))
-                } else {
-                    LinearProgressIndicator(
-                        progress = { status.fraction },
-                        color = accent,
-                        modifier = Modifier.fillMaxWidth().height(3.dp),
-                    )
-                }
+                LinearProgressIndicator(color = accent, modifier = Modifier.fillMaxWidth().height(3.dp))
             }
         }
     }

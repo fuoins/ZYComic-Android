@@ -3,6 +3,8 @@ package com.zycomic.app.net
 import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,7 +22,9 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** Independent Picacg API and real-image probes. No endpoint is successful by assumption or synthesis. */
 object PicacgSpeedTester {
@@ -107,247 +111,341 @@ object PicacgSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onApiPublished: (DomainIp?) -> Unit = {},
+        onRouteReady: (() -> Unit)? = null,
         onProgress: (Progress) -> Unit = {},
     ): Snapshot = withContext(Dispatchers.IO) {
         runLock.withLock {
-            fun publishProgress(value: Progress) {
-                _progress.value = value
-                onProgress(value)
-            }
-            SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.PICACG).use { timings ->
-                val started = System.currentTimeMillis()
-                val networkIdentity = PlatformSpeedTestCoordinator.currentNetworkIdentity()
-                // One session is shared by API, cover and reader-page probes; preparation time counts.
-                val adaptiveSession = AdaptiveSpeedHistory.session(networkIdentity, started)
-                val revision = PicacgRouteManager.configRevision
-                val activeVersion = PicacgRouteManager.remoteVersion
-                // History may rank candidates, but only probes in this run can establish health.
-                // `reuse*` remains source-compatible as a hint for the bounded quick strategy.
-                val quickApi = fastApi || reuseApi
-                val quickImages = fastImages || reuseImages
-                val preferredApiHost = PicacgRouteManager.selectedApiHost
-                val preferredApiEndpoint = PicacgRouteManager.selectedApiEndpoint
-                val preferredCoverHost = PicacgRouteManager.imageSourceFor(content = false)
-                val preferredContentHost = PicacgRouteManager.imageSourceFor(content = true)
-                val preferredImageEndpoint = PicacgRouteManager.selectedImageEndpoint
-                val previousImageState = PicacgRouteManager.state.value
-                val preferredCoverEndpoint = if (PicacgRouteManager.isImageManuallyPinned) {
-                    preferredImageEndpoint?.takeIf { it.domain.equals(preferredCoverHost, true) }
-                } else {
-                    previousImageState.coverRanking.firstOrNull { it.domain.equals(preferredCoverHost, true) }
+            coroutineScope {
+                val routeReadyNotified = AtomicBoolean(false)
+                val progressLock = Any()
+                val apiReady = AtomicBoolean(false)
+                val coverReady = AtomicBoolean(false)
+                val contentReady = AtomicBoolean(false)
+                val publicationRejected = AtomicBoolean(false)
+                fun notifyRouteReady() {
+                    if (apiReady.get() && coverReady.get() && contentReady.get() &&
+                        routeReadyNotified.compareAndSet(false, true)
+                    ) {
+                        onRouteReady?.invoke()
+                    }
                 }
-                val preferredContentEndpoint = if (PicacgRouteManager.isImageManuallyPinned) {
-                    preferredImageEndpoint?.takeIf { it.domain.equals(preferredContentHost, true) }
-                } else {
-                    previousImageState.contentRanking.firstOrNull { it.domain.equals(preferredContentHost, true) }
+                fun markImageReady(content: Boolean) {
+                    if (content) contentReady.set(true) else coverReady.set(true)
+                    notifyRouteReady()
                 }
-                PicacgRouteManager.clearAutomaticHealthSelections()
-                val storedApi = if (forceFresh) PicacgSpeedTestHistoryPolicy.PhaseHistory(null) else PicacgSpeedTestHistoryStorage.loadApi()
-                val storedImages = if (forceFresh) PicacgSpeedTestHistoryPolicy.PhaseHistory(null) else PicacgSpeedTestHistoryStorage.loadImages()
-                val apiCanUseHistory = !forceFresh && PicacgSpeedTestHistoryPolicy.canUseAtVersion(storedApi.remoteVersion, activeVersion)
-                val imageCanUseHistory = !forceFresh && PicacgSpeedTestHistoryPolicy.canUseAtVersion(storedImages.remoteVersion, activeVersion)
-                val apiReconcile = !forceFresh && PicacgSpeedTestHistoryPolicy.shouldReconcile(reconcileConfig, storedApi.remoteVersion, activeVersion)
-                val imageReconcile = !forceFresh && PicacgSpeedTestHistoryPolicy.shouldReconcile(reconcileConfig, storedImages.remoteVersion, activeVersion)
-                fun current(): Boolean = isCurrent() && revision == PicacgRouteManager.configRevision &&
-                    activeVersion == PicacgRouteManager.remoteVersion &&
-                    networkIdentity == PlatformSpeedTestCoordinator.currentNetworkIdentity()
-                fun logAdaptive(message: String) {
-                    android.util.Log.i("PlatformSpeedTest", "picacg adaptive $message")
+                val apiHasPublished = AtomicBoolean(false)
+                val lastApiPublished = AtomicReference<DomainIp?>(null)
+                fun publishApi(endpoint: DomainIp?) {
+                    val previous = lastApiPublished.getAndSet(endpoint)
+                    val wasPublished = apiHasPublished.getAndSet(true)
+                    if (!wasPublished || previous != endpoint) onApiPublished(endpoint)
+                    apiReady.set(endpoint != null)
+                    if (endpoint != null) notifyRouteReady()
                 }
-                fun identityKey(identity: PicacgSpeedTestHistoryPolicy.Identity, service: String): String =
-                    "$service ${identity.domain}[${identity.ip}] $identity"
-                fun combineRows(
-                    history: PicacgSpeedTestHistoryPolicy.PhaseHistory,
-                    active: Set<PicacgSpeedTestHistoryPolicy.Identity>,
-                    fresh: List<PicacgSpeedTestHistoryPolicy.Measurement>,
-                ): MutableList<Probe> {
-                    val freshByIdentity = fresh.associateBy(PicacgSpeedTestHistoryPolicy.Measurement::identity)
-                    val old = history.measurements.filter { it.identity in active && it.identity !in freshByIdentity }
-                        .map { it.toProbe() }
-                    return (old + fresh.map { it.toProbe(testedThisRound = true, quickSelected = quickApi) }).toMutableList()
+                fun publishProgress(value: Progress) = synchronized(progressLock) {
+                    _progress.value = value
+                    onProgress(value)
                 }
+                SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.PICACG).use { timings ->
+                    val started = System.currentTimeMillis()
+                    val networkIdentity = PlatformSpeedTestCoordinator.currentNetworkIdentity()
+                    // One session is shared by API, cover and reader-page probes; preparation time counts.
+                    val adaptiveSession = AdaptiveSpeedHistory.session(networkIdentity, started)
+                    val revision = PicacgRouteManager.configRevision
+                    val activeVersion = PicacgRouteManager.remoteVersion
+                    // History may rank candidates, but only probes in this run can establish health.
+                    // `reuse*` remains source-compatible as a hint for the bounded quick strategy.
+                    val quickApi = fastApi || reuseApi
+                    val quickImages = fastImages || reuseImages
+                    val preferredApiHost = PicacgRouteManager.selectedApiHost
+                    val preferredApiEndpoint = PicacgRouteManager.selectedApiEndpoint
+                    val preferredCoverHost = PicacgRouteManager.imageSourceFor(content = false)
+                    val preferredContentHost = PicacgRouteManager.imageSourceFor(content = true)
+                    val preferredImageEndpoint = PicacgRouteManager.selectedImageEndpoint
+                    val previousImageState = PicacgRouteManager.state.value
+                    val preferredCoverEndpoint = if (PicacgRouteManager.isImageManuallyPinned) {
+                        preferredImageEndpoint?.takeIf { it.domain.equals(preferredCoverHost, true) }
+                    } else {
+                        previousImageState.coverRanking.firstOrNull { it.domain.equals(preferredCoverHost, true) }
+                    }
+                    val preferredContentEndpoint = if (PicacgRouteManager.isImageManuallyPinned) {
+                        preferredImageEndpoint?.takeIf { it.domain.equals(preferredContentHost, true) }
+                    } else {
+                        previousImageState.contentRanking.firstOrNull { it.domain.equals(preferredContentHost, true) }
+                    }
+                    PicacgRouteManager.clearAutomaticHealthSelections()
+                    val storedApi = if (forceFresh) PicacgSpeedTestHistoryPolicy.PhaseHistory(null) else PicacgSpeedTestHistoryStorage.loadApi()
+                    val storedImages = if (forceFresh) PicacgSpeedTestHistoryPolicy.PhaseHistory(null) else PicacgSpeedTestHistoryStorage.loadImages()
+                    val apiCanUseHistory = !forceFresh && PicacgSpeedTestHistoryPolicy.canUseAtVersion(storedApi.remoteVersion, activeVersion)
+                    val imageCanUseHistory = !forceFresh && PicacgSpeedTestHistoryPolicy.canUseAtVersion(storedImages.remoteVersion, activeVersion)
+                    val apiReconcile = !forceFresh && PicacgSpeedTestHistoryPolicy.shouldReconcile(reconcileConfig, storedApi.remoteVersion, activeVersion)
+                    val imageReconcile = !forceFresh && PicacgSpeedTestHistoryPolicy.shouldReconcile(reconcileConfig, storedImages.remoteVersion, activeVersion)
+                    fun current(): Boolean = isCurrent() && revision == PicacgRouteManager.configRevision &&
+                        activeVersion == PicacgRouteManager.remoteVersion &&
+                        networkIdentity == PlatformSpeedTestCoordinator.currentNetworkIdentity()
+                    fun logAdaptive(message: String) {
+                        android.util.Log.i("PlatformSpeedTest", "picacg adaptive $message")
+                    }
+                    fun identityKey(identity: PicacgSpeedTestHistoryPolicy.Identity, service: String): String =
+                        "$service ${identity.domain}[${identity.ip}] $identity"
+                    fun combineRows(
+                        history: PicacgSpeedTestHistoryPolicy.PhaseHistory,
+                        active: Set<PicacgSpeedTestHistoryPolicy.Identity>,
+                        fresh: List<PicacgSpeedTestHistoryPolicy.Measurement>,
+                    ): MutableList<Probe> {
+                        val freshByIdentity = fresh.associateBy(PicacgSpeedTestHistoryPolicy.Measurement::identity)
+                        val old = history.measurements.filter { it.identity in active && it.identity !in freshByIdentity }
+                            .map { it.toProbe() }
+                        return (old + fresh.map { it.toProbe(testedThisRound = true, quickSelected = quickApi) }).toMutableList()
+                    }
 
-                val apiUrls = PicacgRouteManager.apiUrls
-                val apiTargets = timings.start(SpeedTestTimings.Phase.PICACG_LINE_PREPARATION).use {
-                    publishProgress(Progress(Stage.PREPARING_API, total = apiUrls.size))
-                    adaptiveSession.prepareBlocking(quick = quickApi) {
-                        PicacgSpeedTestTargetPolicy.apiTargets(apiUrls, ::resolve).map { target ->
-                            ApiTarget(target.url, target.endpoint, apiIdentity(target.url, target.endpoint))
-                        }
-                    }.orEmpty()
-                }
-                val activeApiIdentities = apiTargets.mapTo(linkedSetOf(), ApiTarget::identity)
-                val freshApiHistory: List<PicacgSpeedTestHistoryPolicy.Measurement>
-                val apiResults = run {
-                    val completed = AtomicInteger(0)
-                    val successful = AtomicInteger(0)
-                    val failed = AtomicInteger(0)
-                    val attemptedIdentities = java.util.concurrent.ConcurrentHashMap.newKeySet<PicacgSpeedTestHistoryPolicy.Identity>()
-                    publishProgress(Progress(Stage.TESTING_API, total = apiTargets.size))
-                    val fresh = adaptiveSession.run(
-                        scope = "PICACG:api",
-                        candidates = apiTargets,
-                        key = { identityKey(it.identity, "api-root") },
-                        quick = quickApi,
-                        preferredKeys = if (quickApi) {
-                            apiTargets.filter { target ->
-                                target.endpoint.domain.equals(preferredApiHost, true) &&
-                                    (preferredApiEndpoint == null || target.endpoint == preferredApiEndpoint)
-                            }.mapTo(linkedSetOf()) { identityKey(it.identity, "api-root") }
-                        } else {
-                            emptySet()
-                        },
-                        independenceKey = { it.endpoint.ip.trim().lowercase(java.util.Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(java.util.Locale.ROOT) } },
-                        success = Probe::success,
-                        elapsedMs = Probe::elapsedMs,
-                        sampleInvalid = { it.elapsedMs < 0L || (it.success && it.httpStatus == null) },
-                        log = ::logAdaptive,
-                        probe = probe@{ target ->
-                            if (!current()) return@probe null
-                            val probe = SpeedTestProbeBudget.scheduler.withPermit(
-                                ContentPlatform.PICACG,
-                                { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
-                            ) {
-                                if (current()) {
-                                    runInterruptible {
-                                        attemptedIdentities += target.identity
-                                        probeApi(target.url, target.endpoint)
+                    data class ImagePhase(
+                        val blockedReason: String?,
+                        val freshHistory: List<PicacgSpeedTestHistoryPolicy.Measurement>,
+                        val results: List<Probe>,
+                        val activeIdentities: Set<PicacgSpeedTestHistoryPolicy.Identity>,
+                    )
+                    val imageTask = async {
+                        var blockedReason: String? = null
+                        val allImageTargets = timings.start(SpeedTestTimings.Phase.PICACG_IMAGE_PREPARATION).use {
+                            publishProgress(Progress(Stage.PREPARING_IMAGES, total = PicacgRouteManager.imageHosts.size))
+                            when {
+                                PicacgRouteManager.imageHosts.isEmpty() -> {
+                                    blockedReason = "哔咔未配置任何正文图源（storage-b）；图源验证未运行"
+                                    emptyList()
+                                }
+                                else -> adaptiveSession.prepareBlocking(quick = quickImages) {
+                                    PicacgSpeedTestTargetPolicy.imageTargets(PicacgRouteManager.imageHosts, ::resolve).map { target ->
+                                        ImageTarget(
+                                            target.url,
+                                            target.endpoint,
+                                            imageIdentity(target.endpoint, content = target.content),
+                                            content = target.content,
+                                        )
                                     }
-                                } else {
-                                    null
+                                }.orEmpty()
+                            }
+                        }
+                        if (blockedReason != null) publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
+                        val activeImageIdentities = allImageTargets.mapTo(linkedSetOf(), ImageTarget::identity)
+                        val freshImageHistory = mutableListOf<PicacgSpeedTestHistoryPolicy.Measurement>()
+                        val imageResults = coroutineScope {
+                            val priorImageHistory = if (imageCanUseHistory || imageReconcile) storedImages else PicacgSpeedTestHistoryPolicy.PhaseHistory(null)
+                            val accumulated = combineRows(priorImageHistory, activeImageIdentities, emptyList())
+                            val completed = AtomicInteger(0)
+                            val successful = AtomicInteger(0)
+                            val failed = AtomicInteger(0)
+                            suspend fun runImageKind(content: Boolean, service: String): List<Pair<ImageTarget, Probe>> {
+                                val targets = allImageTargets.filter { it.content == content }
+                                if (targets.isEmpty()) return emptyList()
+                                publishProgress(Progress(Stage.TESTING_IMAGES, total = allImageTargets.size))
+                                val attemptedIdentities = java.util.concurrent.ConcurrentHashMap.newKeySet<PicacgSpeedTestHistoryPolicy.Identity>()
+                                val results = adaptiveSession.run(
+                                    scope = if (content) "PICACG:content" else "PICACG:cover",
+                                    candidates = targets,
+                                    key = { identityKey(it.identity, service) },
+                                    quick = quickImages,
+                                    preferredKeys = if (quickImages) {
+                                        val preferredHost = if (content) preferredContentHost else preferredCoverHost
+                                        val preferredEndpoint = if (content) preferredContentEndpoint else preferredCoverEndpoint
+                                        targets.filter { target ->
+                                            target.endpoint.domain.equals(preferredHost, true) &&
+                                                (preferredEndpoint == null || target.endpoint == preferredEndpoint)
+                                        }.mapTo(linkedSetOf()) { identityKey(it.identity, service) }
+                                    } else {
+                                        emptySet()
+                                    },
+                                    independenceKey = { it.endpoint.ip.trim().lowercase(java.util.Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(java.util.Locale.ROOT) } },
+                                    success = Probe::success,
+                                    elapsedMs = Probe::elapsedMs,
+                                    sampleInvalid = {
+                                        it.elapsedMs < 0L || (
+                                            it.success &&
+                                                (it.httpStatus != 200 || it.imageDecoded != true || !PicacgImagePayloadPolicy.isImageContentType(it.contentType))
+                                            )
+                                    },
+                                    log = ::logAdaptive,
+                                    onUsable = usable@{ target, measured ->
+                                        if (!current()) return@usable
+                                        val allowed = beforeApply() && current()
+                                        if (!allowed) {
+                                            publicationRejected.set(true)
+                                            return@usable
+                                        }
+                                        if (PicacgRouteManager.isImageManuallyPinned) {
+                                            if (PicacgRouteManager.selectedImageEndpoint == target.endpoint) markImageReady(target.content)
+                                            return@usable
+                                        }
+                                        synchronized(freshImageHistory) {
+                                            freshImageHistory.removeAll { it.identity == target.identity }
+                                            freshImageHistory += target.identity.toMeasurement(
+                                                measured.copy(measuredAtEpochMs = measured.measuredAtEpochMs ?: System.currentTimeMillis()),
+                                                measured.measuredAtEpochMs ?: System.currentTimeMillis(),
+                                            )
+                                            fun readyRanking(contentKind: Boolean): List<DomainIp> = PicacgSpeedTestTargetPolicy.ranking(
+                                                freshImageHistory.map { row ->
+                                                    PicacgSpeedTestTargetPolicy.ImageOutcome(
+                                                        row.endpoint,
+                                                        content = row.identity.probeCondition.contains("reader-page"),
+                                                        success = row.success,
+                                                        elapsedMs = row.elapsedMs,
+                                                    )
+                                                },
+                                                content = contentKind,
+                                            )
+                                            if (PicacgRouteManager.applyImageRankings(readyRanking(false), readyRanking(true))) {
+                                                markImageReady(target.content)
+                                            }
+                                        }
+                                    },
+                                    probe = probe@{ target ->
+                                        if (!current()) return@probe null
+                                        val probe = SpeedTestProbeBudget.scheduler.withPermit(
+                                            ContentPlatform.PICACG,
+                                            { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
+                                        ) {
+                                            if (current()) {
+                                                runInterruptible {
+                                                    attemptedIdentities += target.identity
+                                                    probeImage(target.url, target.endpoint, content = target.content)
+                                                }
+                                            } else {
+                                                null
+                                            }
+                                        }
+                                        if (probe == null || !current()) return@probe null
+                                        val measured = probe.copy(measuredAtEpochMs = System.currentTimeMillis(), testedThisRound = true, quickSelected = quickImages)
+                                        synchronized(allImageTargets) {
+                                            if (measured.success) successful.incrementAndGet() else failed.incrementAndGet()
+                                            publishProgress(
+                                                Progress(
+                                                    Stage.TESTING_IMAGES,
+                                                    completed = completed.incrementAndGet(),
+                                                    total = allImageTargets.size,
+                                                    successful = successful.get(),
+                                                    failed = failed.get(),
+                                                ),
+                                            )
+                                        }
+                                        measured
+                                    },
+                                ).filterNot { (_, probe) ->
+                                    probe.elapsedMs < 0L || (
+                                        probe.success &&
+                                            (probe.httpStatus != 200 || probe.imageDecoded != true || !PicacgImagePayloadPolicy.isImageContentType(probe.contentType))
+                                        )
+                                }
+                                if (quickImages && results.any { it.second.success }) {
+                                    adaptiveSession.deferExploration(
+                                        scope = if (content) "PICACG:content" else "PICACG:cover",
+                                        candidates = targets.filterNot { it.identity in attemptedIdentities },
+                                        key = { identityKey(it.identity, service) },
+                                        success = Probe::success,
+                                        elapsedMs = Probe::elapsedMs,
+                                        sampleInvalid = {
+                                            it.elapsedMs < 0L || (
+                                                it.success &&
+                                                    (it.httpStatus != 200 || it.imageDecoded != true || !PicacgImagePayloadPolicy.isImageContentType(it.contentType))
+                                                )
+                                        },
+                                        log = ::logAdaptive,
+                                    ) { target ->
+                                        if (!current()) return@deferExploration null
+                                        SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.PICACG) {
+                                            if (current()) {
+                                                runInterruptible {
+                                                    probeImage(target.url, target.endpoint, content = target.content)
+                                                }
+                                            } else {
+                                                null
+                                            }
+                                        }.takeIf { current() }
+                                    }
+                                }
+                                return results
+                            }
+                            val coverTask = async { runImageKind(content = false, service = "cover") }
+                            val contentTask = async { runImageKind(content = true, service = "content") }
+                            val measurements = coverTask.await().plus(contentTask.await()).map { (target, probe) ->
+                                target.identity.toMeasurement(probe, probe.measuredAtEpochMs ?: System.currentTimeMillis())
+                            }
+                            measurements.forEach { measurement ->
+                                freshImageHistory.removeAll { it.identity == measurement.identity }
+                                freshImageHistory += measurement
+                            }
+                            val freshByEndpointAndKind = freshImageHistory.associateBy { it.identity }
+                            // Replace retained display history with measured values without treating retained rows as current.
+                            val freshDisplay = freshImageHistory.map { it.toProbe(testedThisRound = true, quickSelected = quickImages) }
+                            accumulated.removeAll { old ->
+                                freshByEndpointAndKind.keys.any {
+                                    it.domain == old.endpoint.domain && it.ip == old.endpoint.ip &&
+                                        (it.probeCondition.contains("reader-page") == old.content)
                                 }
                             }
-                            if (probe == null || !current()) return@probe null
-                            val measured = probe.copy(measuredAtEpochMs = System.currentTimeMillis(), testedThisRound = true, quickSelected = quickApi)
-                            synchronized(apiTargets) {
-                                if (measured.success) successful.incrementAndGet() else failed.incrementAndGet()
-                                publishProgress(
-                                    Progress(
-                                        Stage.TESTING_API,
-                                        completed = completed.incrementAndGet(),
-                                        total = apiTargets.size,
-                                        successful = successful.get(),
-                                        failed = failed.get(),
-                                    ),
-                                )
+                            accumulated += freshDisplay
+                            if (allImageTargets.isEmpty() && accumulated.isEmpty() && blockedReason == null) {
+                                blockedReason = "哔咔图源没有可探测的 IP；图源验证未完成"
+                                publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
                             }
-                            measured
-                        },
-                    ).filterNot { (_, probe) -> probe.elapsedMs < 0L || (probe.success && probe.httpStatus == null) }
-                    freshApiHistory = fresh.map { (target, probe) ->
-                        target.identity.toMeasurement(probe, probe.measuredAtEpochMs ?: System.currentTimeMillis())
-                    }
-                    if (quickApi && fresh.any { it.second.success }) {
-                        adaptiveSession.deferExploration(
-                            scope = "PICACG:api",
-                            candidates = apiTargets.filterNot { it.identity in attemptedIdentities },
-                            key = { identityKey(it.identity, "api-root") },
-                            success = Probe::success,
-                            elapsedMs = Probe::elapsedMs,
-                            sampleInvalid = { it.elapsedMs < 0L || (it.success && it.httpStatus == null) },
-                            log = ::logAdaptive,
-                        ) { target ->
-                            if (!current()) return@deferExploration null
-                            SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.PICACG) {
-                                if (current()) runInterruptible { probeApi(target.url, target.endpoint) } else null
-                            }.takeIf { current() }
+                            accumulated
                         }
-                    }
-                    val oldHistory = if (apiCanUseHistory || apiReconcile) storedApi else PicacgSpeedTestHistoryPolicy.PhaseHistory(null)
-                    combineRows(oldHistory, activeApiIdentities, freshApiHistory)
-                }
-                val apiProbes = apiResults.toList()
-                val fastestCurrentApi = freshApiHistory.asSequence()
-                    .filter(PicacgSpeedTestHistoryPolicy.Measurement::success)
-                    .minWithOrNull(compareBy({ it.elapsedMs }, { it.endpoint.domain }, { it.endpoint.ip }))
-                val requestedEndpoint = if (PicacgRouteManager.isApiManuallyPinned) {
-                    PicacgRouteManager.selectedApiEndpoint
-                } else {
-                    fastestCurrentApi?.endpoint
-                }
-                val selectedTarget = if (PicacgRouteManager.isApiManuallyPinned) {
-                    requestedEndpoint?.let { endpoint -> apiTargets.firstOrNull { it.endpoint == endpoint } }
-                } else {
-                    fastestCurrentApi?.identity?.let { identity -> apiTargets.firstOrNull { it.identity == identity } }
-                }
-                var publishedLine: DomainIp? = null
-                var publicationAllowed = beforeApply() && current()
-                if (publicationAllowed) {
-                    val selectedSucceededThisRound = requestedEndpoint != null && apiProbes.any {
-                        it.endpoint == requestedEndpoint && it.testedThisRound && it.success
-                    }
-                    var bindingApplied = PicacgRouteManager.isApiManuallyPinned && selectedSucceededThisRound &&
-                        PicacgRouteManager.selectedApiEndpoint == requestedEndpoint
-                    if (selectedSucceededThisRound && selectedTarget != null && !PicacgRouteManager.isApiManuallyPinned) {
-                        bindingApplied = PicacgRouteManager.selectApiUrl(selectedTarget.url, manual = false) &&
-                            PicacgRouteManager.applyAutomaticApiEndpoint(selectedTarget.endpoint)
-                    }
-                    publishedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
-                        requestedEndpoint?.takeIf { selectedSucceededThisRound && bindingApplied },
-                        apiProbes.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
-                    ) { endpoint -> apiProbes.any { it.endpoint == endpoint && it.testedThisRound && it.success } }
-                    if (current()) onApiPublished(publishedLine) else publicationAllowed = false
-                }
 
-                var blockedReason: String? = null
-                val allImageTargets = timings.start(SpeedTestTimings.Phase.PICACG_IMAGE_PREPARATION).use {
-                    publishProgress(Progress(Stage.PREPARING_IMAGES, total = PicacgRouteManager.imageHosts.size))
-                    when {
-                        PicacgRouteManager.imageHosts.isEmpty() -> {
-                            blockedReason = "哔咔未配置任何正文图源（storage-b）；图源验证未运行"
-                            emptyList()
-                        }
-                        else -> adaptiveSession.prepareBlocking(quick = quickImages) {
-                            PicacgSpeedTestTargetPolicy.imageTargets(PicacgRouteManager.imageHosts, ::resolve).map { target ->
-                                ImageTarget(
-                                    target.url,
-                                    target.endpoint,
-                                    imageIdentity(target.endpoint, content = target.content),
-                                    content = target.content,
-                                )
+                        ImagePhase(blockedReason, freshImageHistory.toList(), imageResults.toList(), activeImageIdentities)
+                    }
+                    val apiUrls = PicacgRouteManager.apiUrls
+                    val apiTargets = timings.start(SpeedTestTimings.Phase.PICACG_LINE_PREPARATION).use {
+                        publishProgress(Progress(Stage.PREPARING_API, total = apiUrls.size))
+                        adaptiveSession.prepareBlocking(quick = quickApi) {
+                            PicacgSpeedTestTargetPolicy.apiTargets(apiUrls, ::resolve).map { target ->
+                                ApiTarget(target.url, target.endpoint, apiIdentity(target.url, target.endpoint))
                             }
                         }.orEmpty()
                     }
-                }
-                if (blockedReason != null) publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
-                val activeImageIdentities = allImageTargets.mapTo(linkedSetOf(), ImageTarget::identity)
-                val freshImageHistory = mutableListOf<PicacgSpeedTestHistoryPolicy.Measurement>()
-                val imageResults = run {
-                    val priorImageHistory = if (imageCanUseHistory || imageReconcile) storedImages else PicacgSpeedTestHistoryPolicy.PhaseHistory(null)
-                    val accumulated = combineRows(priorImageHistory, activeImageIdentities, emptyList())
-                    val completed = AtomicInteger(0)
-                    val successful = AtomicInteger(0)
-                    val failed = AtomicInteger(0)
-                    for ((content, service) in listOf(false to "cover", true to "content")) {
-                        val targets = allImageTargets.filter { it.content == content }
-                        if (targets.isEmpty()) continue
-                        publishProgress(Progress(Stage.TESTING_IMAGES, total = allImageTargets.size))
+                    val activeApiIdentities = apiTargets.mapTo(linkedSetOf(), ApiTarget::identity)
+                    val freshApiHistory: List<PicacgSpeedTestHistoryPolicy.Measurement>
+                    val apiResults = run {
+                        val completed = AtomicInteger(0)
+                        val successful = AtomicInteger(0)
+                        val failed = AtomicInteger(0)
                         val attemptedIdentities = java.util.concurrent.ConcurrentHashMap.newKeySet<PicacgSpeedTestHistoryPolicy.Identity>()
-                        val results = adaptiveSession.run(
-                            scope = if (content) "PICACG:content" else "PICACG:cover",
-                            candidates = targets,
-                            key = { identityKey(it.identity, service) },
-                            quick = quickImages,
-                            preferredKeys = if (quickImages) {
-                                val preferredHost = if (content) preferredContentHost else preferredCoverHost
-                                val preferredEndpoint = if (content) preferredContentEndpoint else preferredCoverEndpoint
-                                targets.filter { target ->
-                                    target.endpoint.domain.equals(preferredHost, true) &&
-                                        (preferredEndpoint == null || target.endpoint == preferredEndpoint)
-                                }.mapTo(linkedSetOf()) { identityKey(it.identity, service) }
+                        publishProgress(Progress(Stage.TESTING_API, total = apiTargets.size))
+                        val fresh = adaptiveSession.run(
+                            scope = "PICACG:api",
+                            candidates = apiTargets,
+                            key = { identityKey(it.identity, "api-root") },
+                            quick = quickApi,
+                            preferredKeys = if (quickApi) {
+                                apiTargets.filter { target ->
+                                    target.endpoint.domain.equals(preferredApiHost, true) &&
+                                        (preferredApiEndpoint == null || target.endpoint == preferredApiEndpoint)
+                                }.mapTo(linkedSetOf()) { identityKey(it.identity, "api-root") }
                             } else {
                                 emptySet()
                             },
                             independenceKey = { it.endpoint.ip.trim().lowercase(java.util.Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(java.util.Locale.ROOT) } },
                             success = Probe::success,
                             elapsedMs = Probe::elapsedMs,
-                            sampleInvalid = {
-                                it.elapsedMs < 0L || (
-                                    it.success &&
-                                        (it.httpStatus != 200 || it.imageDecoded != true || !PicacgImagePayloadPolicy.isImageContentType(it.contentType))
-                                    )
-                            },
+                            sampleInvalid = { it.elapsedMs < 0L || (it.success && it.httpStatus == null) },
                             log = ::logAdaptive,
+                            onUsable = usable@{ target, _ ->
+                                if (!current()) return@usable
+                                val allowed = beforeApply() && current()
+                                if (!allowed) {
+                                    publicationRejected.set(true)
+                                    return@usable
+                                }
+                                val manual = PicacgRouteManager.isApiManuallyPinned
+                                val applied = if (manual) {
+                                    PicacgRouteManager.selectedApiEndpoint == target.endpoint
+                                } else if (PicacgRouteManager.selectedApiEndpoint == target.endpoint &&
+                                    PicacgRouteManager.selectedApiHost.equals(URI(target.url).host, true)
+                                ) {
+                                    true
+                                } else {
+                                    PicacgRouteManager.applyAutomaticApiRoute(target.url, target.endpoint)
+                                }
+                                if (applied && current()) publishApi(target.endpoint)
+                            },
                             probe = probe@{ target ->
                                 if (!current()) return@probe null
                                 val probe = SpeedTestProbeBudget.scheduler.withPermit(
@@ -357,21 +455,21 @@ object PicacgSpeedTester {
                                     if (current()) {
                                         runInterruptible {
                                             attemptedIdentities += target.identity
-                                            probeImage(target.url, target.endpoint, content = target.content)
+                                            probeApi(target.url, target.endpoint)
                                         }
                                     } else {
                                         null
                                     }
                                 }
                                 if (probe == null || !current()) return@probe null
-                                val measured = probe.copy(measuredAtEpochMs = System.currentTimeMillis(), testedThisRound = true, quickSelected = quickImages)
-                                synchronized(allImageTargets) {
+                                val measured = probe.copy(measuredAtEpochMs = System.currentTimeMillis(), testedThisRound = true, quickSelected = quickApi)
+                                synchronized(apiTargets) {
                                     if (measured.success) successful.incrementAndGet() else failed.incrementAndGet()
                                     publishProgress(
                                         Progress(
-                                            Stage.TESTING_IMAGES,
+                                            Stage.TESTING_API,
                                             completed = completed.incrementAndGet(),
-                                            total = allImageTargets.size,
+                                            total = apiTargets.size,
                                             successful = successful.get(),
                                             failed = failed.get(),
                                         ),
@@ -379,151 +477,166 @@ object PicacgSpeedTester {
                                 }
                                 measured
                             },
-                        ).filterNot { (_, probe) ->
-                            probe.elapsedMs < 0L || (
-                                probe.success &&
-                                    (probe.httpStatus != 200 || probe.imageDecoded != true || !PicacgImagePayloadPolicy.isImageContentType(probe.contentType))
-                                )
+                        ).filterNot { (_, probe) -> probe.elapsedMs < 0L || (probe.success && probe.httpStatus == null) }
+                        freshApiHistory = fresh.map { (target, probe) ->
+                            target.identity.toMeasurement(probe, probe.measuredAtEpochMs ?: System.currentTimeMillis())
                         }
-                        if (quickImages && results.any { it.second.success }) {
+                        if (quickApi && fresh.any { it.second.success }) {
                             adaptiveSession.deferExploration(
-                                scope = if (content) "PICACG:content" else "PICACG:cover",
-                                candidates = targets.filterNot { it.identity in attemptedIdentities },
-                                key = { identityKey(it.identity, service) },
+                                scope = "PICACG:api",
+                                candidates = apiTargets.filterNot { it.identity in attemptedIdentities },
+                                key = { identityKey(it.identity, "api-root") },
                                 success = Probe::success,
                                 elapsedMs = Probe::elapsedMs,
-                                sampleInvalid = {
-                                    it.elapsedMs < 0L || (
-                                        it.success &&
-                                            (it.httpStatus != 200 || it.imageDecoded != true || !PicacgImagePayloadPolicy.isImageContentType(it.contentType))
-                                        )
-                                },
+                                sampleInvalid = { it.elapsedMs < 0L || (it.success && it.httpStatus == null) },
                                 log = ::logAdaptive,
                             ) { target ->
                                 if (!current()) return@deferExploration null
                                 SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.PICACG) {
-                                    if (current()) {
-                                        runInterruptible {
-                                            probeImage(target.url, target.endpoint, content = target.content)
-                                        }
-                                    } else {
-                                        null
-                                    }
+                                    if (current()) runInterruptible { probeApi(target.url, target.endpoint) } else null
                                 }.takeIf { current() }
                             }
                         }
-                        val measurements = results.map { (target, probe) ->
-                            target.identity.toMeasurement(probe, probe.measuredAtEpochMs ?: System.currentTimeMillis())
+                        val oldHistory = if (apiCanUseHistory || apiReconcile) storedApi else PicacgSpeedTestHistoryPolicy.PhaseHistory(null)
+                        combineRows(oldHistory, activeApiIdentities, freshApiHistory)
+                    }
+                    val apiProbes = apiResults.toList()
+                    val fastestCurrentApi = freshApiHistory.asSequence()
+                        .filter(PicacgSpeedTestHistoryPolicy.Measurement::success)
+                        .minWithOrNull(compareBy({ it.elapsedMs }, { it.endpoint.domain }, { it.endpoint.ip }))
+                    val requestedEndpoint = if (PicacgRouteManager.isApiManuallyPinned) {
+                        PicacgRouteManager.selectedApiEndpoint
+                    } else {
+                        fastestCurrentApi?.endpoint
+                    }
+                    val selectedTarget = if (PicacgRouteManager.isApiManuallyPinned) {
+                        requestedEndpoint?.let { endpoint -> apiTargets.firstOrNull { it.endpoint == endpoint } }
+                    } else {
+                        fastestCurrentApi?.identity?.let { identity -> apiTargets.firstOrNull { it.identity == identity } }
+                    }
+                    var publishedLine: DomainIp? = null
+                    var publicationAllowed = !publicationRejected.get() && beforeApply() && current()
+                    if (publicationAllowed) {
+                        val selectedSucceededThisRound = requestedEndpoint != null && apiProbes.any {
+                            it.endpoint == requestedEndpoint && it.testedThisRound && it.success
                         }
-                        freshImageHistory += measurements
-                    }
-                    val freshByEndpointAndKind = freshImageHistory.associateBy { it.identity }
-                    // Replace retained display history with measured values without treating retained rows as current.
-                    val freshDisplay = freshImageHistory.map { it.toProbe(testedThisRound = true, quickSelected = quickImages) }
-                    accumulated.removeAll { old ->
-                        freshByEndpointAndKind.keys.any {
-                            it.domain == old.endpoint.domain && it.ip == old.endpoint.ip &&
-                                (it.probeCondition.contains("reader-page") == old.content)
+                        var bindingApplied = PicacgRouteManager.isApiManuallyPinned && selectedSucceededThisRound &&
+                            PicacgRouteManager.selectedApiEndpoint == requestedEndpoint
+                        if (selectedSucceededThisRound && selectedTarget != null && !PicacgRouteManager.isApiManuallyPinned) {
+                            bindingApplied = (
+                                PicacgRouteManager.selectedApiEndpoint == selectedTarget.endpoint &&
+                                    PicacgRouteManager.selectedApiHost.equals(URI(selectedTarget.url).host, true)
+                                ) ||
+                                PicacgRouteManager.applyAutomaticApiRoute(selectedTarget.url, selectedTarget.endpoint)
+                        }
+                        publishedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
+                            requestedEndpoint?.takeIf { selectedSucceededThisRound && bindingApplied },
+                            apiProbes.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
+                        ) { endpoint -> apiProbes.any { it.endpoint == endpoint && it.testedThisRound && it.success } }
+                        if (current()) {
+                            publishApi(publishedLine)
+                        } else {
+                            publicationAllowed = false
                         }
                     }
-                    accumulated += freshDisplay
-                    if (allImageTargets.isEmpty() && accumulated.isEmpty() && blockedReason == null) {
-                        blockedReason = "哔咔图源没有可探测的 IP；图源验证未完成"
-                        publishProgress(Progress(Stage.IMAGE_BLOCKED, total = 0))
-                    }
-                    accumulated
-                }
 
-                if (publicationAllowed && beforeApply() && current()) {
-                    run {
-                        val canPersistApiHistory = forceFresh || apiCanUseHistory || apiReconcile || storedApi.remoteVersion == null
-                        if (canPersistApiHistory) {
-                            val history = when {
-                                forceFresh -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshApiHistory)
-                                apiReconcile -> {
-                                    val freshIdentities = freshApiHistory.mapTo(hashSetOf()) { it.identity }
-                                    PicacgSpeedTestHistoryPolicy.reconcile(
-                                        storedApi.copy(measurements = storedApi.measurements.filterNot { it.identity in freshIdentities }),
-                                        activeVersion,
-                                        activeApiIdentities,
-                                        freshApiHistory,
-                                    )
+                    val imagePhase = imageTask.await()
+                    val blockedReason = imagePhase.blockedReason
+                    val freshImageHistory = imagePhase.freshHistory.toMutableList()
+                    val imageResults = imagePhase.results
+                    val activeImageIdentities = imagePhase.activeIdentities
+
+                    if (publicationAllowed && beforeApply() && current()) {
+                        run {
+                            val canPersistApiHistory = forceFresh || apiCanUseHistory || apiReconcile || storedApi.remoteVersion == null
+                            if (canPersistApiHistory) {
+                                val history = when {
+                                    forceFresh -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshApiHistory)
+                                    apiReconcile -> {
+                                        val freshIdentities = freshApiHistory.mapTo(hashSetOf()) { it.identity }
+                                        PicacgSpeedTestHistoryPolicy.reconcile(
+                                            storedApi.copy(measurements = storedApi.measurements.filterNot { it.identity in freshIdentities }),
+                                            activeVersion,
+                                            activeApiIdentities,
+                                            freshApiHistory,
+                                        )
+                                    }
+                                    quickApi -> PicacgSpeedTestHistoryPolicy.mergeQuick(storedApi, freshApiHistory.mapTo(linkedSetOf()) { it.identity }, freshApiHistory)
+                                    apiCanUseHistory -> PicacgSpeedTestHistoryPolicy.mergeFull(storedApi, freshApiHistory)
+                                    else -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshApiHistory)
                                 }
-                                quickApi -> PicacgSpeedTestHistoryPolicy.mergeQuick(storedApi, freshApiHistory.mapTo(linkedSetOf()) { it.identity }, freshApiHistory)
-                                apiCanUseHistory -> PicacgSpeedTestHistoryPolicy.mergeFull(storedApi, freshApiHistory)
-                                else -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshApiHistory)
+                                PicacgSpeedTestHistoryStorage.saveApi(history)
                             }
-                            PicacgSpeedTestHistoryStorage.saveApi(history)
                         }
-                    }
-                    run {
-                        val canPersistImageHistory = forceFresh || imageCanUseHistory || imageReconcile || storedImages.remoteVersion == null
-                        if (canPersistImageHistory) {
-                            val history = when {
-                                forceFresh -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshImageHistory)
-                                imageReconcile -> {
-                                    val freshIdentities = freshImageHistory.mapTo(hashSetOf()) { it.identity }
-                                    PicacgSpeedTestHistoryPolicy.reconcile(
-                                        storedImages.copy(measurements = storedImages.measurements.filterNot { it.identity in freshIdentities }),
-                                        activeVersion,
-                                        activeImageIdentities,
-                                        freshImageHistory,
-                                    )
+                        run {
+                            val canPersistImageHistory = forceFresh || imageCanUseHistory || imageReconcile || storedImages.remoteVersion == null
+                            if (canPersistImageHistory) {
+                                val history = when {
+                                    forceFresh -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshImageHistory)
+                                    imageReconcile -> {
+                                        val freshIdentities = freshImageHistory.mapTo(hashSetOf()) { it.identity }
+                                        PicacgSpeedTestHistoryPolicy.reconcile(
+                                            storedImages.copy(measurements = storedImages.measurements.filterNot { it.identity in freshIdentities }),
+                                            activeVersion,
+                                            activeImageIdentities,
+                                            freshImageHistory,
+                                        )
+                                    }
+                                    quickImages -> PicacgSpeedTestHistoryPolicy.mergeQuick(storedImages, freshImageHistory.mapTo(linkedSetOf()) { it.identity }, freshImageHistory)
+                                    imageCanUseHistory -> PicacgSpeedTestHistoryPolicy.mergeFull(storedImages, freshImageHistory)
+                                    else -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshImageHistory)
                                 }
-                                quickImages -> PicacgSpeedTestHistoryPolicy.mergeQuick(storedImages, freshImageHistory.mapTo(linkedSetOf()) { it.identity }, freshImageHistory)
-                                imageCanUseHistory -> PicacgSpeedTestHistoryPolicy.mergeFull(storedImages, freshImageHistory)
-                                else -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshImageHistory)
+                                if (forceFresh || imageReconcile || PicacgRouteManager.imageHosts.isNotEmpty()) PicacgSpeedTestHistoryStorage.saveImages(history)
                             }
-                            if (forceFresh || imageReconcile || PicacgRouteManager.imageHosts.isNotEmpty()) PicacgSpeedTestHistoryStorage.saveImages(history)
                         }
-                    }
-                    if (!PicacgRouteManager.isImageManuallyPinned) {
-                        fun rankingOf(content: Boolean): List<DomainIp> = PicacgSpeedTestTargetPolicy.ranking(
-                            freshImageHistory.map { measurement ->
-                                PicacgSpeedTestTargetPolicy.ImageOutcome(
-                                    measurement.endpoint,
-                                    content = measurement.identity.probeCondition.contains("reader-page"),
-                                    success = measurement.success,
-                                    elapsedMs = measurement.elapsedMs,
-                                )
-                            },
-                            content = content,
+                        if (!PicacgRouteManager.isImageManuallyPinned) {
+                            fun rankingOf(content: Boolean): List<DomainIp> = PicacgSpeedTestTargetPolicy.ranking(
+                                freshImageHistory.map { measurement ->
+                                    PicacgSpeedTestTargetPolicy.ImageOutcome(
+                                        measurement.endpoint,
+                                        content = measurement.identity.probeCondition.contains("reader-page"),
+                                        success = measurement.success,
+                                        elapsedMs = measurement.elapsedMs,
+                                    )
+                                },
+                                content = content,
+                            )
+                            PicacgRouteManager.applyImageRankings(rankingOf(false), rankingOf(true))
+                        }
+                        val finished = System.currentTimeMillis()
+                        val ordered = compareBy<Probe>({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip }, { it.content })
+                        val result = Snapshot(
+                            started,
+                            finished,
+                            activeVersion,
+                            apiProbes.sortedWith(ordered),
+                            imageResults.sortedWith(ordered),
+                            blockedReason,
+                            revision,
+                            roundSelectedLine = publishedLine,
+                            roundSelectedImage = imageResults.asSequence()
+                                .filter { it.content && it.testedThisRound && it.success }
+                                .minByOrNull(Probe::elapsedMs)
+                                ?.endpoint,
+                            networkIdentity = networkIdentity,
                         )
-                        PicacgRouteManager.applyImageRankings(rankingOf(false), rankingOf(true))
+                        _snapshot.value = result
+                        val measuredApi = apiProbes.filter(Probe::testedThisRound)
+                        publishProgress(
+                            Progress(
+                                Stage.COMPLETE,
+                                completed = measuredApi.size + imageResults.count(Probe::testedThisRound),
+                                total = apiProbes.size + imageResults.size,
+                                successful = measuredApi.count(Probe::success) + imageResults.count { it.testedThisRound && it.success },
+                                failed = measuredApi.count { !it.success } + imageResults.count { it.testedThisRound && !it.success },
+                            ),
+                        )
+                        AdaptiveSpeedHistory.launchExploration(adaptiveSession)
+                        return@use result
                     }
                     val finished = System.currentTimeMillis()
-                    val ordered = compareBy<Probe>({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip }, { it.content })
-                    val result = Snapshot(
-                        started,
-                        finished,
-                        activeVersion,
-                        apiProbes.sortedWith(ordered),
-                        imageResults.sortedWith(ordered),
-                        blockedReason,
-                        revision,
-                        roundSelectedLine = publishedLine,
-                        roundSelectedImage = imageResults.asSequence()
-                            .filter { it.content && it.testedThisRound && it.success }
-                            .minByOrNull(Probe::elapsedMs)
-                            ?.endpoint,
-                        networkIdentity = networkIdentity,
-                    )
-                    _snapshot.value = result
-                    val measuredApi = apiProbes.filter(Probe::testedThisRound)
-                    publishProgress(
-                        Progress(
-                            Stage.COMPLETE,
-                            completed = apiProbes.size + imageResults.count(Probe::testedThisRound),
-                            total = apiProbes.size + imageResults.size,
-                            successful = measuredApi.count(Probe::success) + imageResults.count { it.testedThisRound && it.success },
-                            failed = measuredApi.count { !it.success } + imageResults.count { it.testedThisRound && !it.success },
-                        ),
-                    )
-                    AdaptiveSpeedHistory.launchExploration(adaptiveSession)
-                    return@use result
+                    Snapshot(started, finished, activeVersion, apiProbes, imageResults, blockedReason, revision, networkIdentity = networkIdentity)
                 }
-                val finished = System.currentTimeMillis()
-                Snapshot(started, finished, activeVersion, apiProbes, imageResults, blockedReason, revision, networkIdentity = networkIdentity)
             }
         }
     }

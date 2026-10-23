@@ -2,6 +2,7 @@ package com.zycomic.app.net
 
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -29,6 +30,50 @@ class SpeedTesterAdaptiveSelectionTest {
                 mapOf(endpoint("line.example", "192.0.2.3") to Long.MAX_VALUE),
             ),
         )
+    }
+
+    @Test
+    fun manualLineOverrideRejectsEarlyAutomaticRoutePublication() {
+        val oldLines = RouteManager.lineHosts
+        val oldImages = RouteManager.imgDomains
+        val oldVersion = RouteManager.activeRemoteConfigVersion
+        val oldAutoSelect = RouteManager.autoSelectEnabled
+        val oldDomain = RouteManager.lineHost
+        val oldIp = RouteManager.selectedLineIp
+        try {
+            RouteManager.applyBaseLists(
+                lineUrls = listOf("https://line-a.example", "https://line-b.example"),
+                sourceDomains = listOf("cdn-a.example", "cdn-b.example"),
+            )
+            RouteManager.setAutoSelectEnabled(true)
+            RouteManager.setLineEndpoint("line-a.example", "192.0.2.10")
+            val expectedRevision = RouteManager.configRevision
+            val expectedPlatformRevision = com.zycomic.app.platform.StartupPlatformPolicy.state.value.revision
+
+            assertFalse(
+                RouteManager.applyFastestLineEndpoint(
+                    endpoint("line-b.example", "192.0.2.11"),
+                    expectedConfigRevision = expectedRevision,
+                    expectedPlatformRevision = expectedPlatformRevision,
+                ),
+            )
+            assertEquals("line-a.example", RouteManager.baseUrl.substringAfter("://").substringBefore('/'))
+            assertEquals("192.0.2.10", RouteManager.selectedLineIp)
+        } finally {
+            RouteManager.setAutoSelectEnabled(true)
+            RouteManager.applyBaseLists(oldLines, oldImages, oldVersion)
+            RouteManager.setAutoSelectEnabled(oldAutoSelect)
+            if (!oldAutoSelect) {
+                val oldIndex = oldLines.indexOfFirst { it.contains(oldDomain, ignoreCase = true) }
+                if (oldIndex >= 0) {
+                    if (oldIp.isNullOrBlank()) {
+                        RouteManager.setLine(oldIndex)
+                    } else {
+                        RouteManager.setLineEndpoint(oldDomain, oldIp)
+                    }
+                }
+            }
+        }
     }
 
     @Test

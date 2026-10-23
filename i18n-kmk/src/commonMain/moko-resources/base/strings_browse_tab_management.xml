@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="browse_tab_name_hint">Tab 名称仅用于显示提醒，实际内容由下方选项决定。</string>
+</resources>

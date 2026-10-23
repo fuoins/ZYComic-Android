@@ -358,6 +358,26 @@ object PicacgRouteManager {
     @Synchronized
     fun pinImageEndpoint(endpoint: DomainIp?): Boolean = setPin(endpoint, false)
 
+    /** Apply an already measured API host/IP pair atomically without racing a manual selection. */
+    @Synchronized
+    internal fun applyAutomaticApiRoute(url: String, endpoint: DomainIp): Boolean {
+        if (isApiManuallyPinned) return false
+        val current = _state.value
+        val index = current.apiUrls.indexOfFirst { hostOf(it).equals(hostOf(url), true) }
+        if (index < 0 || !hostOf(current.apiUrls[index]).equals(endpoint.domain, true) ||
+            !isIpv4Literal(endpoint.ip) ||
+            apiRouteRules.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true
+        ) {
+            return false
+        }
+        prefs()?.edit()?.apply {
+            putBoolean("manual_api_selection", false)
+            remove("selected_api_host")
+            persistEndpoint("api_pin", endpoint)
+        }?.apply()
+        _state.value = current.copy(apiIndex = index, pinnedApi = endpoint, revision = current.revision + 1)
+        return true
+    }
     /** Apply a measured endpoint without changing the user's manual-selection preference. */
     fun applyAutomaticApiEndpoint(endpoint: DomainIp?): Boolean = setPin(endpoint, true, manual = false)
 

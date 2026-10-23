@@ -133,9 +133,23 @@ object PicacgRouteManager {
     fun selectApiUrl(url: String, manual: Boolean = true): Boolean {
         apiSelections += URI(url).host
         selectedApiUrl = url
+        if (manual) isApiManuallyPinned = true
         return true
     }
     fun selectImageHost(host: String, manual: Boolean = true): Boolean = true
+    fun applyAutomaticApiRoute(url: String, endpoint: DomainIp): Boolean {
+        if (isApiManuallyPinned) return false
+        val host = URI(url).host ?: return false
+        if (apiUrls.none { URI(it).host.equals(host, true) } ||
+            !host.equals(endpoint.domain, true) || ips[host.lowercase()].orEmpty().none { it == endpoint.ip }
+        ) return false
+        if (selectedApiUrl?.let { URI(it).host.equals(host, true) } != true || selectedApiEndpoint != endpoint) {
+            apiSelections += host
+        }
+        selectedApiUrl = url
+        selectedApiEndpoint = endpoint
+        return true
+    }
     fun applyAutomaticApiEndpoint(endpoint: DomainIp?): Boolean {
         selectedApiEndpoint = endpoint
         return true

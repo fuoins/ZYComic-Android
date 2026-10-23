@@ -8,6 +8,9 @@ import java.util.UUID
 
 enum class PicacgBrowsePageMode { HOME, RANKING, CATEGORY }
 
+/** Persisted mode for either legacy picacg_home or the newer ranking tab. */
+enum class PicacgRankingMode { H24, D7, D30, RANDOM, LATEST }
+
 internal object PicacgBrowsePolicy {
     data class LeaderboardPreset(val name: String, val timeframe: String)
 

@@ -77,6 +77,14 @@ internal enum class PicacgFeedMode(val timeframe: String? = null) {
     FILTERED,
 }
 
+internal fun PicacgRankingMode.toFeedMode(): PicacgFeedMode = when (this) {
+    PicacgRankingMode.H24 -> PicacgFeedMode.LEADERBOARD_24H
+    PicacgRankingMode.D7 -> PicacgFeedMode.LEADERBOARD_7D
+    PicacgRankingMode.D30 -> PicacgFeedMode.LEADERBOARD_30D
+    PicacgRankingMode.RANDOM -> PicacgFeedMode.RANDOM
+    PicacgRankingMode.LATEST -> PicacgFeedMode.LATEST
+}
+
 /** Static ranking controls; the pager preview uses the no-op callback until selection settles. */
 @Composable
 internal fun PicacgRankingChips(
@@ -120,6 +128,7 @@ fun PicacgBrowseScreen(
     onRequireLogin: () -> Unit,
     tabId: String = "",
     initialFilter: PicacgBrowseFilter? = null,
+    initialRankingMode: PicacgRankingMode = PicacgRankingMode.H24,
     pageMode: PicacgBrowsePageMode = PicacgBrowsePageMode.HOME,
     displayMode: Int = 1,
     gridColumns: Int = 3,
@@ -139,16 +148,24 @@ fun PicacgBrowseScreen(
     val browseCacheRevision by PicacgRepository.browseCacheRevision.collectAsState()
     val routeState by PicacgRouteManager.state.collectAsState()
     val presets = remember { mutableStateOf(PicacgBrowsePrefs.load(context)) }
-    var mode by remember(session, tabId, initialFilter, pageMode) {
+    var mode by remember(session, tabId, initialFilter, pageMode, initialRankingMode) {
         mutableStateOf(
             if (pageMode == PicacgBrowsePageMode.CATEGORY) {
                 PicacgFeedMode.FILTERED
             } else {
-                PicacgFeedMode.LEADERBOARD_24H
+                initialRankingMode.toFeedMode()
             },
         )
     }
-    var filter by remember(session, tabId, initialFilter) { mutableStateOf(initialFilter?.normalized() ?: PicacgBrowseFilter()) }
+    var filter by remember(session, tabId, initialFilter, pageMode, initialRankingMode) {
+        mutableStateOf(
+            if (pageMode != PicacgBrowsePageMode.CATEGORY && initialRankingMode == PicacgRankingMode.LATEST) {
+                PicacgBrowseFilter(sort = "dd")
+            } else {
+                initialFilter?.normalized() ?: PicacgBrowseFilter()
+            },
+        )
+    }
     val currentFilter = filter.normalized()
     val condition = PicacgRepository.currentBrowseCondition()
     // A different query/condition gets a different state object, never a frame of the old list.
@@ -271,7 +288,11 @@ fun PicacgBrowseScreen(
 
     fun selectMode(next: PicacgFeedMode, nextFilter: PicacgBrowseFilter = filter) {
         mode = next
-        filter = nextFilter
+        filter = if (pageMode != PicacgBrowsePageMode.CATEGORY && next == PicacgFeedMode.LATEST) {
+            PicacgBrowseFilter(sort = "dd")
+        } else {
+            nextFilter
+        }
         page = 1
     }
 

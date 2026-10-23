@@ -86,6 +86,7 @@ object BrowseTabStore {
         kind = TabKind.FILTER,
         builtin = true,
         platformId = ContentPlatform.PICACG,
+        picacgRankingMode = com.zycomic.app.ui.picacg.PicacgRankingMode.H24,
     )
 
     /** The legacy homepage identity is retained for existing users, but now represents the 24-hour ranking. */
@@ -97,6 +98,7 @@ object BrowseTabStore {
         kind = TabKind.SPECIAL,
         pageType = BrowsePageType.PICACG_RANKING,
         platformId = ContentPlatform.PICACG,
+        picacgRankingMode = com.zycomic.app.ui.picacg.PicacgRankingMode.H24,
     )
 
     fun picacgCategoryTab() = BrowseTabItem(
@@ -105,6 +107,7 @@ object BrowseTabStore {
         kind = TabKind.SPECIAL,
         pageType = BrowsePageType.PICACG_CATEGORY,
         platformId = ContentPlatform.PICACG,
+        picacgFilter = com.zycomic.app.ui.picacg.PicacgBrowseFilter(),
     )
 
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {

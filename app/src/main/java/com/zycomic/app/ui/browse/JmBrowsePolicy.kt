@@ -68,7 +68,7 @@ internal object JmBrowsePolicy {
     fun customCategoryFilters(filters: Filters = Filters()): Filters = Filters(
         mode = MODE_CATEGORY,
         category = filters.category,
-        order = ALL_HOT_ORDER,
+        order = filters.order.ifBlank { ALL_HOT_ORDER },
     )
 
     fun jmHomeModes(): List<Pair<String, Int>> = listOf(

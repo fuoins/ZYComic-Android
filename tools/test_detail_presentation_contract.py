@@ -226,7 +226,7 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         self.assertIn("if (isActive) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen(", selected)
         self.assertNotIn("vm.mainTab.value", page)
         self.assertIn("pageMode = pageMode,", selected)
-        self.assertIn("com.zycomic.app.ui.picacg.PicacgRankingChips()", preview)
+        self.assertIn("com.zycomic.app.ui.picacg.PicacgRankingChips(selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode())", preview)
         self.assertIn("padding(horizontal = 12.dp, vertical = 8.dp)", preview)
         for forbidden in ("PicacgBrowseScreen(", "Repository", "LaunchedEffect", "selectMainTab"):
             self.assertNotIn(forbidden, preview)
@@ -258,11 +258,11 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
     def test_category_and_custom_filter_pages_do_not_get_ranking_preview(self):
         host = (JAVA / "ui/browse/BrowseScreen.kt").read_text()
         page = host.split("if (tabPlatform == ContentPlatform.PICACG)", 1)[1].split("if (item?.kind == TabKind.SPECIAL", 1)[0]
-        self.assertIn("BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY", page)
-        self.assertIn("item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME", page)
+        self.assertIn("val pageMode = if (item?.isPicacgRanking() != false)", page)
+        self.assertRegex(page, r"else\s*\{\s*com\.zycomic\.app\.ui\.picacg\.PicacgBrowsePageMode\.CATEGORY\s*\}")
         preview = page.split("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)", 1)[1]
         self.assertIn("} else {\n            Box(Modifier.fillMaxSize())", preview)
-        self.assertEqual(1, preview.count("PicacgRankingChips()"))
+        self.assertEqual(1, preview.count("PicacgRankingChips("))
 
     def test_picacg_disk_cache_is_counted_and_statistics_refresh_after_clear(self):
         for contract in ("PicacgImageLoader.diskCacheDirectory(context)", "coilBytes + picacgBytes", "KMR.strings.picacg_image_cache_size", "cacheRevision++", "remember(cacheRevision) { imageDiskCacheSize() }"):

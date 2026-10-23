@@ -2,12 +2,15 @@ package com.zycomic.app.net
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.time.ZoneId
@@ -230,6 +233,7 @@ internal object AdaptiveSpeedProbe {
             preferredKeys: Set<String> = emptySet(),
             independenceKey: (T) -> String = key,
             explorationOnly: Boolean = false,
+            onUsable: (suspend (T, R) -> Unit)? = null,
             probe: suspend (T) -> R?,
         ): List<Pair<T, R>> = coroutineScope {
             data class Candidate<T>(
@@ -309,6 +313,10 @@ internal object AdaptiveSpeedProbe {
             emit("exploration=optional-deferred; explorationOnly=$explorationOnly; baselineMs=$baseline; fastThresholdMs=$fastThresholdMs")
             val guard = Any()
             val results = mutableListOf<Pair<T, R>>()
+            var bestUsable: Pair<T, R>? = null
+            var publishedElapsed = Long.MAX_VALUE
+            var foregroundReleased = false
+            val publishLock = Mutex()
             var latestAttemptStamp = ordered.maxOfOrNull { lastAttempt(it.allTimes) } ?: 0L
             var good = 0
             var dispatched = 0
@@ -317,6 +325,32 @@ internal object AdaptiveSpeedProbe {
             val usedGroups = mutableSetOf<String>()
             var changed = CompletableDeferred<Unit>()
             fun remaining(): Long = remainingBudgetMs()
+            suspend fun publishBest(force: Boolean) {
+                val callback = onUsable ?: return
+                publishLock.withLock {
+                    val best = synchronized(guard) { bestUsable }
+                    if (best != null) {
+                        val elapsed = elapsedMs(best.second).coerceAtLeast(0L)
+                        if (elapsed < publishedElapsed && (force || elapsed <= fastThresholdMs || remaining() <= 0L)) {
+                            publishedElapsed = elapsed
+                            synchronized(guard) { foregroundReleased = true }
+                            callback(best.first, best.second)
+                        }
+                    }
+                }
+            }
+            val stageTimer = if (onUsable != null) {
+                launch {
+                    delay(remaining().coerceAtLeast(0L))
+                    publishBest(force = true)
+                    synchronized(guard) {
+                        changed.complete(Unit)
+                        changed = CompletableDeferred()
+                    }
+                }
+            } else {
+                null
+            }
             val workers = List(minOf(if (quick) concurrency else fullConcurrency, ordered.size)) {
                 launch {
                     while (true) {
@@ -324,11 +358,15 @@ internal object AdaptiveSpeedProbe {
                         var waitMs = 0L
                         var waitFor: CompletableDeferred<Unit>? = null
                         val candidate = synchronized(guard) {
-                            if (ordered.isEmpty() || (quick && (remaining() <= 0L || good >= 2))) {
+                            if (ordered.isEmpty() || (onUsable == null && quick && (remaining() <= 0L || good >= 2))) {
                                 null
-                            } else if (quick && !explorationOnly && good + inFlight >= 2) {
+                            } else if (onUsable == null && quick && !explorationOnly && good + inFlight >= 2) {
                                 // Do not speculatively dispatch a third (possibly failed) peer while
                                 // the primary two can still establish a healthy pool.
+                                waitFor = changed
+                                null
+                            } else if (onUsable != null && (foregroundReleased || remaining() <= 0L) && inFlight > 0) {
+                                // Foreground attempts finish; after the deadline only one worker drains the tail.
                                 waitFor = changed
                                 null
                             } else {
@@ -349,7 +387,7 @@ internal object AdaptiveSpeedProbe {
                                     inFlight++
                                     ordered.removeAt(next).also { usedGroups += independenceKey(it.target) }
                                 } else if (!explorationOnly && inFlight == 0) {
-                                    // Only service recovery may wait for cooling peers within the run budget.
+                                    // Legacy recovery defers cooled peers at the budget; two-stage runs drain them.
                                     waitMs = (ordered.minOf { it.allTimes?.cooldownUntil ?: 0L } - now()).coerceAtLeast(1L)
                                     null
                                 } else {
@@ -360,10 +398,14 @@ internal object AdaptiveSpeedProbe {
                         }
                         if (candidate == null) {
                             if (waitFor != null) {
-                                withTimeoutOrNull(remaining().coerceAtLeast(1L)) { waitFor!!.await() }
+                                if (onUsable != null) {
+                                    waitFor!!.await()
+                                } else {
+                                    withTimeoutOrNull(remaining().coerceAtLeast(1L)) { waitFor!!.await() }
+                                }
                                 continue
                             }
-                            if (waitMs > 0L && remaining() > waitMs) {
+                            if (waitMs > 0L && (onUsable != null || remaining() > waitMs)) {
                                 emit("recovery=cooldown-wait; waitMs=$waitMs")
                                 delay(waitMs)
                                 continue
@@ -381,10 +423,14 @@ internal object AdaptiveSpeedProbe {
                         var timedOut = false
                         var exceptionName: String? = null
                         val result = try {
-                            if (quick) {
+                            if (quick && onUsable == null) {
                                 val timeout = minOf(attemptTimeoutMs, remaining()).coerceAtLeast(1L)
                                 withTimeoutOrNull(timeout) {
                                     // A null result means an invalidated run; do not count it as failure.
+                                    probe(candidate.target) to true
+                                }.also { if (it == null) timedOut = true }?.first
+                            } else if (onUsable != null && quick) {
+                                withTimeoutOrNull(attemptTimeoutMs) {
                                     probe(candidate.target) to true
                                 }.also { if (it == null) timedOut = true }?.first
                             } else {
@@ -462,9 +508,16 @@ internal object AdaptiveSpeedProbe {
                             inFlight--
                             if (result != null) results += candidate.target to result
                             if (ok && elapsedMs(result!!) in 0L..fastThresholdMs) good++
+                            if (ok) {
+                                val currentBest = bestUsable
+                                if (currentBest == null || elapsedMs(result!!) < elapsedMs(currentBest.second)) {
+                                    bestUsable = candidate.target to result!!
+                                }
+                            }
                             changed.complete(Unit)
                             changed = CompletableDeferred()
                         }
+                        if (ok && onUsable != null) publishBest(force = elapsedMs(result!!) <= fastThresholdMs)
                         emit(
                             "probe=${candidate.endpoint}; result=${when {
                                 timedOut -> "timeout"
@@ -481,10 +534,16 @@ internal object AdaptiveSpeedProbe {
                 }
             }
             workers.forEach { it.join() }
+            if (onUsable != null) {
+                // If all candidates finish before the deadline, there is no later result to wait for.
+                publishBest(force = true)
+                stageTimer?.cancelAndJoin()
+            }
             val valid = results.filter { !sampleInvalid(it.second) && success(it.second) }
             val selected = valid.minByOrNull { elapsedMs(it.second) }
             emit(
                 "dispatched=$dispatched; completed=$completed; untested=${ordered.size}; explorationOnly=$explorationOnly; stop=${when {
+                    onUsable != null -> "two-stage-complete"
                     !quick -> "full-complete"
                     remaining() <= 0L -> "run-budget"
                     good >= 2 -> "enough-current-successes"

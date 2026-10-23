@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Tune
@@ -36,6 +38,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -43,11 +47,18 @@ fun YuzongDefaultDialog(
     initialName: String,
     onRename: (String) -> Boolean,
     onDismiss: () -> Unit,
+    checkNameTaken: (String) -> Boolean = { false },
 ) {
     val ctx = LocalContext.current
     var platform by remember { mutableStateOf(PlatformPrefs.loadPlatform(ctx)) }
     var sub by remember { mutableStateOf(PlatformPrefs.loadSub(ctx, platform)) }
     var name by remember { mutableStateOf(initialName) }
+    val trimmed = name.trim()
+    val nameError = when {
+        trimmed.isEmpty() -> "名称不能为空"
+        checkNameTaken(trimmed) -> "名称已存在"
+        else -> null
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -60,7 +71,7 @@ fun YuzongDefaultDialog(
                 tonalElevation = 3.dp,
                 modifier = Modifier.fillMaxHeight(0.9f).widthIn(max = 460.dp).fillMaxWidth(),
             ) {
-                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Tune, null, tint = MaterialTheme.colorScheme.primary)
                         androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
@@ -71,12 +82,18 @@ fun YuzongDefaultDialog(
                         value = name,
                         onValueChange = { name = it },
                         singleLine = true,
-                        isError = name.trim().isEmpty(),
+                        isError = nameError != null,
+                        supportingText = {
+                            Column {
+                                nameError?.let { Text(it) }
+                                Text(stringResource(KMR.strings.browse_tab_name_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
                         label = { Text("tab 名称") },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     )
                     Text("默认平台", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
-                    androidx.compose.foundation.layout.Row(
+                    FlowRow(
                         modifier = Modifier.padding(vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -105,7 +122,6 @@ fun YuzongDefaultDialog(
                             )
                         }
                     }
-                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                     HorizontalDivider()
                     androidx.compose.foundation.layout.Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -114,10 +130,9 @@ fun YuzongDefaultDialog(
                     ) {
                         TextButton(onClick = onDismiss) { Text("取消") }
                         androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
-                        Button(onClick = {
+                        Button(enabled = nameError == null, onClick = {
+                            if (trimmed != initialName && !onRename(trimmed)) return@Button
                             PlatformPrefs.save(ctx, platform, sub)
-                            val t = name.trim()
-                            if (t.isNotEmpty() && t != initialName) onRename(t)
                             onDismiss()
                         }) { Text("保存") }
                     }

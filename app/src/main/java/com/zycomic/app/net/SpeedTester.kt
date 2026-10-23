@@ -5,6 +5,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
@@ -822,6 +824,7 @@ object SpeedTester {
      */
     suspend fun runAndApply(
         onProgress: ((line: Map<DomainIp, Long>, img: Map<DomainIp, Long>, verdicts: Map<DomainIp, ImgVerdict>) -> Unit)? = null,
+        onRouteReady: (() -> Unit)? = null,
         onStageProgress: ((Progress) -> Unit)? = null,
         reuseLines: Boolean = false,
         allowImageReuse: Boolean = false,
@@ -882,6 +885,13 @@ object SpeedTester {
             val inUseLineIp = RouteManager.selectedLineIp
             val inUseImageDomain = RouteManager.imgRewriteTarget ?: RouteManager.imgHost
             var samplePath: ManwaImageFallbackProbePolicy.SharedLazy<String?>? = null
+            val lineRouteSettled = CompletableDeferred<Unit>()
+            val applyGate = Mutex()
+            var applyGateResolved = false
+            var applyGateAllowed = false
+            val readyLineEndpoints = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
+            val readyImageEndpoints = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgProbe>()
+            val routeReadySent = AtomicBoolean(false)
             val timings = SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.MANWA)
             try {
                 // A new run must not expose last-run successes as currently healthy while fresh probes are pending.
@@ -893,7 +903,9 @@ object SpeedTester {
                 val preparedLineTargets = adaptiveSession.prepareBlocking(quickLineRetest) { lineTargets() }
                 val preparedImageTargets = adaptiveSession.prepareBlocking(quickImageRetest) { imgTargets() }
                 val currentLineTargets = preparedLineTargets.orEmpty()
-                val currentImageTargets = preparedImageTargets.orEmpty()
+                // Image preparation shares the quick-run budget, but timing out DNS preparation must not turn a full image pass into zero probes.
+                // Re-enumerate without the probe deadline; the later two-stage runner still drains every discovered candidate.
+                val currentImageTargets = preparedImageTargets ?: imgTargets()
                 fun identity(endpoint: DomainIp, type: String, request: String, probe: String): String {
                     val routes = RouteManager.customRule.entries.firstOrNull { it.key.equals(endpoint.domain, true) }
                         ?.value.orEmpty()
@@ -921,6 +933,37 @@ object SpeedTester {
                 fun imageKey(endpoint: DomainIp): String =
                     "${endpoint.domain}|${endpoint.ip}|" +
                         identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2")
+                suspend fun allowPublication(): Boolean = applyGate.withLock {
+                    if (!applyGateResolved) {
+                        applyGateAllowed = beforeApply()
+                        applyGateResolved = true
+                    }
+                    applyGateAllowed && runIsCurrent()
+                }
+                fun currentLineHasFreshSuccess(): Boolean {
+                    val domain = lineDomain(RouteManager.baseUrl) ?: return false
+                    val selectedIp = RouteManager.selectedLineIp
+                    return readyLineEndpoints.any { (endpoint, delay) ->
+                        delay < MAX && endpoint.domain.equals(domain, true) &&
+                            (selectedIp.isNullOrBlank() || endpoint.ip.equals(selectedIp, true))
+                    }
+                }
+                fun currentImageHasFreshSuccess(): Boolean {
+                    val domain = RouteManager.imgRewriteTarget ?: RouteManager.imgHost
+                    val selectedIp = RouteManager.selectedImgIp
+                    return readyImageEndpoints.any { (endpoint, result) ->
+                        result.verdict == ImgVerdict.OK && result.delayMs < MAX &&
+                            endpoint.domain.equals(domain, true) &&
+                            (selectedIp.isNullOrBlank() || endpoint.ip.equals(selectedIp, true))
+                    }
+                }
+                fun publishReadyIfPossible() {
+                    if (runIsCurrent() && currentLineHasFreshSuccess() && currentImageHasFreshSuccess() &&
+                        routeReadySent.compareAndSet(false, true)
+                    ) {
+                        onRouteReady?.invoke()
+                    }
+                }
                 // The runner owns scheduling history and never synthesizes current outcomes from it.
                 // Candidate order remains configured/DNS order.
                 val lineProbeTargets = currentLineTargets
@@ -930,117 +973,80 @@ object SpeedTester {
                 reportStage(Progress(Phase.TESTING_LINES, total = lineProbeTargets.size, reusedLines = retainedLineCount))
                 val freshLineAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, Long>()
                 val freshLineOutcomes = java.util.concurrent.ConcurrentHashMap<DomainIp, ProbeOutcome>()
-                val lineResults = adaptiveSession.run(
-                    scope = "MANWA:line",
-                    candidates = lineProbeTargets,
-                    key = ::lineKey,
-                    quick = quickLineRetest,
-                    preferredKeys = if (quickLineRetest) {
-                        currentLineTargets.filter { target ->
-                            target.endpoint.domain.equals(inUseLineDomain, true) &&
-                                (inUseLineIp.isNullOrBlank() || target.endpoint.ip.equals(inUseLineIp, true))
-                        }.mapTo(linkedSetOf(), ::lineKey)
-                    } else {
-                        emptySet()
-                    },
-                    independenceKey = { it.endpoint.ip.trim().lowercase(java.util.Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(java.util.Locale.ROOT) } },
-                    success = { it.delayMs < MAX },
-                    elapsedMs = { it.elapsedMs },
-                    sampleInvalid = { it.failureCategory == SpeedTestFailureCategory.INVALID_JSON },
-                    log = { Log.i(TAG, it) },
-                ) { target ->
-                    val outcome = if (runIsCurrent()) {
-                        probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
-                            if (runIsCurrent()) measureLineAtIp(lineClient, target) else null
-                        }
-                    } else {
-                        null
-                    }
-                    if (outcome != null && runIsCurrent()) {
-                        freshLineOutcomes[target.endpoint] = outcome
-                        freshLineAcc[target.endpoint] = outcome.delayMs
-                        onProgress?.invoke(freshLineAcc.toMap(), emptyMap(), emptyMap())
-                        val successful = freshLineAcc.values.count { it < MAX }
-                        reportStage(
-                            Progress(
-                                phase = Phase.TESTING_LINES,
-                                completed = freshLineAcc.size.coerceAtMost(lineProbeTargets.size),
-                                total = lineProbeTargets.size,
-                                successful = successful,
-                                failed = freshLineAcc.size - successful,
-                                reusedLines = retainedLineCount,
-                                lineQuickTest = quickLineRetest,
-                            ),
-                        )
-                    }
-                    outcome.takeIf { runIsCurrent() }
-                }.toList()
-                if (quickLineRetest && lineResults.any { it.second.delayMs < MAX }) {
-                    val measured = lineResults.mapTo(hashSetOf()) { it.first.endpoint }
-                    adaptiveSession.deferExploration(
+                val lineResultsDeferred = async {
+                    adaptiveSession.run(
                         scope = "MANWA:line",
-                        candidates = lineProbeTargets.filterNot { it.endpoint in measured },
+                        candidates = lineProbeTargets,
                         key = ::lineKey,
+                        quick = quickLineRetest,
+                        preferredKeys = if (quickLineRetest) {
+                            currentLineTargets.filter { target ->
+                                target.endpoint.domain.equals(inUseLineDomain, true) &&
+                                    (inUseLineIp.isNullOrBlank() || target.endpoint.ip.equals(inUseLineIp, true))
+                            }.mapTo(linkedSetOf(), ::lineKey)
+                        } else {
+                            emptySet()
+                        },
+                        independenceKey = { it.endpoint.ip.trim().lowercase(java.util.Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(java.util.Locale.ROOT) } },
                         success = { it.delayMs < MAX },
                         elapsedMs = { it.elapsedMs },
                         sampleInvalid = { it.failureCategory == SpeedTestFailureCategory.INVALID_JSON },
                         log = { Log.i(TAG, it) },
-                    ) { target ->
-                        if (!runIsCurrent()) return@deferExploration null
-                        probeScheduler.withPermit(ContentPlatform.MANWA) {
-                            if (!runIsCurrent()) return@withPermit null
-                            val client = NetworkModule.newLineProbeClient()
-                            try {
-                                measureLineAtIp(client, target).takeIf { runIsCurrent() }
-                            } finally {
-                                client.releaseProbe()
+                        onUsable = { _, _ ->
+                            if (runIsCurrent() && allowPublication()) {
+                                val best = fastestCurrentEndpoint(freshLineAcc.toMap())
+                                val bestIndex = best?.let { endpoint ->
+                                    RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
+                                }?.takeIf { it >= 0 }
+                                if (best != null && bestIndex != null && runIsCurrent()) {
+                                    val oldRoute = RouteManager.baseUrl to RouteManager.selectedLineIp
+                                    RouteManager.saveLastFastestLine(bestIndex)
+                                    if (RouteManager.applyFastestLineEndpoint(
+                                            best,
+                                            expectedConfigRevision = configRevisionAtStart,
+                                            expectedPlatformRevision = platformRevisionAtStart,
+                                        ) && oldRoute != (RouteManager.baseUrl to RouteManager.selectedLineIp)
+                                    ) {
+                                        NetworkModule.rebuildApi("测速提前发布线路")
+                                    }
+                                }
+                                if (currentLineHasFreshSuccess()) lineRouteSettled.complete(Unit)
+                                publishReadyIfPossible()
                             }
+                        },
+                    ) { target ->
+                        val outcome = if (runIsCurrent()) {
+                            probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
+                                if (runIsCurrent()) measureLineAtIp(lineClient, target) else null
+                            }
+                        } else {
+                            null
                         }
-                    }
+                        if (outcome != null && runIsCurrent()) {
+                            freshLineOutcomes[target.endpoint] = outcome
+                            freshLineAcc[target.endpoint] = outcome.delayMs
+                            if (outcome.delayMs < MAX) readyLineEndpoints[target.endpoint] = outcome.delayMs
+                            onProgress?.invoke(freshLineAcc.toMap(), emptyMap(), emptyMap())
+                            val successful = freshLineAcc.values.count { it < MAX }
+                            reportStage(
+                                Progress(
+                                    phase = Phase.TESTING_LINES,
+                                    completed = freshLineAcc.size.coerceAtMost(lineProbeTargets.size),
+                                    total = lineProbeTargets.size,
+                                    successful = successful,
+                                    failed = freshLineAcc.size - successful,
+                                    reusedLines = retainedLineCount,
+                                    lineQuickTest = quickLineRetest,
+                                ),
+                            )
+                        }
+                        outcome.takeIf { runIsCurrent() }
+                    }.toList()
                 }
-                lineTiming.close()
-                val confirmedForApply = timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { beforeApply() }
-                if (!confirmedForApply || !runIsCurrent()) return@coroutineScope (-1 to -1)
-                // Do not replace previously published results during an unconfirmed warmup.
+                // If no effective route passed during the budget, unblock sample fallback after line probes drain.
+                lineResultsDeferred.invokeOnCompletion { lineRouteSettled.complete(Unit) }
                 lastImgVerdicts = emptyMap()
                 lastImgIpVerdicts = emptyMap()
-                val freshLines = freshLineAcc.toMap()
-                val lines = freshLines
-                if (runIsCurrent()) onProgress?.invoke(lines, emptyMap(), emptyMap())
-                val lineDiagnostics = freshLineOutcomes.mapValues { it.value.toLineDiagnostic() }
-                val lineQuickAllFailed = quickLineRetest && freshLines.isNotEmpty() && freshLines.values.all { it >= MAX }
-                if (!runIsCurrent()) {
-                    return@coroutineScope (-1 to -1)
-                }
-                val successfulLines = lines.values.count { it < MAX }
-                reportStage(
-                    Progress(
-                        phase = Phase.APPLYING_LINE,
-                        completed = freshLines.size,
-                        total = lineProbeTargets.size,
-                        successful = freshLines.values.count { it < MAX },
-                        failed = freshLines.size - freshLines.values.count { it < MAX },
-                        reusedLines = retainedLineCount,
-                        lineQuickTest = quickLineRetest,
-                    ),
-                )
-                val bestLine = fastestCurrentEndpoint(freshLines)
-                val bestLineIndex = bestLine?.let { endpoint ->
-                    RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
-                }?.takeIf { it >= 0 }
-                if (bestLine != null && bestLineIndex != null && runIsCurrent()) {
-                    RouteManager.saveLastFastestLine(bestLineIndex)
-                    if (runIsCurrent() && RouteManager.applyFastestLineEndpoint(
-                            bestLine,
-                            expectedConfigRevision = configRevisionAtStart,
-                            expectedPlatformRevision = platformRevisionAtStart,
-                        )
-                    ) {
-                        // 自动模式下让阶段 2 样本走最快线路；临时手动覆盖不被测速改写。
-                        NetworkModule.rebuildApi("测速选出线路")
-                    }
-                }
-                Log.i(TAG, "line test done, best=$bestLine")
 
                 // The fallback sample is fetched only if an image probe gets an HTTP response
                 // without a valid image; concurrent failures share this run-scoped lazy lookup.
@@ -1048,6 +1054,7 @@ object SpeedTester {
                 val sharedSamplePath = ManwaImageFallbackProbePolicy.sharedLazy(this) {
                     reportStage(Progress(Phase.FETCHING_SAMPLE))
                     timings.start(SpeedTestTimings.Phase.IMAGE_SAMPLE_FETCH_FALLBACK).use {
+                        lineRouteSettled.await()
                         if (runIsCurrent()) obtainProbePath(::runIsCurrent) else null
                     }.also { path ->
                         resolvedSamplePath = path
@@ -1097,6 +1104,23 @@ object SpeedTester {
                     elapsedMs = { it.delayMs },
                     sampleInvalid = { it.verdict == ImgVerdict.NO_IMAGE },
                     log = { Log.i(TAG, it) },
+                    onUsable = { _, _ ->
+                        if (runIsCurrent() && allowPublication()) {
+                            val best = fastestCurrentEndpoint(imgAcc.toMap()) { verdictAcc[it] == ImgVerdict.OK }
+                            if (best != null && runIsCurrent()) {
+                                val oldRoute = (RouteManager.imgRewriteTarget ?: RouteManager.imgHost) to RouteManager.selectedImgIp
+                                if (RouteManager.applyFastestImgEndpoint(
+                                        best,
+                                        expectedConfigRevision = configRevisionAtStart,
+                                        expectedPlatformRevision = platformRevisionAtStart,
+                                    ) && oldRoute != ((RouteManager.imgRewriteTarget ?: RouteManager.imgHost) to RouteManager.selectedImgIp)
+                                ) {
+                                    NetworkModule.rebindImageRoute("测速提前发布图源")
+                                }
+                            }
+                            publishReadyIfPossible()
+                        }
+                    },
                 ) { endpoint ->
                     val result = if (runIsCurrent()) {
                         probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
@@ -1120,9 +1144,10 @@ object SpeedTester {
                         imgAcc[endpoint] = delay
                         verdictAcc[endpoint] = verdict
                         freshVerdictAcc[endpoint] = verdict
+                        if (verdict == ImgVerdict.OK && delay < MAX) readyImageEndpoints[endpoint] = currentResult
                         lastImgIpVerdicts = verdictAcc.toMap()
                         lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
-                        onProgress?.invoke(lines, imgAcc.toMap(), verdictAcc.toMap())
+                        onProgress?.invoke(freshLineAcc.toMap(), imgAcc.toMap(), verdictAcc.toMap())
                         reportStage(
                             Progress(
                                 phase = Phase.TESTING_IMAGES,
@@ -1141,6 +1166,68 @@ object SpeedTester {
                     }
                     currentResult
                 }.toList()
+                val lineResults = lineResultsDeferred.await()
+                lineRouteSettled.complete(Unit)
+                lineTiming.close()
+                if (!timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { allowPublication() } || !runIsCurrent()) {
+                    return@coroutineScope (-1 to -1)
+                }
+                val freshLines = freshLineAcc.toMap()
+                val lines = freshLines
+                val lineDiagnostics = freshLineOutcomes.mapValues { it.value.toLineDiagnostic() }
+                val lineQuickAllFailed = quickLineRetest && freshLines.isNotEmpty() && freshLines.values.all { it >= MAX }
+                if (quickLineRetest && lineResults.any { it.second.delayMs < MAX }) {
+                    val measured = lineResults.mapTo(hashSetOf()) { it.first.endpoint }
+                    adaptiveSession.deferExploration(
+                        scope = "MANWA:line",
+                        candidates = lineProbeTargets.filterNot { it.endpoint in measured },
+                        key = ::lineKey,
+                        success = { it.delayMs < MAX },
+                        elapsedMs = { it.elapsedMs },
+                        sampleInvalid = { it.failureCategory == SpeedTestFailureCategory.INVALID_JSON },
+                        log = { Log.i(TAG, it) },
+                    ) { target ->
+                        if (!runIsCurrent()) return@deferExploration null
+                        probeScheduler.withPermit(ContentPlatform.MANWA) {
+                            if (!runIsCurrent()) return@withPermit null
+                            val client = NetworkModule.newLineProbeClient()
+                            try {
+                                measureLineAtIp(client, target).takeIf { runIsCurrent() }
+                            } finally {
+                                client.releaseProbe()
+                            }
+                        }
+                    }
+                }
+                val bestLine = fastestCurrentEndpoint(freshLines)
+                val bestLineIndex = bestLine?.let { endpoint ->
+                    RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
+                }?.takeIf { it >= 0 }
+                if (bestLine != null && bestLineIndex != null && runIsCurrent()) {
+                    val oldRoute = RouteManager.baseUrl to RouteManager.selectedLineIp
+                    RouteManager.saveLastFastestLine(bestLineIndex)
+                    if (RouteManager.applyFastestLineEndpoint(
+                            bestLine,
+                            expectedConfigRevision = configRevisionAtStart,
+                            expectedPlatformRevision = platformRevisionAtStart,
+                        ) && oldRoute != (RouteManager.baseUrl to RouteManager.selectedLineIp)
+                    ) {
+                        NetworkModule.rebuildApi("测速选出线路")
+                    }
+                }
+                reportStage(
+                    Progress(
+                        phase = Phase.APPLYING_LINE,
+                        completed = freshLines.size,
+                        total = lineProbeTargets.size,
+                        successful = freshLines.values.count { it < MAX },
+                        failed = freshLines.size - freshLines.values.count { it < MAX },
+                        reusedLines = retainedLineCount,
+                        lineQuickTest = quickLineRetest,
+                    ),
+                )
+                Log.i(TAG, "line test done, best=$bestLine")
+                if (!runIsCurrent()) return@coroutineScope (-1 to -1)
                 if (quickImageRetest && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < MAX }) {
                     val measured = imageResults.mapTo(hashSetOf()) { it.first }
                     adaptiveSession.deferExploration(
@@ -1212,7 +1299,7 @@ object SpeedTester {
                 val completedAt = System.currentTimeMillis()
                 val lineUntestedEndpoints = lineProbeTargets.mapTo(linkedSetOf()) { it.endpoint } - lines.keys
                 val imageUntestedEndpoints = imageProbeTargets.toSet() - imgs.keys
-                val completeSnapshot = preparedLineTargets != null && preparedImageTargets != null &&
+                val completeSnapshot = preparedLineTargets != null &&
                     lineUntestedEndpoints.isEmpty() && imageUntestedEndpoints.isEmpty() &&
                     lineDiagnostics.keys == lines.keys && imageDiagnostics.keys == imgs.keys &&
                     verdictAcc.keys == imgs.keys

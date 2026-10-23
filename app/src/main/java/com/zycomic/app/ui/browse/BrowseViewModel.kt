@@ -15,6 +15,7 @@ import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.reader.JmSource
 import com.zycomic.app.ui.picacg.PicacgBrowseFilter
+import com.zycomic.app.ui.picacg.PicacgRankingMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -887,11 +888,19 @@ class BrowseViewModel {
         }
     }
 
-    /** Persist a Picacg filter tab's independent theme/sort defaults. */
+    /** Persist a Picacg category tab's independent theme/sort defaults. */
     internal fun updateTabDefaultPicacgFilter(id: String, filter: PicacgBrowseFilter) {
         val i = tabs.indexOfFirst { it.id == id && it.platformId == ContentPlatform.PICACG }
-        if (i < 0 || tabs[i].kind != TabKind.FILTER || tabs[i].builtin) return
+        if (i < 0 || !(tabs[i].isPicacgCategory() || (tabs[i].kind == TabKind.FILTER && !tabs[i].builtin))) return
         tabs[i] = tabs[i].copy(picacgFilter = filter.normalized())
+        persist()
+    }
+
+    /** Persist the user's selected feed on either Picacg ranking identity. */
+    internal fun updateTabDefaultPicacgRankingMode(id: String, mode: PicacgRankingMode) {
+        val i = tabs.indexOfFirst { it.id == id && it.isPicacgRanking() }
+        if (i < 0 || tabs[i].picacgRankingMode == mode) return
+        tabs[i] = tabs[i].copy(picacgRankingMode = mode)
         persist()
     }
     /** Save a JM tab's own category/order state, never converting it to a Manwa FilterSnapshot. */

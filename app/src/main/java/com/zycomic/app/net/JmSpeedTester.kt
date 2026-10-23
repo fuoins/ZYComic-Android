@@ -3,7 +3,9 @@ package com.zycomic.app.net
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -56,6 +58,7 @@ object JmSpeedTester {
         reconcileConfig: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onRouteReady: (() -> Unit)? = null,
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): RunResult = lock.withLock {
         check(running.compareAndSet(false, true)) { "JM 测速已在运行" }
@@ -150,6 +153,45 @@ object JmSpeedTester {
                     )
                     val startedNanos = System.nanoTime()
                     val progressGuard = Any()
+                    val beforeApplyGate = CompletableDeferred<Boolean>()
+                    val beforeApplyMutex = Mutex()
+                    suspend fun awaitBeforeApplyGate(): Boolean = beforeApplyMutex.withLock {
+                        if (!beforeApplyGate.isCompleted) beforeApplyGate.complete(beforeApply())
+                        beforeApplyGate.await()
+                    }
+                    val routeReadyGuard = Any()
+                    var lineRouteReady = false
+                    var imageRouteReady = false
+                    var routeReadyEmitted = false
+                    fun notifyRouteReadyIfNeeded() {
+                        val emit = synchronized(routeReadyGuard) {
+                            if (!routeReadyEmitted && lineRouteReady && imageRouteReady && stillCurrent()) {
+                                routeReadyEmitted = true
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        if (emit) onRouteReady?.invoke()
+                    }
+                    suspend fun applyLineRoute(target: LineTarget, result: ProbeResult) {
+                        if (result.delayMs >= Long.MAX_VALUE || !stillCurrent() || !awaitBeforeApplyGate() || !stillCurrent()) return
+                        if (JmRouteManager.applyMeasuredLineRoute(target.endpoint, configRevision, platformRevision)) {
+                            synchronized(routeReadyGuard) { lineRouteReady = true }
+                            notifyRouteReadyIfNeeded()
+                        }
+                    }
+                    suspend fun applyImageRoute(endpoint: DomainIp, result: ProbeResult) {
+                        if (result.verdict != ImgVerdict.OK || result.delayMs >= Long.MAX_VALUE || !stillCurrent() ||
+                            !awaitBeforeApplyGate() || !stillCurrent()
+                        ) {
+                            return
+                        }
+                        if (JmRouteManager.applyMeasuredImageRoute(endpoint, configRevision, platformRevision)) {
+                            synchronized(routeReadyGuard) { imageRouteReady = true }
+                            notifyRouteReadyIfNeeded()
+                        }
+                    }
                     var progress = JmSpeedTestProgress()
                     var lineCount = 0
                     var imageCount = 0
@@ -236,44 +278,157 @@ object JmSpeedTester {
                             endpoint = LineTarget::endpoint,
                         )
                         phase(JmSpeedTestProgress.Phase.TESTING_LINES, lineTargetsToProbe.size)
-                        val lineResults = adaptiveSession.run(
-                            scope = "JM:line",
-                            candidates = lineTargetsToProbe,
-                            key = { target -> lineIdentity(target.endpoint, target.url).toString() },
-                            quick = quickLines,
-                            preferredKeys = if (quickLines) {
-                                lineTargetsToProbe.filter { target ->
-                                    target.endpoint.domain.equals(inUseLineHost, true) &&
-                                        (inUseLineEndpoint == null || target.endpoint == inUseLineEndpoint)
-                                }.mapTo(linkedSetOf()) { target -> lineIdentity(target.endpoint, target.url).toString() }
+                        val lineResultsDeferred = async {
+                            adaptiveSession.run(
+                                scope = "JM:line",
+                                candidates = lineTargetsToProbe,
+                                key = { target -> lineIdentity(target.endpoint, target.url).toString() },
+                                quick = quickLines,
+                                preferredKeys = if (quickLines) {
+                                    lineTargetsToProbe.filter { target ->
+                                        target.endpoint.domain.equals(inUseLineHost, true) &&
+                                            (inUseLineEndpoint == null || target.endpoint == inUseLineEndpoint)
+                                    }.mapTo(linkedSetOf()) { target -> lineIdentity(target.endpoint, target.url).toString() }
+                                } else {
+                                    emptySet()
+                                },
+                                independenceKey = { it.endpoint.ip.trim().lowercase(Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(Locale.ROOT) } },
+                                success = { result -> result.delayMs < Long.MAX_VALUE },
+                                elapsedMs = ProbeResult::elapsedMs,
+                                log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
+                                onUsable = { target, result -> applyLineRoute(target, result) },
+                                probe = probe@{ target ->
+                                    if (!stillCurrent()) return@probe null
+                                    endpointStarted(target.endpoint)
+                                    val result = SpeedTestProbeBudget.scheduler.withPermit(
+                                        ContentPlatform.JM,
+                                        { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.JM, it) },
+                                    ) {
+                                        measureAtIp(lineClient, target.endpoint, target.url, false, ::stillCurrent)
+                                    }
+                                    if (!stillCurrent()) return@probe null
+                                    pendingLogs.add(
+                                        Triple(
+                                            "speed_line_ip",
+                                            "${target.endpoint.domain} [${target.endpoint.ip}]",
+                                            "JM API ${if (result.delayMs < Long.MAX_VALUE) "${result.delayMs}ms" else "不可达"}",
+                                        ),
+                                    )
+                                    endpointDone(target.endpoint, result)
+                                    result
+                                },
+                            )
+                        }
+
+                        val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
+                        phase(JmSpeedTestProgress.Phase.PREPARING_IMAGES, imagesToTest.size)
+                        val resolvedImageEndpoints = adaptiveSession.prepare(quickImages) {
+                            runner.run(
+                                imagesToTest,
+                                probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain, image = true)) },
+                                onStarted = { domain -> publish { it.copy(endpoint = domain, endpointSuccessful = null, endpointElapsedMs = null) } },
+                                onResult = { domain, endpoints ->
+                                    publish {
+                                        it.copy(
+                                            completed = it.completed + 1,
+                                            endpoint = domain,
+                                            endpointSuccessful = endpoints.isNotEmpty(),
+                                            successful = it.successful + if (endpoints.isNotEmpty()) 1 else 0,
+                                            failed = it.failed + if (endpoints.isEmpty()) 1 else 0,
+                                        )
+                                    }
+                                },
+                            ).flatMap { it.second }.distinct()
+                        }.orEmpty()
+                        val imageEndpoints = JmSpeedTestQuickProbePolicy.currentCandidates(
+                            candidates = resolvedImageEndpoints,
+                            key = { endpoint -> imageIdentity(endpoint).toString() },
+                            endpoint = { it },
+                        )
+                        imagePreparationTiming.close()
+                        val activeImageIdentities = imageEndpoints.mapTo(linkedSetOf(), ::imageIdentity)
+                        val imageTargetsToProbe = imageEndpoints
+                        val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES)
+                        phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageTargetsToProbe.size)
+                        val imageResults = adaptiveSession.run(
+                            scope = "JM:image",
+                            candidates = imageTargetsToProbe,
+                            key = { endpoint -> imageIdentity(endpoint).toString() },
+                            quick = quickImages,
+                            preferredKeys = if (quickImages) {
+                                imageTargetsToProbe.filter { endpoint ->
+                                    endpoint.domain.equals(inUseImageHost, true) &&
+                                        (inUseImageEndpoint == null || endpoint == inUseImageEndpoint)
+                                }.mapTo(linkedSetOf()) { imageIdentity(it).toString() }
                             } else {
                                 emptySet()
                             },
-                            independenceKey = { it.endpoint.ip.trim().lowercase(Locale.ROOT).ifBlank { it.endpoint.domain.lowercase(Locale.ROOT) } },
-                            success = { result -> result.delayMs < Long.MAX_VALUE },
+                            independenceKey = { it.ip.trim().lowercase(Locale.ROOT).ifBlank { it.domain.lowercase(Locale.ROOT) } },
+                            success = { result -> result.verdict == ImgVerdict.OK && result.delayMs < Long.MAX_VALUE },
                             elapsedMs = ProbeResult::elapsedMs,
+                            sampleInvalid = { result -> result.verdict == ImgVerdict.NO_IMAGE },
                             log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
-                            probe = probe@{ target ->
+                            onUsable = { endpoint, result -> applyImageRoute(endpoint, result) },
+                            probe = probe@{ endpoint ->
                                 if (!stillCurrent()) return@probe null
-                                endpointStarted(target.endpoint)
+                                endpointStarted(endpoint)
                                 val result = SpeedTestProbeBudget.scheduler.withPermit(
                                     ContentPlatform.JM,
                                     { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.JM, it) },
                                 ) {
-                                    measureAtIp(lineClient, target.endpoint, target.url, false, ::stillCurrent)
+                                    measureAtIp(
+                                        probeClient,
+                                        endpoint,
+                                        "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}",
+                                        true,
+                                        ::stillCurrent,
+                                    )
                                 }
                                 if (!stillCurrent()) return@probe null
                                 pendingLogs.add(
                                     Triple(
-                                        "speed_line_ip",
-                                        "${target.endpoint.domain} [${target.endpoint.ip}]",
-                                        "JM API ${if (result.delayMs < Long.MAX_VALUE) "${result.delayMs}ms" else "不可达"}",
+                                        "speed_image_ip",
+                                        "${endpoint.domain} [${endpoint.ip}]",
+                                        "JM 图源 ${result.verdict}; ${result.elapsedMs}ms",
                                     ),
                                 )
-                                endpointDone(target.endpoint, result)
+                                endpointDone(endpoint, result)
                                 result
                             },
                         )
+                        if (quickImages && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < Long.MAX_VALUE }) {
+                            val measuredKeys = imageResults.mapTo(hashSetOf()) { (endpoint, _) -> imageIdentity(endpoint).toString() }
+                            adaptiveSession.deferExploration(
+                                scope = "JM:image",
+                                candidates = imageTargetsToProbe.filterNot { imageIdentity(it).toString() in measuredKeys },
+                                key = { imageIdentity(it).toString() },
+                                success = { it.verdict == ImgVerdict.OK && it.delayMs < Long.MAX_VALUE },
+                                elapsedMs = ProbeResult::elapsedMs,
+                                sampleInvalid = { it.verdict == ImgVerdict.NO_IMAGE },
+                                log = { message -> if (explorationIsCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
+                            ) { endpoint ->
+                                if (!explorationIsCurrent()) return@deferExploration null
+                                SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.JM) {
+                                    if (!explorationIsCurrent()) return@withPermit null
+                                    val client = JmNetworkModule.newProbeClient()
+                                    try {
+                                        measureAtIp(
+                                            client,
+                                            endpoint,
+                                            "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}",
+                                            true,
+                                            ::explorationIsCurrent,
+                                        ).takeIf { explorationIsCurrent() }
+                                    } finally {
+                                        client.dispatcher.cancelAll()
+                                        client.connectionPool.evictAll()
+                                        client.dispatcher.executorService.shutdown()
+                                    }
+                                }
+                            }
+                        }
+                        imageTiming.close()
+                        val lineResults = lineResultsDeferred.await()
                         if (quickLines && lineResults.any { it.second.delayMs < Long.MAX_VALUE }) {
                             val measuredKeys = lineResults.mapTo(hashSetOf()) { (target, _) ->
                                 lineIdentity(target.endpoint, target.url).toString()
@@ -339,114 +494,6 @@ object JmSpeedTester {
                             val host = URI(url).host.lowercase(Locale.ROOT)
                             host to (effectiveLineIpDelays.filterKeys { it.domain.equals(host, true) }.values.minOrNull() ?: Long.MAX_VALUE)
                         }
-
-                        val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
-                        phase(JmSpeedTestProgress.Phase.PREPARING_IMAGES, imagesToTest.size)
-                        val resolvedImageEndpoints = adaptiveSession.prepare(quickImages) {
-                            runner.run(
-                                imagesToTest,
-                                probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain, image = true)) },
-                                onStarted = { domain -> publish { it.copy(endpoint = domain, endpointSuccessful = null, endpointElapsedMs = null) } },
-                                onResult = { domain, endpoints ->
-                                    publish {
-                                        it.copy(
-                                            completed = it.completed + 1,
-                                            endpoint = domain,
-                                            endpointSuccessful = endpoints.isNotEmpty(),
-                                            successful = it.successful + if (endpoints.isNotEmpty()) 1 else 0,
-                                            failed = it.failed + if (endpoints.isEmpty()) 1 else 0,
-                                        )
-                                    }
-                                },
-                            ).flatMap { it.second }.distinct()
-                        }.orEmpty()
-                        val imageEndpoints = JmSpeedTestQuickProbePolicy.currentCandidates(
-                            candidates = resolvedImageEndpoints,
-                            key = { endpoint -> imageIdentity(endpoint).toString() },
-                            endpoint = { it },
-                        )
-                        imagePreparationTiming.close()
-                        val activeImageIdentities = imageEndpoints.mapTo(linkedSetOf(), ::imageIdentity)
-                        val imageTargetsToProbe = imageEndpoints
-                        val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES)
-                        phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageTargetsToProbe.size)
-                        val imageResults = adaptiveSession.run(
-                            scope = "JM:image",
-                            candidates = imageTargetsToProbe,
-                            key = { endpoint -> imageIdentity(endpoint).toString() },
-                            quick = quickImages,
-                            preferredKeys = if (quickImages) {
-                                imageTargetsToProbe.filter { endpoint ->
-                                    endpoint.domain.equals(inUseImageHost, true) &&
-                                        (inUseImageEndpoint == null || endpoint == inUseImageEndpoint)
-                                }.mapTo(linkedSetOf()) { imageIdentity(it).toString() }
-                            } else {
-                                emptySet()
-                            },
-                            independenceKey = { it.ip.trim().lowercase(Locale.ROOT).ifBlank { it.domain.lowercase(Locale.ROOT) } },
-                            success = { result -> result.verdict == ImgVerdict.OK && result.delayMs < Long.MAX_VALUE },
-                            elapsedMs = ProbeResult::elapsedMs,
-                            sampleInvalid = { result -> result.verdict == ImgVerdict.NO_IMAGE },
-                            log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
-                            probe = probe@{ endpoint ->
-                                if (!stillCurrent()) return@probe null
-                                endpointStarted(endpoint)
-                                val result = SpeedTestProbeBudget.scheduler.withPermit(
-                                    ContentPlatform.JM,
-                                    { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.JM, it) },
-                                ) {
-                                    measureAtIp(
-                                        probeClient,
-                                        endpoint,
-                                        "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}",
-                                        true,
-                                        ::stillCurrent,
-                                    )
-                                }
-                                if (!stillCurrent()) return@probe null
-                                pendingLogs.add(
-                                    Triple(
-                                        "speed_image_ip",
-                                        "${endpoint.domain} [${endpoint.ip}]",
-                                        "JM 图源 ${result.verdict}; ${result.elapsedMs}ms",
-                                    ),
-                                )
-                                endpointDone(endpoint, result)
-                                result
-                            },
-                        )
-                        if (quickImages && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < Long.MAX_VALUE }) {
-                            val measuredKeys = imageResults.mapTo(hashSetOf()) { (endpoint, _) -> imageIdentity(endpoint).toString() }
-                            adaptiveSession.deferExploration(
-                                scope = "JM:image",
-                                candidates = imageTargetsToProbe.filterNot { imageIdentity(it).toString() in measuredKeys },
-                                key = { imageIdentity(it).toString() },
-                                success = { it.verdict == ImgVerdict.OK && it.delayMs < Long.MAX_VALUE },
-                                elapsedMs = ProbeResult::elapsedMs,
-                                sampleInvalid = { it.verdict == ImgVerdict.NO_IMAGE },
-                                log = { message -> if (explorationIsCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
-                            ) { endpoint ->
-                                if (!explorationIsCurrent()) return@deferExploration null
-                                SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.JM) {
-                                    if (!explorationIsCurrent()) return@withPermit null
-                                    val client = JmNetworkModule.newProbeClient()
-                                    try {
-                                        measureAtIp(
-                                            client,
-                                            endpoint,
-                                            "https://${endpoint.domain}${JmSpeedProbeProtocol.IMAGE_PATH}",
-                                            true,
-                                            ::explorationIsCurrent,
-                                        ).takeIf { explorationIsCurrent() }
-                                    } finally {
-                                        client.dispatcher.cancelAll()
-                                        client.connectionPool.evictAll()
-                                        client.dispatcher.executorService.shutdown()
-                                    }
-                                }
-                            }
-                        }
-                        imageTiming.close()
                         val freshImageIpDelays = imageResults.associate { it.first to it.second.delayMs }
                         val freshImageIpVerdicts = imageResults.associate { it.first to (it.second.verdict ?: ImgVerdict.UNREACHABLE) }
                         val measuredImageHistory = imageResults.map { (endpoint, result) ->
@@ -506,7 +553,7 @@ object JmSpeedTester {
                             runId = identity.runId,
                         )
                         imageCount = testedImageEndpoints.size
-                        val beforeApplyAccepted = timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { beforeApply() }
+                        val beforeApplyAccepted = timings.start(SpeedTestTimings.Phase.CONFIG_WAIT).use { awaitBeforeApplyGate() }
                         runContext.ensureActive()
                         val submission = JmSpeedTestSubmission.commit(
                             identity = identity,

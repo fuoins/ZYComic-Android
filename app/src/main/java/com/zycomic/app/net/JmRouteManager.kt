@@ -109,6 +109,10 @@ object JmRouteManager {
     @Volatile private var lastLineEndpoint: DomainIp? = null
 
     @Volatile private var lastImageEndpoint: DomainIp? = null
+
+    @Volatile private var liveProbeLineEndpoint: DomainIp? = null
+
+    @Volatile private var liveProbeImageEndpoint: DomainIp? = null
     private val failedLineEndpoints = ConcurrentHashMap.newKeySet<DomainIp>()
     private val failedImageEndpoints = ConcurrentHashMap.newKeySet<DomainIp>()
     private val imageTransportFailures = ConcurrentHashMap<DomainIp, Int>()
@@ -265,6 +269,8 @@ object JmRouteManager {
         }
         failedLineEndpoints.clear()
         failedImageEndpoints.clear()
+        liveProbeLineEndpoint = null
+        liveProbeImageEndpoint = null
         persistSnapshot()
         if (!poolsChanged && auto) applyFastestLine()
         JmNetworkModule.rebindApiEndpoint()
@@ -363,6 +369,9 @@ object JmRouteManager {
 
     /** Exactly one measured successful IP for a lines2 host, honoring an available manual pin. */
     fun currentLineEndpoint(domain: String = lineHost): DomainIp? {
+        if (_state.value.autoSelect) {
+            liveProbeLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) }?.let { return it }
+        }
         val snapshot = _speedTestSnapshot.value
         val selected = JmEndpointSelectionPolicy.select(
             domain = domain,
@@ -526,6 +535,8 @@ object JmRouteManager {
             return false
         }
         _speedTestSnapshot.value = snapshot
+        liveProbeLineEndpoint = null
+        liveProbeImageEndpoint = null
         apiEndpointRecovery.clearFailures()
         failedLineEndpoints.clear()
         snapshot.lineIpDelaysMs.filterValues { it >= Long.MAX_VALUE }.keys.forEach { failedLineEndpoints += it.normalizedForComparison() }
@@ -565,6 +576,64 @@ object JmRouteManager {
         persistCurrentEndpoints()
         JmNetworkModule.rebindApiEndpoint()
         JmNetworkModule.rebindImageEndpoint()
+        publishEndpointSelection()
+        return true
+    }
+
+    /** Apply one verified endpoint during a live probe without publishing a partial speed-test snapshot. */
+    @Synchronized
+    internal fun applyMeasuredLineRoute(
+        endpoint: DomainIp,
+        expectedConfigRevision: Long? = null,
+        expectedPlatformRevision: Long? = null,
+    ): Boolean {
+        val index = _state.value.lines.indexOfFirst { hostFromUrl(it).equals(endpoint.domain, true) }
+        if (index < 0 || endpoint.ip.isBlank() ||
+            (expectedConfigRevision != null && currentSpeedTestConfigRevision() != expectedConfigRevision) ||
+            (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision)
+        ) {
+            return false
+        }
+        failedLineEndpoints.remove(endpoint.normalizedForComparison())
+        if (!_state.value.autoSelect) {
+            return index == _state.value.lineIndex &&
+                (manualLineEndpoint == null || manualLineEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison()) &&
+                currentLineEndpoint(endpoint.domain)?.normalizedForComparison() == endpoint.normalizedForComparison()
+        }
+        lastLineEndpoint = endpoint
+        liveProbeLineEndpoint = endpoint
+        _state.value = _state.value.copy(lineIndex = index)
+        JmNetworkModule.rebindApiEndpoint()
+        persistCurrentEndpoints()
+        publishEndpointSelection()
+        return true
+    }
+
+    /** Apply one verified image endpoint during a live probe, never overriding a persisted pin. */
+    @Synchronized
+    internal fun applyMeasuredImageRoute(
+        endpoint: DomainIp,
+        expectedConfigRevision: Long? = null,
+        expectedPlatformRevision: Long? = null,
+    ): Boolean {
+        if (imageDomains.none { it.equals(endpoint.domain, true) } || endpoint.ip.isBlank() ||
+            (expectedConfigRevision != null && currentSpeedTestConfigRevision() != expectedConfigRevision) ||
+            (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision)
+        ) {
+            return false
+        }
+        failedImageEndpoints.remove(endpoint.normalizedForComparison())
+        val pinned = pinnedImageDomain
+        if (pinned != null) {
+            return pinned.equals(endpoint.domain, true) &&
+                (manualImageEndpoint == null || manualImageEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison()) &&
+                currentImageEndpoint(endpoint.domain)?.normalizedForComparison() == endpoint.normalizedForComparison()
+        }
+        lastImageEndpoint = endpoint
+        liveProbeImageEndpoint = endpoint
+        _state.value = _state.value.copy(imageDomain = endpoint.domain)
+        JmNetworkModule.rebindImageEndpoint()
+        persistCurrentEndpoints()
         publishEndpointSelection()
         return true
     }
@@ -925,6 +994,9 @@ object JmRouteManager {
     }
 
     fun currentImageEndpoint(domain: String = activeImageDomain): DomainIp? {
+        if (pinnedImageDomain == null) {
+            liveProbeImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) }?.let { return it }
+        }
         val snapshot = _speedTestSnapshot.value
         val selected = JmEndpointSelectionPolicy.select(
             domain = domain,

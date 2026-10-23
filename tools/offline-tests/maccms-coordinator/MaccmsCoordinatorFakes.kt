@@ -102,6 +102,9 @@ object SpeedTester {
     val reconcileConfigFlags = mutableListOf<Boolean>()
     var beforeApplyHook: (() -> Unit)? = null
     var progressEvents = emptyList<Progress>()
+    var emitRouteReady = false
+    var suspendBeforeRouteReadyHook: (suspend () -> Unit)? = null
+    var suspendAfterRouteReadyHook: (suspend () -> Unit)? = null
 
     suspend fun runAndApply(
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, ImgVerdict>) -> Unit)? = null,
@@ -110,6 +113,7 @@ object SpeedTester {
         reconcileConfig: Boolean = true,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onRouteReady: (() -> Unit)? = null,
         onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> {
         runCount++
@@ -122,6 +126,11 @@ object SpeedTester {
             Progress(Phase.SKIPPED)
         } else {
             progressEvents.forEach { event -> onStageProgress?.invoke(event) }
+            if (emitRouteReady) {
+                suspendBeforeRouteReadyHook?.invoke()
+                onRouteReady?.invoke()
+                suspendAfterRouteReadyHook?.invoke()
+            }
             Progress(
                 lineQuickTest = reuseLines,
                 imageQuickTest = allowImageReuse,
@@ -170,6 +179,9 @@ object PicacgSpeedTester {
     var beforeApplyHook: (() -> Unit)? = null
     var suspendBeforeApplyHook: (suspend () -> Unit)? = null
     var suspendBeforeImagesHook: (suspend () -> Unit)? = null
+    var emitRouteReady = false
+    var suspendBeforeRouteReadyHook: (suspend () -> Unit)? = null
+    var suspendAfterRouteReadyHook: (suspend () -> Unit)? = null
     var progressHook: ((Progress) -> Unit)? = null
     var apiProbesOverride: List<Probe>? = null
     var imageProbesOverride: List<Probe>? = null
@@ -185,6 +197,7 @@ object PicacgSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onApiPublished: (DomainIp?) -> Unit = {},
+        onRouteReady: (() -> Unit)? = null,
         onProgress: (Progress) -> Unit = {},
     ): Snapshot {
         runCount++
@@ -250,6 +263,11 @@ object PicacgSpeedTester {
         if (canCommitApi) {
             PicacgRouteManager.selectedApiEndpoint = selectedLine
             onApiPublished(selectedLine)
+            if (emitRouteReady) {
+                suspendBeforeRouteReadyHook?.invoke()
+                onRouteReady?.invoke()
+                suspendAfterRouteReadyHook?.invoke()
+            }
             suspendBeforeImagesHook?.invoke()
         }
         if (canCommitApi && beforeApply() && isCurrent()) snapshot.value = result
@@ -293,6 +311,9 @@ object JmSpeedTester {
     var progressEvents = emptyList<JmSpeedTestProgress>()
     var lineIpDelaysForRun = emptyMap<DomainIp, Long>()
     var imageIpDelaysForRun = emptyMap<DomainIp, Long>()
+    var emitRouteReady = false
+    var suspendBeforeRouteReadyHook: (suspend () -> Unit)? = null
+    var suspendAfterRouteReadyHook: (suspend () -> Unit)? = null
     data class RunResult(val snapshot: JmRouteManager.SpeedTestSnapshot, val submission: JmSpeedTestSubmission?)
     suspend fun run(
         reuseLines: Boolean = false,
@@ -300,6 +321,7 @@ object JmSpeedTester {
         reconcileConfig: Boolean = true,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onRouteReady: (() -> Unit)? = null,
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): RunResult {
         runCount++
@@ -308,6 +330,11 @@ object JmSpeedTester {
         val runId = "offline-jm-$runCount"
         val result = if (beforeApply() && isCurrent()) {
             progressEvents.forEach { event -> onProgress?.invoke(event) }
+            if (emitRouteReady) {
+                suspendBeforeRouteReadyHook?.invoke()
+                onRouteReady?.invoke()
+                suspendAfterRouteReadyHook?.invoke()
+            }
             JmRouteManager.SpeedTestSnapshot(
                 lineDelaysMs = mapOf("jm.test" to 2L),
                 imageDelaysMs = mapOf("img.jm.test" to 3L),

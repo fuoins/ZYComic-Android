@@ -97,6 +97,8 @@ import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
 import com.zycomic.app.ui.components.JmLibrarySelectionPolicy
 import com.zycomic.app.ui.components.MangaGridSkeleton
+import com.zycomic.app.ui.picacg.PicacgRankingMode
+import com.zycomic.app.ui.picacg.toFeedMode
 import com.zycomic.app.ui.search.SearchProvider
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
@@ -372,7 +374,6 @@ private fun LegacyBrowseScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            AppBarTitle("分类")
                             CategoryPlatformLegend()
                         }
                     },
@@ -535,18 +536,18 @@ private fun LegacyBrowseScreen(
                                     )
                                 }
                             }
-                            if (index == pagerState.currentPage && (item.platformId != ContentPlatform.PICACG || item.id == BrowseTabStore.ID_PICACG_HOME || item.id == BrowseTabStore.ID_PICACG_RANKING || item.id == BrowseTabStore.ID_PICACG_CATEGORY)) {
+                            if (index == pagerState.currentPage && (item.platformId != ContentPlatform.PICACG || item.isPicacgRanking() || item.isPicacgCategory() || (item.kind == TabKind.FILTER && !item.builtin))) {
                                 item(key = "filter_affordance") {
                                     TabBarIcon(
                                         icon = Icons.Outlined.FilterList,
                                         contentDescription = when {
                                             item.platformId == ContentPlatform.JM -> "JM 筛选"
-                                            item.platformId == ContentPlatform.PICACG && item.id in setOf(BrowseTabStore.ID_PICACG_HOME, BrowseTabStore.ID_PICACG_RANKING) -> "显示"
+                                            item.isPicacgRanking() -> "显示"
                                             else -> "重新筛选"
                                         },
                                         tint = MaterialTheme.colorScheme.primary,
                                         onClick = {
-                                            if (item.platformId == ContentPlatform.PICACG && item.id == BrowseTabStore.ID_PICACG_CATEGORY) {
+                                            if (item.platformId == ContentPlatform.PICACG && !item.isPicacgRanking()) {
                                                 picacgFilterDialogRequest++
                                             } else {
                                                 showFilterDialog = true
@@ -634,7 +635,7 @@ private fun LegacyBrowseScreen(
             onOpenTagDialog = { showTagDialog = true },
             displayOnly = vm.tabs.getOrNull(mainTab)?.let {
                 it.isUngatedYuzongRank() || (it.platformId == ContentPlatform.JM && it.id == BrowseTabStore.ID_JM_HOME) ||
-                    (it.platformId == ContentPlatform.PICACG && it.id in setOf(BrowseTabStore.ID_PICACG_HOME, BrowseTabStore.ID_PICACG_RANKING))
+                    it.isPicacgRanking()
             } ?: false,
         )
     }
@@ -737,10 +738,10 @@ private fun BrowseTabContent(
     val tabPlatform = item?.platformId ?: platform
     val picacgOrientation = androidx.compose.ui.platform.LocalConfiguration.current.orientation
     if (tabPlatform == ContentPlatform.PICACG) {
-        val pageMode = when (item?.pageType) {
-            BrowsePageType.PICACG_RANKING -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
-            BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
-            else -> if (item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME) com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY else com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
+        val pageMode = if (item?.isPicacgRanking() != false) {
+            com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING
+        } else {
+            com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY
         }
         if (isActive) {
             com.zycomic.app.ui.picacg.PicacgBrowseScreen(
@@ -748,6 +749,7 @@ private fun BrowseTabContent(
                 onRequireLogin = onRequireLogin,
                 tabId = item?.id.orEmpty(),
                 initialFilter = item?.picacgFilter,
+                initialRankingMode = item?.picacgRankingMode ?: PicacgRankingMode.H24,
                 pageMode = pageMode,
                 displayMode = displayMode,
                 gridColumns = gridColumns,
@@ -759,7 +761,7 @@ private fun BrowseTabContent(
         } else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING) {
             // Compose only the static header during the swipe; keep data effects in the selected page.
             Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                com.zycomic.app.ui.picacg.PicacgRankingChips()
+                com.zycomic.app.ui.picacg.PicacgRankingChips(selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode())
             }
         } else {
             Box(Modifier.fillMaxSize())

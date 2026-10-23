@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION = ROOT / "app/src/main/java/com/zycomic/app/net/AdaptiveSpeedProbe.kt"
 TEST = ROOT / "app/src/test/java/com/zycomic/app/net/AdaptiveSpeedProbeTest.kt"
 STARTUP_TEST = ROOT / "app/src/test/java/com/zycomic/app/net/AdaptiveStartupRecoveryTest.kt"
+TWO_STAGE_TEST = ROOT / "app/src/test/java/com/zycomic/app/net/AdaptiveSpeedProbeTwoStageTest.kt"
 DEPS = ROOT / "tools/offline-tests/build/deps"
 CACHE = Path(os.environ.get("GRADLE_USER_HOME", Path.home() / ".gradle")) / "caches/modules-2/files-2.1"
 
@@ -42,14 +43,14 @@ def main() -> None:
         coroutines,
         jar("org.jetbrains", "annotations", "13.0"),
     ])
-    missing = [str(path) for path in (PRODUCTION, TEST, STARTUP_TEST) if not path.is_file()]
+    missing = [str(path) for path in (PRODUCTION, TEST, STARTUP_TEST, TWO_STAGE_TEST) if not path.is_file()]
     if missing:
         raise RuntimeError("Missing source(s): " + ", ".join(missing))
 
     with tempfile.TemporaryDirectory(prefix="adaptive-speed-probe-") as temp:
         classes = Path(temp) / "classes"
         classes.mkdir()
-        sources = [PRODUCTION, TEST, STARTUP_TEST]
+        sources = [PRODUCTION, TEST, STARTUP_TEST, TWO_STAGE_TEST]
         print(f"Compiling {len(sources)} isolated production/test sources", flush=True)
         subprocess.run([
             "java", "-cp", compiler, "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
@@ -60,6 +61,7 @@ def main() -> None:
             "java", "-jar", junit, "execute", "--class-path", str(classes) + os.pathsep + classpath,
             "--select-class", "com.zycomic.app.net.AdaptiveSpeedProbeTest",
             "--select-class", "com.zycomic.app.net.AdaptiveStartupRecoveryTest",
+            "--select-class", "com.zycomic.app.net.AdaptiveSpeedProbeTwoStageTest",
             "--disable-banner", "--details=summary", "--fail-if-no-tests",
         ], cwd=ROOT, check=True)
 

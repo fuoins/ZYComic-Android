@@ -285,7 +285,7 @@
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">重启软件生效</string>
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
-    <string name="startup_checks_ready_count">就绪 %1$d/%2$d</string>
+    <string name="startup_quick_test_running">快测中</string>
     <string name="startup_check_reused">历史有效沿用</string>
     <string name="startup_retest_all">重新完整测速</string>
     <string name="startup_network_status_title">网络配置</string>

@@ -150,7 +150,7 @@ class JmBrowsePolicyTest {
         assertFalse(JmBrowsePolicy.showsCategoryPicker(custom))
         assertTrue(JmBrowsePolicy.showsCategoryPicker(JmBrowsePolicy.ALL_HOT_TAB_ID))
         assertEquals(
-            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, category = "doujin", order = "tf"),
+            JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, category = "doujin", order = "mr"),
             JmBrowsePolicy.customCategoryFilters(legacy.copy(order = "mr")),
         )
         assertEquals("doujin", JmBrowsePolicy.defaultFilters(custom, legacy).category)

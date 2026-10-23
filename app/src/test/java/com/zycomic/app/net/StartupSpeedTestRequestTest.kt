@@ -7,12 +7,100 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class StartupSpeedTestRequestTest {
+    @Test
+    fun `routes ready releases waiters but does not finish or cancel the shared worker`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val request = StartupSpeedTestRequest<Int, String>(scope)
+            val ready = CompletableDeferred<Unit>()
+            val finish = CompletableDeferred<Unit>()
+            val completed = CompletableDeferred<Unit>()
+            val waiter = async {
+                request.runUntilReady({ 1 }) { publish ->
+                    ready.await()
+                    publish(1, "usable")
+                    finish.await()
+                    completed.complete(Unit)
+                    1 to "complete"
+                }
+            }
+            ready.complete(Unit)
+            assertEquals("usable", withTimeout(2_000) { waiter.await() })
+            assertFalse(completed.isCompleted)
+            assertEquals("usable", request.runUntilReady({ 1 }) { error("must share active background worker") })
+            finish.complete(Unit)
+            withTimeout(2_000) { completed.await() }
+            assertEquals("complete", request.run({ 1 }) { error("must reuse true completion") })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `old generation readiness cannot release a waiter for the new generation`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val request = StartupSpeedTestRequest<Int, String>(scope)
+            var key = 1
+            val oldPublished = CompletableDeferred<Unit>()
+            val publishCurrent = CompletableDeferred<Unit>()
+            val finish = CompletableDeferred<Unit>()
+            val waiter = async(start = CoroutineStart.UNDISPATCHED) {
+                request.runUntilReady({ key }) { publish ->
+                    key = 2
+                    publish(1, "stale")
+                    oldPublished.complete(Unit)
+                    publishCurrent.await()
+                    publish(2, "current")
+                    finish.await()
+                    2 to "complete"
+                }
+            }
+            oldPublished.await()
+            kotlinx.coroutines.yield()
+            assertFalse(waiter.isCompleted)
+            publishCurrent.complete(Unit)
+            assertEquals("current", withTimeout(2_000) { waiter.await() })
+            finish.complete(Unit)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `full request shares active background work but does not cache a completed full round`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val request = StartupSpeedTestRequest<Int, String>(scope, reuseCompleted = false)
+            val finish = CompletableDeferred<Unit>()
+            val completed = CompletableDeferred<Unit>()
+            assertEquals(
+                "usable",
+                request.runUntilReady({ 1 }) { publish ->
+                    publish(1, "usable")
+                    finish.await()
+                    completed.complete(Unit)
+                    1 to "complete"
+                },
+            )
+            assertEquals("usable", request.runUntilReady({ 1 }) { error("must share active full round") })
+            finish.complete(Unit)
+            completed.await()
+            kotlinx.coroutines.yield()
+            assertEquals("fresh", request.run({ 1 }) { 1 to "fresh" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test
     fun `completion caches the published identity not a newer unmeasured identity`() = runBlocking {
         val scope = CoroutineScope(coroutineContext + SupervisorJob())

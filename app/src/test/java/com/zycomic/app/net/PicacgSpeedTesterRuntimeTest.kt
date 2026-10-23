@@ -72,8 +72,9 @@ class PicacgSpeedTesterRuntimeTest {
         assertTrue(snapshot.imageBlockedReason.orEmpty().contains("正文图源"), "with no configured content source the image stage is blocked")
         assertEquals(1, values("runtimeTestApiSelections").size)
         assertTrue(values("runtimeTestApiSelections").single() in setOf("api5.picacg.test", "api6.picacg.test"))
-        assertEquals(1, published.size)
-        assertTrue(published.single()?.domain in setOf("api5.picacg.test", "api6.picacg.test"))
+        assertTrue(published.isNotEmpty())
+        assertTrue(published.all { it?.domain in setOf("api5.picacg.test", "api6.picacg.test") })
+        assertEquals(snapshot.roundSelectedLine, published.last())
 
         val refreshed = PicacgSpeedTestHistoryStorage.loadApi()
         assertEquals(7, refreshed.measurements.size, "quick refresh must not append duplicates")
@@ -104,8 +105,9 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(expected, values("runtimeTestRequests").toSet())
         assertEquals(expected, snapshot.apiProbes.map { it.endpoint.domain }.toSet())
         assertTrue(snapshot.apiProbes.all { it.testedThisRound })
-        assertEquals(1, published.size)
-        assertNotNull(published.single())
+        assertTrue(published.isNotEmpty())
+        assertNotNull(published.last())
+        assertEquals(snapshot.roundSelectedLine, published.last())
     }
 
     @Test
@@ -162,7 +164,8 @@ class PicacgSpeedTesterRuntimeTest {
         val selected = DomainIp("steady.picacg.test", ip)
         assertEquals(listOf("steady.picacg.test"), values("runtimeTestRequests"))
         assertEquals(listOf(selected), published)
-        assertTrue(events.indexOf("published") in 0 until events.indexOf("images"))
+        assertTrue(events.contains("published"))
+        assertTrue(events.contains("images"), "API and image phases now progress independently")
         assertEquals(listOf(selected), snapshot.apiProbes.filter { it.testedThisRound && it.success }.map { it.endpoint })
         assertTrue(snapshot.apiProbes.single().testedThisRound)
         assertTrue(PicacgSpeedTestHistoryStorage.loadApi().measurements.single().measuredAtEpochMs > 123_500)
@@ -234,6 +237,30 @@ class PicacgSpeedTesterRuntimeTest {
         assertFalse(stored.success)
         assertEquals(503, stored.httpStatus)
         assertTrue(stored.measuredAtEpochMs > oldPinned.measuredAtEpochMs)
+    }
+
+    @Test
+    fun `early quick improvements never replace a manually pinned API endpoint`() = runBlocking {
+        val automatic = "https://manual-a.picacg.test"
+        val pinned = "https://manual-b.picacg.test"
+        val firstIp = "192.0.2.124"
+        val pinnedIp = "192.0.2.125"
+        configure(
+            listOf(automatic, pinned),
+            mapOf(host(automatic) to listOf(firstIp), host(pinned) to listOf(pinnedIp)),
+            version = 32,
+        )
+        val selected = DomainIp(host(pinned), pinnedIp)
+        invokeRoute("applyAutomaticApiEndpoint", selected)
+        routeManager.javaClass.getMethod("setApiManuallyPinned", Boolean::class.javaPrimitiveType).invoke(routeManager, true)
+        val published = mutableListOf<DomainIp?>()
+
+        val snapshot = PicacgSpeedTester.run(fastApi = true, onApiPublished = published::add)
+
+        assertEquals(selected, PicacgRouteManager.selectedApiEndpoint)
+        assertEquals(selected, snapshot.roundSelectedLine)
+        assertTrue(published.all { it == selected }, "non-pinned valid alternatives cannot be published over the manual route")
+        assertEquals(setOf("manual-a.picacg.test", "manual-b.picacg.test"), values("runtimeTestRequests").toSet())
     }
 
     @Test
@@ -338,7 +365,7 @@ class PicacgSpeedTesterRuntimeTest {
     }
 
     @Test
-    fun `healthy quick API publishes two current results and background exploration cannot change them`() = runBlocking {
+    fun `healthy quick API publishes current results and returns the complete measured pool`() = runBlocking {
         val urls = (0..3).map { "https://quick$it.picacg.test" }
         configure(urls, urls.mapIndexed { index, url -> host(url) to listOf("192.0.2.${index + 151}") }.toMap(), version = 71)
         val publications = mutableListOf<DomainIp?>()
@@ -348,12 +375,12 @@ class PicacgSpeedTesterRuntimeTest {
 
         awaitBackgroundExploration()
 
-        assertEquals(2, snapshot.apiProbes.count { it.testedThisRound })
+        assertEquals(4, snapshot.apiProbes.count { it.testedThisRound }, "the full quick run must finish every configured endpoint after publishing readiness")
         assertEquals(snapshot, PicacgSpeedTester.snapshot.value)
-        assertEquals(progress, PicacgSpeedTester.progress.value, "background probes must not publish foreground progress")
+        assertEquals(PicacgSpeedTester.Stage.COMPLETE, progress?.stage)
         assertEquals(selected, PicacgRouteManager.selectedApiEndpoint)
-        assertEquals(1, publications.size)
-        assertEquals(3, values("runtimeTestRequests").size, "two foreground probes plus at most one separately limited exploration")
+        assertEquals(snapshot.roundSelectedLine, publications.last())
+        assertEquals(4, values("runtimeTestRequests").size, "all configured endpoints are included before the run completes")
     }
 
     @Test
@@ -387,8 +414,8 @@ class PicacgSpeedTesterRuntimeTest {
 
         val freshCover = snapshot.imageProbes.filter { !it.content && it.testedThisRound }
         val freshBody = snapshot.imageProbes.filter { it.content && it.testedThisRound }
-        assertEquals(2, freshCover.size)
-        assertEquals(2, freshBody.size)
+        assertEquals(images.toSet(), freshCover.map { it.endpoint.domain }.toSet(), "quick return waits for full background cover exploration")
+        assertEquals(images.toSet(), freshBody.map { it.endpoint.domain }.toSet(), "quick return waits for full background content exploration")
         assertTrue(freshCover.any { it.endpoint == cover }, "the current cover source must be revalidated even when body uses a different source")
         assertTrue(freshBody.any { it.endpoint == body })
     }
@@ -439,9 +466,9 @@ class PicacgSpeedTesterRuntimeTest {
             onApiPublished = published::add,
         )
 
-        assertEquals(3, checksWhenApplyInvalidated, "current generation is checked before and after the probe")
+        assertEquals(4, checksWhenApplyInvalidated, "the early publication callback rechecks the generation after probing")
         assertEquals(1, beforeApplyCalls, "a failed API publication barrier prevents the final snapshot barrier")
-        assertEquals(4, currentChecks, "revision is checked again after the publication callback")
+        assertEquals(5, currentChecks, "revision is checked around the early publication guard")
         assertTrue(published.isEmpty(), "a configuration revision race must not publish the API line")
         assertNull(PicacgSpeedTester.snapshot.value)
         assertEquals(oldHistory, PicacgSpeedTestHistoryStorage.loadApi(), "rejected generation cannot publish history")
@@ -449,7 +476,7 @@ class PicacgSpeedTesterRuntimeTest {
     }
 
     @Test
-    fun `fresh successful API is published before image preparation and matches final snapshot`() = runBlocking {
+    fun `fresh successful API is published during the full probe run and matches final snapshot`() = runBlocking {
         val url = "https://fresh.picacg.test"
         val freshIp = "192.0.2.51"
         configure(listOf(url), mapOf(host(url) to listOf(freshIp)), version = 5)
@@ -469,7 +496,8 @@ class PicacgSpeedTesterRuntimeTest {
         val publishedEndpoint = requireNotNull(published.single())
         assertNotNull(publishedEndpoint)
         assertEquals(DomainIp(host(url), freshIp), publishedEndpoint)
-        assertTrue(events.indexOf("published") in 0 until events.indexOf("preparing-images"), "API publication must precede image preparation")
+        assertTrue(events.contains("published"), "API publication must occur while its fresh success is available")
+        assertTrue(events.contains("preparing-images"), "the independent image phase must also start")
         assertEquals(publishedEndpoint, snapshot.roundSelectedLine)
         assertEquals(publishedEndpoint, PicacgSpeedTester.snapshot.value?.roundSelectedLine)
         assertTrue(snapshot.apiProbes.any { it.endpoint == publishedEndpoint && it.testedThisRound && it.success })
@@ -494,6 +522,72 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(1, beforeApplyCalls, "a rejected API publication barrier suppresses the final snapshot gate")
         assertTrue(published.isEmpty(), "a rejected API publication barrier must not invoke the callback")
         assertNull(PicacgSpeedTester.snapshot.value)
+    }
+
+    @Test
+    fun `quick run publishes the best current API while retaining full-run completion data`() = runBlocking {
+        val urls = (0..4).map { "https://ready$it.picacg.test" }
+        configure(urls, urls.mapIndexed { index, url -> host(url) to listOf("192.0.2.${index + 181}") }.toMap(), version = 74)
+        val publications = mutableListOf<DomainIp?>()
+        var readyCallbacks = 0
+        var snapshotWasIncompleteAtApiPublication = false
+
+        val snapshot = PicacgSpeedTester.run(
+            fastApi = true,
+            onApiPublished = { endpoint ->
+                publications += endpoint
+                snapshotWasIncompleteAtApiPublication = PicacgSpeedTester.snapshot.value == null
+            },
+            onRouteReady = { readyCallbacks++ },
+        )
+
+        assertTrue(publications.isNotEmpty(), "a current tested API success must publish before the run returns")
+        assertTrue(snapshotWasIncompleteAtApiPublication, "API publication precedes the final full-run snapshot")
+        assertEquals(snapshot.roundSelectedLine, PicacgRouteManager.selectedApiEndpoint)
+        assertTrue(snapshot.apiProbes.all { it.testedThisRound }, "the returned quick-run snapshot must include every completed API measurement")
+        assertFalse(snapshot.complete, "API-only configuration has no real cover/body results")
+        assertNotNull(PicacgSpeedTester.snapshot.value, "the final API-only snapshot is still written after all configured candidates end")
+        assertEquals(0, readyCallbacks)
+        assertEquals(urls.map(::host).toSet(), values("runtimeTestRequests").toSet())
+    }
+
+    @Test
+    fun `onRouteReady waits for API cover and reader page routes and never marks a partial snapshot complete`() = runBlocking {
+        val api = "https://ready-all.picacg.test"
+        val image = "storage-b.go2778.com"
+        configure(listOf(api), mapOf(host(api) to listOf("192.0.2.191"), image to listOf("192.0.2.192")), version = 75, images = listOf(image))
+        val ready = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var callbacks = 0
+        val snapshot = PicacgSpeedTester.run(
+            onApiPublished = {},
+            onRouteReady = {
+                callbacks++
+                assertNull(PicacgSpeedTester.snapshot.value, "ready is incremental; complete snapshot is published only after every candidate finishes")
+                ready.complete(Unit)
+            },
+        )
+
+        withTimeout(1_000L) { ready.await() }
+        assertEquals(1, callbacks)
+        assertTrue(snapshot.complete)
+        assertEquals(1, snapshot.apiProbes.count { it.testedThisRound })
+        assertEquals(2, snapshot.imageProbes.count { it.testedThisRound }, "cover and body are independent successful image checks")
+        assertEquals(PicacgSpeedTester.Stage.COMPLETE, PicacgSpeedTester.progress.value?.stage)
+    }
+
+    @Test
+    fun `later faster API publication is reflected in final route without duplicate final binding`() = runBlocking {
+        val urls = (0..6).map { "https://improve$it.picacg.test" }
+        configure(urls, urls.mapIndexed { index, url -> host(url) to listOf("192.0.2.${index + 201}") }.toMap(), version = 76)
+        val publications = mutableListOf<DomainIp?>()
+
+        val snapshot = PicacgSpeedTester.run(fastApi = true, onApiPublished = publications::add)
+
+        assertTrue(publications.isNotEmpty())
+        assertEquals(snapshot.roundSelectedLine, PicacgRouteManager.selectedApiEndpoint)
+        assertEquals(snapshot.roundSelectedLine, publications.last(), "the last improvement must match the best full-run result")
+        assertEquals(publications.distinct().size, publications.size, "the final full snapshot must not re-publish/restart the same Maccms binding")
+        assertEquals(urls.map(::host).toSet(), values("runtimeTestRequests").toSet())
     }
 
     private suspend fun awaitBackgroundExploration() {

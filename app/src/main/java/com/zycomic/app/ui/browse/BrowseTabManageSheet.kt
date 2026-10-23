@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -56,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zycomic.app.data.AllTags
@@ -66,6 +68,7 @@ import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
 import com.zycomic.app.ui.picacg.PicacgBrowseFilter
+import com.zycomic.app.ui.picacg.PicacgRankingMode
 import com.zycomic.app.ui.picacg.PicacgThemes
 import eu.kanade.presentation.components.AdaptiveSheet
 import tachiyomi.i18n.kmk.KMR
@@ -302,7 +305,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState()),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp)) {
                 Icon(Icons.Outlined.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -407,20 +411,20 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            FlowRow(
+                horizontalArrangement = Arrangement.End,
+                verticalArrangement = Arrangement.Center,
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
             ) {
-                Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth())
+                TextButton(onClick = { confirmReset = true }) { Text("恢复默认") }
                 TextButton(onClick = { showReorder = true }) { Text("更改顺序") }
             }
 
             Column(
                 modifier = Modifier
-                    .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(horizontal = 12.dp),
             ) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -430,15 +434,11 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     vm.tabs.forEach { item ->
                         ManagedTabPill(
                             item = item,
-                            onEdit = { if (item.kind == TabKind.FILTER) editing = item else editingSpecial = item },
+                            onEdit = { if (item.kind == TabKind.FILTER || item.platformId == ContentPlatform.PICACG) editing = item else editingSpecial = item },
                             onDelete = { deletingItem = item },
                         )
                     }
                 }
-            }
-
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
-                TextButton(onClick = { confirmReset = true }) { Text("恢复默认预设") }
             }
         }
     }
@@ -468,6 +468,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             initialName = item.name,
             initial = item.filter ?: FilterSnapshot(),
             initialPicacgFilter = item.picacgFilter ?: PicacgBrowseFilter(),
+            picacgRanking = item.isPicacgRanking(),
+            initialRankingMode = item.picacgRankingMode,
             initialJmFilters = vm.defaultJmFiltersForTab(vm.tabs.indexOfFirst { it.id == item.id }).let {
                 if (item.id == JmBrowsePolicy.ALL_HOT_TAB_ID) it.copy(mode = JmBrowsePolicy.MODE_CATEGORY, query = "") else it
             },
@@ -478,9 +480,13 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             onDismiss = { editing = null },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, item.id, platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, jmFilters, platform, picacgFilter ->
+            onSave = { nm, snap, jmFilters, platform, picacgFilter, rankingMode ->
                 if (platform == ContentPlatform.PICACG) {
-                    vm.updateTabDefaultPicacgFilter(item.id, picacgFilter)
+                    if (item.isPicacgRanking()) {
+                        vm.updateTabDefaultPicacgRankingMode(item.id, rankingMode)
+                    } else {
+                        vm.updateTabDefaultPicacgFilter(item.id, picacgFilter)
+                    }
                 } else if (platform == ContentPlatform.JM) {
                     vm.updateTabDefaultJmFilters(item.id, jmFilters)
                 } else if (snap != null) {
@@ -499,6 +505,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             initialName = "",
             initial = FilterSnapshot(),
             initialPicacgFilter = PicacgBrowseFilter(),
+            picacgRanking = false,
+            initialRankingMode = PicacgRankingMode.H24,
             initialJmFilters = JmBrowsePolicy.customCategoryFilters(),
             jmHome = false,
             jmCategoryOnly = true,
@@ -507,7 +515,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             onDismiss = { adding = false },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, platform = platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, jmFilters, platform, picacgFilter ->
+            onSave = { nm, snap, jmFilters, platform, picacgFilter, _ ->
                 if (vm.addFilterTab(nm, snap, platform, jmFilters, picacgFilter)) {
                     adding = false
                     onDismiss()
@@ -523,7 +531,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             title = { Text("恢复默认预设") },
             text = {
                 Text(
-                    "将清空共享列表中的新增、改名和修改项，恢复漫蛙默认标签及禁漫天堂的首页、全部热门标签。确定？",
+                    "将清空共享列表中的新增、改名和修改项，恢复漫蛙、禁漫天堂和哔咔的默认标签。确定？",
                 )
             },
             confirmButton = {
@@ -566,6 +574,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                     true
                 },
                 onDismiss = { editingSpecial = null },
+                checkNameTaken = { vm.isNameTaken(it, sp.id, sp.platformId) },
             )
         } else {
             SpecialTabEditDialog(item = sp, vm = vm, onDismiss = { editingSpecial = null })
@@ -581,7 +590,7 @@ private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDis
     val trimmed = name.trim()
     val nameError = when {
         trimmed.isEmpty() -> "名称不能为空"
-        vm.isNameTaken(trimmed, item.id) -> "名称已存在"
+        vm.isNameTaken(trimmed, item.id, item.platformId) -> "名称已存在"
         else -> null
     }
     androidx.compose.ui.window.Dialog(
@@ -595,7 +604,7 @@ private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDis
                 tonalElevation = 3.dp,
                 modifier = Modifier.fillMaxHeight(0.8f).widthIn(max = 460.dp).fillMaxWidth(),
             ) {
-                Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Tune, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
@@ -607,7 +616,7 @@ private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDis
                         onValueChange = { name = it },
                         singleLine = true,
                         isError = nameError != null,
-                        supportingText = { nameError?.let { e -> Text(e) } },
+                        supportingText = { TabNameSupportingText(nameError) },
                         label = { Text("tab 名称") },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     )
@@ -632,7 +641,6 @@ private fun SpecialTabEditDialog(item: BrowseTabItem, vm: BrowseViewModel, onDis
                         )
                         else -> {}
                     }
-                    Spacer(Modifier.weight(1f))
                     HorizontalDivider()
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -675,7 +683,6 @@ private fun FilterSnapshot.summary(): String {
 private fun JmTabFilterEditor(
     filters: JmBrowsePolicy.Filters,
     home: Boolean,
-    categoryOnly: Boolean,
     onChange: (JmBrowsePolicy.Filters) -> Unit,
 ) {
     if (home) {
@@ -695,13 +702,11 @@ private fun JmTabFilterEditor(
             }
         }
     }
-    if (!categoryOnly) {
-        val orders = remember { JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions) }
-        FilterSection("JM 排序") {
-            orders.forEach { (label, value) ->
-                FilterChip(text = label, selected = filters.order == value) {
-                    onChange(filters.copy(order = value))
-                }
+    val orders = remember { JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions) }
+    FilterSection("JM 排序") {
+        orders.forEach { (label, value) ->
+            FilterChip(text = label, selected = filters.order == value) {
+                onChange(filters.copy(order = value))
             }
         }
     }
@@ -716,13 +721,15 @@ private fun FilterTabFormDialog(
     initialName: String,
     initial: FilterSnapshot,
     initialPicacgFilter: PicacgBrowseFilter,
+    picacgRanking: Boolean,
+    initialRankingMode: PicacgRankingMode,
     initialJmFilters: JmBrowsePolicy.Filters,
     jmHome: Boolean,
     jmCategoryOnly: Boolean,
     initialPlatform: ContentPlatform,
     allowPlatformSelect: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform, PicacgBrowseFilter) -> Unit,
+    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform, PicacgBrowseFilter, PicacgRankingMode) -> Unit,
     onOpenTagDialog: (Set<String>, (Set<String>) -> Unit) -> Unit,
     checkNameTaken: (String, ContentPlatform) -> Boolean,
 ) {
@@ -731,6 +738,7 @@ private fun FilterTabFormDialog(
     var draft by remember(title) { mutableStateOf(initial) }
     var jmDraft by remember(title) { mutableStateOf(initialJmFilters) }
     var picacgDraft by remember(title) { mutableStateOf(initialPicacgFilter.normalized()) }
+    var rankingDraft by remember(title) { mutableStateOf(initialRankingMode) }
     var targetPlatform by remember(title) { mutableStateOf(initialPlatform) }
 
     val trimmed = name.trim()
@@ -765,99 +773,103 @@ private fun FilterTabFormDialog(
                         IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
                     }
 
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Outlined.Label, contentDescription = null) },
-                        isError = nameError != null,
-                        supportingText = { nameError?.let { Text(it) } },
-                        label = { Text("tab 名称") },
-                        placeholder = { Text("例如：热血收藏") },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                    )
-
-                    if (allowPlatformSelect) {
-                        Text(stringResource(KMR.strings.content_platform_custom_tab_target), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                        ContentPlatformSelector(
-                            selected = targetPlatform,
-                            onSelect = {
-                                if (StartupPlatformPolicy.checkSelection(context, it)) {
-                                    targetPlatform = it
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            singleLine = true,
+                            leadingIcon = { Icon(Icons.Outlined.Label, contentDescription = null) },
+                            isError = nameError != null,
+                            supportingText = { TabNameSupportingText(nameError) },
+                            label = { Text("tab 名称") },
+                            placeholder = { Text("例如：热血收藏") },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                         )
-                        if (targetPlatform == ContentPlatform.JM) {
+
+                        if (allowPlatformSelect) {
+                            Text(stringResource(KMR.strings.content_platform_custom_tab_target), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                            ContentPlatformSelector(
+                                selected = targetPlatform,
+                                onSelect = {
+                                    if (StartupPlatformPolicy.checkSelection(context, it)) {
+                                        targetPlatform = it
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            )
+                            if (targetPlatform == ContentPlatform.JM) {
+                                Text(
+                                    stringResource(KMR.strings.content_platform_custom_tab_notice),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        ) {
                             Text(
-                                stringResource(KMR.strings.content_platform_custom_tab_notice),
+                                if (targetPlatform == ContentPlatform.PICACG) {
+                                    if (picacgRanking) picacgRankingLabel(rankingDraft) else "${picacgDraft.category.ifBlank { "全部主题" }} · ${picacgSortLabel(picacgDraft.sort)}"
+                                } else if (targetPlatform == ContentPlatform.JM) {
+                                    when {
+                                        jmHome -> BrowseTabStore.JM_HOME_NAME
+                                        jmDraft.mode == JmBrowsePolicy.MODE_RECOMMENDATIONS -> "首页推荐"
+                                        jmDraft.mode == JmBrowsePolicy.MODE_WEEK -> "每周必看 · ${jmDraft.weekType.ifBlank { "manga" }} · ${jmDraft.weekId.ifBlank { "最新期" }}"
+                                        jmDraft.mode == JmBrowsePolicy.MODE_SERIALIZATION -> "每周连载更新 · ${jmDraft.serializationType} · ${if (jmDraft.serializationDate == 0) "已完结" else "周${jmDraft.serializationDate}"}"
+                                        else -> {
+                                            val category = JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions)
+                                                .firstOrNull { it.second == jmDraft.category }?.first ?: "全部分类"
+                                            val order = JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions)
+                                                .firstOrNull { it.second == jmDraft.order }?.first ?: "最新"
+                                            "$category · $order"
+                                        }
+                                    }
+                                } else {
+                                    draft.summary()
+                                },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(10.dp),
                             )
                         }
-                    }
 
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    ) {
-                        Text(
+                        Column(
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                        ) {
                             if (targetPlatform == ContentPlatform.PICACG) {
-                                "${picacgDraft.category.ifBlank { "全部主题" }} · ${picacgSortLabel(picacgDraft.sort)}"
-                            } else if (targetPlatform == ContentPlatform.JM) {
-                                when {
-                                    jmHome -> BrowseTabStore.JM_HOME_NAME
-                                    jmDraft.mode == JmBrowsePolicy.MODE_RECOMMENDATIONS -> "首页推荐"
-                                    jmDraft.mode == JmBrowsePolicy.MODE_WEEK -> "每周必看 · ${jmDraft.weekType.ifBlank { "manga" }} · ${jmDraft.weekId.ifBlank { "最新期" }}"
-                                    jmDraft.mode == JmBrowsePolicy.MODE_SERIALIZATION -> "每周连载更新 · ${jmDraft.serializationType} · ${if (jmDraft.serializationDate == 0) "已完结" else "周${jmDraft.serializationDate}"}"
-                                    else -> {
-                                        val category = JmBrowsePolicy.categorySelections(com.zycomic.app.reader.JmSource.categoryOptions)
-                                            .firstOrNull { it.second == jmDraft.category }?.first ?: "全部分类"
-                                        val order = JmBrowsePolicy.orderOptions(com.zycomic.app.reader.JmSource.orderOptions)
-                                            .firstOrNull { it.second == jmDraft.order }?.first ?: "最新"
-                                        "$category · $order"
-                                    }
+                                if (picacgRanking) {
+                                    PicacgTabRankingEditor(rankingDraft) { rankingDraft = it }
+                                } else {
+                                    PicacgTabFilterEditor(picacgDraft) { picacgDraft = it }
                                 }
+                            } else if (targetPlatform == ContentPlatform.JM) {
+                                JmTabFilterEditor(
+                                    filters = jmDraft,
+                                    home = jmHome,
+                                    onChange = { jmDraft = it },
+                                )
                             } else {
-                                draft.summary()
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(10.dp),
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                    ) {
-                        if (targetPlatform == ContentPlatform.PICACG) {
-                            PicacgTabFilterEditor(picacgDraft) { picacgDraft = it }
-                        } else if (targetPlatform == ContentPlatform.JM) {
-                            JmTabFilterEditor(
-                                filters = jmDraft,
-                                home = jmHome,
-                                categoryOnly = jmCategoryOnly,
-                                onChange = { jmDraft = it },
-                            )
-                        } else {
-                            FilterSnapshotEditor(
-                                snapshot = draft,
-                                onChange = { draft = it },
-                                onOpenTagDialog = {
-                                    onOpenTagDialog(draft.tags.toSet()) { set -> draft = draft.copy(tags = set.toList()) }
-                                },
-                            )
-                            Text(
-                                "新 tab 默认按收藏（热门）排序",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-                            )
+                                FilterSnapshotEditor(
+                                    snapshot = draft,
+                                    onChange = { draft = it },
+                                    onOpenTagDialog = {
+                                        onOpenTagDialog(draft.tags.toSet()) { set -> draft = draft.copy(tags = set.toList()) }
+                                    },
+                                )
+                                Text(
+                                    "新 tab 默认按收藏（热门）排序",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                                )
+                            }
                         }
                     }
 
@@ -882,6 +894,7 @@ private fun FilterTabFormDialog(
                                     },
                                     targetPlatform,
                                     picacgDraft.normalized(),
+                                    rankingDraft,
                                 )
                             },
                         ) { Text("保存") }
@@ -889,6 +902,31 @@ private fun FilterTabFormDialog(
                 }
             }
         }
+    }
+}
+
+private fun picacgRankingLabel(mode: PicacgRankingMode): String = when (mode) {
+    PicacgRankingMode.H24 -> "日榜（24小时）"
+    PicacgRankingMode.D7 -> "周榜"
+    PicacgRankingMode.D30 -> "月榜"
+    PicacgRankingMode.RANDOM -> "随机"
+    PicacgRankingMode.LATEST -> "最新"
+}
+
+@Composable
+private fun PicacgTabRankingEditor(mode: PicacgRankingMode, onChange: (PicacgRankingMode) -> Unit) {
+    FilterSection("默认排行") {
+        PicacgRankingMode.entries.forEach { option ->
+            FilterChip(text = picacgRankingLabel(option), selected = mode == option, onClick = { onChange(option) })
+        }
+    }
+}
+
+@Composable
+private fun TabNameSupportingText(error: String?) {
+    Column {
+        error?.let { Text(it) }
+        Text(stringResource(KMR.strings.browse_tab_name_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1038,21 +1076,23 @@ private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onDelete: ()
     } else {
         rememberContentPlatformAccent(item.platformId)
     }
-    Surface(shape = CircleShape, color = accent.copy(alpha = 0.13f)) {
+    Surface(shape = CircleShape, color = accent.copy(alpha = 0.13f), modifier = Modifier.heightIn(min = 48.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 11.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+            modifier = Modifier.heightIn(min = 48.dp).padding(start = 11.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
         ) {
             Text(
                 item.name,
                 style = MaterialTheme.typography.labelLarge,
                 color = accent,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
-            IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+            IconButton(onClick = onEdit, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Outlined.Edit, contentDescription = "编辑 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
             }
-            IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Outlined.Delete, contentDescription = "删除 ${item.name}", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
             }
         }

@@ -37,6 +37,34 @@ class PicacgRouteManagerTest {
     }
 
     @Test
+    fun automaticApiRouteCannotOverrideManualSelectionAndCommitsHostAndIpTogether() {
+        val first = "api.pica.example"
+        val second = "api2.pica.example"
+        val firstIp = "198.51.100.10"
+        val secondIp = "198.51.100.12"
+        PicacgRouteManager.applyRemoteConfig(
+            apiUrls = listOf("https://$first/v2/root", "https://$second/v2/root"),
+            imageHosts = emptyList(),
+            rules = mapOf(first to listOf(firstIp), second to listOf(secondIp)),
+            version = 3,
+        )
+        val pinned = DomainIp(first, firstIp)
+        assertTrue(PicacgRouteManager.selectApiUrl("https://$first/v2/root", manual = true))
+        assertTrue(PicacgRouteManager.pinApiEndpoint(pinned))
+
+        assertFalse(PicacgRouteManager.applyAutomaticApiRoute("https://$second/v2/root", DomainIp(second, secondIp)))
+        assertEquals(first, PicacgRouteManager.selectedApiHost)
+        assertEquals(pinned, PicacgRouteManager.selectedApiEndpoint)
+        assertTrue(PicacgRouteManager.isApiManuallyPinned)
+
+        assertTrue(PicacgRouteManager.selectApiUrl("https://$first/v2/root", manual = false))
+        assertTrue(PicacgRouteManager.applyAutomaticApiRoute("https://$second/v2/root", DomainIp(second, secondIp)))
+        assertEquals(second, PicacgRouteManager.selectedApiHost)
+        assertEquals(DomainIp(second, secondIp), PicacgRouteManager.selectedApiEndpoint)
+        assertFalse(PicacgRouteManager.isApiManuallyPinned)
+    }
+
+    @Test
     fun pinnedClientIsRestrictedToItsSelectedPicacgEndpoint() {
         installRoutes()
         val client = PicacgRouteManager.newPinnedClient(OkHttpClient(), DomainIp("api.pica.example", "198.51.100.10"))
@@ -85,9 +113,9 @@ class PicacgRouteManagerTest {
         assertTrue(PicacgRouteManager.state.value.contentRanking.isEmpty())
         assertNull(PicacgRouteManager.selectedImageEndpoint)
         assertEquals(
+            "a cover-only measurement cannot become the storage-b reader-page pin",
             listOf(defaultIp, coverIp),
             PicacgRouteManager.dns().lookup(host).map { it.hostAddress },
-            "a cover-only measurement cannot become the storage-b reader-page pin",
         )
 
         assertTrue(PicacgRouteManager.applyImageRankings(emptyList(), emptyList()))

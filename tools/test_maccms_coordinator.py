@@ -28,15 +28,10 @@ def jar(group: str, name: str, version: str) -> str:
 
 def main() -> None:
     net = ROOT / "app/src/main/java/com/zycomic/app/net"
-    test_names = [
-        "CompletedSpeedTestCoordinatorRuntimeTest",
-        "StartupSpeedTestSharingRuntimeTest",
-        "CoordinatorRetestAllRuntimeTest",
-        "StartupCompletionToastRuntimeTest",
-        "MaccmsCoordinatorRuntimeTest",
-        "ConfigUpdateStartupStateRuntimeTest",
-    ]
-    tests = [HARNESS / f"{name}.kt" for name in test_names]
+    tests = sorted(
+        HARNESS.glob("*RuntimeTest.kt"),
+        key=lambda path: (path.name != "CoordinatorForegroundReadyRuntimeTest.kt", path.name),
+    )
     tests.append(ROOT / "app/src/test/java/com/zycomic/app/net/SpeedTestRunPolicyTest.kt")
     tests.append(ROOT / "app/src/test/java/com/zycomic/app/net/StartupCheckStatusTest.kt")
     sources = [HARNESS / name for name in [
@@ -63,7 +58,8 @@ def main() -> None:
             else:
                 assert current_class, path
                 selectors.append(f"com.zycomic.app.net.{current_class}#{match.group(2)}")
-    assert len(selectors) == 52, f"Expected all 52 coordinator and startup-state contract methods, found {len(selectors)}"
+    assert selectors, "No coordinator runtime test methods were discovered"
+    assert len(selectors) == len(set(selectors)), "Duplicate coordinator runtime test selectors discovered"
     stdlib = jar("org.jetbrains.kotlin", "kotlin-stdlib", "2.2.21")
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.10.2")
     junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")
