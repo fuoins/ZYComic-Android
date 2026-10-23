@@ -80,7 +80,7 @@ class SettingsViewModel {
         }
         SpeedTester.Phase.APPLYING_RESULTS -> "端点检测完成，正在更新排名并应用可自动切换的结果…"
         SpeedTester.Phase.COMPLETE -> if (progress.fullRetestRecommended) {
-            "前五快测全部失败，本轮不再扩测；请在测速表中选择完整重新测速"
+            "历史排序自适应快测未取得本轮有效成功结果；如需覆盖全部候选，请在测速表中选择完整重新测速"
         } else if (progress.reusedImages > 0) {
             "图源本次新测 ${progress.freshImages} 项，另 ${progress.reusedImages} 项保留历史排名（本轮未测）；可手动完整重测"
         } else {

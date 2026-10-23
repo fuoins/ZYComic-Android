@@ -120,7 +120,7 @@ fun SpeedTestScreen(
         }
     }
 
-    // 快测将刚重测的前五项按fresh延迟排序；其余端点保持上轮排名和样本，并明确标记为未测。
+    // 快测优先按历史排名自适应探测；其余端点保留历史记录并明确标记为未测。
     val lineOrder = remember(lineDelays, currentSpeedSnapshot.lineUntestedEndpoints) {
         val untested = currentSpeedSnapshot.lineUntestedEndpoints
         orderSpeedTestLogRows(
@@ -149,7 +149,7 @@ fun SpeedTestScreen(
                 it.value < Long.MAX_VALUE && imgVerdicts[it.key] == SpeedTester.ImgVerdict.OK
         }.map { it.key }
     }
-    // Use the published round's membership, not the newly ranked top five or current route selection.
+    // Use the published round's membership, not adaptive candidate ranking or current route selection.
     val lineQuickTestEndpoints = if (!showingPreviousRound && speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.lineQuickTest) {
         currentSpeedSnapshot.lineDelays.keys - currentSpeedSnapshot.lineUntestedEndpoints
     } else {
@@ -217,10 +217,10 @@ fun SpeedTestScreen(
                     }
                     if (speedTestProgress.phase == SpeedTester.Phase.COMPLETE && speedTestProgress.fullRetestRecommended) {
                         Text(
-                            "快测前五项全部失败（${listOfNotNull(
+                            "历史排序自适应快测未取得有效成功结果（${listOfNotNull(
                                 "线路".takeIf { speedTestProgress.lineTopFiveAllFailed },
                                 "图源".takeIf { speedTestProgress.imageTopFiveAllFailed },
-                            ).joinToString("、")}），未沿用旧延迟。请点“完整重新测速”重新测试全部候选。",
+                            ).joinToString("、")}）。未测历史只用于排序，不作为自动选择依据；如需覆盖全部候选，请点“完整重新测速”。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(top = 4.dp),

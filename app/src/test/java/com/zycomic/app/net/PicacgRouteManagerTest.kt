@@ -4,6 +4,7 @@ import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -64,6 +65,66 @@ class PicacgRouteManagerTest {
         assertEquals(listOf("198.51.100.21"), client.dns.lookup(endpoint.domain).map { it.hostAddress })
         assertEquals(2, urls.size)
         assertTrue(rules.containsKey("picacomic.com"))
+    }
+
+    @Test
+    fun emptyImageRankingsClearOldHealthAndCoverSuccessDoesNotPinReaderPages() {
+        val host = "storage-b.go2778.com"
+        val defaultIp = "192.0.2.30"
+        val coverIp = "192.0.2.31"
+        PicacgRouteManager.applyRemoteConfig(
+            apiUrls = listOf("https://api.pica.example/"),
+            imageHosts = listOf(host),
+            rules = mapOf(host to listOf(defaultIp, coverIp)),
+            version = 4,
+        )
+        assertTrue(PicacgRouteManager.selectImageHost(host, manual = false))
+
+        assertTrue(PicacgRouteManager.applyImageRankings(listOf(DomainIp(host, coverIp)), emptyList()))
+        assertEquals(listOf(DomainIp(host, coverIp)), PicacgRouteManager.state.value.coverRanking)
+        assertTrue(PicacgRouteManager.state.value.contentRanking.isEmpty())
+        assertNull(PicacgRouteManager.selectedImageEndpoint)
+        assertEquals(
+            listOf(defaultIp, coverIp),
+            PicacgRouteManager.dns().lookup(host).map { it.hostAddress },
+            "a cover-only measurement cannot become the storage-b reader-page pin",
+        )
+
+        assertTrue(PicacgRouteManager.applyImageRankings(emptyList(), emptyList()))
+        assertTrue(PicacgRouteManager.state.value.coverRanking.isEmpty())
+        assertTrue(PicacgRouteManager.state.value.contentRanking.isEmpty())
+        assertNull(PicacgRouteManager.selectedImageEndpoint)
+    }
+
+    @Test
+    fun roundStartClearsAutomaticPinsButRetainsManualPreferencesAndPins() {
+        installRoutes()
+        assertTrue(PicacgRouteManager.selectApiUrl("https://api.pica.example/v2/root", manual = false))
+        assertTrue(PicacgRouteManager.selectImageHost("cdn.pica.example", manual = false))
+        val automaticApi = DomainIp("api.pica.example", "198.51.100.10")
+        val automaticImage = DomainIp("cdn.pica.example", "198.51.100.11")
+        assertTrue(PicacgRouteManager.applyAutomaticApiEndpoint(automaticApi))
+        assertTrue(PicacgRouteManager.applyImageRankings(listOf(automaticImage), listOf(automaticImage)))
+
+        PicacgRouteManager.clearAutomaticHealthSelections()
+
+        assertNull(PicacgRouteManager.selectedApiEndpoint)
+        assertNull(PicacgRouteManager.selectedImageEndpoint)
+        assertTrue(PicacgRouteManager.state.value.coverRanking.isEmpty())
+        assertTrue(PicacgRouteManager.state.value.contentRanking.isEmpty())
+
+        assertTrue(PicacgRouteManager.pinApiEndpoint(automaticApi))
+        assertTrue(PicacgRouteManager.selectImageHost("cdn.pica.example", manual = true))
+        assertTrue(PicacgRouteManager.pinImageEndpoint(automaticImage))
+        PicacgRouteManager.clearAutomaticHealthSelections()
+
+        assertTrue(PicacgRouteManager.isApiManuallyPinned)
+        assertTrue(PicacgRouteManager.isImageManuallyPinned)
+        assertEquals(automaticApi, PicacgRouteManager.selectedApiEndpoint)
+        assertEquals(automaticImage, PicacgRouteManager.selectedImageEndpoint)
+
+        PicacgRouteManager.selectApiUrl("https://api.pica.example/v2/root", manual = false)
+        PicacgRouteManager.selectImageHost("cdn.pica.example", manual = false)
     }
 
     private fun installRoutes() = PicacgRouteManager.applyRemoteConfig(

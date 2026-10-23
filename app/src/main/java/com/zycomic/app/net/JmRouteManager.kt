@@ -531,12 +531,20 @@ object JmRouteManager {
         snapshot.lineIpDelaysMs.filterValues { it >= Long.MAX_VALUE }.keys.forEach { failedLineEndpoints += it.normalizedForComparison() }
         failedImageEndpoints.clear()
         snapshot.imageIpDelaysMs.forEach { (endpoint, delay) ->
-            if (delay >= Long.MAX_VALUE || snapshot.imageIpVerdicts[endpoint] != JmSpeedTester.ImgVerdict.OK) {
+            if (JmSpeedTestQuickProbePolicy.isImageEndpointFailure(snapshot.imageIpVerdicts[endpoint], delay)) {
                 failedImageEndpoints += endpoint.normalizedForComparison()
             }
         }
         lastLineEndpoint?.let { last -> if (snapshot.lineIpDelaysMs.entries.any { it.key.normalizedForComparison() == last.normalizedForComparison() && it.value >= Long.MAX_VALUE }) lastLineEndpoint = null }
-        lastImageEndpoint?.let { last -> if (snapshot.imageIpDelaysMs.entries.any { it.key.normalizedForComparison() == last.normalizedForComparison() && (it.value >= Long.MAX_VALUE || snapshot.imageIpVerdicts[it.key] != JmSpeedTester.ImgVerdict.OK) }) lastImageEndpoint = null }
+        lastImageEndpoint?.let { last ->
+            if (snapshot.imageIpDelaysMs.entries.any {
+                    it.key.normalizedForComparison() == last.normalizedForComparison() &&
+                        JmSpeedTestQuickProbePolicy.isImageEndpointFailure(snapshot.imageIpVerdicts[it.key], it.value)
+                }
+            ) {
+                lastImageEndpoint = null
+            }
+        }
         if (manualLineEndpoint?.let { selected -> snapshot.lineIpDelaysMs.entries.none { it.key.normalizedForComparison() == selected.normalizedForComparison() && it.value < Long.MAX_VALUE } } == true) {
             manualLineEndpoint = null
             prefs()?.edit()?.remove("manual_line_endpoint_domain")?.remove("manual_line_endpoint_ip")?.apply()

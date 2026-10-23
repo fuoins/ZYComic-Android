@@ -163,7 +163,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     snapshot.remoteVersion?.let { Text("远程配置版本：$it", style = MaterialTheme.typography.bodySmall) }
                     if (snapshotIsCurrentRun && (snapshot.lineQuickTest || snapshot.imageQuickTest)) {
                         Text(
-                            "本次快速复测：线路 ${if (snapshot.lineQuickTest) "前五历史端点" else "完整检测"}；图源 ${if (snapshot.imageQuickTest) "前五历史端点" else "完整检测"}",
+                            "本次快速复测：线路 ${if (snapshot.lineQuickTest) "历史排序自适应快测" else "完整检测"}；图源 ${if (snapshot.imageQuickTest) "历史排序自适应快测" else "完整检测"}",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -196,7 +196,7 @@ fun JmSpeedTestLogScreen(onClose: () -> Unit) {
                     }
                     if (snapshotIsCurrentRun && (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed)) {
                         Text(
-                            "前五个历史端点本轮全部失败，未扩展到第六项；请点击“完整重新测速”检测全部端点。",
+                            "本轮历史排序自适应快测未取得可自动选择的有效成功结果；未测历史不作为本轮成功依据。如需覆盖全部候选，请点击“完整重新测速”。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

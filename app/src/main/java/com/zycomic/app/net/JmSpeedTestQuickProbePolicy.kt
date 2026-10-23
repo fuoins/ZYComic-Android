@@ -2,25 +2,21 @@ package com.zycomic.app.net
 
 import java.util.LinkedHashMap
 
-/** Policies for the version-gated JM top-five quick retest. */
+/** Current configuration defines eligibility; history is handled only by the adaptive scheduler. */
 internal object JmSpeedTestQuickProbePolicy {
-    fun selectPriorEndpoints(
-        priorVersion: Int?,
-        currentVersion: Int?,
-        priorCompletedAtEpochMs: Long?,
-        delays: Map<DomainIp, Long>,
-        limit: Int = 5,
-    ): List<DomainIp> {
-        if (limit <= 0 || priorVersion != currentVersion || priorCompletedAtEpochMs == null || priorCompletedAtEpochMs <= 0L) return emptyList()
-        return delays.entries
-            .filter { entry ->
-                entry.value >= 0L && entry.key.domain.isNotBlank() && entry.key.ip.isNotBlank()
-            }
-            .take(limit)
-            .map { it.key }
+    /** Keep every valid current endpoint in configuration/DNS order; never add a historical candidate. */
+    fun <T> currentCandidates(
+        candidates: List<T>,
+        key: (T) -> String,
+        endpoint: (T) -> DomainIp,
+    ): List<T> = candidates.distinctBy(key).filter { candidate ->
+        endpoint(candidate).domain.isNotBlank() && endpoint(candidate).ip.isNotBlank()
     }
 
-    /** All fresh results (including failures) rank by their new delay before untouched history. */
+    fun isImageEndpointFailure(verdict: JmSpeedTester.ImgVerdict?, delayMs: Long): Boolean =
+        verdict != JmSpeedTester.ImgVerdict.NO_IMAGE && delayMs >= Long.MAX_VALUE
+
+    /** Fresh measurements rank first; untouched rows are retained only for independent history display. */
     fun rankPriorDelays(
         fresh: Map<DomainIp, Long>,
         untested: Map<DomainIp, Long>,
@@ -29,7 +25,6 @@ internal object JmSpeedTestQuickProbePolicy {
         untested.forEach { (endpoint, delay) -> if (endpoint !in this) put(endpoint, delay) }
     }
 
-    /** All fresh results rank first by their new delay; untested history retains its insertion order and values. */
     fun mergeDelays(
         prior: Map<DomainIp, Long>,
         fresh: Map<DomainIp, Long>,

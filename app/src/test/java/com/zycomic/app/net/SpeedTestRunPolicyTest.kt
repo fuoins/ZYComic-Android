@@ -71,7 +71,7 @@ class SpeedTestRunPolicyTest {
     }
 
     @Test
-    fun `new config disables old top five for every line and image toggle combination`() {
+    fun `new config disables history guided fast test for every line and image toggle combination`() {
         for (line in listOf(false, true)) {
             for (image in listOf(false, true)) {
                 assertFalse(SpeedTestRunPolicy.canFastTest(line, false, remoteConfigUpdated = true))

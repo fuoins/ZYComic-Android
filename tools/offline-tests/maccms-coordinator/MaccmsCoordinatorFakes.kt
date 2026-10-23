@@ -134,7 +134,14 @@ object SpeedTester {
 object PicacgSpeedTester {
     enum class Stage { PREPARING_API, TESTING_API, PREPARING_IMAGES, TESTING_IMAGES, IMAGE_BLOCKED, COMPLETE }
     data class Progress(val stage: Stage, val completed: Int = 0, val total: Int = 0, val successful: Int = 0, val failed: Int = 0)
-    data class Probe(val endpoint: DomainIp, val success: Boolean, val elapsedMs: Long, val httpStatus: Int?, val testedThisRound: Boolean = true)
+    data class Probe(
+        val endpoint: DomainIp,
+        val success: Boolean,
+        val elapsedMs: Long,
+        val httpStatus: Int?,
+        val testedThisRound: Boolean = true,
+        val content: Boolean = false,
+    )
     data class Snapshot(
         val startedAtEpochMs: Long,
         val completedAtEpochMs: Long,
@@ -212,6 +219,7 @@ object PicacgSpeedTester {
         } else if (sampleAvailable) {
             listOf(
                 Probe(DomainIp("img.picacg.test", "192.0.2.20"), true, 5, 200),
+                Probe(DomainIp("img.picacg.test", "192.0.2.21"), true, 6, 200, content = true),
             )
         } else {
             emptyList()

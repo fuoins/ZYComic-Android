@@ -100,14 +100,37 @@ object PlatformSpeedTestCoordinator {
     internal fun currentNetworkIdentity(): String {
         val manager = DevConfig.appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
         val active = manager?.activeNetwork
-        val underlying = manager?.allNetworks.orEmpty().filter { network ->
-            manager?.getNetworkCapabilities(network)?.let { caps ->
-                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-            } == true
-        }.map { it.toString() }.sorted()
-        return "$active|$underlying|${NetworkModule.shouldUseDirectStrategy()}|${DevConfig.isFollowSystemVpnEnabled()}"
+        val activeCapabilities = active?.let { network -> manager?.getNetworkCapabilities(network) }
+        val activeType = activeCapabilities?.let {
+            networkTypeLabel(
+                isVpn = it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN),
+                isWifi = it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI),
+                isCellular = it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR),
+            )
+        } ?: "unknown"
+        val underlying = manager?.allNetworks.orEmpty().mapNotNull { network ->
+            val capabilities = manager?.getNetworkCapabilities(network) ?: return@mapNotNull null
+            if (!capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            ) {
+                return@mapNotNull null
+            }
+            val type = networkTypeLabel(
+                isVpn = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN),
+                isWifi = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI),
+                isCellular = capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR),
+            )
+            "$type@$network"
+        }.sorted()
+        return "active=$activeType@$active|underlying=$underlying|${NetworkModule.shouldUseDirectStrategy()}|${DevConfig.isFollowSystemVpnEnabled()}"
     }
+
+    internal fun networkTypeLabel(isVpn: Boolean, isWifi: Boolean, isCellular: Boolean): String = buildList {
+        if (isVpn) add("vpn")
+        if (isWifi) add("WiFi")
+        if (isCellular) add("cellular")
+        if (isEmpty()) add("other")
+    }.joinToString("+")
 
     suspend fun run(
         forceFresh: Boolean = false,
@@ -175,9 +198,8 @@ object PlatformSpeedTestCoordinator {
                                 .firstOrNull { it.phase == check.phase } ?: check
                         }
                     }
-                    // Equal versions retain the existing version-only fast test. Each tester
-                    // reconciles endpoint identities only against a strictly older history.
-                    // Process-local revisions/network identity still guard publication.
+                    // History ranks adaptive fast-test candidates; only this round's valid successes
+                    // may drive automatic selection. Process-local revisions/network identity guard publication.
                     val freshConfig = remoteConfigUpdated ||
                         (startupConfig.configurationUpdated == true && checkedConfigurationVersion != key.remoteVersion)
                     val reuseLines = SpeedTestRunPolicy.canFastTest(
@@ -240,6 +262,10 @@ object PlatformSpeedTestCoordinator {
                                 }
                                 val requested = onlyPlatform == null || onlyPlatform == platform
                                 var picacgSnapshot: PicacgSpeedTester.Snapshot? = null
+                                var manwaLineProgress: SpeedTester.Progress? = null
+                                var manwaImageProgress: SpeedTester.Progress? = null
+                                var jmLineProgress: JmSpeedTestProgress? = null
+                                var jmImageProgress: JmSpeedTestProgress? = null
                                 if (enabled && !requested) reason = "本轮仅重新检测${platformName(onlyPlatform ?: platform)}"
                                 if (enabled && requested) {
                                     val phaseKey = phaseKey(key, platform)
@@ -261,11 +287,7 @@ object PlatformSpeedTestCoordinator {
                                     _progressText.value = "正在检测${platformName(platform)}线路与图源…"
                                     publishPlatformStatus(platform, "正在检测线路与图源…", running = true)
                                     try {
-                                        reason = if (freshConfig && !forceFresh) {
-                                            "新版本配置增量测速：保留身份未变的结果，新增端点测速，移除已删除端点"
-                                        } else {
-                                            "线路${if (reuseLines) "优先前五快测" else "完整测速"}；图源${if (reuseImages) "优先前五快测" else "完整测速"}（同版本历史仅核对网络配置版本）"
-                                        }
+                                        reason = "线路${if (reuseLines) "历史排序自适应快测" else "完整测速"}；图源${if (reuseImages) "历史排序自适应快测" else "完整测速"}（历史仅用于候选排序；健康与自动选路仅依据本轮有效实测）"
                                         if (platform == ContentPlatform.MANWA) {
                                             SpeedTester.runAndApply(
                                                 onProgress = if (onProgress == null) {
@@ -284,6 +306,11 @@ object PlatformSpeedTestCoordinator {
                                                 beforeApply = ::beforeApply,
                                                 onStageProgress = { progress ->
                                                     if (generationIsCurrent()) {
+                                                        when (progress.phase) {
+                                                            SpeedTester.Phase.TESTING_LINES -> manwaLineProgress = progress
+                                                            SpeedTester.Phase.TESTING_IMAGES -> manwaImageProgress = progress
+                                                            else -> Unit
+                                                        }
                                                         _progressText.value = manwaProgressMessage(progress)
                                                         publishManwaProgress(progress)
                                                         publishManwaCheckProgress(progress)
@@ -294,10 +321,12 @@ object PlatformSpeedTestCoordinator {
                                             if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
                                             if (status == "tested") {
+                                                manwaLineProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.MANWA_LINE, it.completed, it.successful) }
+                                                manwaImageProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.MANWA_IMAGE, it.completed, it.successful) }
                                                 _progressText.value = manwaProgressMessage(SpeedTester.progress.value)
                                                 publishManwaProgress(SpeedTester.progress.value)
                                                 if (SpeedTester.progress.value.fullRetestRecommended) {
-                                                    reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
+                                                    reason += "；历史排序自适应快测未取得可自动选择的有效成功结果；如需覆盖全部候选，请选择完整重新测速"
                                                 }
                                             } else if (SpeedTester.progress.value.phase != SpeedTester.Phase.SKIPPED) {
                                                 val failed = SpeedTester.Progress(phase = SpeedTester.Phase.FAILED)
@@ -307,10 +336,10 @@ object PlatformSpeedTestCoordinator {
                                             }
                                         } else if (platform == ContentPlatform.PICACG) {
                                             val snapshot = PicacgSpeedTester.run(
-                                                // Even a phase-cache hit needs a newly tested/published lines3
-                                                // IP. Reuse image work, never an earlier round's API binding.
+                                                // Both API and image endpoints are probed each run; history only
+                                                // affects adaptive candidate ordering.
                                                 reuseApi = false,
-                                                reuseImages = imagesDone,
+                                                reuseImages = false,
                                                 fastApi = reuseLines,
                                                 fastImages = reuseImages,
                                                 reconcileConfig = !forceFresh,
@@ -329,17 +358,20 @@ object PlatformSpeedTestCoordinator {
                                             if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             picacgSnapshot = snapshot.takeIf { PicacgSpeedTester.snapshot.value == it && generationIsCurrent() }
                                             picacgSnapshot?.let { current ->
-                                                publishPicacgMeasuredChecks(
-                                                    current,
-                                                    allowReconciledHistory = freshConfig && !forceFresh && onlyPlatform == null,
-                                                    imagesReused = imagesDone,
-                                                )
+                                                publishPicacgMeasuredChecks(current)
                                             }
                                             // The API callback already bound the current round before image work.
                                             if (picacgSnapshot == null && MaccmsSpeedTester.routeSelection().lines3Ip == null) {
                                                 publishMaccmsRoute(null)
                                             }
-                                            status = if (picacgSnapshot?.complete == true) "tested" else "incomplete"
+                                            status = if (picacgSnapshot?.let { snapshot ->
+                                                    snapshot.apiProbes.any { it.testedThisRound } && snapshot.imageProbes.any { it.testedThisRound }
+                                                } == true
+                                            ) {
+                                                "tested"
+                                            } else {
+                                                "incomplete"
+                                            }
                                             reason = if (snapshot.complete) {
                                                 "API 根路径 HTTP 200–499（不含 3xx）：${PicacgSpeedTester.logSummary(snapshot.apiProbes)}；" +
                                                     "封面瓦片 GET 200/image 且魔数有效：${PicacgSpeedTester.logSummary(snapshot.imageProbes)}"
@@ -357,6 +389,11 @@ object PlatformSpeedTestCoordinator {
                                         } else {
                                             val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply) { progress ->
                                                 if (generationIsCurrent()) {
+                                                    when (progress.phase) {
+                                                        JmSpeedTestProgress.Phase.TESTING_LINES -> jmLineProgress = progress
+                                                        JmSpeedTestProgress.Phase.TESTING_IMAGES -> jmImageProgress = progress
+                                                        else -> Unit
+                                                    }
                                                     _jmProgress.value = progress
                                                     _progressText.value = progress.message()
                                                     publishJmProgress(progress)
@@ -371,9 +408,13 @@ object PlatformSpeedTestCoordinator {
                                                 submission.identity.takeIf { generationIsCurrent() },
                                             ) == true
                                             status = if (complete) "tested" else "incomplete"
+                                            if (complete) {
+                                                jmLineProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.JM_LINE, it.completed, it.successful) }
+                                                jmImageProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.JM_IMAGE, it.completed, it.successful) }
+                                            }
                                             if (!complete) reason = "本轮结果未完整提交：${submission?.state?.reason ?: "未启用或未返回提交结果"}"
                                             if (snapshot.lineQuickTestAllFailed || snapshot.imageQuickTestAllFailed) {
-                                                reason += "；前五快测全部失败，请在测速表中选择完整重新测速（本轮未扩测）"
+                                                reason += "；历史排序自适应快测未取得可自动选择的有效成功结果；如需覆盖全部候选，请选择完整重新测速"
                                             }
                                         }
                                     } catch (e: CancellationException) {
@@ -395,9 +436,6 @@ object PlatformSpeedTestCoordinator {
                                 report(platform, status, reason, picacgSnapshot).also { platformReport ->
                                     if (generationIsCurrent()) {
                                         publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
-                                        if (platform != ContentPlatform.PICACG && status == "tested" && freshConfig && !forceFresh && onlyPlatform == null) {
-                                            publishReconciledChecks(platform, platformReport)
-                                        }
                                         blockUnresolvedChecks(platform)
                                     }
                                 }
@@ -484,25 +522,6 @@ object PlatformSpeedTestCoordinator {
         return completedChecks[platform]?.takeIf { it.first == phaseKey }?.second.orEmpty()
     }
 
-    /** A reconciled map contains only matching measurement identities plus this round's probes. */
-    private fun publishReconciledChecks(platform: ContentPlatform, report: PlatformSpeedTestReport) {
-        phasesFor(platform).zip(listOf(report.lineDelays, report.imageDelays)).forEach { (phase, delays) ->
-            if (delays.values.none { it < Long.MAX_VALUE }) return@forEach
-            _startupCheckStatuses.update { current ->
-                current.map { check ->
-                    if (check.phase == phase && check.result in setOf(StartupCheckResult.RUNNING, StartupCheckResult.NOT_TESTED, StartupCheckResult.FAILED)) {
-                        check.copy(
-                            result = StartupCheckResult.REUSED,
-                            detail = "沿用身份已核对的有效历史测量；本轮新增探测的失败记录仍保留，不计为本轮实测通过",
-                        )
-                    } else {
-                        check
-                    }
-                }
-            }
-        }
-    }
-
     private fun publishMeasuredCheck(phase: StartupCheckPhase, completed: Int, total: Int, successful: Int) {
         if (total <= 0 || completed < total) {
             publishStartupCheck(phase, StartupCheckResult.RUNNING)
@@ -513,6 +532,23 @@ object PlatformSpeedTestCoordinator {
                 if (successful > 0) "本轮检测到可用结果" else "本轮已检测，未发现可用结果",
             )
         }
+    }
+
+    /** Finalize after the tester stops, including adaptive early-stop samples. */
+    private fun publishFinalMeasuredCheck(phase: StartupCheckPhase, completed: Int, successful: Int) {
+        publishStartupCheck(
+            phase,
+            when {
+                completed <= 0 -> StartupCheckResult.NOT_TESTED
+                successful > 0 -> StartupCheckResult.SUCCESS
+                else -> StartupCheckResult.FAILED
+            },
+            when {
+                completed <= 0 -> "本轮没有有效实测样本"
+                successful > 0 -> "本轮实测取得有效成功结果"
+                else -> "本轮已实测，但没有有效成功结果"
+            },
+        )
     }
 
     private fun blockUnresolvedChecks(platform: ContentPlatform) {
@@ -579,36 +615,32 @@ object PlatformSpeedTestCoordinator {
         }
     }
 
-    private fun publishPicacgMeasuredChecks(snapshot: PicacgSpeedTester.Snapshot, allowReconciledHistory: Boolean, imagesReused: Boolean) {
-        fun measured(phase: StartupCheckPhase, probes: List<PicacgSpeedTester.Probe>, allowHistory: Boolean) {
+    private fun publishPicacgMeasuredChecks(snapshot: PicacgSpeedTester.Snapshot) {
+        fun measured(phase: StartupCheckPhase, probes: List<PicacgSpeedTester.Probe>) {
             val fresh = probes.filter { it.testedThisRound }
-            val retainedSuccess = allowHistory && probes.any { !it.testedThisRound && it.success }
+            val coverSucceeded = fresh.any { it.success && !it.content }
+            val contentSucceeded = fresh.any { it.success && it.content }
             publishStartupCheck(
                 phase,
                 when {
+                    phase == StartupCheckPhase.PICACG_IMAGE && coverSucceeded && contentSucceeded -> StartupCheckResult.SUCCESS
+                    phase == StartupCheckPhase.PICACG_IMAGE && fresh.isEmpty() -> StartupCheckResult.NOT_TESTED
+                    phase == StartupCheckPhase.PICACG_IMAGE -> StartupCheckResult.FAILED
                     fresh.any { it.success } -> StartupCheckResult.SUCCESS
-                    retainedSuccess -> StartupCheckResult.REUSED
-                    fresh.isNotEmpty() || (allowHistory && probes.isNotEmpty()) -> StartupCheckResult.FAILED
+                    fresh.isNotEmpty() -> StartupCheckResult.FAILED
                     else -> StartupCheckResult.NOT_TESTED
                 },
                 when {
+                    phase == StartupCheckPhase.PICACG_IMAGE && coverSucceeded && contentSucceeded -> "本轮封面与正文图源均取得有效成功结果"
+                    fresh.isEmpty() -> snapshot.imageBlockedReason ?: "本轮没有有效实测样本；历史结果仅供展示与排序"
+                    phase == StartupCheckPhase.PICACG_IMAGE -> "本轮封面和正文图源均需各自取得有效成功结果；本轮实测未满足"
                     fresh.any { it.success } -> "仅统计本轮真实探测"
-                    retainedSuccess -> "沿用身份已核对的有效历史测量；本轮新测 ${fresh.size} 条、失败 ${fresh.count { !it.success }} 条，不计为本轮实测通过"
-                    fresh.isEmpty() -> "本轮未检测到可用结果"
                     else -> "本轮真实探测均未通过"
                 },
             )
         }
-        measured(StartupCheckPhase.PICACG_LINE, snapshot.apiProbes, allowReconciledHistory)
-        if (snapshot.imageBlockedReason != null) {
-            publishStartupCheck(
-                StartupCheckPhase.PICACG_IMAGE,
-                StartupCheckResult.BLOCKED,
-                snapshot.imageBlockedReason,
-            )
-        } else {
-            measured(StartupCheckPhase.PICACG_IMAGE, snapshot.imageProbes, allowReconciledHistory || imagesReused)
-        }
+        measured(StartupCheckPhase.PICACG_LINE, snapshot.apiProbes)
+        measured(StartupCheckPhase.PICACG_IMAGE, snapshot.imageProbes)
     }
 
     private fun publishJmCheckProgress(progress: JmSpeedTestProgress) {
@@ -681,7 +713,7 @@ object PlatformSpeedTestCoordinator {
     private fun platformCompletionStatus(report: PlatformSpeedTestReport): String = when (report.status) {
         "skipped" -> "已跳过：${report.reason}"
         "incomplete" -> "测速受阻：${report.reason}"
-        else -> if (report.reason.contains("前五快测全部失败")) report.reason else "测速完成"
+        else -> if (report.reason.contains("自适应快测未取得可自动选择的有效成功结果")) report.reason else "测速完成"
     }
 
     internal fun manwaProgressMessage(progress: SpeedTester.Progress): String = when (progress.phase) {
@@ -708,7 +740,7 @@ object PlatformSpeedTestCoordinator {
         )
         SpeedTester.Phase.APPLYING_RESULTS -> "漫蛙 · 端点检测完成，正在更新排名并应用结果…"
         SpeedTester.Phase.COMPLETE -> if (progress.fullRetestRecommended) {
-            "漫蛙前五快测全部失败，本轮不再扩测；请在测速表中选择完整重新测速"
+            "漫蛙历史排序自适应快测未取得本轮可自动选择的有效成功结果；如需覆盖全部候选，请选择完整重新测速"
         } else {
             "漫蛙测速完成：图源 ${progress.completed}/${progress.total}，可用 ${progress.successful}、失败 ${progress.failed}、无图 ${progress.noImage}；本次新测 ${progress.freshImages}、保留历史 ${progress.reusedImages}（本轮未测）"
         }
@@ -777,8 +809,8 @@ object PlatformSpeedTestCoordinator {
                 lineDelays = if (status == "skipped") emptyMap() else snapshot?.apiProbes.orEmpty().associate { "${it.endpoint.domain} [${it.endpoint.ip}]" to if (it.success) it.elapsedMs else Long.MAX_VALUE },
                 imageDelays = if (status == "skipped") emptyMap() else snapshot?.imageProbes.orEmpty().associate { "${it.endpoint.domain} [${it.endpoint.ip}]" to if (it.success) it.elapsedMs else Long.MAX_VALUE },
                 remoteVersion = PicacgRouteManager.remoteVersion,
-                lineStatus = if (snapshot?.apiComplete == true) "tested" else "incomplete",
-                imageStatus = if (snapshot?.imageComplete == true) "tested" else "incomplete",
+                lineStatus = if (snapshot?.apiProbes?.any { it.testedThisRound } == true) "tested" else "incomplete",
+                imageStatus = if (snapshot?.imageProbes?.any { it.testedThisRound } == true) "tested" else "incomplete",
             )
         }
         ContentPlatform.JM -> PlatformSpeedTestReport(

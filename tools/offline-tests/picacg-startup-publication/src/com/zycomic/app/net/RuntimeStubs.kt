@@ -23,6 +23,10 @@ object SpeedTestTimingLog {
 object SpeedTestProbeBudget {
     val scheduler = Scheduler
     object Scheduler {
-        suspend fun <T> withPermit(platform: ContentPlatform, onWait: (Long) -> Unit, block: suspend () -> T): T = block()
+        suspend fun <T> withPermit(platform: ContentPlatform, onWait: (Long) -> Unit = {}, block: suspend () -> T): T = block()
     }
+}
+
+object PlatformSpeedTestCoordinator {
+    fun currentNetworkIdentity(): String = "offline-test-network"
 }

@@ -82,14 +82,22 @@ class PlatformSpeedTestCoordinatorProgressTest {
     }
 
     @Test
-    fun `all failed top five recommends explicit full retest rather than expanding`() {
+    fun `adaptive fast test without a successful result recommends explicit full retest`() {
         val message = PlatformSpeedTestCoordinator.manwaProgressMessage(
             SpeedTester.Progress(
                 phase = SpeedTester.Phase.COMPLETE,
                 fullRetestRecommended = true,
             ),
         )
-        assertTrue(message.contains("本轮不再扩测"))
+        assertTrue(message.contains("历史排序自适应快测未取得本轮可自动选择的有效成功结果"))
         assertTrue(message.contains("完整重新测速"))
+    }
+
+    @Test
+    fun `network identity labels vpn wifi and cellular transports readably`() {
+        assertEquals("WiFi", PlatformSpeedTestCoordinator.networkTypeLabel(isVpn = false, isWifi = true, isCellular = false))
+        assertEquals("cellular", PlatformSpeedTestCoordinator.networkTypeLabel(isVpn = false, isWifi = false, isCellular = true))
+        assertEquals("vpn", PlatformSpeedTestCoordinator.networkTypeLabel(isVpn = true, isWifi = false, isCellular = false))
+        assertEquals("vpn+WiFi", PlatformSpeedTestCoordinator.networkTypeLabel(isVpn = true, isWifi = true, isCellular = false))
     }
 }

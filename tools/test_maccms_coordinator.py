@@ -63,7 +63,7 @@ def main() -> None:
             else:
                 assert current_class, path
                 selectors.append(f"com.zycomic.app.net.{current_class}#{match.group(2)}")
-    assert len(selectors) == 49, f"Expected all 49 coordinator and startup-state contract methods, found {len(selectors)}"
+    assert len(selectors) == 52, f"Expected all 52 coordinator and startup-state contract methods, found {len(selectors)}"
     stdlib = jar("org.jetbrains.kotlin", "kotlin-stdlib", "2.2.21")
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.10.2")
     junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")

@@ -280,7 +280,7 @@
     <string name="startup_use_last_speed_test">默认使用上次图源测速结果</string>
     <string name="startup_use_last_line_speed_test">默认使用上次线路测速结果</string>
     <string name="startup_history_controls_title">启动测速历史复测</string>
-    <string name="startup_history_controls_summary">开启不是跳过测速，而是分别优先复测历史排名前五的线路或图源候选；前五全部失败时不会自动扩测，可在对应测速日志中手动完整重新测速。</string>
+    <string name="startup_history_controls_summary">开启不是跳过测速，而是按历史排序自适应探测线路或图源候选；历史只用于排序，本轮有效成功才用于自动选择。测速历史按本地时间分为 06:20–18:20 与 18:20–次日 06:20 两档；完整重新测速可覆盖全部候选。</string>
     <string name="startup_platform_settings_title">平台可用性</string>
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">重启软件生效</string>

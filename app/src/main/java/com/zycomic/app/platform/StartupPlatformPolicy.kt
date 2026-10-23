@@ -12,9 +12,9 @@ object StartupPlatformPolicy {
         val disableManwa: Boolean = false,
         val disablePicacg: Boolean = false,
         val disableJm: Boolean = false,
-        /** Re-test the previous image-source top five when the config version matches. */
+        /** Enable adaptive image probing; history may order candidates but cannot supply a healthy result. */
         val useLastResult: Boolean = true,
-        /** Independently re-test the previous line top five when the config version matches. */
+        /** Independently enable adaptive line probing; automatic selection requires this round's success. */
         val useLastLineResult: Boolean = true,
         /** Increments whenever any preference value changes; also invalidates stale network-test results. */
         val revision: Long = 0,

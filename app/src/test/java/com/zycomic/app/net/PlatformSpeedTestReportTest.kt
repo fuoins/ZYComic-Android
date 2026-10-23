@@ -49,8 +49,8 @@ class PlatformSpeedTestReportTest {
     fun `quick results explicitly distinguish untested history on either category`() {
         val lineOnly = report().copy(lineStatus = "quick").summary()
         val imageOnly = report().copy(imageStatus = "quick").summary()
-        assertTrue(lineOnly.contains("线路前五快测"))
-        assertTrue(imageOnly.contains("图源前五快测"))
+        assertTrue(lineOnly.contains("线路为历史排序自适应快测"))
+        assertTrue(imageOnly.contains("图源为历史排序自适应快测"))
         assertTrue(lineOnly.contains("未测历史结果"))
         assertTrue(imageOnly.contains("未测历史结果"))
         assertFalse(imageOnly.contains("复用上次结果"))

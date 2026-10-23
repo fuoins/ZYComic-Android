@@ -20,7 +20,7 @@ internal object SpeedTestRunPolicy {
         remoteConfigUpdated: Boolean = false,
     ): Boolean = !forceFresh && !platformOnly && completed == current
 
-    /** Each tester validates its history's configuration version, not the current endpoint pool. */
+    /** Enable adaptive probing; each tester still resolves the current pool and measures eligible candidates. */
     fun canFastTest(
         requested: Boolean,
         forceFresh: Boolean,

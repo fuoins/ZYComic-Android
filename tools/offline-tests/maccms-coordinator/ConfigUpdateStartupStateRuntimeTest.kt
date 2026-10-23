@@ -134,7 +134,7 @@ class ConfigUpdateStartupStateRuntimeTest {
     }
 
     @Test
-    fun `zero added endpoints display valid retained measurements instead of untested or failed`() = runBlocking {
+    fun `persistent retained measurements do not become this rounds health`() = runBlocking {
         configure()
         stageEvents(successful = 0, total = 0)
         retainedHealthyMaps()
@@ -142,18 +142,23 @@ class ConfigUpdateStartupStateRuntimeTest {
             PicacgSpeedTester.Probe(DomainIp("img.picacg.test", "192.0.2.50"), true, 9, 200, testedThisRound = false),
         )
         val reports = PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
-        assertTrue(reports.all { it.status == "tested" })
+        assertTrue(reports.filter { it.platform != "哔咔" }.all { it.status == "tested" })
+        assertEquals("incomplete", reports.single { it.platform == "哔咔" }.status)
         val checks = PlatformSpeedTestCoordinator.startupCheckStatuses.value
-        val retained = nonMaccmsPhases - StartupCheckPhase.PICACG_LINE
-        assertTrue(checks.filter { it.phase in retained }.all { it.result == StartupCheckResult.REUSED })
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.MANWA_LINE }.result)
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.MANWA_IMAGE }.result)
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.JM_LINE }.result)
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.JM_IMAGE }.result)
         assertEquals(StartupCheckResult.SUCCESS, checks.first { it.phase == StartupCheckPhase.PICACG_LINE }.result)
-        assertEquals(7, startupChecksPassed(checks))
-        assertEquals(reports, PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true))
-        assertEquals(checks, PlatformSpeedTestCoordinator.startupCheckStatuses.value)
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.result)
+        assertEquals(2, startupChecksPassed(checks))
+        val picacg = reports.single { it.platform == "哔咔" }
+        assertEquals("incomplete", picacg.imageStatus)
+        assertTrue(picacg.imageDelays.containsKey("img.picacg.test [192.0.2.50]"))
     }
 
     @Test
-    fun `failed additions remain recorded while matching healthy measurements are explicitly reused`() = runBlocking {
+    fun `old successful history cannot hide this rounds measured failures`() = runBlocking {
         configure()
         stageEvents(successful = 0, total = 1)
         retainedHealthyMaps(includeFailedAddition = true)
@@ -164,8 +169,9 @@ class ConfigUpdateStartupStateRuntimeTest {
         PicacgSpeedTester.imageProbesOverride = PicacgSpeedTester.apiProbesOverride
         val reports = PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
         val checks = PlatformSpeedTestCoordinator.startupCheckStatuses.value
-        assertTrue(checks.filter { it.phase in nonMaccmsPhases }.all { it.result == StartupCheckResult.REUSED })
-        assertTrue(checks.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.detail.orEmpty().contains("失败 1 条"))
+        assertTrue(checks.filter { it.phase in nonMaccmsPhases }.all { it.result == StartupCheckResult.FAILED })
+        assertEquals(0, startupChecksPassed(checks.filter { it.phase in nonMaccmsPhases }))
+        assertTrue(checks.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.detail.orEmpty().contains("封面和正文"))
         reports.forEach { report ->
             assertEquals(1, report.lineDelays.values.count { it == Long.MAX_VALUE }, report.platform)
             assertEquals(1, report.imageDelays.values.count { it == Long.MAX_VALUE }, report.platform)
@@ -210,5 +216,56 @@ class ConfigUpdateStartupStateRuntimeTest {
         PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
         assertTrue(PlatformSpeedTestCoordinator.startupCheckStatuses.value.filter { it.phase in nonMaccmsPhases }.all { it.result == StartupCheckResult.FAILED })
         assertEquals(listOf(2, 2, 2), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
+    }
+
+    @Test
+    fun `partial adaptive quick successes become healthy when the testers stop`() = runBlocking {
+        configure()
+        stageEvents(successful = 2, total = 8)
+
+        PlatformSpeedTestCoordinator.run()
+
+        val checks = PlatformSpeedTestCoordinator.startupCheckStatuses.value
+        listOf(StartupCheckPhase.MANWA_LINE, StartupCheckPhase.MANWA_IMAGE, StartupCheckPhase.JM_LINE, StartupCheckPhase.JM_IMAGE)
+            .forEach { phase -> assertEquals(StartupCheckResult.SUCCESS, checks.first { it.phase == phase }.result, phase.name) }
+        assertTrue(PicacgSpeedTester.reuseFlags.all { it == (false to false) }, "each Picacg run must freshly probe API and images")
+    }
+
+    @Test
+    fun `Picacg history-only successful probes remain untested for health`() = runBlocking {
+        configure()
+        val api = PicacgSpeedTester.Probe(DomainIp("api.picacg.test", "192.0.2.70"), true, 9, 200, testedThisRound = false)
+        val cover = PicacgSpeedTester.Probe(DomainIp("img.picacg.test", "192.0.2.71"), true, 9, 200, testedThisRound = false)
+        val content = PicacgSpeedTester.Probe(
+            DomainIp("img.picacg.test", "192.0.2.72"),
+            true,
+            9,
+            200,
+            testedThisRound = false,
+            content = true,
+        )
+        PicacgSpeedTester.apiProbesOverride = listOf(api)
+        PicacgSpeedTester.imageProbesOverride = listOf(cover, content)
+
+        PlatformSpeedTestCoordinator.run()
+
+        val checks = PlatformSpeedTestCoordinator.startupCheckStatuses.value
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.PICACG_LINE }.result)
+        assertEquals(StartupCheckResult.NOT_TESTED, checks.first { it.phase == StartupCheckPhase.PICACG_IMAGE }.result)
+    }
+
+    @Test
+    fun `Picacg cover success without a successful content probe is not healthy`() = runBlocking {
+        configure()
+        PicacgSpeedTester.imageProbesOverride = listOf(
+            PicacgSpeedTester.Probe(DomainIp("img.picacg.test", "192.0.2.80"), true, 9, 200),
+            PicacgSpeedTester.Probe(DomainIp("img.picacg.test", "192.0.2.81"), false, 30, null, content = true),
+        )
+
+        PlatformSpeedTestCoordinator.run()
+
+        val image = PlatformSpeedTestCoordinator.startupCheckStatuses.value.first { it.phase == StartupCheckPhase.PICACG_IMAGE }
+        assertEquals(StartupCheckResult.FAILED, image.result)
+        assertTrue(image.detail.orEmpty().contains("封面和正文"))
     }
 }

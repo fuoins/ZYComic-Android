@@ -16,6 +16,23 @@ DEPS = ROOT / "tools/offline-tests/build/deps"
 CACHE = Path(os.environ.get("GRADLE_USER_HOME", Path.home() / ".gradle")) / "caches/modules-2/files-2.1"
 
 
+def verify_production_route_source_contract() -> None:
+    route = (NET / "PicacgRouteManager.kt").read_text()
+    tester = (NET / "PicacgSpeedTester.kt").read_text()
+    assert "internal fun clearAutomaticHealthSelections()" in route
+    assert "PicacgRouteManager.clearAutomaticHealthSelections()" in tester
+    assert "if (validCover.isEmpty() && validContent.isEmpty()) return false" not in route
+    assert "val firstContent = validContent.firstOrNull()" in route
+    assert "val first = validContent.firstOrNull() ?: validCover.first()" not in route
+    body_route = route.split("private fun rankedIpFor(hostname: String?): String?", 1)[1].split("private fun persistedRanking", 1)[0]
+    assert "state.coverRanking.firstOrNull { it.domain.equals(hostname, true) }" not in body_route
+    assert "return state.contentRanking.firstOrNull { it.domain.equals(hostname, true) }?.ip" in body_route
+    assert "adaptiveSession.prepareBlocking(quick = quickApi)" in tester
+    assert "adaptiveSession.prepareBlocking(quick = quickImages)" in tester
+    assert "freshImageHistory.isNotEmpty()" not in tester
+    assert "reuseApi && !forceFresh" not in tester and "reuseImages && !forceFresh" not in tester
+
+
 def jar(group: str, name: str, version: str) -> str:
     prepared = DEPS / f"{name}-{version}.jar"
     if prepared.is_file():
@@ -27,6 +44,7 @@ def jar(group: str, name: str, version: str) -> str:
 
 
 def main() -> None:
+    verify_production_route_source_contract()
     stdlib = jar("org.jetbrains.kotlin", "kotlin-stdlib", "2.2.21")
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.8.0")
     junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")
@@ -41,13 +59,14 @@ def main() -> None:
         stdlib, junit, coroutines,
         jar("com.squareup.okhttp3", "okhttp", "4.12.0"),
         jar("com.squareup.okio", "okio-jvm", "3.6.0"),
+        jar("org.json", "json", "20240303"),
         jar("org.jetbrains", "annotations", "13.0"),
     ])
-    harness_sources = sorted(HARNESS.glob("src/**/*.kt"))
+    harness_sources = sorted(path for path in HARNESS.glob("src/**/*.kt") if path.name != "Json.kt")
     production_names = [
         "DomainIp", "PicacgNetworkPolicy", "PicacgBuiltinNetwork", "PicacgImagePayloadPolicy",
         "PicacgSpeedTestTargetPolicy", "PicacgSpeedTestHistory", "SpeedTestLogSelectionPolicy",
-        "SpeedTestLogSummary", "RuntimeRecoveryPolicy", "PicacgSpeedTester",
+        "SpeedTestLogSummary", "RuntimeRecoveryPolicy", "AdaptiveSpeedProbe", "AdaptiveSpeedHistory", "PicacgSpeedTester",
     ]
     sources = harness_sources + [NET / f"{name}.kt" for name in production_names]
     sources += [ROOT / "app/src/test/java/com/zycomic/app/net/PicacgSpeedTesterRuntimeTest.kt"]
@@ -66,6 +85,7 @@ def main() -> None:
         subprocess.run([
             "java", "-jar", junit, "execute", "--class-path", str(classes) + os.pathsep + classpath,
             "--select-class", "com.zycomic.app.net.PicacgSpeedTesterRuntimeTest",
+            "--select-class", "com.zycomic.app.net.AdaptiveSpeedHistoryPersistenceTest",
             "--disable-banner", "--details=summary", "--fail-if-no-tests",
         ], cwd=ROOT, check=True)
 

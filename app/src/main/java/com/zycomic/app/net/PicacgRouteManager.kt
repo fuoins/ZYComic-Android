@@ -364,6 +364,31 @@ object PicacgRouteManager {
     /** Apply a measured image endpoint without changing the user's manual-selection preference. */
     fun applyAutomaticImageEndpoint(endpoint: DomainIp?): Boolean = setPin(endpoint, false, manual = false)
 
+    /** Clear automatic health-derived choices before a new speed-test round; keep user pins intact. */
+    @Synchronized
+    internal fun clearAutomaticHealthSelections() {
+        val current = _state.value
+        val clearApi = !isApiManuallyPinned
+        val clearImage = !isImageManuallyPinned
+        if (!clearApi && !clearImage) return
+        prefs()?.edit()?.apply {
+            if (clearApi) persistEndpoint("api_pin", null)
+            if (clearImage) {
+                persistEndpoint("image_pin", null)
+                putString("cover_ranking", encodeRanking(emptyList()))
+                putString("content_ranking", encodeRanking(emptyList()))
+            }
+        }?.apply()
+        _state.value = current.copy(
+            pinnedApi = if (clearApi) null else current.pinnedApi,
+            pinnedImage = if (clearImage) null else current.pinnedImage,
+            coverRanking = if (clearImage) emptyList() else current.coverRanking,
+            contentRanking = if (clearImage) emptyList() else current.contentRanking,
+            imageHost = if (clearImage) current.imageHosts.firstOrNull() else current.imageHost,
+            revision = current.revision + 1,
+        )
+    }
+
     /**
      * Install the two independent, per-root rankings: one best IP per `storage-b.{root}` for covers
      * (imgproxy) and one for reader pages (the storage-b bucket), each ordered fastest-first by its
@@ -383,22 +408,22 @@ object PicacgRouteManager {
             .distinctBy { it.domain.lowercase(Locale.ROOT) }
         val validCover = valid(cover)
         val validContent = valid(content)
-        if (validCover.isEmpty() && validContent.isEmpty()) return false
-        // The reader bucket is the user-visible "图源" selection; covers follow their root automatically.
-        val first = validContent.firstOrNull() ?: validCover.first()
+        if (isImageManuallyPinned) return false
+        // Empty results are authoritative too: they must remove stale automatic health rankings.
+        // Only a successful reader-page probe may establish the content bucket pin.
+        val firstContent = validContent.firstOrNull()
+        val imageHost = firstContent?.domain ?: current.imageHost?.takeIf { host -> current.imageHosts.any { it.equals(host, true) } }
+            ?: current.imageHosts.firstOrNull()
         prefs()?.edit()?.apply {
-            putBoolean("manual_image_selection", false)
-            remove("selected_image_host")
             putString("cover_ranking", encodeRanking(validCover))
             putString("content_ranking", encodeRanking(validContent))
-            putString("image_pin_domain", first.domain)
-            putString("image_pin_ip", first.ip)
+            persistEndpoint("image_pin", firstContent)
         }?.apply()
         _state.value = current.copy(
             coverRanking = validCover,
             contentRanking = validContent,
-            imageHost = first.domain,
-            pinnedImage = first,
+            imageHost = imageHost,
+            pinnedImage = firstContent,
             revision = current.revision + 1,
         )
         return true
@@ -425,16 +450,13 @@ object PicacgRouteManager {
     private fun rankedIpFor(hostname: String?): String? {
         if (hostname == null) return null
         val state = _state.value
-        // Reader bucket request -> content ranking.
-        state.contentRanking.firstOrNull { it.domain.equals(hostname, true) }?.let { return it.ip }
-        // Cover mirror img.{root} -> its root's cover ranking.
-        val contentHost = PicacgBuiltinNetwork.contentHostFor(hostname)
-        if (contentHost != null) {
-            state.coverRanking.firstOrNull { it.domain.equals(contentHost, true) }?.let { return it.ip }
+        // Storage-b/body traffic is pinned only by a reader-page measurement, never a cover result.
+        if (state.imageHosts.any { it.equals(hostname, true) }) {
+            return state.contentRanking.firstOrNull { it.domain.equals(hostname, true) }?.ip
         }
-        // Same-root content bucket lookup for a cover-measured host (kept as a fallback when no content result).
-        state.coverRanking.firstOrNull { it.domain.equals(hostname, true) }?.let { return it.ip }
-        return null
+        // The corresponding imgproxy host is independently pinned by its cover measurement.
+        val contentHost = PicacgBuiltinNetwork.contentHostFor(hostname) ?: return null
+        return state.coverRanking.firstOrNull { it.domain.equals(contentHost, true) }?.ip
     }
 
     private fun persistedRanking(key: String): List<DomainIp> {
