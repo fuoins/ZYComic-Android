@@ -1403,8 +1403,10 @@ object RouteManager {
         if (!useFastestImgForAll || imgOverrideActive || !pinnedImgDomain.isNullOrBlank()) return false
         val index = imgDomains.indexOfFirst { it.equals(endpoint.domain, ignoreCase = true) }
         if (index < 0) return false
-        runtimeRecoveryImgDomain = null
-        runtimeRecoveryImgEndpoint = null
+        // Publish this verified live domain/IP without pretending the full measurement snapshot is complete.
+        // The same transient slot is used by validated runtime recovery; persisted/manual pins stay untouched.
+        runtimeRecoveryImgDomain = endpoint.domain
+        runtimeRecoveryImgEndpoint = endpoint
         if (pinnedImgDomain.isNullOrBlank()) setImgHost(index)
         return true
     }

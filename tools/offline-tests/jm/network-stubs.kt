@@ -45,7 +45,7 @@ object JmNetworkModule {
             if (delay > 0) Thread.sleep(delay)
         }
         val image = request.url.encodedPath.startsWith("/media/")
-        val failed = !image && request.url.host in failedHosts
+        val failed = request.url.host in failedHosts
         val type = if (image) "image/gif" else "application/json"
         val bytes = if (image) "GIF89a" else "{\"code\":200}"
         okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)

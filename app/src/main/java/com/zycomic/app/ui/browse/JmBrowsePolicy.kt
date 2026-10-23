@@ -59,7 +59,7 @@ internal object JmBrowsePolicy {
 
     fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID && !isCustomCategoryTab(tabId)
 
-    fun showsCategoryPicker(tabId: String): Boolean = !isCustomCategoryTab(tabId)
+    fun showsCategoryPicker(tabId: String): Boolean = true
 
     /** Home defaults to weekly; other destinations remain selectable for this session. */
     fun defaultFilters(tabId: String, stored: Filters?): Filters =

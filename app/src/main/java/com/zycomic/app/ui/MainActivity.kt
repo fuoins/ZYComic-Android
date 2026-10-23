@@ -551,7 +551,7 @@ fun AppContent(
         ) {
             StartupNetworkStatus(remoteInfo.substringBefore("　上次错误："))
             StartupBrand()
-            StartupPlatformSwitches()
+            StartupPlatformSwitches(fullRequested = fullSpeedTestRequested)
             Spacer(modifier = Modifier.height(8.dp))
             Button(
                 modifier = Modifier.fillMaxWidth(),
@@ -879,24 +879,30 @@ private fun StartupGuidanceCard() {
 }
 
 @Composable
-private fun StartupPlatformSwitches() {
+private fun StartupPlatformSwitches(fullRequested: Boolean = false) {
+    val mode by PlatformSpeedTestCoordinator.testMode.collectAsState()
+    val runningLabel = if (fullRequested || mode == com.zycomic.app.net.StartupTestMode.FULL) {
+        stringResource(KMR.strings.startup_full_test_running)
+    } else {
+        stringResource(KMR.strings.startup_quick_test_running)
+    }
     val policy by StartupPlatformPolicy.state.collectAsState()
     val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
     val checkStatuses by PlatformSpeedTestCoordinator.startupCheckStatuses.collectAsState()
     val context = LocalContext.current
     val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
     Column(modifier = Modifier.fillMaxWidth()) {
-        StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA, platformStatuses[ContentPlatform.MANWA]) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA, platformStatuses[ContentPlatform.MANWA], runningLabel) {
             if (!StartupPlatformPolicy.setManwaEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        StartupSwitch(stringResource(KMR.strings.startup_enable_picacg), !policy.disablePicacg, ContentPlatform.PICACG, platformStatuses[ContentPlatform.PICACG]) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_picacg), !policy.disablePicacg, ContentPlatform.PICACG, platformStatuses[ContentPlatform.PICACG], runningLabel) {
             if (!StartupPlatformPolicy.setPicacgEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
         }
-        StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM, platformStatuses[ContentPlatform.JM]) {
+        StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM, platformStatuses[ContentPlatform.JM], runningLabel) {
             if (!StartupPlatformPolicy.setJmEnabled(it)) {
                 Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
             }
@@ -906,7 +912,7 @@ private fun StartupPlatformSwitches() {
             modifier = Modifier.fillMaxWidth().height(6.dp),
         )
         Text(
-            stringResource(KMR.strings.startup_quick_test_running),
+            runningLabel,
             modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -968,6 +974,7 @@ private fun StartupSwitch(
     checked: Boolean,
     platform: ContentPlatform,
     status: com.zycomic.app.net.PlatformStartupStatus?,
+    runningLabel: String,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val accent = rememberContentPlatformAccent(platform)
@@ -982,7 +989,7 @@ private fun StartupSwitch(
                     Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = accent)
                     Text(
                         if (status?.running == true) {
-                            stringResource(KMR.strings.startup_quick_test_running)
+                            runningLabel
                         } else {
                             status?.message ?: "等待测速"
                         },

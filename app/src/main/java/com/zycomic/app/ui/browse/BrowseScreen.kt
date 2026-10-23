@@ -109,7 +109,6 @@ import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -156,21 +155,28 @@ private fun LegacyBrowseScreen(
 
     val mainTab by vm.mainTab.collectAsState()
     val tabs = vm.tabs
+    var programmaticTabSelection by remember { mutableStateOf<Int?>(null) }
     val pagerState = rememberPagerState(
         initialPage = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0)),
         pageCount = { tabs.size.coerceAtLeast(1) },
     )
-    LaunchedEffect(platform, mainTab, tabs.size) {
-        val target = mainTab.coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
-        if (pagerState.currentPage != target) pagerState.animateScrollToPage(target)
+    LaunchedEffect(platform, mainTab, tabs.size, programmaticTabSelection) {
+        val target = (programmaticTabSelection ?: mainTab).coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
+        if (pagerState.currentPage != target || pagerState.settledPage != target) {
+            if (programmaticTabSelection == target) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target)
+        }
     }
     LaunchedEffect(Unit) { vm.initDefaultRankType(SpecialTabPrefs.getRankType(context)) }
     // 监听用户左右滑动切换页面，同步到 ViewModel 并触发请求
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
-            .filter { it != vm.mainTab.value }
             .collect { page ->
+                if (programmaticTabSelection != null) {
+                    if (page == programmaticTabSelection) programmaticTabSelection = null
+                    return@collect
+                }
+                if (page == vm.mainTab.value) return@collect
                 val targetItem = vm.tabs.getOrNull(page)
                 if (targetItem != null && (targetItem.isUngatedYuzongRank() || com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, targetItem.platformId))) {
                     vm.selectMainTab(page)
@@ -622,7 +628,13 @@ private fun LegacyBrowseScreen(
 
     // Tab 管理面板
     if (showManageSheet) {
-        TabManageSheet(vm = vm, onDismiss = { showManageSheet = false })
+        TabManageSheet(
+            vm = vm,
+            onDismiss = { showManageSheet = false },
+            onTabAdded = { index ->
+                programmaticTabSelection = index.takeUnless { it == pagerState.settledPage }
+            },
+        )
     }
 
     // 筛选对话框

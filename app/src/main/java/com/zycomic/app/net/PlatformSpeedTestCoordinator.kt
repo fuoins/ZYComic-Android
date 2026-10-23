@@ -11,11 +11,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,6 +33,8 @@ object PlatformSpeedTestCoordinator {
     val reports = _reports.asStateFlow()
     private val _running = MutableStateFlow(false)
     val running = _running.asStateFlow()
+    private val _testMode = MutableStateFlow(StartupTestMode.FULL)
+    val testMode = _testMode.asStateFlow()
     private val _foregroundReady = MutableStateFlow(false)
     val foregroundReady = _foregroundReady.asStateFlow()
     private val _progressText = MutableStateFlow<String?>(null)
@@ -73,10 +77,16 @@ object PlatformSpeedTestCoordinator {
         checkNotNull(publishedKey) to result
     }
 
-    /** Splash requests share one full test even while waiting behind the automatic startup run. */
+    /** Explicit full work supersedes the low-priority startup tail, never its usable routes. */
     suspend fun retestAllEnabled(): List<PlatformSpeedTestReport> = fullTestRequest.run {
-        fullStartupRequest.runUntilReady(::currentKey) { ready ->
-            startupRequest.invalidate()
+        awaitFullStartup()
+    }
+
+    private suspend fun awaitFullStartup(reuseCompleted: Boolean = false): List<PlatformSpeedTestReport> =
+        fullStartupRequest.runUntilReady(::currentKey, reuseCompletedResult = reuseCompleted) { ready ->
+            _testMode.value = StartupTestMode.FULL
+            _foregroundReady.value = false
+            startupRequest.supersedeWith { awaitFullStartup(reuseCompleted = true) }
             var publishedKey: SpeedTestRunKey? = null
             val result = execute(
                 forceFresh = true,
@@ -86,7 +96,6 @@ object PlatformSpeedTestCoordinator {
             )
             checkNotNull(publishedKey) to result
         }
-    }
 
     internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
         startupConfig.complete(configurationUpdated)
@@ -232,19 +241,20 @@ object PlatformSpeedTestCoordinator {
                         forceFresh,
                         freshConfig,
                     )
+                    _testMode.value = if (reuseLines || reuseImages) StartupTestMode.QUICK else StartupTestMode.FULL
                     val version = DevConfig.remoteVersion()
-                    fun generationIsCurrent() = key == currentKey() && version == DevConfig.remoteVersion()
-                    val foregroundPlatforms = java.util.concurrent.ConcurrentHashMap.newKeySet<ContentPlatform>()
+                    val runContext = currentCoroutineContext()
+                    fun generationMatches() = key == currentKey() && version == DevConfig.remoteVersion()
+                    fun generationIsCurrent() = runContext.isActive && generationMatches()
                     val requiredPlatforms = ContentPlatform.entries.filter {
                         StartupPlatformPolicy.isEnabled(policy, it) && (onlyPlatform == null || onlyPlatform == it)
                     }.toSet()
-                    fun platformReady(platform: ContentPlatform, publishEarly: Boolean = true) {
-                        if (!generationIsCurrent() || startupConfig.configurationUpdated == null) return
-                        foregroundPlatforms.add(platform)
-                        if (foregroundPlatforms.containsAll(requiredPlatforms)) {
-                            _foregroundReady.value = true
-                            if (publishEarly) onForegroundReady?.invoke(key)
-                        }
+                    fun qualifiedEndpointReady(platform: ContentPlatform) {
+                        if (!generationIsCurrent() || startupConfig.configurationUpdated == null || platform !in requiredPlatforms) return
+                        // The tester attests a current, applied, threshold-qualified endpoint.
+                        // Other businesses and final reports remain in flight.
+                        _foregroundReady.value = true
+                        onForegroundReady?.invoke(key)
                     }
                     suspend fun beforeApply(): Boolean {
                         startupConfig.awaitConfigurationUpdated()
@@ -271,8 +281,11 @@ object PlatformSpeedTestCoordinator {
                                 MaccmsSpeedTester.run(
                                     quick = reuseLines,
                                     lines3Ip = lines3Ip,
-                                    isCurrent = { generationIsCurrent() && (binding == null || MaccmsSpeedTester.isLines3BindingCurrent(binding)) },
-                                    beforeApply = ::beforeApply,
+                                    isCurrent = { generationMatches() && (binding == null || MaccmsSpeedTester.isLines3BindingCurrent(binding)) },
+                                    beforeApply = {
+                                        startupConfig.awaitConfigurationUpdated()
+                                        generationMatches()
+                                    },
                                 )
                             } catch (e: CancellationException) {
                                 throw e
@@ -313,7 +326,6 @@ object PlatformSpeedTestCoordinator {
                                         // must revalidate its lines before binding the independent Maccms pool.
                                         if (cached != null && platform != ContentPlatform.PICACG) {
                                             publishPlatformStatus(platform, platformCompletionStatus(cached), running = false)
-                                            platformReady(platform)
                                             return@async cached
                                         }
                                     }
@@ -338,7 +350,7 @@ object PlatformSpeedTestCoordinator {
                                                 reconcileConfig = !forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onRouteReady = { platformReady(platform) },
+                                                onQualifiedEndpoint = { qualifiedEndpointReady(platform) },
                                                 onStageProgress = { progress ->
                                                     if (generationIsCurrent()) {
                                                         when (progress.phase) {
@@ -381,7 +393,7 @@ object PlatformSpeedTestCoordinator {
                                                 forceFresh = forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onRouteReady = { platformReady(platform) },
+                                                onQualifiedEndpoint = { qualifiedEndpointReady(platform) },
                                                 onApiPublished = { endpoint -> publishMaccmsRoute(endpoint?.ip) },
                                                 onProgress = { progress ->
                                                     if (generationIsCurrent()) {
@@ -423,7 +435,7 @@ object PlatformSpeedTestCoordinator {
                                             }
                                             publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {
-                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply, onRouteReady = { platformReady(platform) }) { progress ->
+                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply, onQualifiedEndpoint = { qualifiedEndpointReady(platform) }) { progress ->
                                                 if (generationIsCurrent()) {
                                                     when (progress.phase) {
                                                         JmSpeedTestProgress.Phase.TESTING_LINES -> jmLineProgress = progress
@@ -473,8 +485,6 @@ object PlatformSpeedTestCoordinator {
                                     if (generationIsCurrent()) {
                                         publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
                                         blockUnresolvedChecks(platform)
-                                        // Exhausted/blocked platforms settle only when their real work ends.
-                                        platformReady(platform, publishEarly = false)
                                     }
                                 }
                             }

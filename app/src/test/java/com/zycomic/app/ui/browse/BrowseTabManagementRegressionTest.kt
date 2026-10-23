@@ -24,6 +24,21 @@ class BrowseTabManagementRegressionTest {
     }
 
     @Test
+    fun `new JM tabs append to the global tab list and return their immediate selection index`() {
+        val current = listOf(
+            BrowseTabStore.defaultTabs(ContentPlatform.MANWA).first(),
+            BrowseTabStore.picacgHomeTab(),
+            BrowseTabStore.jmHomeTab(),
+        )
+        val added = BrowseTabStore.jmAllHotTab()
+
+        val (next, selectedIndex) = BrowseTabPolicy.insertNewTab(current, added)
+
+        assertEquals(current + added, next)
+        assertEquals(current.lastIndex + 1, selectedIndex)
+    }
+
+    @Test
     fun `legacy home and new ranking persist all five modes and selected identity after restart`() {
         val modes = PicacgRankingMode.entries
         assertEquals(listOf("H24", "D7", "D30", "RANDOM", "LATEST"), modes.map { it.name })

@@ -67,7 +67,7 @@ def main() -> None:
         "DomainIp.kt", "RouteListPolicy.kt", "ImageEndpointSelectionPolicy.kt", "ImgDomainPolicy.kt",
         "SpeedTestLogModels.kt", "ProbeAttemptDiagnostics.kt", "ReusableImageSpeedTestPolicy.kt",
         "SpeedTestHistoryPolicy.kt", "SpeedTestLogSelectionPolicy.kt", "DomainIpProbePolicy.kt", "ManwaSniPolicy.kt",
-        "SpeedTestProbeBudget.kt", "ManwaImageFallbackProbePolicy.kt", "SpeedTestTimings.kt", "SpeedTestTimingLog.kt",
+        "SpeedTestProbeBudget.kt", "SpeedTestProbeCall.kt", "ManwaImageFallbackProbePolicy.kt", "SpeedTestTimings.kt", "SpeedTestTimingLog.kt",
         "AdaptiveSpeedProbe.kt", "AdaptiveSpeedHistory.kt", "RouteManager.kt", "SpeedTester.kt",
     ]]
     kotlin_sources += [

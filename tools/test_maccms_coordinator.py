@@ -43,7 +43,7 @@ def main() -> None:
         "StartupSpeedTestGate", "StartupSpeedTestRequest", "SpeedTestRunPolicy", "FullSpeedTestRequest",
         "PlatformStartupStatus", "PlatformSpeedTestCoordinator", "PlatformSpeedTestReport",
         "SpeedTestTimings", "SpeedTestTimingLog", "SpeedTestUiTextPolicy", "ImageSourceDisplayPolicy",
-        "ImgDomainPolicy",
+        "ImgDomainPolicy", "StartupTestMode",
     ]]
     sources += tests
     for path in sources:

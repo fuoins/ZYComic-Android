@@ -50,6 +50,7 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
             host to if (index == 0 || index == routes.lines.size) 5L else 700L
         }.toMap()
         val ready = CompletableDeferred<Unit>()
+        val qualified = CompletableDeferred<Unit>()
         val completionObserved = AtomicBoolean(false)
         val maxLineCount = AtomicInteger()
         val maxImageCount = AtomicInteger()
@@ -60,6 +61,7 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
                     maxImageCount.updateAndGet { maxOf(it, images.size) }
                 },
                 onRouteReady = { ready.complete(Unit) },
+                onQualifiedEndpoint = { qualified.complete(Unit) },
                 onStageProgress = { if (it.phase == SpeedTester.Phase.COMPLETE) completionObserved.set(true) },
                 reuseLines = quick,
                 allowImageReuse = quick,
@@ -74,6 +76,9 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
                 error,
             )
         }
+        withTimeout(2_500L) { qualified.await() }
+        assertTrue(SpeedTester.isRunning, "qualified publication must precede the exhaustive tail drain")
+        assertFalse(completionObserved.get(), "qualified publication must not complete a full run")
         assertTrue(SpeedTester.isRunning, "the stage-one route callback must precede the tail drain")
         assertFalse(completionObserved.get(), "COMPLETE must not be published while the tail is in flight")
         assertTrue(ManwaProbeFixture.active.get() > 0, "slow tail probes should still be active at ready publication")
@@ -136,13 +141,21 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
     }
 
     @Test
-    fun manualLineOverrideIsNotChangedByEarlyOrFinalAutomaticResults() = runBlocking {
+    fun manualEndpointOverridesAreNotChangedByEarlyOrFinalAutomaticResults() = runBlocking {
         val routes = configure("manual", lineCount = 3, imageCount = 1)
         RouteManager.setLineEndpoint(routes.lineHosts[1], "203.0.113.99")
+        RouteManager.pinImgHost(0, "203.0.113.98")
         ManwaProbeFixture.delaysByDomain = mapOf(routes.lineHosts[0] to 5L, routes.lineHosts[2] to 8L)
-        SpeedTester.runAndApply(reuseLines = true, allowImageReuse = true)
+        var qualified = false
+        SpeedTester.runAndApply(
+            reuseLines = true,
+            allowImageReuse = true,
+            onQualifiedEndpoint = { qualified = true },
+        )
         assertEquals(routes.lineHosts[1], RouteManager.lineHost)
         assertEquals("203.0.113.99", RouteManager.selectedLineIp)
+        assertEquals("203.0.113.98", RouteManager.selectedImgIp)
+        assertFalse(qualified, "successful endpoints conflicting with both manual pins must not qualify")
     }
 
     @Test
@@ -172,12 +185,68 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
         val routes = configure("stale", lineCount = 3, imageCount = 1)
         val initialHost = RouteManager.lineHost
         val generationCurrent = AtomicBoolean(true)
+        val qualified = AtomicBoolean(false)
         ManwaProbeFixture.onRequestStart = { _, path ->
             if (path == "/api/users/info") generationCurrent.set(false)
         }
-        SpeedTester.runAndApply(isCurrent = { generationCurrent.get() })
+        SpeedTester.runAndApply(
+            isCurrent = { generationCurrent.get() },
+            onQualifiedEndpoint = { qualified.set(true) },
+        )
         assertEquals(initialHost, RouteManager.lineHost)
         assertTrue(RouteManager.selectedLineIp.isNullOrBlank(), "stale run must not pin an endpoint")
+        assertFalse(qualified.get(), "a stale generation must not release the startup gate")
         assertNotNull(ManwaProbeFixture.started.firstOrNull { it.second == "/api/users/info" })
     }
+    @Test
+    fun imageEndpointCanQualifyWhenManualLineEndpointDoesNotMatchProbe() = runBlocking {
+        val routes = configure("image-only", lineCount = 1, imageCount = 1)
+        RouteManager.setLineEndpoint(routes.lineHosts.single(), "203.0.113.77")
+        val qualified = AtomicBoolean(false)
+        SpeedTester.runAndApply(onQualifiedEndpoint = { qualified.set(true) })
+        assertEquals("203.0.113.77", RouteManager.selectedLineIp)
+        assertTrue(qualified.get(), "the real, applied image endpoint should release startup even when line pin mismatches; domain=${RouteManager.imgRewriteTarget ?: RouteManager.imgHost} ip=${RouteManager.selectedImgIp} fastest=${RouteManager.fastestImgEndpoint}")
+    }
+
+    @Test
+    fun cancelledProbeClosesItsOwnBlockedSocketWithoutWaitingForReadTimeout() = runBlocking {
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())
+        val releaseServer = java.util.concurrent.CountDownLatch(1)
+        val bodyReadStarted = CompletableDeferred<Unit>()
+        val serverThread = Thread {
+            runCatching {
+                server.accept().use { socket ->
+                    socket.getOutputStream().apply {
+                        write("HTTP/1.1 200 OK\r\nContent-Length: 999999\r\n\r\nx".toByteArray())
+                        flush()
+                    }
+                    releaseServer.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                }
+            }
+        }.apply { isDaemon = true; start() }
+        val client = okhttp3.OkHttpClient.Builder().readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
+        val call = client.newCall(okhttp3.Request.Builder().url("http://127.0.0.1:${server.localPort}/probe").build())
+        val probe = async(Dispatchers.IO) {
+            SpeedTestProbeCall.execute(call, kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]) { response ->
+                bodyReadStarted.complete(Unit)
+                response.body!!.string()
+            }
+        }
+        try {
+            withTimeout(5_000) { bodyReadStarted.await() }
+            withTimeout(2_000) {
+                probe.cancel()
+                probe.join()
+            }
+            assertTrue(call.isCanceled(), "retiring the probe must close only its own Call immediately")
+        } finally {
+            probe.cancel()
+            releaseServer.countDown()
+            server.close()
+            serverThread.join(2_000)
+            client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdownNow()
+        }
+    }
+
 }

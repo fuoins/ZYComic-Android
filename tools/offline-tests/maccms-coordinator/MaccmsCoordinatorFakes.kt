@@ -101,6 +101,9 @@ object SpeedTester {
     val reuseImages = mutableListOf<Boolean>()
     val reconcileConfigFlags = mutableListOf<Boolean>()
     var beforeApplyHook: (() -> Unit)? = null
+    var emitQualifiedEndpoint = false
+    var suspendBeforeQualifiedEndpointHook: (suspend () -> Unit)? = null
+    var suspendAfterQualifiedEndpointHook: (suspend (Int) -> Unit)? = null
     var progressEvents = emptyList<Progress>()
     var emitRouteReady = false
     var suspendBeforeRouteReadyHook: (suspend () -> Unit)? = null
@@ -113,6 +116,7 @@ object SpeedTester {
         reconcileConfig: Boolean = true,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onQualifiedEndpoint: (() -> Unit)? = null,
         onRouteReady: (() -> Unit)? = null,
         onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> {
@@ -122,6 +126,11 @@ object SpeedTester {
         reconcileConfigFlags += reconcileConfig
         beforeApplyHook?.invoke()
         lastRunSkipped = !(beforeApply() && isCurrent())
+        if (!lastRunSkipped && emitQualifiedEndpoint) {
+            suspendBeforeQualifiedEndpointHook?.invoke()
+            onQualifiedEndpoint?.invoke()
+            suspendAfterQualifiedEndpointHook?.invoke(runCount)
+        }
         progress.value = if (lastRunSkipped) {
             Progress(Phase.SKIPPED)
         } else {
@@ -178,6 +187,9 @@ object PicacgSpeedTester {
     var doNotPublishNextRun = false
     var beforeApplyHook: (() -> Unit)? = null
     var suspendBeforeApplyHook: (suspend () -> Unit)? = null
+    var emitQualifiedEndpoint = false
+    var suspendBeforeQualifiedEndpointHook: (suspend () -> Unit)? = null
+    var suspendAfterQualifiedEndpointHook: (suspend (Int) -> Unit)? = null
     var suspendBeforeImagesHook: (suspend () -> Unit)? = null
     var emitRouteReady = false
     var suspendBeforeRouteReadyHook: (suspend () -> Unit)? = null
@@ -196,6 +208,7 @@ object PicacgSpeedTester {
         forceFresh: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onQualifiedEndpoint: (() -> Unit)? = null,
         onApiPublished: (DomainIp?) -> Unit = {},
         onRouteReady: (() -> Unit)? = null,
         onProgress: (Progress) -> Unit = {},
@@ -262,6 +275,11 @@ object PicacgSpeedTester {
         val canCommitApi = !doNotPublishNextRun && beforeApply() && isCurrent()
         if (canCommitApi) {
             PicacgRouteManager.selectedApiEndpoint = selectedLine
+            if (emitQualifiedEndpoint && api.any { it.success && it.testedThisRound }) {
+                suspendBeforeQualifiedEndpointHook?.invoke()
+            onQualifiedEndpoint?.invoke()
+                suspendAfterQualifiedEndpointHook?.invoke(runCount)
+            }
             onApiPublished(selectedLine)
             if (emitRouteReady) {
                 suspendBeforeRouteReadyHook?.invoke()
@@ -312,6 +330,9 @@ object JmSpeedTester {
     var lineIpDelaysForRun = emptyMap<DomainIp, Long>()
     var imageIpDelaysForRun = emptyMap<DomainIp, Long>()
     var emitRouteReady = false
+    var emitQualifiedEndpoint = false
+    var suspendBeforeQualifiedEndpointHook: (suspend () -> Unit)? = null
+    var suspendAfterQualifiedEndpointHook: (suspend (Int) -> Unit)? = null
     var suspendBeforeRouteReadyHook: (suspend () -> Unit)? = null
     var suspendAfterRouteReadyHook: (suspend () -> Unit)? = null
     data class RunResult(val snapshot: JmRouteManager.SpeedTestSnapshot, val submission: JmSpeedTestSubmission?)
@@ -321,6 +342,7 @@ object JmSpeedTester {
         reconcileConfig: Boolean = true,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
+        onQualifiedEndpoint: (() -> Unit)? = null,
         onRouteReady: (() -> Unit)? = null,
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): RunResult {
@@ -330,6 +352,11 @@ object JmSpeedTester {
         val runId = "offline-jm-$runCount"
         val result = if (beforeApply() && isCurrent()) {
             progressEvents.forEach { event -> onProgress?.invoke(event) }
+            if (emitQualifiedEndpoint) {
+                suspendBeforeQualifiedEndpointHook?.invoke()
+            onQualifiedEndpoint?.invoke()
+                suspendAfterQualifiedEndpointHook?.invoke(runCount)
+            }
             if (emitRouteReady) {
                 suspendBeforeRouteReadyHook?.invoke()
                 onRouteReady?.invoke()

@@ -212,16 +212,10 @@ object JmNetworkModule {
         JmRouteManager.selectImageDomain(null)
     }
 
-    /** Cancel outstanding requests and discard idle sockets on any endpoint transition. */
-    fun rebindImageEndpoint() = rebindEndpointPools()
+    /** Endpoint rebinding must not cancel unrelated in-flight JM API or image calls. */
+    fun rebindImageEndpoint() = prepareImageRoute(JmRouteManager.activeImageDomain)
 
-    fun rebindApiEndpoint() = rebindEndpointPools()
-
-    private fun rebindEndpointPools() {
-        runCatching { baseClient.dispatcher.cancelAll() }
-        runCatching { imageClient.dispatcher.cancelAll() }
-        evictIdleEndpointPools()
-    }
+    fun rebindApiEndpoint() = prepareApiRoute(JmRouteManager.lineHost)
 
     internal fun evictIdleEndpointPools() {
         runCatching { baseClient.connectionPool.evictAll() }
@@ -233,7 +227,8 @@ object JmNetworkModule {
     @Synchronized
     internal fun prepareImageRoute(host: String) {
         if (JmRouteManager.imageDomains.none { it.equals(host, ignoreCase = true) }) return
-        val identity = "${host.lowercase(java.util.Locale.ROOT)}|${currentImageEndpoint(host)?.ip.orEmpty()}"
+        val identity = "${host.lowercase(java.util.Locale.ROOT)}|${currentImageEndpoint(host)?.ip.orEmpty()}" +
+            "|${JmRouteManager.currentImageNetworkPolicy()}|${RuntimeNetworkGate.revision}"
         if (boundImageRoutes[host.lowercase(java.util.Locale.ROOT)] != identity) {
             evictIdleEndpointPools()
             boundImageRoutes[host.lowercase(java.util.Locale.ROOT)] = identity
@@ -243,7 +238,9 @@ object JmNetworkModule {
     @Synchronized
     internal fun prepareApiRoute(host: String) {
         if (JmRouteManager.lineHosts.none { runCatching { java.net.URI(it).host.equals(host, true) }.getOrDefault(false) }) return
-        val identity = "${host.lowercase(java.util.Locale.ROOT)}|${JmRouteManager.currentLineEndpoint(host)?.ip.orEmpty()}"
+        val identity = "${JmRouteManager.configuredLineUrl(host).orEmpty()}|" +
+            "${JmRouteManager.currentLineEndpoint(host)?.ip.orEmpty()}|" +
+            "${JmRouteManager.currentImageNetworkPolicy()}|${RuntimeNetworkGate.revision}"
         if (boundApiRoutes[host.lowercase(java.util.Locale.ROOT)] != identity) {
             evictIdleEndpointPools()
             boundApiRoutes[host.lowercase(java.util.Locale.ROOT)] = identity

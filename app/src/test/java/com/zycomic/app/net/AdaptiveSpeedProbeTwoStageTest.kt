@@ -236,4 +236,44 @@ class AdaptiveSpeedProbeTwoStageTest {
         assertFalse(run.isActive)
         assertEquals(0, callbacks)
     }
+
+    @Test
+    fun `deadline forced slow usable result never qualifies and qualified follows usable`() = runBlocking {
+        fun endpointSeeded(scope: String) = MemoryStore().apply {
+            val bucket = AdaptiveSpeedProbe.timeBucket(startedAt, ZoneId.of("UTC"))
+            val key = listOf(bucket, "wifi", scope, "ep1").joinToString("") { "${it.length}:$it" }
+            history[key] = AdaptiveSpeedProbe.History(successes = 2, latencyMs = 50L, lastMeasuredAt = startedAt)
+        }
+        val store = endpointSeeded("qualified-deadline")
+        val usable = CompletableDeferred<Int>()
+        var qualifiedCalls = 0
+        session(store, budgetMs = 20L, attemptTimeoutMs = 500L).run(
+            scope = "qualified-deadline",
+            candidates = listOf(1),
+            key = { "ep$it" },
+            quick = true,
+            success = { true },
+            elapsedMs = { it.toLong() },
+            onUsable = { _, value -> usable.complete(value) },
+            onQualified = { _, _ -> qualifiedCalls++ },
+        ) {
+            delay(80L)
+            500 // Exceeds the run's existing 200ms threshold; deadline publication remains usable only.
+        }
+        assertEquals(500, usable.await())
+        assertEquals(0, qualifiedCalls)
+
+        val order = CopyOnWriteArrayList<String>()
+        session(endpointSeeded("qualified-order"), budgetMs = 500L).run(
+            scope = "qualified-order",
+            candidates = listOf(1),
+            key = { "ep$it" },
+            quick = true,
+            success = { true },
+            elapsedMs = { it.toLong() },
+            onUsable = { _, _ -> order += "usable" },
+            onQualified = { _, _ -> order += "qualified" },
+        ) { 100 }
+        assertEquals(listOf("usable", "qualified"), order)
+    }
 }

@@ -165,4 +165,110 @@ class StartupSpeedTestRequestTest {
             scope.cancel()
         }
     }
+
+    @Test
+    fun `full takeover cancels blocked startup tail and redirects live waiters without a fake completion`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val startup = StartupSpeedTestRequest<Int, String>(scope)
+            val full = StartupSpeedTestRequest<Int, String>(scope, reuseCompleted = false)
+            val testerLock = kotlinx.coroutines.sync.Mutex()
+            val oldStarted = CompletableDeferred<Unit>()
+            val oldCancelled = CompletableDeferred<Unit>()
+            val fullStarted = CompletableDeferred<Unit>()
+            val qualify = CompletableDeferred<Unit>()
+            val finish = CompletableDeferred<Unit>()
+            val completed = CompletableDeferred<Unit>()
+            var fullRuns = 0
+            suspend fun awaitFull(): String = full.runUntilReady({ 1 }) { publish ->
+                fullRuns++
+                testerLock.lock()
+                try {
+                    assertTrue(oldCancelled.isCompleted)
+                    fullStarted.complete(Unit)
+                    qualify.await()
+                    publish(1, "qualified")
+                    finish.await()
+                    completed.complete(Unit)
+                    1 to "all actually measured"
+                } finally {
+                    testerLock.unlock()
+                }
+            }
+            val oldWaiter = async {
+                startup.runUntilReady({ 1 }) {
+                    testerLock.lock()
+                    try {
+                        oldStarted.complete(Unit)
+                        CompletableDeferred<Unit>().await()
+                        error("retired startup cannot complete")
+                    } finally {
+                        testerLock.unlock()
+                        oldCancelled.complete(Unit)
+                    }
+                }
+            }
+            oldStarted.await()
+            startup.supersedeWith { awaitFull() }
+            withTimeout(2_000) { fullStarted.await() }
+            val explicit = async { awaitFull() }
+            val repeated = async { awaitFull() }
+            kotlinx.coroutines.yield()
+            assertFalse(oldWaiter.isCompleted)
+            assertFalse(completed.isCompleted)
+            qualify.complete(Unit)
+            assertEquals("qualified", withTimeout(2_000) { oldWaiter.await() })
+            assertEquals("qualified", explicit.await())
+            assertEquals("qualified", repeated.await())
+            assertEquals(1, fullRuns)
+            assertFalse(completed.isCompleted)
+            finish.complete(Unit)
+            completed.await()
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `cancelling a UI waiter during takeover cannot resurrect it or cancel successor work`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val startup = StartupSpeedTestRequest<Int, String>(scope)
+            val started = CompletableDeferred<Unit>()
+            val waiter = async {
+                startup.run({ 1 }) {
+                    started.complete(Unit)
+                    CompletableDeferred<Unit>().await()
+                    1 to "old"
+                }
+            }
+            started.await()
+            waiter.cancel()
+            var transfers = 0
+            startup.supersedeWith {
+                transfers++
+                "successor"
+            }
+            waiter.join()
+            assertTrue(waiter.isCancelled)
+            assertEquals(0, transfers)
+            assertEquals("successor", startup.run({ 1 }) { error("retired request must not restart") })
+            assertEquals(1, transfers)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `late transferred startup waiter reuses full completion but explicit request starts a new full round`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val full = StartupSpeedTestRequest<Int, String>(scope, reuseCompleted = false)
+            assertEquals("measured", full.run({ 1 }) { 1 to "measured" })
+            assertEquals("measured", full.runUntilReady({ 1 }, reuseCompletedResult = true) { error("late startup waiter must not restart full work") })
+            assertEquals("explicit fresh", full.run({ 1 }) { 1 to "explicit fresh" })
+        } finally {
+            scope.cancel()
+        }
+    }
 }

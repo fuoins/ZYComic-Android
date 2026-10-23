@@ -287,7 +287,7 @@ fun TagPickerDialog(
 /** Tab 管理面板：预设快速添加，已有 tab 编辑/删除，排序通过独立草稿对话框提交。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
+fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int) -> Unit) {
     var editing by remember { mutableStateOf<BrowseTabItem?>(null) }
     var adding by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -305,8 +305,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState()),
+                .navigationBarsPadding(),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp)) {
                 Icon(Icons.Outlined.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -314,129 +313,135 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
                 Text("标签页管理", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "关闭") }
             }
-            Text(
-                "可编辑tab名称和默认选项；通过标签胶囊管理或调整顺序。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-
-            Text("添加标签页", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp))
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(10.dp)) {
-                OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(KMR.strings.browse_tab_add_custom))
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    SpecialAddButton(
-                        label = "首页",
-                        enabled = vm.canAddJmHome(),
-                        onClick = { vm.addJmHomeTab() },
-                        info = "禁漫天堂首页推荐内容。",
-                        platform = ContentPlatform.JM,
-                    )
-                    SpecialAddButton(
-                        label = "全部热门",
-                        enabled = vm.canAddJmAllHot(),
-                        onClick = { vm.addJmAllHotTab() },
-                        info = "禁漫天堂全部分类内容，默认按最多喜欢排序。",
-                        platform = ContentPlatform.JM,
-                    )
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.padding(top = 6.dp),
-                ) {
-                    listOf(
-                        BrowseTabStore.ID_GENERAL to "mw一般向热门",
-                        BrowseTabStore.ID_JINMAN to "mw禁漫向热门",
-                        BrowseTabStore.ID_REXUE to "mw热血热门",
-                    ).forEach { (id, name) ->
-                        SpecialAddButton(
-                            label = name,
-                            enabled = vm.canAddManwaPreset(id),
-                            onClick = { vm.addManwaPreset(id) },
-                            info = "$name，漫蛙热门筛选预设。",
-                            platform = ContentPlatform.MANWA,
-                            isAdded = vm.tabs.any { it.platformId == ContentPlatform.MANWA && it.id == id },
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                item {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            "可编辑tab名称和默认选项；通过标签胶囊管理或调整顺序。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         )
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.padding(top = 6.dp),
-                ) {
-                    SpecialAddButton(
-                        label = "哔咔排行",
-                        enabled = vm.canAddPicacgRanking(),
-                        onClick = { vm.addPicacgRankingTab() },
-                        info = "Picacg 日榜、周榜、月榜、随机和最新漫画。",
-                        platform = ContentPlatform.PICACG,
-                    )
-                    SpecialAddButton(
-                        label = "哔咔分类",
-                        enabled = vm.canAddPicacgCategory(),
-                        onClick = { vm.addPicacgCategoryTab() },
-                        info = "使用 Picacg 配置中的40个静态主题筛选漫画。",
-                        platform = ContentPlatform.PICACG,
-                    )
-                    SpecialAddButton(
-                        label = "增加最新更新",
-                        enabled = vm.canAddLatest(),
-                        onClick = { vm.addLatestTab() },
-                        info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
-                        platform = ContentPlatform.MANWA,
-                    )
-                    SpecialAddButton(
-                        label = "增加 gay排行",
-                        enabled = vm.canAddRanking(),
-                        onClick = { vm.addRankingTab() },
-                        info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
-                        platform = ContentPlatform.MANWA,
-                    )
-                    SpecialAddButton(
-                        label = "增加宇总排行",
-                        enabled = vm.canAddYuzong(),
-                        onClick = { vm.addYuzongTab() },
-                        info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
-                        platform = ContentPlatform.MANWA,
-                        isYuzongRank = true,
-                    )
-                }
-            }
 
-            FlowRow(
-                horizontalArrangement = Arrangement.End,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
-            ) {
-                Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth())
-                TextButton(onClick = { confirmReset = true }) { Text("恢复默认") }
-                TextButton(onClick = { showReorder = true }) { Text("更改顺序") }
-            }
+                        Text("添加标签页", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp))
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                            OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                                Icon(Icons.Outlined.Add, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(KMR.strings.browse_tab_add_custom))
+                            }
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                SpecialAddButton(
+                                    label = "首页",
+                                    enabled = vm.canAddJmHome(),
+                                    onClick = { if (vm.addJmHomeTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "禁漫天堂首页推荐内容。",
+                                    platform = ContentPlatform.JM,
+                                )
+                                SpecialAddButton(
+                                    label = "全部热门",
+                                    enabled = vm.canAddJmAllHot(),
+                                    onClick = { if (vm.addJmAllHotTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "禁漫天堂全部分类内容，默认按最多喜欢排序。",
+                                    platform = ContentPlatform.JM,
+                                )
+                            }
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.padding(top = 6.dp),
+                            ) {
+                                listOf(
+                                    BrowseTabStore.ID_GENERAL to "mw一般向热门",
+                                    BrowseTabStore.ID_JINMAN to "mw禁漫向热门",
+                                    BrowseTabStore.ID_REXUE to "mw热血热门",
+                                ).forEach { (id, name) ->
+                                    SpecialAddButton(
+                                        label = name,
+                                        enabled = vm.canAddManwaPreset(id),
+                                        onClick = { if (vm.addManwaPreset(id)) onTabAdded(vm.mainTab.value) },
+                                        info = "$name，漫蛙热门筛选预设。",
+                                        platform = ContentPlatform.MANWA,
+                                        isAdded = vm.tabs.any { it.platformId == ContentPlatform.MANWA && it.id == id },
+                                    )
+                                }
+                            }
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.padding(top = 6.dp),
+                            ) {
+                                SpecialAddButton(
+                                    label = "哔咔排行",
+                                    enabled = vm.canAddPicacgRanking(),
+                                    onClick = { if (vm.addPicacgRankingTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "Picacg 日榜、周榜、月榜、随机和最新漫画。",
+                                    platform = ContentPlatform.PICACG,
+                                )
+                                SpecialAddButton(
+                                    label = "哔咔分类",
+                                    enabled = vm.canAddPicacgCategory(),
+                                    onClick = { if (vm.addPicacgCategoryTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "使用 Picacg 配置中的40个静态主题筛选漫画。",
+                                    platform = ContentPlatform.PICACG,
+                                )
+                                SpecialAddButton(
+                                    label = "增加最新更新",
+                                    enabled = vm.canAddLatest(),
+                                    onClick = { if (vm.addLatestTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "所有漫画 7 天内的更新；可单独查看 7 天内某一天的全部更新",
+                                    platform = ContentPlatform.MANWA,
+                                )
+                                SpecialAddButton(
+                                    label = "增加 gay排行",
+                                    enabled = vm.canAddRanking(),
+                                    onClick = { if (vm.addRankingTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "整体排行，但女用户较多导致 gay 漫画偏多，建议使用宇总排行",
+                                    platform = ContentPlatform.MANWA,
+                                )
+                                SpecialAddButton(
+                                    label = "增加宇总排行",
+                                    enabled = vm.canAddYuzong(),
+                                    onClick = { if (vm.addYuzongTab()) onTabAdded(vm.mainTab.value) },
+                                    info = "提供哔哩哔哩 腾讯 快看的排行榜，但因为没有对应的图源，所以采用搜索自行点击",
+                                    platform = ContentPlatform.MANWA,
+                                    isYuzongRank = true,
+                                )
+                            }
+                        }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-            ) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                ) {
-                    vm.tabs.forEach { item ->
-                        ManagedTabPill(
-                            item = item,
-                            onEdit = { if (item.kind == TabKind.FILTER || item.platformId == ContentPlatform.PICACG) editing = item else editingSpecial = item },
-                            onDelete = { deletingItem = item },
-                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.End,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+                        ) {
+                            Text("管理已有标签页（${vm.tabs.size}）", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth())
+                            TextButton(onClick = { confirmReset = true }) { Text("恢复默认") }
+                            TextButton(onClick = { showReorder = true }) { Text("更改顺序") }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp),
+                        ) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            ) {
+                                vm.tabs.forEach { item ->
+                                    ManagedTabPill(
+                                        item = item,
+                                        onEdit = { if (item.kind == TabKind.FILTER || item.platformId == ContentPlatform.PICACG) editing = item else editingSpecial = item },
+                                        onDelete = { deletingItem = item },
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -517,6 +522,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit) {
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
             onSave = { nm, snap, jmFilters, platform, picacgFilter, _ ->
                 if (vm.addFilterTab(nm, snap, platform, jmFilters, picacgFilter)) {
+                    onTabAdded(vm.mainTab.value)
                     adding = false
                     onDismiss()
                 }
@@ -797,14 +803,6 @@ private fun FilterTabFormDialog(
                                 },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             )
-                            if (targetPlatform == ContentPlatform.JM) {
-                                Text(
-                                    stringResource(KMR.strings.content_platform_custom_tab_notice),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                                )
-                            }
                         }
 
                         Surface(

@@ -159,15 +159,15 @@ class BrowseTabPersistenceTest {
         val withPicacg = BrowseTabPolicy.addMissingPicacgHome(existing, BrowseTabStore.picacgHomeTab())
 
         assertEquals(
-            listOf(manwa.id, BrowseTabStore.ID_PICACG_HOME, jm.id),
+            listOf(manwa.id, jm.id, BrowseTabStore.ID_PICACG_HOME),
             withPicacg.map { it.id },
         )
         assertEquals(existing, BrowseTabPolicy.addMissingPicacgHome(withPicacg, BrowseTabStore.picacgHomeTab()).filterNot { it.id == BrowseTabStore.ID_PICACG_HOME })
 
         BrowseTabStore.saveAll(existing, selectedTabIndex = 1)
         val migrated = BrowseTabStore.loadAll()
-        assertEquals(BrowseTabPolicy.identity(BrowseTabStore.picacgHomeTab()), BrowseTabPolicy.identity(migrated[1]))
-        assertEquals(BrowseTabStore.ID_PICACG_CATEGORY, migrated[2].id)
+        assertEquals(BrowseTabStore.ID_PICACG_HOME, migrated[migrated.lastIndex - 1].id)
+        assertEquals(BrowseTabStore.ID_PICACG_CATEGORY, migrated.last().id)
         assertEquals(BrowseTabPolicy.identity(jm), BrowseTabPolicy.identity(migrated[BrowseTabStore.loadSelectedTab()]))
 
         val reordered = BrowseTabPolicy.reorder(migrated, migrated.reversed(), BrowseTabStore.loadSelectedTab())!!
@@ -213,7 +213,7 @@ class BrowseTabPersistenceTest {
 
         val loaded = BrowseTabStore.loadAll()
         assertEquals(
-            listOf(draft[0], draft[1], BrowseTabStore.picacgRankingDefaultTab(), BrowseTabStore.picacgCategoryTab(), draft[2], draft[3])
+            (draft + listOf(BrowseTabStore.picacgRankingDefaultTab(), BrowseTabStore.picacgCategoryTab()))
                 .map(BrowseTabPolicy::identity),
             loaded.map { BrowseTabPolicy.identity(it) },
         )
@@ -234,7 +234,7 @@ class BrowseTabPersistenceTest {
         val draft = current.reversed()
         BrowseTabPolicy.reorder(current, draft, 1)
         assertEquals(
-            listOf(current[0], BrowseTabStore.picacgRankingDefaultTab(), BrowseTabStore.picacgCategoryTab(), current[1], current[2])
+            (current + listOf(BrowseTabStore.picacgRankingDefaultTab(), BrowseTabStore.picacgCategoryTab()))
                 .map(BrowseTabPolicy::identity),
             BrowseTabStore.loadAll().map { BrowseTabPolicy.identity(it) },
         )

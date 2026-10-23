@@ -19,11 +19,13 @@ FAKES = ROOT / "tools/offline-tests/browse-tab-management"
 CACHE = Path.home() / ".gradle/caches/modules-2/files-2.1"
 BROWSE_DIR = MAIN / "com/zycomic/app/ui/browse"
 PICACG_DIR = MAIN / "com/zycomic/app/ui/picacg"
+STRINGS = ROOT / "i18n-kmk/src/commonMain/moko-resources/base/strings.xml"
 SHEET = (BROWSE_DIR / "BrowseTabManageSheet.kt").read_text()
 BROWSE = (BROWSE_DIR / "BrowseScreen.kt").read_text()
 BROWSE_VM = (BROWSE_DIR / "BrowseViewModel.kt").read_text()
 PICACG = (PICACG_DIR / "PicacgBrowseScreen.kt").read_text()
 JM_POLICY = (BROWSE_DIR / "JmBrowsePolicy.kt").read_text()
+STRINGS_XML = STRINGS.read_text()
 JM_SOURCE = (MAIN / "com/zycomic/app/reader/JmSource.kt").read_text()
 TAB_MODELS = (BROWSE_DIR / "BrowseTabModels.kt").read_text()
 
@@ -128,6 +130,34 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
         self.assertIn("to if (value.isEmpty()) LATEST_A_CATEGORY else value", category_options)
         self.assertNotIn("category = label", JM_POLICY)
         self.assertNotIn("category = section.title", JM_SOURCE)
+
+    def test_custom_jm_tabs_show_categories_without_exposing_other_browse_modes(self):
+        self.assertIn("fun showsCategoryPicker(tabId: String): Boolean = true", JM_POLICY)
+        self.assertIn("if (JmBrowsePolicy.showsCategoryPicker(tabId))", BROWSE)
+        self.assertIn("fun showsModePicker(tabId: String): Boolean = tabId != ALL_HOT_TAB_ID && !isCustomCategoryTab(tabId)", JM_POLICY)
+        self.assertIn("if (tabId == ALL_HOT_TAB_ID || isCustomCategoryTab(tabId))", JM_POLICY)
+        self.assertIn("mode = MODE_CATEGORY", JM_POLICY)
+
+    def test_manage_sheet_keeps_title_and_close_fixed_while_only_list_scrolls(self):
+        sheet = _function_body(SHEET, "fun TabManageSheet(", "// ---- 删除确认 ----")
+        header = sheet.index('Text("标签页管理"')
+        close = sheet.index('IconButton(onClick = onDismiss)')
+        listing = sheet.index("LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth())")
+        self.assertLess(header, listing)
+        self.assertLess(close, listing)
+        self.assertIn(".fillMaxHeight(0.9f)", sheet)
+        self.assertNotIn("verticalScroll(", sheet)
+
+    def test_added_tab_is_selected_without_accepting_a_stale_pager_page(self):
+        self.assertIn("programmaticTabSelection = index.takeUnless { it == pagerState.settledPage }", BROWSE)
+        self.assertIn("if (programmaticTabSelection == target) pagerState.scrollToPage(target)", BROWSE)
+        self.assertIn("if (page == programmaticTabSelection) programmaticTabSelection = null", BROWSE)
+        self.assertIn("if (page == vm.mainTab.value) return@collect", BROWSE)
+
+    def test_obsolete_jm_browse_interface_pending_copy_is_removed(self):
+        self.assertNotIn("禁漫天堂接口待接入", STRINGS_XML)
+        self.assertNotIn('name="content_platform_browse_detail"', STRINGS_XML)
+        self.assertNotIn('name="content_platform_not_connected_detail"', STRINGS_XML)
 
 
 

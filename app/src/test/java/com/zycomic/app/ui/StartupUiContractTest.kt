@@ -45,14 +45,14 @@ class StartupUiContractTest {
     @Test
     fun `startup keeps dynamic config and per platform progress without redundant running summary`() {
         assertTrue(measurementPage.contains("StartupNetworkStatus(remoteInfo.substringBefore(\"　上次错误：\"))"))
-        assertTrue(measurementPage.contains("StartupPlatformSwitches()"))
+        assertTrue(measurementPage.contains("StartupPlatformSwitches(fullRequested = fullSpeedTestRequested)"))
         assertTrue(measurementPage.contains("platformTestSummary?.let { summary ->"))
         assertFalse(measurementPage.contains("正在准备启动测速…"))
         val coordinator = File(root, "app/src/main/java/com/zycomic/app/net/PlatformSpeedTestCoordinator.kt").readText()
         assertFalse(coordinator.contains("三平台测速进行中；各平台进度独立显示"))
         assertTrue(coordinator.contains("_startupSummary.value = null"))
         assertTrue(coordinator.contains("_startupSummary.value = startupSummary(result)"))
-        val startupSwitches = mainActivity.substringAfter("private fun StartupPlatformSwitches()")
+        val startupSwitches = mainActivity.substringAfter("private fun StartupPlatformSwitches(")
             .substringBefore("@Composable\nprivate fun StartupSwitch(")
         assertTrue(startupSwitches.contains("StartupSwitch("))
         assertTrue(startupSwitches.contains("LinearProgressIndicator("))
@@ -61,6 +61,9 @@ class StartupUiContractTest {
         assertFalse(startupSwitches.contains("startupChecksPassed(checkStatuses)"))
         assertFalse(startupSwitches.contains("startup_checks_ready_count"))
         assertEquals("快测中", strings["startup_quick_test_running"])
+        assertEquals("完整测速中", strings["startup_full_test_running"])
+        assertTrue(startupSwitches.contains("fullRequested || mode =="))
+        assertTrue(startupSwitches.contains("PlatformSpeedTestCoordinator.testMode.collectAsState()"))
         assertTrue(startupSwitches.contains("val passed = check.result.isReady"))
         assertTrue(startupSwitches.contains("KMR.strings.startup_check_reused"))
         assertEquals("历史有效沿用", strings["startup_check_reused"])
@@ -77,7 +80,7 @@ class StartupUiContractTest {
 
     @Test
     fun `startup testing UI does not expose candidate or check totals`() {
-        val switches = mainActivity.substringAfter("private fun StartupPlatformSwitches()")
+        val switches = mainActivity.substringAfter("private fun StartupPlatformSwitches(")
             .substringBefore("@Composable\nprivate fun StartupSwitch(")
         val row = mainActivity.substringAfter("private fun StartupSwitch(")
             .substringBefore("@Composable")
@@ -86,7 +89,7 @@ class StartupUiContractTest {
         assertFalse(switches.contains("progress ="))
         assertTrue(switches.contains("KMR.strings.startup_quick_test_running"))
         assertTrue(row.contains("status?.running == true"))
-        assertTrue(row.contains("KMR.strings.startup_quick_test_running"))
+        assertTrue(row.contains("runningLabel"))
         assertFalse(row.contains("status.fraction"))
         assertTrue(row.contains("status?.message ?: \"等待测速\""))
         assertFalse(mainActivity.contains("PlatformSpeedTestCoordinator.running.collectAsState()"))

@@ -27,7 +27,8 @@ internal class JmEndpointTransportInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val scope = request.tag(PageAttemptScope::class.java)
-        fun isCancelled() = chain.call().isCanceled() || scope?.isCurrent == false
+        val homeScope = request.tag(JmHomeRequestScope::class.java)
+        fun isCancelled() = chain.call().isCanceled() || scope?.isCurrent == false || homeScope?.isCurrent() == false
         fun requireActive() {
             if (isCancelled()) throw IOException("JM request cancelled")
         }
@@ -35,6 +36,9 @@ internal class JmEndpointTransportInterceptor(
         val host = request.url.host
         val isImage = request.url.encodedPath.startsWith("/media/")
         val endpoint = if (isImage) imageEndpoint(host) else apiEndpoint(host)
+        if (homeScope != null && (isImage || !homeScope.matches(host, endpoint))) {
+            throw IOException("JM browse endpoint binding changed")
+        }
         val hasMeasurements = if (isImage) imageHasMeasurements(host) else apiHasMeasurements(host)
         val configRevision = JmRouteManager.runtimeConfigRevision
         val platformRevision = com.zycomic.app.platform.StartupPlatformPolicy.state.value.revision
@@ -78,7 +82,8 @@ internal class JmEndpointTransportInterceptor(
                     }
                 } catch (error: IOException) {
                     if (requestStillCurrent() && actualEndpoint != null && request.url.encodedPath != "/confirm" &&
-                        isSafeApiRead(request) && RuntimeRecoveryPolicy.isTransportFailure(error) && reported.compareAndSet(false, true)
+                        homeScope == null && isSafeApiRead(request) && RuntimeRecoveryPolicy.isTransportFailure(error) &&
+                        reported.compareAndSet(false, true)
                     ) {
                         apiFailure(actualEndpoint, error.javaClass.simpleName)
                     }
@@ -97,7 +102,7 @@ internal class JmEndpointTransportInterceptor(
             if (requestStillCurrent() && actualEndpoint != null && RuntimeRecoveryPolicy.isTransportFailure(error)) {
                 if (isImage) {
                     imageFailure(actualEndpoint, error.javaClass.simpleName)
-                } else if (request.url.encodedPath != "/confirm" && isSafeApiRead(request) &&
+                } else if (homeScope == null && request.url.encodedPath != "/confirm" && isSafeApiRead(request) &&
                     RuntimeRecoveryPolicy.mayRecoverApi(request.method, error)
                 ) {
                     apiFailure(actualEndpoint, error.javaClass.simpleName)

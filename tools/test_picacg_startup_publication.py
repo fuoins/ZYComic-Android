@@ -66,7 +66,7 @@ def main() -> None:
     production_names = [
         "DomainIp", "PicacgNetworkPolicy", "PicacgBuiltinNetwork", "PicacgImagePayloadPolicy",
         "PicacgSpeedTestTargetPolicy", "PicacgSpeedTestHistory", "SpeedTestLogSelectionPolicy",
-        "SpeedTestLogSummary", "RuntimeRecoveryPolicy", "AdaptiveSpeedProbe", "AdaptiveSpeedHistory", "PicacgSpeedTester",
+        "SpeedTestLogSummary", "SpeedTestProbeCall", "RuntimeRecoveryPolicy", "AdaptiveSpeedProbe", "AdaptiveSpeedHistory", "PicacgSpeedTester",
     ]
     sources = harness_sources + [NET / f"{name}.kt" for name in production_names]
     sources += [ROOT / "app/src/test/java/com/zycomic/app/net/PicacgSpeedTesterRuntimeTest.kt"]

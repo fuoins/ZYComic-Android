@@ -234,6 +234,7 @@ internal object AdaptiveSpeedProbe {
             independenceKey: (T) -> String = key,
             explorationOnly: Boolean = false,
             onUsable: (suspend (T, R) -> Unit)? = null,
+            onQualified: (suspend (T, R) -> Unit)? = null,
             probe: suspend (T) -> R?,
         ): List<Pair<T, R>> = coroutineScope {
             data class Candidate<T>(
@@ -518,6 +519,12 @@ internal object AdaptiveSpeedProbe {
                             changed = CompletableDeferred()
                         }
                         if (ok && onUsable != null) publishBest(force = elapsedMs(result!!) <= fastThresholdMs)
+                        if (ok && elapsedMs(result!!) <= fastThresholdMs) {
+                            // Qualification is distinct from forced/deadline usability publication.
+                            // This executes only for this real, successful in-round sample and only
+                            // after any onUsable route-application callback has returned.
+                            onQualified?.invoke(candidate.target, result!!)
+                        }
                         emit(
                             "probe=${candidate.endpoint}; result=${when {
                                 timedOut -> "timeout"

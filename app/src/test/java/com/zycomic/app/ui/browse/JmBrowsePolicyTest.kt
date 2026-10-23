@@ -147,8 +147,12 @@ class JmBrowsePolicyTest {
         assertEquals("", JmBrowsePolicy.effectiveFilters(custom, legacy).promoteId)
         assertEquals("tf", JmBrowsePolicy.initialFilters(custom).order)
         assertFalse(JmBrowsePolicy.showsModePicker(custom))
-        assertFalse(JmBrowsePolicy.showsCategoryPicker(custom))
+        assertTrue(JmBrowsePolicy.showsCategoryPicker(custom))
         assertTrue(JmBrowsePolicy.showsCategoryPicker(JmBrowsePolicy.ALL_HOT_TAB_ID))
+        val selectedCategory = JmBrowsePolicy.customCategoryFilters(legacy.copy(category = "single", order = "mr"))
+        assertEquals(JmBrowsePolicy.MODE_CATEGORY, selectedCategory.mode)
+        assertEquals("single", selectedCategory.category)
+        assertEquals("mr", selectedCategory.order)
         assertEquals(
             JmBrowsePolicy.Filters(mode = JmBrowsePolicy.MODE_CATEGORY, category = "doujin", order = "mr"),
             JmBrowsePolicy.customCategoryFilters(legacy.copy(order = "mr")),

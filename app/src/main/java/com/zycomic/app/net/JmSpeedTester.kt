@@ -59,6 +59,7 @@ object JmSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onRouteReady: (() -> Unit)? = null,
+        onQualifiedEndpoint: (() -> Unit)? = null,
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): RunResult = lock.withLock {
         check(running.compareAndSet(false, true)) { "JM 测速已在运行" }
@@ -160,6 +161,7 @@ object JmSpeedTester {
                         beforeApplyGate.await()
                     }
                     val routeReadyGuard = Any()
+                    val qualifiedEndpointNotified = AtomicBoolean(false)
                     var lineRouteReady = false
                     var imageRouteReady = false
                     var routeReadyEmitted = false
@@ -176,7 +178,8 @@ object JmSpeedTester {
                     }
                     suspend fun applyLineRoute(target: LineTarget, result: ProbeResult) {
                         if (result.delayMs >= Long.MAX_VALUE || !stillCurrent() || !awaitBeforeApplyGate() || !stillCurrent()) return
-                        if (JmRouteManager.applyMeasuredLineRoute(target.endpoint, configRevision, platformRevision)) {
+                        val applied = JmRouteManager.applyMeasuredLineRoute(target.endpoint, configRevision, platformRevision)
+                        if (applied && stillCurrent()) {
                             synchronized(routeReadyGuard) { lineRouteReady = true }
                             notifyRouteReadyIfNeeded()
                         }
@@ -190,6 +193,21 @@ object JmSpeedTester {
                         if (JmRouteManager.applyMeasuredImageRoute(endpoint, configRevision, platformRevision)) {
                             synchronized(routeReadyGuard) { imageRouteReady = true }
                             notifyRouteReadyIfNeeded()
+                        }
+                    }
+                    suspend fun notifyQualifiedIfApplied(endpoint: DomainIp, image: Boolean) {
+                        if (!stillCurrent() || !awaitBeforeApplyGate() || !stillCurrent()) return
+                        val activeDomain = if (image) JmRouteManager.activeImageDomain else JmRouteManager.lineHost
+                        if (!activeDomain.equals(endpoint.domain, true)) return
+                        val appliedEndpoint = if (image) {
+                            JmRouteManager.currentImageEndpoint()
+                        } else {
+                            JmRouteManager.currentLineEndpoint()
+                        }
+                        if (appliedEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison() &&
+                            stillCurrent() && qualifiedEndpointNotified.compareAndSet(false, true)
+                        ) {
+                            onQualifiedEndpoint?.invoke()
                         }
                     }
                     var progress = JmSpeedTestProgress()
@@ -297,6 +315,7 @@ object JmSpeedTester {
                                 elapsedMs = ProbeResult::elapsedMs,
                                 log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                                 onUsable = { target, result -> applyLineRoute(target, result) },
+                                onQualified = { target, _ -> notifyQualifiedIfApplied(target.endpoint, image = false) },
                                 probe = probe@{ target ->
                                     if (!stillCurrent()) return@probe null
                                     endpointStarted(target.endpoint)
@@ -369,6 +388,7 @@ object JmSpeedTester {
                             sampleInvalid = { result -> result.verdict == ImgVerdict.NO_IMAGE },
                             log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                             onUsable = { endpoint, result -> applyImageRoute(endpoint, result) },
+                            onQualified = { endpoint, _ -> notifyQualifiedIfApplied(endpoint, image = true) },
                             probe = probe@{ endpoint ->
                                 if (!stillCurrent()) return@probe null
                                 endpointStarted(endpoint)

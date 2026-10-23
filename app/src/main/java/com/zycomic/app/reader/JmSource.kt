@@ -3,6 +3,8 @@ package com.zycomic.app.reader
 import com.zycomic.app.data.dto.JmComment
 import com.zycomic.app.net.JmApiInterceptor
 import com.zycomic.app.net.JmAuthStore
+import com.zycomic.app.net.JmHomeGetRetryPolicy
+import com.zycomic.app.net.JmHomeRequestScope
 import com.zycomic.app.net.JmNetworkModule
 import com.zycomic.app.net.JmRequestSession
 import com.zycomic.app.net.JmRouteManager
@@ -19,6 +21,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -399,20 +402,36 @@ object JmSource : HttpSource() {
     }
 
     private suspend fun getJson(path: String, params: Map<String, String>): Any = withContext(Dispatchers.IO) {
-        val currentBase = JmRouteManager.baseUrl
-        if (currentBase.isBlank()) throw IOException("JM 没有可用线路")
+        val requestScope = currentCoroutineContext()[JmHomeRequestScope]
+        requestScope?.requireCurrent()
+        val initialBase = JmRouteManager.baseUrl
+        if (initialBase.isBlank()) throw IOException("JM 没有可用线路")
         JmNetworkModule.ensureAgeCookie()
-        val urlBuilder = currentBase.toHttpUrl().newBuilder().addPathSegments(path.trimStart('/'))
-        params.forEach { (key, value) -> urlBuilder.addQueryParameter(key, value) }
-        val request = Request.Builder().url(urlBuilder.build()).get().headers(headers).build()
-        client.newCall(request).awaitSuccess().use { response ->
-            val body = response.body?.string().orEmpty()
-            try {
-                JSONTokener(body).nextValue()
-            } catch (error: Exception) {
-                throw IOException("JM $path 返回内容不是 JSON", error)
+        requestScope?.requireCurrent()
+
+        suspend fun makeFreshCall(): Any {
+            requestScope?.requireCurrent()
+            val currentBase = JmRouteManager.baseUrl
+            if (currentBase.isBlank()) throw IOException("JM 没有可用线路")
+            val urlBuilder = currentBase.toHttpUrl().newBuilder().addPathSegments(path.trimStart('/'))
+            params.forEach { (key, value) -> urlBuilder.addQueryParameter(key, value) }
+            val request = Request.Builder().url(urlBuilder.build()).get().headers(headers).build()
+                .let { requestScope?.tag(it) ?: it }
+            return client.newCall(request).awaitSuccess().use { response ->
+                requestScope?.requireCurrent()
+                val body = response.body?.string().orEmpty()
+                val parsed = try {
+                    JSONTokener(body).nextValue()
+                } catch (error: Exception) {
+                    throw IOException("JM $path 返回内容不是 JSON", error)
+                }
+                requestScope?.requireCurrent()
+                parsed
             }
         }
+
+        // Only scoped browse /promote calls qualify; every attempt creates a new call and is signed anew.
+        JmHomeGetRetryPolicy.run(path, "GET", requestScope, ::makeFreshCall)
     }
 
     private suspend fun getRelatedImageHost(): String? {

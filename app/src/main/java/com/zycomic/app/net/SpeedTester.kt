@@ -348,12 +348,13 @@ object SpeedTester {
             var code = -1
             var contentType: String? = null
             val trace = ProbeAttemptTrace()
+            val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
             val tracedRequest = req.newBuilder()
                 .tag(ProbeAttemptTrace::class.java, trace)
                 .build()
             try {
                 ProbeAttemptTraceContext.withTrace(trace) {
-                    client.newCall(tracedRequest).execute().use { resp ->
+                    SpeedTestProbeCall.execute(client.newCall(tracedRequest), probeOwner) { resp ->
                         code = resp.code
                         contentType = resp.header("Content-Type")
                             ?.lowercase(java.util.Locale.ROOT)
@@ -831,6 +832,7 @@ object SpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         reconcileConfig: Boolean = false,
+        onQualifiedEndpoint: (() -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             val configRevisionAtStart = RouteManager.configRevision
@@ -964,6 +966,7 @@ object SpeedTester {
                         onRouteReady?.invoke()
                     }
                 }
+                val qualifiedEndpointSent = AtomicBoolean(false)
                 // The runner owns scheduling history and never synthesizes current outcomes from it.
                 // Candidate order remains configured/DNS order.
                 val lineProbeTargets = currentLineTargets
@@ -1001,17 +1004,29 @@ object SpeedTester {
                                 if (best != null && bestIndex != null && runIsCurrent()) {
                                     val oldRoute = RouteManager.baseUrl to RouteManager.selectedLineIp
                                     RouteManager.saveLastFastestLine(bestIndex)
-                                    if (RouteManager.applyFastestLineEndpoint(
-                                            best,
-                                            expectedConfigRevision = configRevisionAtStart,
-                                            expectedPlatformRevision = platformRevisionAtStart,
-                                        ) && oldRoute != (RouteManager.baseUrl to RouteManager.selectedLineIp)
-                                    ) {
+                                    val routeChanged = RouteManager.applyFastestLineEndpoint(
+                                        best,
+                                        expectedConfigRevision = configRevisionAtStart,
+                                        expectedPlatformRevision = platformRevisionAtStart,
+                                    )
+                                    if (routeChanged && oldRoute != (RouteManager.baseUrl to RouteManager.selectedLineIp)) {
                                         NetworkModule.rebuildApi("测速提前发布线路")
                                     }
                                 }
                                 if (currentLineHasFreshSuccess()) lineRouteSettled.complete(Unit)
                                 publishReadyIfPossible()
+                            }
+                        },
+                        onQualified = { target, _ ->
+                            if (runIsCurrent() && allowPublication() && runIsCurrent()) {
+                                val appliedEndpointMatches =
+                                    lineDomain(RouteManager.baseUrl).equals(target.endpoint.domain, ignoreCase = true) &&
+                                        RouteManager.selectedLineIp.equals(target.endpoint.ip, ignoreCase = true)
+                                if (appliedEndpointMatches && runIsCurrent() && allowPublication() &&
+                                    qualifiedEndpointSent.compareAndSet(false, true)
+                                ) {
+                                    onQualifiedEndpoint?.invoke()
+                                }
                             }
                         },
                     ) { target ->
@@ -1119,6 +1134,18 @@ object SpeedTester {
                                 }
                             }
                             publishReadyIfPossible()
+                        }
+                    },
+                    onQualified = { endpoint, _ ->
+                        if (runIsCurrent() && allowPublication() && runIsCurrent()) {
+                            val appliedEndpointMatches =
+                                (RouteManager.imgRewriteTarget ?: RouteManager.imgHost).equals(endpoint.domain, ignoreCase = true) &&
+                                    RouteManager.selectedImgIp.equals(endpoint.ip, ignoreCase = true)
+                            if (appliedEndpointMatches && runIsCurrent() && allowPublication() &&
+                                qualifiedEndpointSent.compareAndSet(false, true)
+                            ) {
+                                onQualifiedEndpoint?.invoke()
+                            }
                         }
                     },
                 ) { endpoint ->

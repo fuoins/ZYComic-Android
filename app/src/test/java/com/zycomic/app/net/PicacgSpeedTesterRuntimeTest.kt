@@ -98,8 +98,16 @@ class PicacgSpeedTesterRuntimeTest {
         val ips = urls.mapIndexed { index, url -> host(url) to listOf("192.0.2.${index + 70}") }.toMap()
         configure(urls, ips, version = 9)
         val published = mutableListOf<DomainIp?>()
+        var qualifiedCallbacks = 0
+        var snapshotWasIncompleteAtQualification = false
 
-        val snapshot = PicacgSpeedTester.run(onApiPublished = published::add)
+        val snapshot = PicacgSpeedTester.run(
+            onApiPublished = published::add,
+            onQualifiedEndpoint = {
+                qualifiedCallbacks++
+                snapshotWasIncompleteAtQualification = PicacgSpeedTester.snapshot.value == null
+            },
+        )
 
         val expected = (0..7).map { "full$it.picacg.test" }.toSet()
         assertEquals(expected, values("runtimeTestRequests").toSet())
@@ -108,6 +116,9 @@ class PicacgSpeedTesterRuntimeTest {
         assertTrue(published.isNotEmpty())
         assertNotNull(published.last())
         assertEquals(snapshot.roundSelectedLine, published.last())
+        assertEquals(1, qualifiedCallbacks, "only the first live, applied endpoint releases startup")
+        assertTrue(snapshotWasIncompleteAtQualification, "qualification is published before the exhaustive full snapshot")
+        assertTrue(snapshot.apiProbes.all { it.testedThisRound }, "full mode must still measure every candidate")
     }
 
     @Test
@@ -468,7 +479,7 @@ class PicacgSpeedTesterRuntimeTest {
 
         assertEquals(4, checksWhenApplyInvalidated, "the early publication callback rechecks the generation after probing")
         assertEquals(1, beforeApplyCalls, "a failed API publication barrier prevents the final snapshot barrier")
-        assertEquals(5, currentChecks, "revision is checked around the early publication guard")
+        assertEquals(6, currentChecks, "revision is rechecked by the independent qualified callback after the early publication guard")
         assertTrue(published.isEmpty(), "a configuration revision race must not publish the API line")
         assertNull(PicacgSpeedTester.snapshot.value)
         assertEquals(oldHistory, PicacgSpeedTestHistoryStorage.loadApi(), "rejected generation cannot publish history")

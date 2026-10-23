@@ -24,17 +24,17 @@ class CoordinatorForegroundReadyRuntimeTest {
             revision = 81,
         )
         PicacgRouteManager.verifiedImageSampleUrl = "https://fixture.invalid/cover.jpg"
-        SpeedTester.emitRouteReady = true
-        PicacgSpeedTester.emitRouteReady = true
-        JmSpeedTester.emitRouteReady = true
+        SpeedTester.emitQualifiedEndpoint = true
+        PicacgSpeedTester.emitQualifiedEndpoint = true
+        JmSpeedTester.emitQualifiedEndpoint = true
     }
 
     private suspend fun holdAllPlatformsAfterReady(): Pair<List<CompletableDeferred<Unit>>, List<CompletableDeferred<Unit>>> {
         val entered = List(3) { CompletableDeferred<Unit>() }
         val release = List(3) { CompletableDeferred<Unit>() }
-        SpeedTester.suspendAfterRouteReadyHook = { entered[0].complete(Unit); release[0].await() }
-        PicacgSpeedTester.suspendAfterRouteReadyHook = { entered[1].complete(Unit); release[1].await() }
-        JmSpeedTester.suspendAfterRouteReadyHook = { entered[2].complete(Unit); release[2].await() }
+        SpeedTester.suspendAfterQualifiedEndpointHook = { entered[0].complete(Unit); release[0].await() }
+        PicacgSpeedTester.suspendAfterQualifiedEndpointHook = { entered[1].complete(Unit); release[1].await() }
+        JmSpeedTester.suspendAfterQualifiedEndpointHook = { entered[2].complete(Unit); release[2].await() }
         return entered to release
     }
 
@@ -47,7 +47,7 @@ class CoordinatorForegroundReadyRuntimeTest {
     }
 
     @Test
-    fun `startup returns empty only after all enabled routes are ready while reports remain running`() = runBlocking {
+    fun `startup releases on qualified endpoints while reports remain running`() = runBlocking {
         configureAllPlatforms()
         val (entered, release) = holdAllPlatformsAfterReady()
         val startup = async { PlatformSpeedTestCoordinator.awaitStartup() }
@@ -66,7 +66,7 @@ class CoordinatorForegroundReadyRuntimeTest {
     }
 
     @Test
-    fun `full retest returns early at route readiness then eventually publishes completed reports`() = runBlocking {
+    fun `full retest returns early at qualified readiness then eventually publishes completed reports`() = runBlocking {
         configureAllPlatforms()
         val (entered, release) = holdAllPlatformsAfterReady()
         val full = async { PlatformSpeedTestCoordinator.retestAllEnabled() }
@@ -85,7 +85,7 @@ class CoordinatorForegroundReadyRuntimeTest {
     }
 
     @Test
-    fun `old generation route ready callback cannot release startup waiter`() = runBlocking {
+    fun `old generation qualified callback cannot release startup waiter`() = runBlocking {
         configureAllPlatforms()
         StartupPlatformPolicy.state.value = StartupPlatformPolicy.state.value.copy(
             disableManwa = true,
@@ -97,7 +97,7 @@ class CoordinatorForegroundReadyRuntimeTest {
         val currentCallbackEntered = CompletableDeferred<Unit>()
         val releaseCurrentCallback = CompletableDeferred<Unit>()
         var callbackAttempt = 0
-        PicacgSpeedTester.suspendBeforeRouteReadyHook = {
+        PicacgSpeedTester.suspendBeforeQualifiedEndpointHook = {
             when (++callbackAttempt) {
                 1 -> { oldCallbackEntered.complete(Unit); releaseOldCallback.await() }
                 2 -> { currentCallbackEntered.complete(Unit); releaseCurrentCallback.await() }
@@ -105,7 +105,7 @@ class CoordinatorForegroundReadyRuntimeTest {
         }
         val currentWorkEntered = CompletableDeferred<Unit>()
         val releaseCurrentWork = CompletableDeferred<Unit>()
-        PicacgSpeedTester.suspendAfterRouteReadyHook = {
+        PicacgSpeedTester.suspendAfterQualifiedEndpointHook = {
             if (callbackAttempt == 2) {
                 currentWorkEntered.complete(Unit)
                 releaseCurrentWork.await()

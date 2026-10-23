@@ -112,6 +112,7 @@ object PicacgSpeedTester {
         beforeApply: suspend () -> Boolean = { true },
         onApiPublished: (DomainIp?) -> Unit = {},
         onRouteReady: (() -> Unit)? = null,
+        onQualifiedEndpoint: (() -> Unit)? = null,
         onProgress: (Progress) -> Unit = {},
     ): Snapshot = withContext(Dispatchers.IO) {
         runLock.withLock {
@@ -119,6 +120,13 @@ object PicacgSpeedTester {
                 val routeReadyNotified = AtomicBoolean(false)
                 val progressLock = Any()
                 val apiReady = AtomicBoolean(false)
+                val qualifiedEndpointNotified = AtomicBoolean(false)
+                val applyGateMutex = Mutex()
+                var applyGateResult: Boolean? = null
+                suspend fun awaitApplyGate(): Boolean = applyGateMutex.withLock {
+                    if (applyGateResult == null) applyGateResult = beforeApply()
+                    applyGateResult == true
+                }
                 val coverReady = AtomicBoolean(false)
                 val contentReady = AtomicBoolean(false)
                 val publicationRejected = AtomicBoolean(false)
@@ -183,6 +191,16 @@ object PicacgSpeedTester {
                     fun current(): Boolean = isCurrent() && revision == PicacgRouteManager.configRevision &&
                         activeVersion == PicacgRouteManager.remoteVersion &&
                         networkIdentity == PlatformSpeedTestCoordinator.currentNetworkIdentity()
+                    suspend fun notifyQualifiedIfApplied(matches: Boolean) {
+                        if (!current()) return
+                        if (!awaitApplyGate() || !current()) {
+                            publicationRejected.set(true)
+                            return
+                        }
+                        if (matches && current() && qualifiedEndpointNotified.compareAndSet(false, true)) {
+                            onQualifiedEndpoint?.invoke()
+                        }
+                    }
                     fun logAdaptive(message: String) {
                         android.util.Log.i("PlatformSpeedTest", "picacg adaptive $message")
                     }
@@ -267,7 +285,7 @@ object PicacgSpeedTester {
                                     log = ::logAdaptive,
                                     onUsable = usable@{ target, measured ->
                                         if (!current()) return@usable
-                                        val allowed = beforeApply() && current()
+                                        val allowed = awaitApplyGate() && current()
                                         if (!allowed) {
                                             publicationRejected.set(true)
                                             return@usable
@@ -298,6 +316,18 @@ object PicacgSpeedTester {
                                             }
                                         }
                                     },
+                                    onQualified = { target, _ ->
+                                        val currentState = PicacgRouteManager.state.value
+                                        val source = PicacgRouteManager.imageSourceFor(target.content)
+                                        val routeMatches = if (PicacgRouteManager.isImageManuallyPinned) {
+                                            PicacgRouteManager.selectedImageEndpoint == target.endpoint &&
+                                                source.equals(target.endpoint.domain, true)
+                                        } else {
+                                            val ranking = if (target.content) currentState.contentRanking else currentState.coverRanking
+                                            ranking.firstOrNull() == target.endpoint && source.equals(target.endpoint.domain, true)
+                                        }
+                                        notifyQualifiedIfApplied(routeMatches)
+                                    },
                                     probe = probe@{ target ->
                                         if (!current()) return@probe null
                                         val probe = SpeedTestProbeBudget.scheduler.withPermit(
@@ -305,9 +335,10 @@ object PicacgSpeedTester {
                                             { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
                                         ) {
                                             if (current()) {
+                                                val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
                                                 runInterruptible {
                                                     attemptedIdentities += target.identity
-                                                    probeImage(target.url, target.endpoint, content = target.content)
+                                                    probeImage(target.url, target.endpoint, content = target.content, ownerJob = probeOwner)
                                                 }
                                             } else {
                                                 null
@@ -353,8 +384,9 @@ object PicacgSpeedTester {
                                         if (!current()) return@deferExploration null
                                         SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.PICACG) {
                                             if (current()) {
+                                                val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
                                                 runInterruptible {
-                                                    probeImage(target.url, target.endpoint, content = target.content)
+                                                    probeImage(target.url, target.endpoint, content = target.content, ownerJob = probeOwner)
                                                 }
                                             } else {
                                                 null
@@ -429,7 +461,7 @@ object PicacgSpeedTester {
                             log = ::logAdaptive,
                             onUsable = usable@{ target, _ ->
                                 if (!current()) return@usable
-                                val allowed = beforeApply() && current()
+                                val allowed = awaitApplyGate() && current()
                                 if (!allowed) {
                                     publicationRejected.set(true)
                                     return@usable
@@ -444,7 +476,15 @@ object PicacgSpeedTester {
                                 } else {
                                     PicacgRouteManager.applyAutomaticApiRoute(target.url, target.endpoint)
                                 }
-                                if (applied && current()) publishApi(target.endpoint)
+                                if (applied && current()) {
+                                    publishApi(target.endpoint)
+                                }
+                            },
+                            onQualified = { target, _ ->
+                                notifyQualifiedIfApplied(
+                                    PicacgRouteManager.selectedApiEndpoint == target.endpoint &&
+                                        PicacgRouteManager.selectedApiHost.equals(URI(target.url).host, true),
+                                )
                             },
                             probe = probe@{ target ->
                                 if (!current()) return@probe null
@@ -453,9 +493,10 @@ object PicacgSpeedTester {
                                     { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
                                 ) {
                                     if (current()) {
+                                        val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
                                         runInterruptible {
                                             attemptedIdentities += target.identity
-                                            probeApi(target.url, target.endpoint)
+                                            probeApi(target.url, target.endpoint, ownerJob = probeOwner)
                                         }
                                     } else {
                                         null
@@ -493,7 +534,12 @@ object PicacgSpeedTester {
                             ) { target ->
                                 if (!current()) return@deferExploration null
                                 SpeedTestProbeBudget.scheduler.withPermit(ContentPlatform.PICACG) {
-                                    if (current()) runInterruptible { probeApi(target.url, target.endpoint) } else null
+                                    if (current()) {
+                                        val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+                                        runInterruptible { probeApi(target.url, target.endpoint, ownerJob = probeOwner) }
+                                    } else {
+                                        null
+                                    }
                                 }.takeIf { current() }
                             }
                         }
@@ -515,7 +561,7 @@ object PicacgSpeedTester {
                         fastestCurrentApi?.identity?.let { identity -> apiTargets.firstOrNull { it.identity == identity } }
                     }
                     var publishedLine: DomainIp? = null
-                    var publicationAllowed = !publicationRejected.get() && beforeApply() && current()
+                    var publicationAllowed = !publicationRejected.get() && awaitApplyGate() && current()
                     if (publicationAllowed) {
                         val selectedSucceededThisRound = requestedEndpoint != null && apiProbes.any {
                             it.endpoint == requestedEndpoint && it.testedThisRound && it.success
@@ -546,7 +592,7 @@ object PicacgSpeedTester {
                     val imageResults = imagePhase.results
                     val activeImageIdentities = imagePhase.activeIdentities
 
-                    if (publicationAllowed && beforeApply() && current()) {
+                    if (publicationAllowed && awaitApplyGate() && current()) {
                         run {
                             val canPersistApiHistory = forceFresh || apiCanUseHistory || apiReconcile || storedApi.remoteVersion == null
                             if (canPersistApiHistory) {
@@ -731,6 +777,7 @@ object PicacgSpeedTester {
             ) {
                 return@withContext false
             }
+            val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
             runInterruptible {
                 val pinnedClient = PicacgRouteManager.newDiagnosticPinnedClient(baseProbeClient, endpoint)
                 val client = if (runtimeRecovery && !image) {
@@ -744,21 +791,21 @@ object PicacgSpeedTester {
                     pinnedClient
                 }
                 try {
-                    if (image) probeImage(url, endpoint, client).success else probeApi(url, endpoint, client).success
+                    if (image) probeImage(url, endpoint, client, ownerJob = probeOwner).success else probeApi(url, endpoint, client, ownerJob = probeOwner).success
                 } finally {
                     client.connectionPool.evictAll()
                 }
             }
         }
 
-    private fun probeApi(baseUrl: String, endpoint: DomainIp, clientOverride: OkHttpClient? = null): Probe {
+    private fun probeApi(baseUrl: String, endpoint: DomainIp, clientOverride: OkHttpClient? = null, ownerJob: kotlinx.coroutines.Job? = null): Probe {
         val start = System.nanoTime()
         var code: Int? = null
         if (!PicacgNetworkPolicy.apiBaseAllowed(baseUrl)) return Probe(endpoint, false, elapsedMs(start), null)
         val success = try {
             val client = clientOverride ?: PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
             val request = Request.Builder().url(baseUrl.trimEnd('/') + "/").get().build()
-            client.newCall(request).execute().use { response ->
+            SpeedTestProbeCall.execute(client.newCall(request), ownerJob) { response ->
                 code = response.code
                 response.closeBodyQuietly()
                 PicacgNetworkPolicy.apiRootReachable(response.code)
@@ -779,8 +826,9 @@ object PicacgSpeedTester {
             val mirror = PicacgBuiltinNetwork.coverHostFor(endpoint.domain) ?: return@withContext false
             PicacgBuiltinNetwork.speedTileUrl(mirror)
         }
+        val probeOwner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
         runInterruptible {
-            probeImage(url, endpoint, content = content, runtimeRecovery = true).success
+            probeImage(url, endpoint, content = content, runtimeRecovery = true, ownerJob = probeOwner).success
         }
     }
 
@@ -799,6 +847,7 @@ object PicacgSpeedTester {
         clientOverride: OkHttpClient? = null,
         content: Boolean = false,
         runtimeRecovery: Boolean = false,
+        ownerJob: kotlinx.coroutines.Job? = null,
     ): Probe {
         val start = System.nanoTime()
         var code: Int? = null
@@ -835,7 +884,7 @@ object PicacgSpeedTester {
             }
             // Fetch one tile and validate status + content-type + image magic on the head bytes.
             fun fetchTile(testUrl: String): Boolean =
-                guarded.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()).execute().use { response ->
+                SpeedTestProbeCall.execute(guarded.newCall(Request.Builder().url(testUrl).header("User-Agent", "okhttp/3.8.1").get().build()), ownerJob) { response ->
                     code = response.code
                     contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
                     if (response.code != 200 || !PicacgImagePayloadPolicy.isImageContentType(contentType)) {

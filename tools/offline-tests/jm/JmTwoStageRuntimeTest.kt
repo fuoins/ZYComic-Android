@@ -59,15 +59,21 @@ class JmTwoStageRuntimeTest {
             JmNetworkModule.resetProbeCounts()
             JmNetworkModule.responseDelayMs = { _, _, sequence -> if (sequence == 1) 0 else 500 }
             val ready = CompletableDeferred<Unit>()
+            val qualified = CompletableDeferred<Unit>()
             val complete = AtomicBoolean(false)
             val run = async(Dispatchers.Default) {
                 JmSpeedTester.run(
                     reuseLines = quick,
                     reuseImages = quick,
+                    onQualifiedEndpoint = { qualified.complete(Unit) },
                     onRouteReady = { ready.complete(Unit) },
                     onProgress = { if (it.phase == com.zycomic.app.net.JmSpeedTestProgress.Phase.COMPLETE) complete.set(true) },
                 )
             }
+            withTimeout(5_000) { qualified.await() }
+            delay(40)
+            assertFalse(complete.get(), "quick=$quick qualified API must not report COMPLETE while deferred endpoints are in flight")
+            assertTrue(JmSpeedTester.isRunning)
             withTimeout(5_000) { ready.await() }
             delay(40)
             assertFalse(complete.get(), "quick=$quick must not report COMPLETE while deferred endpoints are still in flight")
@@ -152,4 +158,46 @@ class JmTwoStageRuntimeTest {
         assertFalse(JmRouteManager.applyMeasuredImageRoute(DomainIp("img.example", "198.51.100.9"), currentRevision, platformRevision))
         assertNotNull(selection)
     }
+    @Test
+    fun `real image endpoint can qualify when all API probes fail`() = runBlocking {
+        configure(size = 2)
+        JmNetworkModule.failedHosts = setOf("api.example")
+        var qualified = false
+        val result = JmSpeedTester.run(onQualifiedEndpoint = { qualified = true })
+        assertTrue(result.snapshot.lineIpDelaysMs.values.all { it == Long.MAX_VALUE })
+        assertTrue(result.snapshot.imageIpDelaysMs.values.any { it < Long.MAX_VALUE })
+        assertTrue(qualified, "an applied, threshold-qualified image endpoint must release startup independently")
+        JmRouteManager.applyRemoteConfig(
+            lines, images,
+            mapOf("api.example" to listOf("192.0.2.99"), "img.example" to listOf("198.51.100.99")),
+            101,
+        )
+    }
+
+    @Test
+    fun `healthy candidates on other domains cannot qualify when both active manual domains fail`() = runBlocking {
+        JmRouteManager.applyRemoteConfig(
+            listOf("https://api.example", "https://other-api.example"),
+            listOf("img.example", "other-img.example"),
+            mapOf(
+                "api.example" to listOf("192.0.2.1"),
+                "other-api.example" to listOf("192.0.2.2"),
+                "img.example" to listOf("198.51.100.1"),
+                "other-img.example" to listOf("198.51.100.2"),
+            ),
+            103,
+        )
+        JmSpeedTester.run()
+        assertTrue(JmRouteManager.selectLineEndpoint("api.example", "192.0.2.1"))
+        assertTrue(JmRouteManager.selectImageEndpoint("img.example", "198.51.100.1"))
+        JmNetworkModule.failedHosts = setOf("api.example", "img.example")
+        var qualified = false
+        val result = JmSpeedTester.run(onQualifiedEndpoint = { qualified = true })
+        assertTrue(result.snapshot.lineIpDelaysMs.any { it.key.domain == "other-api.example" && it.value < Long.MAX_VALUE })
+        assertTrue(result.snapshot.imageIpDelaysMs.any { it.key.domain == "other-img.example" && it.value < Long.MAX_VALUE })
+        assertFalse(qualified, "valid endpoints on inactive domains are not the user's actual bound business")
+        assertEquals("api.example", JmRouteManager.lineHost)
+        assertEquals("img.example", JmRouteManager.activeImageDomain)
+    }
+
 }

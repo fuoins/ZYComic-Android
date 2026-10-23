@@ -7,6 +7,7 @@ import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.FavoriteRepository
 import com.zycomic.app.data.repository.MangaRepository
 import com.zycomic.app.data.repository.UserRepository
+import com.zycomic.app.net.JmHomeRequestScope
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.RuntimeNetworkGate
 import com.zycomic.app.platform.ContentPlatform
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -129,6 +131,8 @@ class BrowseViewModel {
     val jmWeekIssuesError: StateFlow<String?> = _jmWeekIssuesError.asStateFlow()
     private var jmWeekIssuesLoaded = false
     private var jmWeekIssuesJob: Job? = null
+    private var jmPageGeneration = 0L
+    private var jmPromoteRequestId = 0L
 
     private val _jmPromoteSections = MutableStateFlow<List<JmSource.PromoteSection>>(emptyList())
     val jmPromoteSections: StateFlow<List<JmSource.PromoteSection>> = _jmPromoteSections.asStateFlow()
@@ -143,19 +147,31 @@ class BrowseViewModel {
 
     fun loadJmPromoteSections(retry: Boolean = false) {
         if (_jmPromoteSectionsLoading.value || (jmPromoteSectionsLoaded && !retry)) return
+        val tab = mainTab.value
+        if (currentPlatform.value != ContentPlatform.JM || tabs.getOrNull(tab)?.platformId != ContentPlatform.JM) return
         jmPromoteSectionsJob?.cancel()
+        val requestId = ++jmPromoteRequestId
+        val pageGeneration = jmPageGeneration
+        val item = tabs[tab]
+        val requestScope = JmHomeRequestScope.capture {
+            requestId == jmPromoteRequestId && pageGeneration == jmPageGeneration &&
+                mainTab.value == tab && currentPlatform.value == ContentPlatform.JM &&
+                tabs.getOrNull(tab) == item
+        }
         _jmPromoteSectionsLoading.value = true
         _jmPromoteSectionsError.value = null
         jmPromoteSectionsJob = scope.launch {
             try {
-                _jmPromoteSections.value = JmRandomAlbumRepository.sections(forceRefresh = retry)
+                val sections = withContext(requestScope) { JmRandomAlbumRepository.sections(forceRefresh = retry) }
+                requestScope.requireCurrent()
+                _jmPromoteSections.value = sections
                 jmPromoteSectionsLoaded = true
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _jmPromoteSectionsError.value = e.message ?: "JM 首页板块加载失败"
+                if (requestScope.isCurrent()) _jmPromoteSectionsError.value = e.message ?: "JM 首页板块加载失败"
             } finally {
-                _jmPromoteSectionsLoading.value = false
+                if (requestId == jmPromoteRequestId) _jmPromoteSectionsLoading.value = false
             }
         }
     }
@@ -343,12 +359,30 @@ class BrowseViewModel {
             !state.loaded && !state.loading.value && state.error.value == null
         ) {
             refresh()
+        } else if (item.platformId == ContentPlatform.JM && !state.loaded && !state.loading.value) {
+            refresh()
         }
     }
 
     fun onBrowseHidden() {
         browseVisible = false
         cancelManwaLoad()
+        jmPageGeneration++
+        tabs.getOrNull(mainTab.value)?.takeIf { it.platformId == ContentPlatform.JM }?.let { item ->
+            stateById["${item.platformId.id}:${item.id}"]?.let(::invalidateJmRequest)
+        }
+        jmPromoteRequestId++
+        jmPromoteSectionsJob?.cancel()
+        jmPromoteSectionsJob = null
+        _jmPromoteSectionsLoading.value = false
+    }
+
+    private fun invalidateJmRequest(state: TabState) {
+        state.jmRequestId++
+        state.jmJob?.cancel()
+        state.jmJob = null
+        state.loading.value = false
+        state.appending.value = false
     }
 
     private fun cancelManwaLoad() {
@@ -397,7 +431,13 @@ class BrowseViewModel {
         if (!canSelect(item)) return
         if (mainTab.value == tab && currentPlatform.value == item.platformId) return
         val platformChanged = currentPlatform.value != item.platformId
-        if (mainTab.value != tab) cancelManwaLoad()
+        if (mainTab.value != tab) {
+            tabs.getOrNull(mainTab.value)?.takeIf { it.platformId == ContentPlatform.JM }?.let { previous ->
+                stateById["${previous.platformId.id}:${previous.id}"]?.let(::invalidateJmRequest)
+            }
+            jmPageGeneration++
+            cancelManwaLoad()
+        }
         bindPlatform(item.platformId, allowIndependentRanking = isIndependentRanking(item))
         if (platformChanged) {
             selectionMode.value = false
@@ -615,9 +655,7 @@ class BrowseViewModel {
         if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
             val ts = stateFor(tab)
-            ts.jmJob?.cancel()
-            ts.loading.value = false
-            ts.appending.value = false
+            invalidateJmRequest(ts)
             ts.jmJob = scope.launch { doLoadJm(reset = true, tab = tab) }
         } else {
             if (!browseVisible) return
@@ -634,7 +672,7 @@ class BrowseViewModel {
         val ts = stateFor(tab)
         if (ts.loading.value || ts.appending.value || !ts.hasMore.value) return
         if (tabs[tab].platformId == ContentPlatform.JM) {
-            ts.jmJob?.cancel()
+            invalidateJmRequest(ts)
             ts.jmJob = scope.launch { doLoadJm(reset = false, tab = tab) }
         } else {
             currentJob = scope.launch { doLoad(reset = false, tab = tab) }
@@ -735,6 +773,8 @@ class BrowseViewModel {
         if (tab !in tabs.indices || !StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
         val ts = stateFor(tab)
         val reqId = ++ts.jmRequestId
+        val item = tabs[tab]
+        val pageGeneration = jmPageGeneration
         if (reset) {
             ts.currentPage = 1
             ts.previousJmPageFirstId = null
@@ -745,6 +785,7 @@ class BrowseViewModel {
         } else {
             ts.appending.value = true
         }
+        var browseRequestScope: JmHomeRequestScope? = null
         try {
             var filters = JmBrowsePolicy.effectiveFilters(tabs[tab].id, ts.jmFilters.value)
             if (filters.mode == JmBrowsePolicy.MODE_CATEGORY && filters.promoteId.isNotBlank()) {
@@ -763,20 +804,35 @@ class BrowseViewModel {
                 ts.jmFilters.value = filters
             }
             val previousFirstId = ts.previousJmPageFirstId
-            val result = JmSource.browse(
-                mode = filters.mode,
-                page = ts.currentPage,
-                query = filters.query,
-                order = filters.order,
-                category = JmBrowsePolicy.apiCategory(filters.category),
-                weekId = filters.weekId,
-                weekType = filters.weekType,
-                previousFirstId = previousFirstId,
-                serializationType = filters.serializationType,
-                serializationDate = filters.serializationDate,
-                promoteId = filters.promoteId,
-            )
-            if (reqId != ts.jmRequestId) return
+            val ownerIsCurrent = {
+                reqId == ts.jmRequestId && pageGeneration == jmPageGeneration &&
+                    mainTab.value == tab && currentPlatform.value == ContentPlatform.JM &&
+                    tabs.getOrNull(tab) == item
+            }
+            val browse = suspend {
+                JmSource.browse(
+                    mode = filters.mode,
+                    page = ts.currentPage,
+                    query = filters.query,
+                    order = filters.order,
+                    category = JmBrowsePolicy.apiCategory(filters.category),
+                    weekId = filters.weekId,
+                    weekType = filters.weekType,
+                    previousFirstId = previousFirstId,
+                    serializationType = filters.serializationType,
+                    serializationDate = filters.serializationDate,
+                    promoteId = filters.promoteId,
+                )
+            }
+            val result = if (filters.query.isBlank() &&
+                filters.mode in setOf(JmBrowsePolicy.MODE_RECOMMENDATIONS, JmBrowsePolicy.MODE_PROMOTE_LIST)
+            ) {
+                browseRequestScope = JmHomeRequestScope.capture(ownerIsCurrent)
+                withContext(browseRequestScope!!) { browse() }
+            } else {
+                browse()
+            }
+            if (!ownerIsCurrent() || browseRequestScope?.isCurrent() == false) return
             if (!StartupPlatformPolicy.isEnabled(tabs[tab].platformId)) return
             if (JmBrowsePolicy.shouldStopPaging(result.items, previousFirstId)) {
                 ts.loaded = true
@@ -793,7 +849,11 @@ class BrowseViewModel {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (reqId != ts.jmRequestId) return
+            if (reqId != ts.jmRequestId || pageGeneration != jmPageGeneration || mainTab.value != tab ||
+                currentPlatform.value != ContentPlatform.JM || browseRequestScope?.isCurrent() == false
+            ) {
+                return
+            }
             if (reset || ts.mangas.value.isEmpty()) ts.error.value = e.message ?: "JM 加载失败"
             ts.loaded = true
             ts.hasMore.value = false

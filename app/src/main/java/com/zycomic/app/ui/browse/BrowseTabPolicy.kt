@@ -34,17 +34,10 @@ internal object BrowseTabPolicy {
         return ReorderResult(draftIds.map { currentById.getValue(it) }, nextSelectedIndex.coerceAtLeast(0))
     }
 
-    /** New platform tabs are inserted at the default Manwa → Picacg → JM boundary without rearranging existing entries. */
+    /** New tabs are appended globally without rearranging existing entries. */
     fun insertNewTab(current: List<BrowseTabItem>, item: BrowseTabItem): Pair<List<BrowseTabItem>, Int> {
         val result = current.toMutableList()
-        val index = if (item.platformId == ContentPlatform.MANWA) {
-            result.indexOfFirst { it.platformId != ContentPlatform.MANWA }.takeIf { it >= 0 } ?: result.size
-        } else if (item.platformId == ContentPlatform.PICACG) {
-            val lastManwa = result.indexOfLast { it.platformId == ContentPlatform.MANWA }
-            if (lastManwa >= 0) lastManwa + 1 else result.indexOfFirst { it.platformId == ContentPlatform.JM }.takeIf { it >= 0 } ?: result.size
-        } else {
-            result.size
-        }
+        val index = result.size
         result.add(index, item)
         return result to index
     }

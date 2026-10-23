@@ -12,6 +12,10 @@ on:
         description: '手动重跑：目标 tag（如 v1.0.0）'
         required: true
         default: 'v1.0.0'
+      prepare_draft:
+        description: '从所选分支完整签名构建并创建待审核草稿，不创建 Git tag、不公开发布'
+        type: boolean
+        default: false
       validate_only:
         description: '仅在所选分支执行发布前单元测试，不创建 Release'
         type: boolean
@@ -28,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.validate_only && github.ref || github.event.inputs.tag || github.ref }}
+          ref: ${{ (inputs.validate_only || inputs.prepare_draft) && github.ref || github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -73,7 +77,7 @@ jobs:
           test -n "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "ver=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "将发布 $TAG"
+          echo "构建版本 $TAG（仅创建草稿，不公开发布）"
 
       - name: Verify release source and version
         env:
@@ -81,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           SHA="$(git rev-parse HEAD)"
-          if [ "${{ inputs.validate_only }}" != "true" ]; then
+          if [ "${{ inputs.validate_only }}" != "true" ] && [ "${{ inputs.prepare_draft }}" != "true" ]; then
             test "$(git rev-parse "refs/tags/${{ steps.t.outputs.tag }}^{commit}")" = "$SHA"
           fi
           grep -q "versionName = \"$RELEASE_VERSION\"" app/build.gradle.kts
@@ -98,11 +102,10 @@ jobs:
       - name: Isolated JVM contract tests
         run: |
           ./gradlew -p tools/offline-tests prepareHarnessDependencies --console=plain
-          python3 tools/test_maccms_coordinator.py
-          python3 tools/test_picacg_repository.py
-          python3 tools/test_manwa_first_page_retry.py
-          python3 tools/test_maccms_routes.py
-          python3 tools/test_picacg_startup_publication.py
+          for test in tools/test_*.py; do
+            echo "===== $test ====="
+            python3 "$test"
+          done
 
       - name: Release unit tests
         env:
@@ -168,6 +171,8 @@ jobs:
           cat "$RUNNER_TEMP/certs.txt"
           # 兼容不同 build-tools 版本的证书摘要输出措辞
           grep -qiE "SHA-256 digest" "$RUNNER_TEMP/certs.txt"
+          # 与 v4.2.0 正式签名保持一致，保证可覆盖安装而非仅验证任意有效签名。
+          grep -qiE 'certificate SHA-256 digest: db5a76b3dee9631dec8e8dd36313267da34a7cc766a36a80c34ab09229ac823d' "$RUNNER_TEMP/certs.txt"
           OUT="ZYComic-${{ steps.t.outputs.ver }}-arm64-v8a.apk"
           cp "$APK" "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
@@ -179,7 +184,7 @@ jobs:
           "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
           grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "versionCode='13'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='14'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "package: name='com.zycomic.app'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
           test -s app/build/outputs/mapping/release/mapping.txt
@@ -198,19 +203,18 @@ jobs:
         if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 4.2.0 正式版
+          ZYComic 5.0.0 待审核构建
 
-          本次更新（相对 v4.1.0）
-          - 修复配置更新后的重复测速：同一配置、网络与平台状态下复用已完成整轮，不再仅因配置更新通知而重复启动；真正变化及手动完整或单平台重测仍正常执行。
-          - 修复哔咔配置切换时旧测速结果继续写回的问题：旧任务的进度、历史、线路发布与完成通知会失效，避免覆盖新配置。
-          - 配置变化时按端点身份增量核对：沿用身份匹配的历史结果、测试新增端点并剔除已移除端点；哔咔在绑定线路及图源测试前重新验证所选 API 端点，验证失败不回退到其他历史线路。
-          - 优化开屏勾选与进度：区分“本轮通过”和“历史有效沿用”，身份核对后沿用的历史成功结果显示勾选并计入就绪进度，但不代表本轮重新实测；未检测、失败、受阻和禁用不误计为就绪。
-          - 保留 Maccms 本轮共享线路绑定要求，以及独立后台 HTTPS 测活；共享线路就绪不代表推荐 API 或所有域名测活已通过。
-          - 补充配置更新、历史沿用、旧任务失效与开屏状态的回归测试。
+          本次更新（相对 v4.2.0）
+          - 优化快测与完整测速的两阶段就绪判断，已就绪平台提前放行，剩余项目继续后台检测。
+          - 开屏展示实际运行模式，并补充分类、每行漫画格数、平台标签切换及标签增删改操作说明。
+          - 禁漫首页安全 GET 请求限次重试，隔离测速请求取消，避免取消其他业务请求。
+          - 优化标签筛选、默认顺序、新增后选中与管理页固定标题。
+          - 补充启动协调、两阶段测速、首页重试及标签管理回归测试。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 版本：4.2.0（versionCode 13），正式包名 com.zycomic.app。
+          - 版本：5.0.0（versionCode 14），正式包名 com.zycomic.app。
           - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
 
@@ -218,6 +222,20 @@ jobs:
           - 保留上游项目及依赖项各自的版权与许可声明。
           EOF
           echo "notes 已生成"
+
+      - name: Guard branch-only draft mode
+        if: ${{ inputs.prepare_draft && !inputs.validate_only }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_TAG: ${{ steps.t.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$DRAFT_TAG" > "$RUNNER_TEMP/matching-tags.json"
+          python3 - "$RUNNER_TEMP/matching-tags.json" "$DRAFT_TAG" <<'PYGUARD'
+          import json, sys
+          refs = json.load(open(sys.argv[1]))
+          assert not any(r['ref'] == 'refs/tags/' + sys.argv[2] for r in refs), '目标 tag 已存在；停止以避免修改现有版本'
+          PYGUARD
 
       - name: Create draft GitHub Release and upload APK
         if: ${{ !inputs.validate_only }}
@@ -230,3 +248,21 @@ jobs:
             --draft \
             --target "$RELEASE_SOURCE_SHA"
           echo "草稿 Release 已创建（未发布）"
+
+      - name: Verify draft remains private and tag absent
+        if: ${{ inputs.prepare_draft && !inputs.validate_only }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_TAG: ${{ steps.t.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$DRAFT_TAG" --json isDraft,targetCommitish,url > "$RUNNER_TEMP/draft.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$DRAFT_TAG" > "$RUNNER_TEMP/matching-tags.json"
+          python3 - "$RUNNER_TEMP/draft.json" "$RUNNER_TEMP/matching-tags.json" "$DRAFT_TAG" "$RELEASE_SOURCE_SHA" <<'PYGUARD'
+          import json, sys
+          release = json.load(open(sys.argv[1]))
+          assert release['isDraft'] is True, 'Release 必须保持草稿'
+          assert release['targetCommitish'] == sys.argv[4], '草稿目标必须是已验证的源码 commit'
+          assert not any(r['ref'] == 'refs/tags/' + sys.argv[3] for r in json.load(open(sys.argv[2]))), '禁止创建 Git tag'
+          print('Verified: draft only, exact source SHA, no Git tag:', release['url'])
+          PYGUARD
