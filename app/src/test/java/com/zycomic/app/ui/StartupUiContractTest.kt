@@ -134,7 +134,7 @@ class StartupUiContractTest {
         assertEquals("重新完整测速", strings["startup_retest_all"])
         assertEquals("网络配置", strings["startup_network_status_title"])
         assertEquals(
-            "三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。",
+            "三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。\\n点击“筛选”按钮可调整分类和每行漫画格数；切换标签页即可切换平台，标签页支持新增、删除和修改。",
             strings["startup_guidance_copy"],
         )
         assertEquals("本身晚上就卡", strings["startup_guidance_evening"])

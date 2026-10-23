@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+DEPS = ROOT / "tools/offline-tests/build/deps"
 CACHE = Path.home() / ".gradle/caches/modules-2/files-2.1"
 OUT = Path("/tmp/jm-runtime-recovery-offline-tests")
 STUBS = OUT / "RuntimeRecoveryTestStubs.kt"
@@ -12,10 +13,10 @@ CLASSES = OUT / "classes"
 
 
 def jar(group: str, name: str, version: str) -> str:
+    prepared = DEPS / f"{name}-{version}.jar"
+    if prepared.is_file():
+        return str(prepared)
     matches = sorted((CACHE / group / name / version).rglob("*.jar"))
-    local = Path("/tmp/jm-targeted-check/deps") / f"{name}-{version}.jar"
-    if not matches and local.is_file():
-        matches = [local]
     if not matches:
         raise RuntimeError(f"Cached dependency not found: {group}:{name}:{version}; this runner is offline")
     return str(matches[0])
@@ -258,7 +259,7 @@ fun logcat(message: () -> String) = Unit
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.8.0")
     okhttp = jar("com.squareup.okhttp3", "okhttp-jvm", "5.3.2")
     okio = jar("com.squareup.okio", "okio-jvm", "3.16.4")
-    junit = "/tmp/jm-targeted-check/junit-console.jar"
+    junit = jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2")
     compiler = ":".join([
         jar("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.2.21"),
         stdlib,
@@ -315,7 +316,10 @@ fun logcat(message: () -> String) = Unit
         signer_file,
     ]
     mockwebserver = jar("com.squareup.okhttp3", "mockwebserver3", "5.3.2")
-    cp = ":".join([stdlib, coroutines, okhttp, okio, junit, "/tmp/jm-targeted-check/deps/json-20240303.jar", mockwebserver])
+    mockk = sorted((DEPS / "mockk").glob("*.jar"))
+    if not mockk:
+        raise RuntimeError("Missing MockK dependencies; run ./gradlew -p tools/offline-tests prepareHarnessDependencies")
+    cp = ":".join([stdlib, coroutines, okhttp, okio, junit, jar("org.json", "json", "20240303"), mockwebserver, *map(str, mockk)])
     subprocess.run([
         "java", "-cp", compiler, "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
         "-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", cp,

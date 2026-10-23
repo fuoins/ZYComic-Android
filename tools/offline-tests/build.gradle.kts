@@ -16,6 +16,8 @@ val harnessCoordinates = listOf(
     "org.jetbrains.kotlin:kotlin-daemon-embeddable:2.2.21",
     "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.0",
     "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2",
+    "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.6.1",
+    "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.6.1",
     "org.jetbrains:annotations:13.0",
     "com.squareup.okhttp3:okhttp-jvm:5.3.2",
     "com.squareup.okhttp3:mockwebserver3:5.3.2",
@@ -40,7 +42,12 @@ val harnessDependencies = harnessCoordinates.map { coordinate ->
     }
 }
 
+val mockkDependencies = configurations.detachedConfiguration(dependencies.create("io.mockk:mockk-jvm:1.14.11"))
+
 tasks.register<Copy>("prepareHarnessDependencies") {
     from(harnessDependencies)
+    from(mockkDependencies) {
+        into("mockk")
+    }
     into(layout.buildDirectory.dir("deps"))
 }
