@@ -179,7 +179,7 @@ jobs:
           "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
           grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "versionCode='12'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='13'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "package: name='com.zycomic.app'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
           test -s app/build/outputs/mapping/release/mapping.txt
@@ -198,18 +198,19 @@ jobs:
         if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 4.1.0 正式版
+          ZYComic 4.2.0 正式版
 
-          本次更新（相对 v4.0.0）
-          - 修复漫蛙首次进入时部分临时连接失败：仅对安全 GET 首屏请求自动重试一次，保留取消、页面、账号、配置与网络变化保护，不扩大到登录或其他写操作。
-          - 优化 Maccms 开屏勾选：本轮哔咔 lines3 IP 正式选定并绑定后，立即显示“共享线路就绪”，不再等待哔咔图源测试结束。
-          - 保留 Maccms 三个域名各自的后台 HTTPS 测活与真实结果日志，不阻塞进入应用；共享线路就绪不代表域名测活或推荐 API 已通过。
-          - Maccms 继续固定使用本轮共享 IP，保留各域名的 Host/SNI 与 TLS 校验；无本轮有效 IP 时不打勾，不回退旧 IP 或 DNS。
-          - 修复整轮测速完成后重复启动五端点快测：同一配置、网络与平台状态下复用已完成整轮，保留勾选进度；真正变化及手动完整或单平台重测仍正常执行。
+          本次更新（相对 v4.1.0）
+          - 修复配置更新后的重复测速：同一配置、网络与平台状态下复用已完成整轮，不再仅因配置更新通知而重复启动；真正变化及手动完整或单平台重测仍正常执行。
+          - 修复哔咔配置切换时旧测速结果继续写回的问题：旧任务的进度、历史、线路发布与完成通知会失效，避免覆盖新配置。
+          - 配置变化时按端点身份增量核对：沿用身份匹配的历史结果、测试新增端点并剔除已移除端点；哔咔在绑定线路及图源测试前重新验证所选 API 端点，验证失败不回退到其他历史线路。
+          - 优化开屏勾选与进度：区分“本轮通过”和“历史有效沿用”，身份核对后沿用的历史成功结果显示勾选并计入就绪进度，但不代表本轮重新实测；未检测、失败、受阻和禁用不误计为就绪。
+          - 保留 Maccms 本轮共享线路绑定要求，以及独立后台 HTTPS 测活；共享线路就绪不代表推荐 API 或所有域名测活已通过。
+          - 补充配置更新、历史沿用、旧任务失效与开屏状态的回归测试。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 版本：4.1.0（versionCode 12），正式包名 com.zycomic.app。
+          - 版本：4.2.0（versionCode 13），正式包名 com.zycomic.app。
           - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
 
