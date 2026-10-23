@@ -5,15 +5,16 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+DEPS = ROOT / "tools/offline-tests/build/deps"
 CACHE = Path.home() / ".gradle/caches/modules-2/files-2.1"
 OUT = Path("/tmp/zycomic-api-transport-observation")
 
 
 def jar(group, name, version):
+    prepared = DEPS / f"{name}-{version}.jar"
+    if prepared.is_file():
+        return str(prepared)
     matches = sorted((CACHE / group / name / version).rglob("*.jar"))
-    fallback = Path("/tmp/jm-targeted-check/deps") / f"{name}-{version}.jar"
-    if not matches and fallback.is_file():
-        matches = [fallback]
     if not matches:
         raise RuntimeError(f"Missing offline dependency: {group}:{name}:{version}")
     return str(matches[0])
@@ -85,9 +86,7 @@ def main():
     platform.write_text(PLATFORM)
     stdlib = jar("org.jetbrains.kotlin", "kotlin-stdlib", "2.2.21")
     coroutines = jar("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.8.0")
-    junit = Path("/tmp/jm-targeted-check/junit-console.jar")
-    if not junit.is_file():
-        raise RuntimeError("Missing offline JUnit console: " + str(junit))
+    junit = Path(jar("org.junit.platform", "junit-platform-console-standalone", "1.10.2"))
     cp = ":".join([stdlib, coroutines, str(junit),
                    jar("com.squareup.okhttp3", "okhttp-jvm", "5.3.2"),
                    jar("com.squareup.okio", "okio-jvm", "3.16.4")])

@@ -17,6 +17,7 @@ MAIN = ROOT / "app/src/main/java"
 TEST = ROOT / "app/src/test/java"
 FAKES = ROOT / "tools/offline-tests/browse-tab-management"
 CACHE = Path.home() / ".gradle/caches/modules-2/files-2.1"
+DEPS = ROOT / "tools/offline-tests/build/deps"
 BROWSE_DIR = MAIN / "com/zycomic/app/ui/browse"
 PICACG_DIR = MAIN / "com/zycomic/app/ui/picacg"
 STRINGS = ROOT / "i18n-kmk/src/commonMain/moko-resources/base/strings.xml"
@@ -201,9 +202,8 @@ def run_offline_kotlin_tests() -> None:
     junit = _required_jar(
         "JUNIT_CONSOLE_JAR",
         "junit-platform-console-standalone",
-        [*_cached_candidates("org.junit.platform", "junit-platform-console-standalone"),
-         Path("/tmp/jm-targeted-check/junit-console.jar"),
-         Path("/tmp/jm-checkin-offline-image-url/junit-console.jar")],
+        [DEPS / "junit-platform-console-standalone-1.10.2.jar",
+         *_cached_candidates("org.junit.platform", "junit-platform-console-standalone")],
     )
     sdk_roots = {
         Path(value).expanduser()
@@ -217,9 +217,7 @@ def run_offline_kotlin_tests() -> None:
     android_api = _required_jar(
         "ANDROID_API_JAR",
         "an Android API jar containing android.content.Context/SharedPreferences",
-        [*sdk_android_jars,
-         Path("/tmp/jm-targeted-check/android-api.jar"),
-         Path("/tmp/jm-checkin-offline-image-url/android-api.jar")],
+        [*sdk_android_jars],
     )
     json_jar = _required_jar(
         "JSON_JAR",
