@@ -222,7 +222,7 @@ def run_offline_kotlin_tests() -> None:
     json_jar = _required_jar(
         "JSON_JAR",
         "org.json/json",
-        [*_cached_candidates("org.json", "json")],
+        [DEPS / "json-20240303.jar", *_cached_candidates("org.json", "json")],
     )
 
     kotlin_version = os.environ.get("KOTLIN_VERSION", "2.2.21")
@@ -236,7 +236,8 @@ def run_offline_kotlin_tests() -> None:
         _required_jar("KOTLIN_ANNOTATIONS_JAR", "JetBrains annotations", [_cached_jar("org.jetbrains", "annotations", "13.0")]),
     ]
 
-    compile_classpath = os.pathsep.join(map(str, [stdlib, junit, android_api, json_jar]))
+    # Real org.json must precede the Android stub jar, whose org.json.* only throws "Stub!".
+    compile_classpath = os.pathsep.join(map(str, [stdlib, junit, json_jar, android_api]))
     compiler_classpath = os.pathsep.join(map(str, [compiler, stdlib, *compiler_support]))
     sources = [
         # Real production policies/models; only framework-facing API/data types are faked.
@@ -275,7 +276,8 @@ def run_offline_kotlin_tests() -> None:
     ]
     print("Compiling production policies and selected tests offline...", flush=True)
     subprocess.run(compile_cmd, cwd=ROOT, check=True)
-    runtime_classpath = os.pathsep.join(map(str, [output, stdlib, junit, android_api, json_jar]))
+    # Real org.json must precede the Android stub jar, whose org.json.* only throws "Stub!".
+    runtime_classpath = os.pathsep.join(map(str, [output, stdlib, junit, json_jar, android_api]))
     print("Running selected JUnit tests...", flush=True)
     subprocess.run(
         ["java", "-jar", str(junit), "execute", "--class-path", runtime_classpath,
