@@ -113,6 +113,156 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(123_456L, reconciled.measurements.single { it.identity.domain == "old0.picacg.test" }.measuredAtEpochMs)
         assertTrue(reconciled.measurements.single { it.identity.domain == "added.picacg.test" }.success)
         assertEquals(2, reconciled.measurements.size)
+        assertEquals(DomainIp("added.picacg.test", "192.0.2.99"), PicacgRouteManager.selectedApiEndpoint)
+    }
+
+    @Test
+    fun `zero additions revalidates selected matching history before image stage`() = runBlocking {
+        val url = "https://steady.picacg.test"
+        val ip = "192.0.2.101"
+        configure(listOf(url), mapOf(host(url) to listOf(ip)), version = 12)
+        PicacgSpeedTestHistoryStorage.saveApi(
+            PicacgSpeedTestHistoryPolicy.PhaseHistory(11, listOf(measurement(url, ip, true, 4, 123_500))),
+        )
+        setResponses(mapOf("steady.picacg.test" to 200))
+        val events = mutableListOf<String>()
+        val published = mutableListOf<DomainIp?>()
+
+        val snapshot = PicacgSpeedTester.run(
+            reconcileConfig = true,
+            onApiPublished = {
+                events += "published"
+                published += it
+            },
+            onProgress = { if (it.stage == PicacgSpeedTester.Stage.PREPARING_IMAGES) events += "images" },
+        )
+
+        val selected = DomainIp("steady.picacg.test", ip)
+        assertEquals(listOf("steady.picacg.test"), values("runtimeTestRequests"))
+        assertEquals(listOf(selected), published)
+        assertTrue(events.indexOf("published") in 0 until events.indexOf("images"))
+        assertEquals(listOf(selected), snapshot.apiProbes.filter { it.testedThisRound && it.success }.map { it.endpoint })
+        assertTrue(snapshot.apiProbes.single().testedThisRound)
+        assertTrue(PicacgSpeedTestHistoryStorage.loadApi().measurements.single().measuredAtEpochMs > 123_500)
+    }
+
+    @Test
+    fun `removed historical endpoint is neither verified nor bound`() = runBlocking {
+        val retainedUrl = "https://retained.picacg.test"
+        val deletedUrl = "https://deleted.picacg.test"
+        val retainedIp = "192.0.2.111"
+        val deletedIp = "192.0.2.112"
+        PicacgSpeedTestHistoryStorage.saveApi(
+            PicacgSpeedTestHistoryPolicy.PhaseHistory(
+                20,
+                listOf(
+                    measurement(retainedUrl, retainedIp, true, 20, 123_510),
+                    measurement(deletedUrl, deletedIp, true, 1, 123_511),
+                ),
+            ),
+        )
+        configure(listOf(retainedUrl), mapOf(host(retainedUrl) to listOf(retainedIp)), version = 21)
+        setResponses(mapOf("retained.picacg.test" to 200))
+        val published = mutableListOf<DomainIp?>()
+
+        val snapshot = PicacgSpeedTester.run(reconcileConfig = true, onApiPublished = published::add)
+
+        assertEquals(listOf("retained.picacg.test"), values("runtimeTestRequests"))
+        assertEquals(listOf(DomainIp("retained.picacg.test", retainedIp)), published)
+        assertFalse(snapshot.apiProbes.any { it.endpoint.domain == "deleted.picacg.test" })
+        assertEquals(setOf("retained.picacg.test"), PicacgSpeedTestHistoryStorage.loadApi().measurements.map { it.identity.domain }.toSet())
+    }
+
+    @Test
+    fun `failed selected historical verification does not fallback and records fresh failure`() = runBlocking {
+        val alternativeUrl = "https://faster.picacg.test"
+        val pinnedUrl = "https://pinned.picacg.test"
+        val alternativeIp = "192.0.2.120"
+        val pinnedIp = "192.0.2.121"
+        configure(
+            listOf(alternativeUrl, pinnedUrl),
+            mapOf(host(alternativeUrl) to listOf(alternativeIp), host(pinnedUrl) to listOf(pinnedIp)),
+            version = 31,
+        )
+        val selected = DomainIp(host(pinnedUrl), pinnedIp)
+        invokeRoute("applyAutomaticApiEndpoint", selected)
+        routeManager.javaClass.getMethod("setApiManuallyPinned", Boolean::class.javaPrimitiveType).invoke(routeManager, true)
+        val oldAlternative = measurement(alternativeUrl, alternativeIp, true, 1, 123_519)
+        val oldPinned = measurement(pinnedUrl, pinnedIp, true, 2, 123_520)
+        PicacgSpeedTestHistoryStorage.saveApi(PicacgSpeedTestHistoryPolicy.PhaseHistory(30, listOf(oldAlternative, oldPinned)))
+        setResponses(mapOf("pinned.picacg.test" to 503))
+        val published = mutableListOf<DomainIp?>()
+
+        val snapshot = PicacgSpeedTester.run(reconcileConfig = true, onApiPublished = published::add)
+
+        assertEquals(listOf("pinned.picacg.test"), values("runtimeTestRequests"), "only the pinned selected identity may be rechecked; the faster historical endpoint is not a fallback")
+        assertTrue(published.singleOrNull() == null, "a failed verification publishes null, never a fallback")
+        assertNull(snapshot.roundSelectedLine)
+        val current = snapshot.apiProbes.single { it.endpoint == selected }
+        assertFalse(current.success)
+        assertTrue(current.testedThisRound)
+        assertEquals(503, current.httpStatus)
+        assertEquals(listOf("faster.picacg.test", "pinned.picacg.test", "faster.picacg.test", "pinned.picacg.test"), values("runtimeTestResolutions"))
+        assertTrue(values("runtimeTestApiSelections").isEmpty(), "the failed pinned endpoint cannot switch API host")
+        assertEquals(selected, PicacgRouteManager.selectedApiEndpoint, "the probe never binds a different endpoint")
+        val storedRows = PicacgSpeedTestHistoryStorage.loadApi().measurements
+        assertEquals(2, storedRows.size)
+        assertTrue(storedRows.single { it.identity.domain == "faster.picacg.test" }.success, "the unselected history remains historical only")
+        val stored = storedRows.single { it.identity.domain == "pinned.picacg.test" }
+        assertFalse(stored.success)
+        assertEquals(503, stored.httpStatus)
+        assertTrue(stored.measuredAtEpochMs > oldPinned.measuredAtEpochMs)
+    }
+
+    @Test
+    fun `rejected preverification guard does not probe or publish selected history`() = runBlocking {
+        val url = "https://guarded.picacg.test"
+        val ip = "192.0.2.131"
+        configure(listOf(url), mapOf(host(url) to listOf(ip)), version = 42)
+        val old = measurement(url, ip, true, 1, 123_530)
+        val history = PicacgSpeedTestHistoryPolicy.PhaseHistory(41, listOf(old))
+        PicacgSpeedTestHistoryStorage.saveApi(history)
+        var beforeApplyCalls = 0
+        val published = mutableListOf<DomainIp?>()
+
+        PicacgSpeedTester.run(
+            reconcileConfig = true,
+            beforeApply = {
+                beforeApplyCalls++
+                false
+            },
+            onApiPublished = published::add,
+        )
+
+        assertTrue(values("runtimeTestRequests").isEmpty(), "a rejected guard must prevent the binding-only probe")
+        assertTrue(published.isEmpty())
+        assertNull(PicacgSpeedTester.snapshot.value)
+        assertEquals(history, PicacgSpeedTestHistoryStorage.loadApi())
+        assertEquals(1, beforeApplyCalls)
+    }
+
+    @Test
+    fun `configuration change during preverification guard does not probe or publish`() = runBlocking {
+        val url = "https://racing.picacg.test"
+        val ip = "192.0.2.141"
+        configure(listOf(url), mapOf(host(url) to listOf(ip)), version = 52)
+        val history = PicacgSpeedTestHistoryPolicy.PhaseHistory(51, listOf(measurement(url, ip, true, 1, 123_540)))
+        PicacgSpeedTestHistoryStorage.saveApi(history)
+        val published = mutableListOf<DomainIp?>()
+
+        PicacgSpeedTester.run(
+            reconcileConfig = true,
+            beforeApply = {
+                invokeRoute("invalidateRuntimeTestRevision")
+                true
+            },
+            onApiPublished = published::add,
+        )
+
+        assertTrue(values("runtimeTestRequests").isEmpty(), "a changed config guard must prevent the selected-target probe")
+        assertTrue(published.isEmpty())
+        assertNull(PicacgSpeedTester.snapshot.value)
+        assertEquals(history, PicacgSpeedTestHistoryStorage.loadApi())
     }
 
     @Test

@@ -285,6 +285,8 @@
     <string name="startup_platform_settings_summary">此处的更改将在下次重启后生效</string>
     <string name="startup_platform_restart_toast">重启软件生效</string>
     <string name="startup_platform_keep_one_toast">至少保留一个漫画源</string>
+    <string name="startup_checks_ready_count">就绪 %1$d/%2$d</string>
+    <string name="startup_check_reused">历史有效沿用</string>
     <string name="startup_retest_all">重新完整测速</string>
     <string name="startup_network_status_title">网络配置</string>
     <string name="startup_guidance_copy">三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。</string>

@@ -168,11 +168,11 @@ object PicacgSpeedTester {
                     else -> mutableListOf()
                 }
                 var freshApiHistory = emptyList<PicacgSpeedTestHistoryPolicy.Measurement>()
+                val apiCompleted = AtomicInteger(0)
+                val apiSuccessful = AtomicInteger(0)
+                val apiFailed = AtomicInteger(0)
                 timings.start(SpeedTestTimings.Phase.PICACG_LINES).use {
                     publishProgress(Progress(Stage.TESTING_API, total = targetsToProbeApi.size))
-                    val completed = AtomicInteger(0)
-                    val successful = AtomicInteger(0)
-                    val failed = AtomicInteger(0)
                     val freshResults = coroutineScope {
                         targetsToProbeApi.map { target ->
                             async {
@@ -187,16 +187,16 @@ object PicacgSpeedTester {
                                     quickSelected = target.identity in apiQuickIdentities,
                                 )
                                 synchronized(apiResults) {
-                                    if (result?.success == true) successful.incrementAndGet()
-                                    if (result != null && !result.success) failed.incrementAndGet()
-                                    val done = completed.incrementAndGet()
+                                    if (result?.success == true) apiSuccessful.incrementAndGet()
+                                    if (result != null && !result.success) apiFailed.incrementAndGet()
+                                    val done = apiCompleted.incrementAndGet()
                                     publishProgress(
                                         Progress(
                                             Stage.TESTING_API,
                                             completed = done,
                                             total = targetsToProbeApi.size,
-                                            successful = successful.get(),
-                                            failed = failed.get(),
+                                            successful = apiSuccessful.get(),
+                                            failed = apiFailed.get(),
                                         ),
                                     )
                                 }
@@ -210,21 +210,89 @@ object PicacgSpeedTester {
                     }
                 }
 
+                // Fix the endpoint that would be selected before validating it. In a config
+                // reconciliation, an unchanged historical winner is only a candidate: it must
+                // succeed in this round before it can be bound. Never fall through to another
+                // historical endpoint or expand the configured probe pool after that check fails.
+                val apiSelection = if (apiQuick) freshApiHistory.map { it.toProbe() } else apiResults
+                val fastestCandidate = apiSelection.filter(Probe::success)
+                    .minWithOrNull(compareBy<Probe>({ it.elapsedMs }, { it.endpoint.domain }, { it.endpoint.ip }))
+                val requestedEndpoint = if (PicacgRouteManager.isApiManuallyPinned) {
+                    PicacgRouteManager.selectedApiEndpoint
+                } else {
+                    fastestCandidate?.endpoint
+                }
+                val selectedTarget = when {
+                    requestedEndpoint == null -> null
+                    apiQuick -> apiQuickSelection.map { it.toApiTarget() }
+                        .firstOrNull { it.endpoint == requestedEndpoint }
+                    else -> apiTargets.firstOrNull { it.endpoint == requestedEndpoint }
+                }
+                var apiPublicationAllowed = true
+                var verifiedIdentity: PicacgSpeedTestHistoryPolicy.Identity? = null
+                if (selectedTarget != null && apiResults.none {
+                        it.endpoint == requestedEndpoint && it.testedThisRound
+                    }
+                ) {
+                    // A false coordinator guard must not trigger a publication-only network probe.
+                    apiPublicationAllowed = beforeApply() && isCurrent() &&
+                        revision == PicacgRouteManager.configRevision &&
+                        activeVersion == PicacgRouteManager.remoteVersion
+                    if (apiPublicationAllowed) {
+                        publishProgress(
+                            Progress(
+                                Stage.TESTING_API,
+                                completed = apiCompleted.get(),
+                                total = targetsToProbeApi.size + 1,
+                                successful = apiSuccessful.get(),
+                                failed = apiFailed.get(),
+                            ),
+                        )
+                        val verified = SpeedTestProbeBudget.scheduler.withPermit(
+                            ContentPlatform.PICACG,
+                            { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.PICACG, it) },
+                        ) {
+                            if (isCurrent()) probeApi(selectedTarget.url, selectedTarget.endpoint) else null
+                        }?.copy(measuredAtEpochMs = System.currentTimeMillis(), testedThisRound = true)
+                        if (verified != null) {
+                            apiResults.removeAll { it.endpoint == requestedEndpoint && !it.testedThisRound }
+                            apiResults += verified
+                            verifiedIdentity = selectedTarget.identity
+                            val measurement = selectedTarget.identity.toMeasurement(
+                                verified,
+                                verified.measuredAtEpochMs ?: System.currentTimeMillis(),
+                            )
+                            freshApiHistory = freshApiHistory + measurement
+                            if (verified.success) apiSuccessful.incrementAndGet() else apiFailed.incrementAndGet()
+                            val done = apiCompleted.incrementAndGet()
+                            publishProgress(
+                                Progress(
+                                    Stage.TESTING_API,
+                                    completed = done,
+                                    total = targetsToProbeApi.size + 1,
+                                    successful = apiSuccessful.get(),
+                                    failed = apiFailed.get(),
+                                ),
+                            )
+                        }
+                    }
+                }
+
                 // Publish the authoritative current-round API binding before any image work.
                 // Probe progress alone cannot cross the configuration barrier or prove selection.
                 var publishedLine: DomainIp? = null
-                if (beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
-                    val apiSelection = if (apiQuick) freshApiHistory.map { it.toProbe() } else apiResults
-                    val fastest = apiSelection.filter(Probe::success).minByOrNull(Probe::elapsedMs)
-                    if (fastest != null && !PicacgRouteManager.isApiManuallyPinned) {
-                        val fastestUrl = apiUrls.firstOrNull { runCatching { URI(it).host.equals(fastest.endpoint.domain, true) }.getOrDefault(false) }
-                        if (fastestUrl != null) {
-                            PicacgRouteManager.selectApiUrl(fastestUrl, manual = false)
-                            PicacgRouteManager.applyAutomaticApiEndpoint(fastest.endpoint)
-                        }
+                if (apiPublicationAllowed && beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
+                    val selectedSucceededThisRound = requestedEndpoint != null && apiResults.any {
+                        it.endpoint == requestedEndpoint && it.testedThisRound && it.success
+                    }
+                    var bindingApplied = PicacgRouteManager.isApiManuallyPinned &&
+                        selectedSucceededThisRound && PicacgRouteManager.selectedApiEndpoint == requestedEndpoint
+                    if (selectedSucceededThisRound && selectedTarget != null && !PicacgRouteManager.isApiManuallyPinned) {
+                        bindingApplied = PicacgRouteManager.selectApiUrl(selectedTarget.url, manual = false) &&
+                            PicacgRouteManager.applyAutomaticApiEndpoint(selectedTarget.endpoint)
                     }
                     publishedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
-                        PicacgRouteManager.selectedApiEndpoint,
+                        requestedEndpoint?.takeIf { selectedSucceededThisRound && bindingApplied },
                         apiResults.filter(Probe::testedThisRound).mapTo(hashSetOf(), Probe::endpoint),
                     ) { endpoint -> apiResults.any { it.endpoint == endpoint && it.testedThisRound && it.success } }
                     if (isCurrent()) onApiPublished(publishedLine)
@@ -323,7 +391,7 @@ object PicacgSpeedTester {
                 val finished = System.currentTimeMillis()
                 val probeOrder = compareBy<Probe>({ if (it.success) it.elapsedMs else Long.MAX_VALUE }, { it.endpoint.domain }, { it.endpoint.ip })
                 var result = Snapshot(started, finished, activeVersion, apiResults.sortedWith(probeOrder), imageResults.sortedWith(probeOrder), blockedReason, revision)
-                if (beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
+                if (apiPublicationAllowed && beforeApply() && isCurrent() && revision == PicacgRouteManager.configRevision && activeVersion == PicacgRouteManager.remoteVersion) {
                     val imageSelection = if (imageQuick) freshImageHistory.map { it.toProbe() } else imageResults
                     if (!PicacgRouteManager.isImageManuallyPinned) {
                         // Keep the fastest IP per storage-b root for EACH service independently — covers
@@ -353,10 +421,13 @@ object PicacgSpeedTester {
                     }
                     val canPersistApiHistory = forceFresh || apiCanUseHistory || apiReconcile || storedApi.remoteVersion == null
                     if (cachedApi.isEmpty() && canPersistApiHistory) {
+                        val apiHistoryToReconcile = verifiedIdentity?.let { identity ->
+                            storedApi.copy(measurements = storedApi.measurements.filterNot { it.identity == identity })
+                        } ?: storedApi
                         val apiHistory = when {
                             forceFresh -> PicacgSpeedTestHistoryPolicy.freshOnly(activeVersion, freshApiHistory)
                             apiReconcile -> PicacgSpeedTestHistoryPolicy.reconcile(
-                                storedApi,
+                                apiHistoryToReconcile,
                                 activeVersion,
                                 apiTargets.mapTo(linkedSetOf(), ApiTarget::identity),
                                 freshApiHistory,

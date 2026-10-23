@@ -908,7 +908,7 @@ private fun StartupPlatformSwitches() {
             modifier = Modifier.fillMaxWidth().height(6.dp),
         )
         Text(
-            "通过 ${startupChecksPassed(checkStatuses)}/${checkStatuses.size}",
+            stringResource(KMR.strings.startup_checks_ready_count, startupChecksPassed(checkStatuses), checkStatuses.size),
             modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -916,7 +916,12 @@ private fun StartupPlatformSwitches() {
         )
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             checkStatuses.forEach { check ->
-                val passed = check.result == StartupCheckResult.SUCCESS
+                val passed = check.result.isReady
+                val resultLabel = if (check.result == StartupCheckResult.REUSED) {
+                    stringResource(KMR.strings.startup_check_reused)
+                } else {
+                    check.result.label
+                }
                 Column(
                     modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -929,6 +934,7 @@ private fun StartupPlatformSwitches() {
                                 StartupCheckResult.NOT_TESTED -> "·"
                                 StartupCheckResult.RUNNING -> "…"
                                 StartupCheckResult.SUCCESS -> "✓"
+                                StartupCheckResult.REUSED -> "✓"
                                 StartupCheckResult.FAILED -> "×"
                                 StartupCheckResult.DISABLED -> "禁"
                                 StartupCheckResult.BLOCKED -> "阻"
@@ -947,7 +953,7 @@ private fun StartupPlatformSwitches() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        check.result.label,
+                        resultLabel,
                         style = MaterialTheme.typography.labelSmall,
                         textAlign = TextAlign.Center,
                         color = if (passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,

@@ -23,7 +23,9 @@ class SpeedTestRunPolicyTest {
     @Test
     fun `network change starts a run without disqualifying version-matched history`() {
         val changed = key.copy(networkIdentity = "wifi-2|direct")
+        val changedRouting = key.copy(networkIdentity = "wifi-1|proxy")
         assertFalse(SpeedTestRunPolicy.canSkip(key, changed, false, false))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, changedRouting, false, false))
         assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, changed, changed, key))
         assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, key, changed, null))
     }
@@ -51,15 +53,19 @@ class SpeedTestRunPolicyTest {
 
     @Test
     fun `manual full retest overrides either remembered-result preference`() {
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key, true, false))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, true))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key, true, false, remoteConfigUpdated = true))
+        assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, true, remoteConfigUpdated = true))
         assertFalse(SpeedTestRunPolicy.canFastTest(true, true))
         assertFalse(SpeedTestRunPolicy.canFastTest(false, false))
         assertFalse(SpeedTestRunPolicy.canReuseImages(true, true, key, key, key))
     }
 
     @Test
-    fun `actual remote config update forces full test without duplicate completed run`() {
+    fun `remote config update does not invalidate an identical completed generation`() {
         assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
-        assertFalse(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = true))
+        assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = true))
         assertFalse(SpeedTestRunPolicy.canFastTest(true, false, remoteConfigUpdated = true))
         assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
     }

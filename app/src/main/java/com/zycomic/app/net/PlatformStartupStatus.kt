@@ -13,10 +13,11 @@ enum class StartupCheckPhase(val label: String) {
     MACCMS_LINE("Maccms 共享线路就绪"),
 }
 
-enum class StartupCheckResult(val label: String) {
+enum class StartupCheckResult(val label: String, val isReady: Boolean = false) {
     NOT_TESTED("未检测"),
     RUNNING("检测中"),
-    SUCCESS("通过"),
+    SUCCESS("通过", isReady = true),
+    REUSED("历史有效沿用", isReady = true),
     FAILED("失败"),
     DISABLED("已禁用"),
     BLOCKED("受阻"),
@@ -43,7 +44,7 @@ fun updateStartupCheckStatus(
 }
 
 fun startupChecksPassed(statuses: List<StartupCheckStatus>): Int =
-    statuses.distinctBy { it.phase }.count { it.result == StartupCheckResult.SUCCESS }
+    statuses.distinctBy { it.phase }.count { it.result.isReady }
 
 /** Fixed check denominator; failures, skipped work and history never advance it. */
 fun startupChecksProgress(statuses: List<StartupCheckStatus>): Float =

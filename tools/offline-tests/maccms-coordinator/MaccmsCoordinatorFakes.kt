@@ -101,6 +101,7 @@ object SpeedTester {
     val reuseImages = mutableListOf<Boolean>()
     val reconcileConfigFlags = mutableListOf<Boolean>()
     var beforeApplyHook: (() -> Unit)? = null
+    var progressEvents = emptyList<Progress>()
 
     suspend fun runAndApply(
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, ImgVerdict>) -> Unit)? = null,
@@ -120,6 +121,7 @@ object SpeedTester {
         progress.value = if (lastRunSkipped) {
             Progress(Phase.SKIPPED)
         } else {
+            progressEvents.forEach { event -> onStageProgress?.invoke(event) }
             Progress(
                 lineQuickTest = reuseLines,
                 imageQuickTest = allowImageReuse,
@@ -162,6 +164,8 @@ object PicacgSpeedTester {
     var suspendBeforeApplyHook: (suspend () -> Unit)? = null
     var suspendBeforeImagesHook: (suspend () -> Unit)? = null
     var progressHook: ((Progress) -> Unit)? = null
+    var apiProbesOverride: List<Probe>? = null
+    var imageProbesOverride: List<Probe>? = null
     fun logSummary(probes: List<Probe>) = "${probes.count { it.success }}/${probes.size} fixture probes"
 
     suspend fun run(
@@ -196,15 +200,15 @@ object PicacgSpeedTester {
             }
         }
         val selectedLine = if (reuseApi) previous?.roundSelectedLine else DomainIp("api.picacg.test", "192.0.2.${10 + runCount}")
-        val api = if (reuseApi) {
+        val api = apiProbesOverride ?: if (reuseApi) {
             previous?.apiProbes.orEmpty()
         } else {
             listOfNotNull(
                 selectedLine?.let { Probe(it, true, 4, 200) },
             )
         }
-        val images = if (reuseImages) {
-            previous?.imageProbes.orEmpty()
+        val images = imageProbesOverride ?: if (reuseImages) {
+            previous?.imageProbes.orEmpty().map { it.copy(testedThisRound = false) }
         } else if (sampleAvailable) {
             listOf(
                 Probe(DomainIp("img.picacg.test", "192.0.2.20"), true, 5, 200),
@@ -278,6 +282,9 @@ object JmSpeedTester {
     var runCount = 0
     val reuseFlags = mutableListOf<Pair<Boolean, Boolean>>()
     val reconcileConfigFlags = mutableListOf<Boolean>()
+    var progressEvents = emptyList<JmSpeedTestProgress>()
+    var lineIpDelaysForRun = emptyMap<DomainIp, Long>()
+    var imageIpDelaysForRun = emptyMap<DomainIp, Long>()
     data class RunResult(val snapshot: JmRouteManager.SpeedTestSnapshot, val submission: JmSpeedTestSubmission?)
     suspend fun run(
         reuseLines: Boolean = false,
@@ -292,9 +299,12 @@ object JmSpeedTester {
         reconcileConfigFlags += reconcileConfig
         val runId = "offline-jm-$runCount"
         val result = if (beforeApply() && isCurrent()) {
+            progressEvents.forEach { event -> onProgress?.invoke(event) }
             JmRouteManager.SpeedTestSnapshot(
                 lineDelaysMs = mapOf("jm.test" to 2L),
                 imageDelaysMs = mapOf("img.jm.test" to 3L),
+                lineIpDelaysMs = lineIpDelaysForRun,
+                imageIpDelaysMs = imageIpDelaysForRun,
                 startedAtEpochMs = 1,
                 completedAtEpochMs = 2,
                 remoteVersion = DevConfig.version,

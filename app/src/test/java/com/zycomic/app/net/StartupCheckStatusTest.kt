@@ -38,8 +38,8 @@ class StartupCheckStatusTest {
     }
 
     @Test
-    fun `all non success states keep fixed denominator without counting as passes`() {
-        StartupCheckResult.entries.filter { it != StartupCheckResult.SUCCESS }.forEach { result ->
+    fun `all non ready states keep fixed denominator without counting as passes`() {
+        StartupCheckResult.entries.filter { !it.isReady }.forEach { result ->
             val statuses = initialStartupCheckStatuses().map { it.copy(result = result) }
             assertEquals(0, startupChecksPassed(statuses), result.name)
             assertEquals(0f, startupChecksProgress(statuses), result.name)
@@ -47,6 +47,29 @@ class StartupCheckStatusTest {
         val partial = updateStartupCheckStatus(initialStartupCheckStatuses(), StartupCheckPhase.JM_LINE, StartupCheckResult.SUCCESS)
         assertEquals(1f / 7f, startupChecksProgress(partial))
         assertEquals(1f, startupChecksProgress(initialStartupCheckStatuses().map { it.copy(result = StartupCheckResult.SUCCESS) }))
+    }
+
+    @Test
+    fun `reused history is ready progress but remains distinct from fresh success and failure`() {
+        assertEquals("历史有效沿用", StartupCheckResult.REUSED.label)
+        assertEquals(true, StartupCheckResult.REUSED.isReady)
+        assertEquals(true, StartupCheckResult.SUCCESS.isReady)
+        listOf(
+            StartupCheckResult.FAILED,
+            StartupCheckResult.DISABLED,
+            StartupCheckResult.BLOCKED,
+            StartupCheckResult.NO_SAMPLE,
+            StartupCheckResult.INTERRUPTED,
+        ).forEach { assertEquals(false, it.isReady, it.name) }
+
+        val reused = updateStartupCheckStatus(
+            initialStartupCheckStatuses(),
+            StartupCheckPhase.MANWA_LINE,
+            StartupCheckResult.REUSED,
+        )
+        assertEquals(1, startupChecksPassed(reused))
+        assertEquals(1f / 7f, startupChecksProgress(reused))
+        assertEquals(StartupCheckResult.REUSED, reused.first { it.phase == StartupCheckPhase.MANWA_LINE }.result)
     }
 
     @Test

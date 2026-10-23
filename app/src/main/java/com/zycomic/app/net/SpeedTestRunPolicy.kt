@@ -11,13 +11,14 @@ internal data class SpeedTestRunKey(
 )
 
 internal object SpeedTestRunPolicy {
+    @Suppress("UNUSED_PARAMETER")
     fun canSkip(
         completed: SpeedTestRunKey?,
         current: SpeedTestRunKey,
         forceFresh: Boolean,
         platformOnly: Boolean,
         remoteConfigUpdated: Boolean = false,
-    ): Boolean = !forceFresh && !platformOnly && !remoteConfigUpdated && completed == current
+    ): Boolean = !forceFresh && !platformOnly && completed == current
 
     /** Each tester validates its history's configuration version, not the current endpoint pool. */
     fun canFastTest(

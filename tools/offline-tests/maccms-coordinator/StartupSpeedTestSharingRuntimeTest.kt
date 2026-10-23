@@ -129,8 +129,10 @@ class StartupSpeedTestSharingRuntimeTest {
         assertEquals(2, PicacgSpeedTester.runCount, "explicit full retest starts an independent fresh run")
         PlatformSpeedTestCoordinator.awaitStartup()
         assertEquals(2, PicacgSpeedTester.runCount, "ordinary same-key startup reuses the completed full retest")
+        DevConfig.version += 1
+        PicacgRouteManager.remoteVersion = DevConfig.version
         PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
-        assertEquals(3, PicacgSpeedTester.runCount, "an explicit config change must not reuse a startup request")
+        assertEquals(3, PicacgSpeedTester.runCount, "a genuinely new config version must not reuse a startup request")
         PlatformSpeedTestCoordinator.awaitStartup()
 
         val mutations: List<() -> Unit> = listOf(

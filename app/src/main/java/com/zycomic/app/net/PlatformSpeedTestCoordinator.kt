@@ -51,6 +51,7 @@ object PlatformSpeedTestCoordinator {
     private var checkedConfigurationVersion: Int? = null
     private val completedPhases = CompletedSpeedTestPhases()
     private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
+    private val completedChecks = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, List<StartupCheckStatus>>>()
     private val fullTestRequest = FullSpeedTestRequest<List<PlatformSpeedTestReport>>()
     private val healthScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var maccmsHealthJob: Job? = null
@@ -170,7 +171,8 @@ object PlatformSpeedTestCoordinator {
                         when {
                             !StartupPlatformPolicy.isEnabled(policy, platform) -> check.copy(result = StartupCheckResult.DISABLED)
                             onlyPlatform != null && onlyPlatform != platform -> check.copy(result = StartupCheckResult.NOT_RUN)
-                            else -> check
+                            else -> reusableChecks(key, platform, forceFresh, onlyPlatform != null)
+                                .firstOrNull { it.phase == check.phase } ?: check
                         }
                     }
                     // Equal versions retain the existing version-only fast test. Each tester
@@ -327,7 +329,11 @@ object PlatformSpeedTestCoordinator {
                                             if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             picacgSnapshot = snapshot.takeIf { PicacgSpeedTester.snapshot.value == it && generationIsCurrent() }
                                             picacgSnapshot?.let { current ->
-                                                publishPicacgMeasuredChecks(current)
+                                                publishPicacgMeasuredChecks(
+                                                    current,
+                                                    allowReconciledHistory = freshConfig && !forceFresh && onlyPlatform == null,
+                                                    imagesReused = imagesDone,
+                                                )
                                             }
                                             // The API callback already bound the current round before image work.
                                             if (picacgSnapshot == null && MaccmsSpeedTester.routeSelection().lines3Ip == null) {
@@ -389,6 +395,9 @@ object PlatformSpeedTestCoordinator {
                                 report(platform, status, reason, picacgSnapshot).also { platformReport ->
                                     if (generationIsCurrent()) {
                                         publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
+                                        if (platform != ContentPlatform.PICACG && status == "tested" && freshConfig && !forceFresh && onlyPlatform == null) {
+                                            publishReconciledChecks(platform, platformReport)
+                                        }
                                         blockUnresolvedChecks(platform)
                                     }
                                 }
@@ -405,6 +414,7 @@ object PlatformSpeedTestCoordinator {
                         if (platformReport.status != "skipped") {
                             val phaseKey = phaseKey(key, platform)
                             completedReports[platform] = phaseKey to platformReport
+                            completedChecks[platform] = phaseKey to _startupCheckStatuses.value.filter { it.phase in phasesFor(platform) }
                             if (platformReport.lineStatus in setOf("tested", "quick")) {
                                 completedPhases.record(phaseKey, CompletedSpeedTestPhases.Phase.LINES)
                             }
@@ -461,6 +471,36 @@ object PlatformSpeedTestCoordinator {
 
     private fun publishStartupCheck(phase: StartupCheckPhase, result: StartupCheckResult, detail: String? = null) {
         _startupCheckStatuses.update { current -> updateStartupCheckStatus(current, phase, result, detail) }
+    }
+
+    private fun reusableChecks(key: SpeedTestRunKey, platform: ContentPlatform, forceFresh: Boolean, platformOnly: Boolean): List<StartupCheckStatus> {
+        if (forceFresh || platformOnly || platform == ContentPlatform.PICACG) return emptyList()
+        val phaseKey = phaseKey(key, platform)
+        if (!completedPhases.canReuse(phaseKey, CompletedSpeedTestPhases.Phase.LINES, false, false) ||
+            !completedPhases.canReuse(phaseKey, CompletedSpeedTestPhases.Phase.IMAGES, false, false)
+        ) {
+            return emptyList()
+        }
+        return completedChecks[platform]?.takeIf { it.first == phaseKey }?.second.orEmpty()
+    }
+
+    /** A reconciled map contains only matching measurement identities plus this round's probes. */
+    private fun publishReconciledChecks(platform: ContentPlatform, report: PlatformSpeedTestReport) {
+        phasesFor(platform).zip(listOf(report.lineDelays, report.imageDelays)).forEach { (phase, delays) ->
+            if (delays.values.none { it < Long.MAX_VALUE }) return@forEach
+            _startupCheckStatuses.update { current ->
+                current.map { check ->
+                    if (check.phase == phase && check.result in setOf(StartupCheckResult.RUNNING, StartupCheckResult.NOT_TESTED, StartupCheckResult.FAILED)) {
+                        check.copy(
+                            result = StartupCheckResult.REUSED,
+                            detail = "沿用身份已核对的有效历史测量；本轮新增探测的失败记录仍保留，不计为本轮实测通过",
+                        )
+                    } else {
+                        check
+                    }
+                }
+            }
+        }
     }
 
     private fun publishMeasuredCheck(phase: StartupCheckPhase, completed: Int, total: Int, successful: Int) {
@@ -539,20 +579,27 @@ object PlatformSpeedTestCoordinator {
         }
     }
 
-    private fun publishPicacgMeasuredChecks(snapshot: PicacgSpeedTester.Snapshot) {
-        fun measured(phase: StartupCheckPhase, probes: List<PicacgSpeedTester.Probe>) {
+    private fun publishPicacgMeasuredChecks(snapshot: PicacgSpeedTester.Snapshot, allowReconciledHistory: Boolean, imagesReused: Boolean) {
+        fun measured(phase: StartupCheckPhase, probes: List<PicacgSpeedTester.Probe>, allowHistory: Boolean) {
             val fresh = probes.filter { it.testedThisRound }
+            val retainedSuccess = allowHistory && probes.any { !it.testedThisRound && it.success }
             publishStartupCheck(
                 phase,
                 when {
-                    fresh.isEmpty() -> StartupCheckResult.NOT_TESTED
                     fresh.any { it.success } -> StartupCheckResult.SUCCESS
-                    else -> StartupCheckResult.FAILED
+                    retainedSuccess -> StartupCheckResult.REUSED
+                    fresh.isNotEmpty() || (allowHistory && probes.isNotEmpty()) -> StartupCheckResult.FAILED
+                    else -> StartupCheckResult.NOT_TESTED
                 },
-                if (fresh.isEmpty()) "仅复用历史结果，本轮未检测" else "仅统计本轮真实探测",
+                when {
+                    fresh.any { it.success } -> "仅统计本轮真实探测"
+                    retainedSuccess -> "沿用身份已核对的有效历史测量；本轮新测 ${fresh.size} 条、失败 ${fresh.count { !it.success }} 条，不计为本轮实测通过"
+                    fresh.isEmpty() -> "本轮未检测到可用结果"
+                    else -> "本轮真实探测均未通过"
+                },
             )
         }
-        measured(StartupCheckPhase.PICACG_LINE, snapshot.apiProbes)
+        measured(StartupCheckPhase.PICACG_LINE, snapshot.apiProbes, allowReconciledHistory)
         if (snapshot.imageBlockedReason != null) {
             publishStartupCheck(
                 StartupCheckPhase.PICACG_IMAGE,
@@ -560,7 +607,7 @@ object PlatformSpeedTestCoordinator {
                 snapshot.imageBlockedReason,
             )
         } else {
-            measured(StartupCheckPhase.PICACG_IMAGE, snapshot.imageProbes)
+            measured(StartupCheckPhase.PICACG_IMAGE, snapshot.imageProbes, allowReconciledHistory || imagesReused)
         }
     }
 
