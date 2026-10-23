@@ -111,6 +111,54 @@ class AdaptiveSpeedProbeTest {
     }
 
     @Test
+    fun `no history accepts two valid probes without a fixed global latency ceiling`() = runBlocking {
+        val tested = mutableListOf<String>()
+        val events = mutableListOf<String>()
+        val results = session(concurrency = 1).run(
+            scope = "cold-start",
+            candidates = listOf("first", "second", "third", "fourth"),
+            key = { it },
+            quick = true,
+            success = { it == "valid" },
+            elapsedMs = { 2_500L },
+            log = events::add,
+        ) { candidate ->
+            tested += candidate
+            "valid"
+        }
+
+        assertEquals(listOf("first", "second"), tested)
+        assertEquals(2, results.size)
+        assertTrue(events.any { it.contains("fastThresholdMs=${Long.MAX_VALUE}") })
+    }
+
+    @Test
+    fun `reliable history contributes to threshold and slow current pool expands`() = runBlocking {
+        val store = MemoryStore()
+        val clock = 1_000_000L
+        store.values[historyKey("06:20-18:20", "wifi", "baseline", "known")] =
+            AdaptiveSpeedProbe.History(successes = 5, latencyMs = 600L, lastMeasuredAt = clock)
+        val tested = mutableListOf<String>()
+        val events = mutableListOf<String>()
+
+        session(store, now = { clock }, concurrency = 1).run(
+            scope = "baseline",
+            candidates = listOf("known", "backup", "extra"),
+            key = { it },
+            quick = true,
+            success = { it == "valid" },
+            elapsedMs = { 1_300L },
+            log = events::add,
+        ) { candidate ->
+            tested += candidate
+            "valid"
+        }
+
+        assertEquals(listOf("known", "backup", "extra"), tested)
+        assertTrue(events.any { it.contains("baselineMs=600; fastThresholdMs=1200") })
+    }
+
+    @Test
     fun `fewer than two samples fall back to configured candidate order`() = runBlocking {
         val store = MemoryStore()
         val clock = 10_000L
@@ -136,10 +184,16 @@ class AdaptiveSpeedProbeTest {
 
     @Test
     fun `slow and failed endpoints do not stop exploration after more than five candidates`() = runBlocking {
+        val store = MemoryStore()
+        val clock = 1_000_000L
+        store.values[historyKey("06:20-18:20", "wifi", "all", "ep0")] =
+            AdaptiveSpeedProbe.History(successes = 3, latencyMs = 100L, lastMeasuredAt = clock)
+        store.values[historyKey("06:20-18:20", "wifi", "all", "ep1")] =
+            AdaptiveSpeedProbe.History(successes = 3, latencyMs = 120L, lastMeasuredAt = clock)
         val tried = mutableListOf<Int>()
         val candidates = (0..6).toList()
 
-        val results = session().run(
+        val results = session(store, now = { clock }).run(
             scope = "all",
             candidates = candidates,
             key = { "ep$it" },
@@ -162,12 +216,18 @@ class AdaptiveSpeedProbeTest {
 
     @Test
     fun `bounded workers refill after a completion without exceeding concurrency`() = runBlocking {
+        val store = MemoryStore()
+        val clock = 1_000_000L
+        store.values[historyKey("06:20-18:20", "wifi", "parallel", "ep0")] =
+            AdaptiveSpeedProbe.History(successes = 3, latencyMs = 100L, lastMeasuredAt = clock)
+        store.values[historyKey("06:20-18:20", "wifi", "parallel", "ep1")] =
+            AdaptiveSpeedProbe.History(successes = 3, latencyMs = 120L, lastMeasuredAt = clock)
         val entered = ConcurrentHashMap.newKeySet<Int>()
         val gates = (0..7).associateWith { CompletableDeferred<String>() }
         val active = AtomicInteger()
         val peak = AtomicInteger()
         val run = async {
-            session(concurrency = 3).run(
+            session(store, now = { clock }, concurrency = 3).run(
                 scope = "parallel",
                 candidates = (0..7).toList(),
                 key = { "ep$it" },

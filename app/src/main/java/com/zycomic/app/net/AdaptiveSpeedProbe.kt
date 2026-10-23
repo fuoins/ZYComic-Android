@@ -273,10 +273,19 @@ internal object AdaptiveSpeedProbe {
                 ),
             ).toMutableList()
             fun eligible(candidate: Candidate<T>) = (candidate.allTimes?.cooldownUntil ?: 0L) <= now()
-            // Recent healthy samples define this business/network's baseline, never another scope's.
-            val baseline = ordered.filter { it.confidence < 2 && (it.allTimes?.failures ?: 0) == 0 }
-                .mapNotNull { it.ranking?.latencyMs }.sorted().take(2).maxOrNull()
-            val fastThresholdMs = baseline?.let { maxOf(200L, it.coerceAtMost(Long.MAX_VALUE / 2) * 2) } ?: 1_500L
+            // Use recent successful history even when it is strong; confidence controls ranking, not baseline eligibility.
+            // With no same-scope history, two valid current results are enough; never invent a global 1.5s ceiling.
+            val baseline = ordered.asSequence()
+                .mapNotNull { it.allTimes }
+                .filter {
+                    it.successes > 0 && it.failures == 0 && it.latencyMs in 0 until Long.MAX_VALUE &&
+                        now() - it.lastMeasuredAt in 0..86_400_000L
+                }
+                .map { it.latencyMs }
+                .sorted()
+                .take(2)
+                .maxOrNull()
+            val fastThresholdMs = baseline?.let { maxOf(200L, it.coerceAtMost(Long.MAX_VALUE / 2) * 2) } ?: Long.MAX_VALUE
             if (explorationOnly) {
                 // One low-priority peer, outside the recent reliable pool; no cooldown waiting.
                 val target = ordered.filter { eligible(it) && it.endpoint !in preferredKeys && it.tier >= 2 }
