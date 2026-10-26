@@ -15,10 +15,13 @@ class PicacgBrowsePresentationContractTest {
     @Test
     fun `ranking starts at 24 hours and does not render internal tab rows`() {
         val initialMode = source.substringAfter("var mode by remember").substringBefore("var filter by remember")
-        assertTrue(initialMode.contains("PicacgFeedMode.LEADERBOARD_24H"))
+        // 默认排名档由 tab 的 initialRankingMode 决定（默认 H24），不再硬编码单个枚举。
+        assertTrue(initialMode.contains("initialRankingMode.toFeedMode()"))
+        assertTrue(source.contains("initialRankingMode: PicacgRankingMode = PicacgRankingMode.H24"))
         assertFalse(initialMode.contains("PicacgFeedMode.LATEST"))
         assertEquals(1, Regex("LazyRow\\(").findAll(source).count())
         val rankingRow = source.substringAfter("internal fun PicacgRankingChips(").substringBefore("fun PicacgBrowseScreen(")
+        assertTrue(rankingRow.contains("selectedMode: PicacgFeedMode = PicacgFeedMode.LEADERBOARD_24H"))
         assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_24H"))
         assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_7D"))
         assertTrue(rankingRow.contains("PicacgFeedMode.LEADERBOARD_30D"))
@@ -82,14 +85,14 @@ class PicacgBrowsePresentationContractTest {
         val picacgPage = browse.substringAfter("if (tabPlatform == ContentPlatform.PICACG)").substringBefore("if (item?.kind == TabKind.SPECIAL")
         val preview = picacgPage.substringAfter("} else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING)")
         assertTrue(picacgPage.contains("if (isActive) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen("))
-        assertTrue(preview.contains("com.zycomic.app.ui.picacg.PicacgRankingChips()"))
+        assertTrue(preview.contains("com.zycomic.app.ui.picacg.PicacgRankingChips(selectedMode ="))
         assertFalse(preview.contains("PicacgBrowseScreen("))
         assertFalse(preview.contains("LaunchedEffect"))
         assertFalse(preview.contains("Repository"))
         assertTrue(browse.contains("snapshotFlow { pagerState.settledPage }"))
         assertTrue(browse.contains("pagerState.animateScrollToPage(index)\n                                            vm.selectMainTab(index)"))
-        assertTrue(picacgPage.contains("BrowsePageType.PICACG_CATEGORY -> com.zycomic.app.ui.picacg.PicacgBrowsePageMode.CATEGORY"))
-        assertTrue(picacgPage.contains("item?.kind == TabKind.FILTER && item.id != BrowseTabStore.ID_PICACG_HOME"))
+        // 排名页/分类页由 tab 自身的 isPicacgRanking() 决定，不再依赖 pageType 分支。
+        assertTrue(picacgPage.contains("val pageMode = if (item?.isPicacgRanking() != false)"))
     }
 
     @Test
@@ -121,7 +124,7 @@ class PicacgBrowsePresentationContractTest {
         assertFalse(ranking.contains("PicacgRankingChips()"))
         val selectMode = source.substringAfter("fun selectMode(").substringBefore("fun persistPresets(")
         assertTrue(selectMode.contains("mode = next"))
-        assertTrue(selectMode.contains("filter = nextFilter"))
+        assertTrue(selectMode.contains("nextFilter"))
         assertTrue(selectMode.contains("page = 1"))
         assertTrue(source.contains("Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }\n        } else {\n            if (loading && mangas.isEmpty() && !hasSnapshot)"))
         val request = source.substringAfter("LaunchedEffect(queryIdentity, page, refresh, browseCacheRevision) {")

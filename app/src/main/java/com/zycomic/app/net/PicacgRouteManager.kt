@@ -511,7 +511,7 @@ object PicacgRouteManager {
                 putString("api_pin_domain", endpoint?.domain)
                 putString("api_pin_ip", endpoint?.ip)
             }?.apply()
-            _state.value = current.copy(pinnedApi = endpoint, revision = current.revision + 1)
+            _state.value = current.copy(pinnedApi = endpoint, revision = current.revision + 1, manualApi = manual)
         } else {
             prefs?.edit()?.apply {
                 putBoolean("manual_image_selection", manual)
