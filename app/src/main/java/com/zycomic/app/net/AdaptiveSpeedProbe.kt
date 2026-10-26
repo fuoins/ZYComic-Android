@@ -98,6 +98,8 @@ internal object AdaptiveSpeedProbe {
         private val maxCooldownMs: Long = 15 * 60_000L,
         private val explorationIntervalMs: Long = 60 * 60_000L,
         private val explorationLimit: Int = 2,
+        /** 上一轮未完成时，该轮开始时间；lastAttemptAt 小于它的端点优先补测。 */
+        private val carryOverCutoffAt: Long? = null,
     ) {
         private val startedTick = monotonicMs()
         private val runId = UUID.randomUUID().toString()
@@ -259,6 +261,7 @@ internal object AdaptiveSpeedProbe {
                 val confidence: Int,
                 val index: Int,
                 val tier: Int,
+                val carryOver: Boolean,
             )
             fun emit(text: String) = log(
                 "run=$runId; startedAt=$startedAtEpochMs; network=$networkIdentity; bucket=$bucket; " +
@@ -273,18 +276,25 @@ internal object AdaptiveSpeedProbe {
                     confidence(allTimes) -> 1
                     else -> 2
                 }
+                // 上一轮没测完的端点：即使没有任何历史，也排到“近期可靠”这一档，配合排序键优先补测。
+                val carryOver = carryOverCutoffAt != null && lastAttempt(allTimes) < carryOverCutoffAt
                 val tier = when {
                     endpoint in preferredKeys -> 0
+                    carryOver -> 1
                     (allTimes?.failures ?: 0) > 0 -> 4
                     level < 2 -> 1
                     (allTimes?.successes ?: 0) > 0 -> 2
                     else -> 3
                 }
-                Candidate(target, endpoint, local, allTimes, if (level == 0) local else allTimes, level, index, tier)
+                Candidate(
+                    target, endpoint, local, allTimes, if (level == 0) local else allTimes, level, index, tier, carryOver,
+                )
             }.sortedWith(
                 compareBy<Candidate<T>>(
                     { if (quick && (it.allTimes?.cooldownUntil ?: 0L) > now()) 1 else 0 },
                     { if (quick) it.tier else 0 },
+                    // 同一档内先补上轮没测过的，再按历史置信度/延迟。
+                    { if (quick && it.carryOver) 0 else 1 },
                     { if (quick) it.confidence else 0 },
                     { if (quick && it.confidence < 2) it.ranking?.latencyMs else Long.MAX_VALUE },
                     { it.index },
@@ -446,6 +456,7 @@ internal object AdaptiveSpeedProbe {
                             explorationOnly -> "low-frequency-exploration"
                             (candidate.allTimes?.failures ?: 0) > 0 -> "recovery-after-cooldown"
                             candidate.endpoint in preferredKeys -> "current-in-use"
+                            candidate.carryOver -> "carry-over-unfinished-round"
                             candidate.tier == 1 -> "recent-reliable"
                             else -> "pool-insufficient-or-slow"
                         }

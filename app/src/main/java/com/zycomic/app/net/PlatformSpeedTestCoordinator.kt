@@ -59,6 +59,10 @@ object PlatformSpeedTestCoordinator {
     private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
     private val completedChecks = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, List<StartupCheckStatus>>>()
     private val fullTestRequest = FullSpeedTestRequest<List<PlatformSpeedTestReport>>()
+    /** 宿主注册：整轮开始/完整完成时用于持久化“是否测完”，未注册时为空操作。 */
+    @Volatile internal var roundStartedHook: ((networkIdentity: String, configRevision: Long, startedAt: Long) -> Unit)? = null
+    @Volatile internal var roundCompletedHook: (() -> Unit)? = null
+
     private val healthScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var maccmsHealthJob: Job? = null
 
@@ -198,6 +202,9 @@ object PlatformSpeedTestCoordinator {
                 return@withLock _reports.value
             }
             completedKey = null
+            // 整轮开始：由宿主注册的钩子落盘本轮起点（读上一轮是否未完成用于补测）。
+            // 用钩子而不是直接依赖历史实现，离线 harness 不注册时自动降级为空操作。
+            roundStartedHook?.invoke(currentNetworkIdentity(), RouteManager.configRevision, System.currentTimeMillis())
             _running.value = true
             _progressText.value = null
             _jmProgress.value = null
@@ -510,7 +517,11 @@ object PlatformSpeedTestCoordinator {
                             }
                         }
                     }
-                    if (onlyPlatform == null) completedKey = key.takeIf { result.none { it.status == "incomplete" } }
+                    if (onlyPlatform == null) {
+                        completedKey = key.takeIf { result.none { it.status == "incomplete" } }
+                        // 只有整轮无 incomplete 才算测完；否则下次启动继续补未测端点。
+                        if (completedKey != null) roundCompletedHook?.invoke()
+                    }
                     checkedConfigurationVersion = version
                     persist(result)
                     if (notifyCompletion) {

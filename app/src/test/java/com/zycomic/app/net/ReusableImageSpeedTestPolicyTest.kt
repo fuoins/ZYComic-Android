@@ -95,7 +95,8 @@ class ReusableImageSpeedTestPolicyTest {
         assertFalse(SpeedTestRunPolicy.canReuseImages(true, true, current, current, current))
         assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, previousNetwork, current, previousNetwork))
         assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, current, current, null))
-        assertFalse(
+        // 配置更新不再禁用快测复用；新增/移除端点由 reconcile 处理。
+        assertTrue(
             SpeedTestRunPolicy.canReuseImages(
                 true,
                 false,

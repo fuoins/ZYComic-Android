@@ -129,12 +129,10 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
             )
         }
         val initialRoute = withTimeout(2_500L) { ready.await() }
-        assertEquals(routes.lineHosts[0], initialRoute, "the first usable candidate publishes readiness")
+        // 24 并发下首个完成的可用候选不一定是配置第一条，只要它是本轮真实可用端点即可。
+        assertTrue(initialRoute in routes.lineHosts, "a usable candidate publishes readiness")
         run.await()
-        assertTrue(
-            measuredLineDelays.getValue(RouteManager.lineHost) < measuredLineDelays.getValue(initialRoute),
-            "a background candidate should be faster; order=$dispatchedLines delays=$measuredLineDelays",
-        )
+        assertEquals(routes.lineHosts[3], RouteManager.lineHost, "the fastest candidate wins after the round")
         assertEquals(6, measuredLineDelays.size)
         assertEquals(measuredLineDelays.values.min(), measuredLineDelays.getValue(RouteManager.lineHost))
         assertEquals("192.0.2.${routes.lineHosts.indexOf(RouteManager.lineHost) + 1}", RouteManager.selectedLineIp)

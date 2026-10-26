@@ -118,6 +118,14 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.ImageCacheManager.init(this)
         // 初始化网络模块上下文（VPN 检测需要），并注册网络/VPN 变化监听
         com.zycomic.app.net.NetworkModule.init(this)
+        // 轮次状态持久化：整轮开始落盘起点，完整完成标记 completed，
+        // 下次启动据此把“上轮没测过”的端点优先补测。
+        com.zycomic.app.net.PlatformSpeedTestCoordinator.roundStartedHook = { network, revision, startedAt ->
+            com.zycomic.app.net.AdaptiveSpeedHistory.prepareRound(network, revision, startedAt)
+        }
+        com.zycomic.app.net.PlatformSpeedTestCoordinator.roundCompletedHook = {
+            com.zycomic.app.net.SpeedTestRoundState.complete()
+        }
         com.zycomic.app.net.JmAuthStore.initialize(this)
         com.zycomic.app.picacg.PicacgRepository.init(this)
         registerNetworkCallback()
@@ -171,6 +179,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 已保存配置可先只测不应用，与权威配置检查重叠；版本变化会丢弃整代预热。
         ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
             com.zycomic.app.net.SpeedTestTimingLog.start(com.zycomic.app.net.SpeedTestTimingLog.Scope.STARTUP).use { timings ->
+                // 已有本地可用配置时不等远端检查：先用现有路由快测进入，配置检查放后台应用。
+                // 首次安装没有配置，必须等权威配置，否则没有可测的端点。
+                val hasLocalRouteConfig = com.zycomic.app.net.DevConfig.hasUsableRouteConfig
+                if (hasLocalRouteConfig) {
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.finishStartupConfigCheck(false)
+                }
                 val warmup = launch {
                     try {
                         com.zycomic.app.net.PlatformSpeedTestCoordinator.awaitStartup()
@@ -198,7 +212,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     // Cached probes from a different generation cannot cross this barrier.
                     com.zycomic.app.net.PlatformSpeedTestCoordinator.finishStartupConfigCheck(configurationUpdated)
                 }
-                if (result?.configurationUpdated == true) {
+                if (result?.configurationUpdated == true && !hasLocalRouteConfig) {
+                    // 只有首次安装才在启动链路里用新配置重测；已有配置时新版本仅应用，
+                    // 由下一轮测速的增量核对（新增测、移除剔除、同身份沿用）补上。
                     com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
                     try {
                         runCatching {

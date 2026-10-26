@@ -63,11 +63,11 @@ class SpeedTestRunPolicyTest {
     }
 
     @Test
-    fun `remote config update does not invalidate an identical completed generation`() {
+    fun `remote config update keeps quick reuse while an identical completed generation stays skippable`() {
         assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false))
         assertTrue(SpeedTestRunPolicy.canSkip(key, key, false, false, remoteConfigUpdated = true))
-        assertFalse(SpeedTestRunPolicy.canFastTest(true, false, remoteConfigUpdated = true))
-        assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
+        assertTrue(SpeedTestRunPolicy.canFastTest(true, false, remoteConfigUpdated = true))
+        assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, key, key, null, remoteConfigUpdated = true))
     }
 
     @Test

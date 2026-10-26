@@ -20,12 +20,18 @@ internal object SpeedTestRunPolicy {
         remoteConfigUpdated: Boolean = false,
     ): Boolean = !forceFresh && !platformOnly && completed == current
 
-    /** Enable adaptive probing; each tester still resolves the current pool and measures eligible candidates. */
+    /**
+     * 启用自适应快测；各 tester 自己按 endpoint identity 做配置增量核对。
+     *
+     * 远程配置更新不再强制全量：新增端点由 reconcile 补测、移除端点被剔除、
+     * 身份一致的沿用历史。只有用户手动“完整重新测速”（forceFresh）才全量。
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun canFastTest(
         requested: Boolean,
         forceFresh: Boolean,
         remoteConfigUpdated: Boolean = false,
-    ): Boolean = requested && !forceFresh && !remoteConfigUpdated
+    ): Boolean = requested && !forceFresh
 
     // Retain the existing call contract for callers/tests outside the coordinator.
     @Suppress("UNUSED_PARAMETER")

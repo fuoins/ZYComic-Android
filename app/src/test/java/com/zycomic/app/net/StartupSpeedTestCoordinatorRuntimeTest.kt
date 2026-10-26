@@ -45,10 +45,13 @@ class StartupSpeedTestCoordinatorRuntimeTest {
     }
 
     @Test
-    fun `updated remote configuration disables quick-history reuse for both dimensions`() {
+    fun `updated remote configuration keeps quick reuse and defers new endpoints to reconciliation`() {
         for (requested in listOf(false, true)) {
-            assertFalse(SpeedTestRunPolicy.canFastTest(requested, forceFresh = false, remoteConfigUpdated = true))
-            assertFalse(
+            // 配置更新不再强制全量：新增端点由 reconcile 补测，已有身份沿用历史。
+            assertTrue(
+                SpeedTestRunPolicy.canFastTest(requested, forceFresh = false, remoteConfigUpdated = true) == requested,
+            )
+            assertTrue(
                 SpeedTestRunPolicy.canReuseImages(
                     requested = requested,
                     forceFresh = false,
@@ -56,7 +59,7 @@ class StartupSpeedTestCoordinatorRuntimeTest {
                     current = SpeedTestRunKey(1, 2, 2, "n"),
                     completed = null,
                     remoteConfigUpdated = true,
-                ),
+                ) == requested,
             )
         }
     }
