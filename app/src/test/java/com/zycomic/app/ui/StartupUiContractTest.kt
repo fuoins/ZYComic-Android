@@ -15,6 +15,9 @@ class StartupUiContractTest {
     private val mainActivity by lazy {
         File(root, "app/src/main/java/com/zycomic/app/ui/MainActivity.kt").readText()
     }
+    private val splash by lazy {
+        File(root, "app/src/main/java/com/zycomic/app/ui/StartupSplash.kt").readText()
+    }
     private val measurementPage by lazy {
         mainActivity.substringAfter("} else if (!blockingSpeedTest) {")
             .substringBefore("// ---- 详情覆盖层 ----")
@@ -29,74 +32,59 @@ class StartupUiContractTest {
     }
 
     @Test
-    fun `remote config gate keeps loading copy and startup measurement but no manga grid skeleton`() {
+    fun `remote config gate reuses the same splash shell`() {
         val gate = mainActivity.substringAfter("private fun RemoteConfigGate(")
             .substringBefore("// ==================== 桌面快捷方式")
 
-        assertTrue(gate.contains("StartupPlatformSwitches()"))
-        assertTrue(gate.contains("正在从网络加载线路与图源配置…"))
-        assertTrue(gate.contains("StartupNetworkStatus("))
-        assertTrue(gate.contains("StartupBrand()"))
-        assertTrue(gate.contains(".statusBarsPadding().navigationBarsPadding()"))
-        assertTrue(gate.contains(".verticalScroll(rememberScrollState())"))
+        assertTrue(gate.contains("StartupConfigGate(loading = true"))
+        assertTrue(gate.contains("StartupConfigGate(loading = false"))
         assertFalse(gate.contains("MangaGridSkeleton"))
+        assertTrue(splash.contains("private fun StartupShell("))
+        assertTrue(splash.contains("AuroraBackdrop("))
     }
 
     @Test
-    fun `startup keeps dynamic config and per platform progress without redundant running summary`() {
-        assertTrue(measurementPage.contains("StartupNetworkStatus(remoteInfo.substringBefore(\"　上次错误：\"))"))
-        assertTrue(measurementPage.contains("StartupPlatformSwitches(fullRequested = fullSpeedTestRequested)"))
-        assertTrue(measurementPage.contains("platformTestSummary?.let { summary ->"))
-        assertFalse(measurementPage.contains("正在准备启动测速…"))
-        val coordinator = File(root, "app/src/main/java/com/zycomic/app/net/PlatformSpeedTestCoordinator.kt").readText()
-        assertFalse(coordinator.contains("三平台测速进行中；各平台进度独立显示"))
-        assertTrue(coordinator.contains("_startupSummary.value = null"))
-        assertTrue(coordinator.contains("_startupSummary.value = startupSummary(result)"))
-        val startupSwitches = mainActivity.substringAfter("private fun StartupPlatformSwitches(")
-            .substringBefore("@Composable\nprivate fun StartupSwitch(")
-        assertTrue(startupSwitches.contains("StartupSwitch("))
-        assertTrue(startupSwitches.contains("LinearProgressIndicator("))
-        assertTrue(startupSwitches.contains("stringResource(KMR.strings.startup_quick_test_running)"))
-        assertFalse(startupSwitches.contains("startupChecksProgress(checkStatuses)"))
-        assertFalse(startupSwitches.contains("startupChecksPassed(checkStatuses)"))
-        assertFalse(startupSwitches.contains("startup_checks_ready_count"))
-        assertEquals("快测中", strings["startup_quick_test_running"])
-        assertEquals("完整测速中", strings["startup_full_test_running"])
-        assertTrue(startupSwitches.contains("fullRequested || mode =="))
-        assertTrue(startupSwitches.contains("PlatformSpeedTestCoordinator.testMode.collectAsState()"))
-        assertTrue(startupSwitches.contains("val passed = check.result.isReady"))
-        assertTrue(startupSwitches.contains("KMR.strings.startup_check_reused"))
-        assertEquals("历史有效沿用", strings["startup_check_reused"])
-        val row = mainActivity.substringAfter("private fun StartupSwitch(")
-        assertTrue(row.contains("if (status?.running == true)"))
-        assertTrue(row.contains("status?.message ?: \"等待测速\""))
-        assertFalse(row.contains("status.fraction"))
-        assertTrue(row.contains("if (status?.running == true) {\n                LinearProgressIndicator("))
-        assertTrue(mainActivity.contains("PlatformSpeedTestCoordinator.foregroundReady.collectAsState()"))
-        assertTrue(mainActivity.contains("configRetest?.duringStartup == true && !foregroundRoutesReady"))
-        assertTrue(measurementPage.contains("KMR.strings.startup_retest_all"))
-        assertFalse(mainActivity.contains("NetworkMaintenanceNotice"))
-    }
-
-    @Test
-    fun `startup testing UI does not expose candidate or check totals`() {
-        val switches = mainActivity.substringAfter("private fun StartupPlatformSwitches(")
-            .substringBefore("@Composable\nprivate fun StartupSwitch(")
-        val row = mainActivity.substringAfter("private fun StartupSwitch(")
-            .substringBefore("@Composable")
-
-        assertTrue(switches.contains("LinearProgressIndicator("))
-        assertFalse(switches.contains("progress ="))
-        assertTrue(switches.contains("KMR.strings.startup_quick_test_running"))
-        assertTrue(row.contains("status?.running == true"))
-        assertTrue(row.contains("runningLabel"))
-        assertFalse(row.contains("status.fraction"))
-        assertTrue(row.contains("status?.message ?: \"等待测速\""))
-        assertFalse(mainActivity.contains("PlatformSpeedTestCoordinator.running.collectAsState()"))
+    fun `startup page delegates to the redesigned splash without per check ticks`() {
+        assertTrue(measurementPage.contains("StartupSplash("))
+        assertTrue(measurementPage.contains("networkInfo = remoteInfo.substringBefore(\"　上次错误：\")"))
+        assertTrue(measurementPage.contains("checks = startupChecks"))
+        assertTrue(measurementPage.contains("onTogglePlatform = { platform, enable ->"))
+        assertTrue(measurementPage.contains("PlatformSpeedTestCoordinator.retestAllEnabled()"))
+        assertTrue(measurementPage.contains("KMR.strings.startup_platform_keep_one_toast"))
+        assertTrue(measurementPage.contains("configRetest?.takeIf { it.duringStartup }?.version"))
+        // 逐项打勾的检查表已经删除：进入条件是“每个平台线路+图源都可用”。
+        assertFalse(mainActivity.contains("StartupPlatformSwitches("))
+        assertFalse(mainActivity.contains(".result?.isReady"))
         assertFalse(mainActivity.contains("startup_checks_ready_count"))
-        assertTrue(mainActivity.contains("Button("))
-        assertTrue(mainActivity.contains("KMR.strings.startup_retest_all"))
-        assertTrue(switches.contains("check.result.isReady"))
+        assertFalse(mainActivity.contains("PlatformSpeedTestCoordinator.running.collectAsState()"))
+    }
+
+    @Test
+    fun `splash draws a readiness ring from stage state and keeps platform toggles`() {
+        assertTrue(splash.contains("StartupSplash("))
+        assertTrue(splash.contains("HeroRing("))
+        assertTrue(splash.contains("PlatformChips("))
+        assertTrue(splash.contains("PlatformChip("))
+        assertTrue(splash.contains("phasesOf(platform)"))
+        assertTrue(splash.contains(".result?.isReady"))
+        assertTrue(splash.contains("rememberInfiniteTransition("))
+        assertTrue(splash.contains("drawArc("))
+        assertTrue(splash.contains("startup_retest_all"))
+        assertTrue(splash.contains("startup_guidance_copy"))
+        assertFalse(splash.contains("startupChecksPassed"))
+        assertFalse(splash.contains("startup_checks_ready_count"))
+    }
+
+    @Test
+    fun `startup still exposes retest and keeps the guidance copy`() {
+        assertTrue(splash.contains("KMR.strings.startup_retest_all"))
+        assertEquals("重新完整测速", strings["startup_retest_all"])
+        assertEquals(
+            "三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n" +
+                "首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。\\n" +
+                "点击“筛选”按钮可调整分类和每行漫画格数；切换标签页即可切换平台，标签页支持新增、删除和修改。",
+            strings["startup_guidance_copy"],
+        )
     }
 
     @Test
@@ -110,50 +98,6 @@ class StartupUiContractTest {
         val autoSelect = settings.substringAfter("suspend fun autoSelectFastest()").substringBefore("companion object")
         assertTrue(autoSelect.contains("PlatformSpeedTestCoordinator.awaitStartup()"))
         assertFalse(autoSelect.contains("PlatformSpeedTestCoordinator.run("))
-    }
-
-    @Test
-    fun `network status sits below system bars and enlarged brand uses compact spacing`() {
-        assertTrue(measurementPage.contains(".statusBarsPadding().navigationBarsPadding()"))
-        assertTrue(measurementPage.contains(".verticalScroll(rememberScrollState())"))
-        assertTrue(measurementPage.contains("padding(horizontal = 20.dp, vertical = 8.dp)"))
-        assertTrue(measurementPage.indexOf("StartupNetworkStatus(") < measurementPage.indexOf("StartupBrand()"))
-        assertFalse(measurementPage.contains("contentAlignment = Alignment.Center"))
-        val brand = mainActivity.substringAfter("private fun StartupBrand()").substringBefore("@Composable")
-        assertTrue(brand.contains("fontSize = 40.sp"))
-        assertTrue(brand.contains("FontWeight.ExtraBold"))
-        assertTrue(brand.contains("MaterialTheme.colorScheme.primary"))
-        val network = mainActivity.substringAfter("private fun StartupNetworkStatus(").substringBefore("@Composable")
-        assertTrue(network.contains("startup_network_status_title"))
-        assertTrue(network.contains("surfaceContainerHigh"))
-        assertTrue(network.contains("\n                info,"))
-    }
-
-    @Test
-    fun `guidance card follows full retest button with exact copy and emphasized phrases`() {
-        assertEquals("重新完整测速", strings["startup_retest_all"])
-        assertEquals("网络配置", strings["startup_network_status_title"])
-        assertEquals(
-            "三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n首次会完整测速，后续打开会用“快测”节省时间，建议每隔一段时间重新完整测速一次。\\n点击“筛选”按钮可调整分类和每行漫画格数；切换标签页即可切换平台，标签页支持新增、删除和修改。",
-            strings["startup_guidance_copy"],
-        )
-        assertEquals("本身晚上就卡", strings["startup_guidance_evening"])
-        assertEquals("早6点到晚5点", strings["startup_guidance_time"])
-        assertEquals("首次", strings["startup_guidance_first"])
-        assertEquals("神秘的网络层优化", strings["startup_guidance_network_optimization"])
-        assertTrue(measurementPage.indexOf("KMR.strings.startup_retest_all") < measurementPage.indexOf("StartupGuidanceCard()"))
-        val card = mainActivity.substringAfter("private fun StartupGuidanceCard()").substringBefore("@Composable")
-        listOf("copy", "evening", "time", "first", "network_optimization").forEach {
-            assertTrue(card.contains("KMR.strings.startup_guidance_$it"))
-        }
-        assertTrue(card.contains("listOf(evening, time, first, networkOptimization)"))
-        assertTrue(card.contains("addStyle("))
-        assertTrue(card.contains("phrase == time || isNetworkOptimization) FontWeight.ExtraBold"))
-        assertTrue(card.contains("MaterialTheme.colorScheme.tertiary"))
-        assertTrue(card.contains("MaterialTheme.colorScheme.tertiaryContainer"))
-        assertTrue(card.contains("MaterialTheme.colorScheme.primaryContainer"))
-        assertTrue(card.contains("color = MaterialTheme.colorScheme.surfaceContainer"))
-        assertTrue(card.contains("lineHeight = 18.sp"))
     }
 
     @Test

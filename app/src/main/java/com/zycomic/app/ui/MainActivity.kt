@@ -7,44 +7,26 @@ import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -58,27 +40,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.lifecycleScope
 import cafe.adriel.voyager.navigator.Navigator
-import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
-import com.zycomic.app.net.StartupCheckResult
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
-import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.reader.ReaderDetailRoute
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.browse.BrowseViewModel
@@ -106,14 +77,12 @@ import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
 import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
-import eu.kanade.tachiyomi.ui.base.delegate.ThemingDelegate
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import android.graphics.Color as AndroidColor
 
 class MainActivity : BaseActivity() {
 
@@ -205,32 +174,12 @@ private fun RemoteConfigGate(
     state: com.zycomic.app.net.RouteConfigState,
     onRetry: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
-            .statusBarsPadding().navigationBarsPadding()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        StartupNetworkStatus(
-            when (state) {
-                com.zycomic.app.net.RouteConfigState.Loading -> "正在从网络加载线路与图源配置…"
-                is com.zycomic.app.net.RouteConfigState.Failed -> "尚未取得有效的网络配置"
-                com.zycomic.app.net.RouteConfigState.Ready -> "网络配置已就绪"
-            },
-        )
-        StartupBrand()
-        StartupPlatformSwitches()
-        when (state) {
-            com.zycomic.app.net.RouteConfigState.Loading -> Unit
-            is com.zycomic.app.net.RouteConfigState.Failed -> {
-                Text("尚未取得有效的网络配置", style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = onRetry) { Text("重试") }
-            }
-            com.zycomic.app.net.RouteConfigState.Ready -> Unit
-        }
+    when (state) {
+        com.zycomic.app.net.RouteConfigState.Loading ->
+            StartupConfigGate(loading = true, detail = null, onRetry = onRetry)
+        is com.zycomic.app.net.RouteConfigState.Failed ->
+            StartupConfigGate(loading = false, detail = state.message, onRetry = onRetry)
+        com.zycomic.app.net.RouteConfigState.Ready -> Unit
     }
 }
 
@@ -574,57 +523,42 @@ fun AppContent(
             onFinish = { onboardingDone = true },
         )
     } else {
-        Column(
-            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
-                .statusBarsPadding().navigationBarsPadding()
-                .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            StartupNetworkStatus(remoteInfo.substringBefore("　上次错误："))
-            StartupBrand()
-            StartupPlatformSwitches(fullRequested = fullSpeedTestRequested)
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !fullSpeedTestRequested,
-                onClick = {
-                    // Set synchronously so repeated taps cannot enqueue extra coroutines.
-                    fullSpeedTestRequested = true
-                    speedTestScope.launch {
-                        try {
-                            PlatformSpeedTestCoordinator.retestAllEnabled()
-                        } catch (error: kotlinx.coroutines.CancellationException) {
-                            throw error
-                        } catch (_: Exception) {
-                            Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
-                        } finally {
-                            fullSpeedTestRequested = false
-                        }
+        val startupMode by PlatformSpeedTestCoordinator.testMode.collectAsState()
+        val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
+        val startupChecks by PlatformSpeedTestCoordinator.startupCheckStatuses.collectAsState()
+        val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
+        StartupSplash(
+            networkInfo = remoteInfo.substringBefore("　上次错误："),
+            configUpdateVersion = configRetest?.takeIf { it.duringStartup }?.version,
+            fullRequested = fullSpeedTestRequested,
+            mode = startupMode,
+            statuses = platformStatuses,
+            checks = startupChecks,
+            summary = platformTestSummary,
+            onTogglePlatform = { platform, enable ->
+                val applied = when (platform) {
+                    ContentPlatform.MANWA -> StartupPlatformPolicy.setManwaEnabled(enable)
+                    ContentPlatform.PICACG -> StartupPlatformPolicy.setPicacgEnabled(enable)
+                    ContentPlatform.JM -> StartupPlatformPolicy.setJmEnabled(enable)
+                }
+                if (!applied) Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
+            },
+            onRetestAll = {
+                // Set synchronously so repeated taps cannot enqueue extra coroutines.
+                fullSpeedTestRequested = true
+                speedTestScope.launch {
+                    try {
+                        PlatformSpeedTestCoordinator.retestAllEnabled()
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "测速未完成，使用当前线路", Toast.LENGTH_SHORT).show()
+                    } finally {
+                        fullSpeedTestRequested = false
                     }
-                },
-            ) {
-                Text(stringResource(KMR.strings.startup_retest_all))
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            StartupGuidanceCard()
-            if (configRetest?.duringStartup == true) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "检测到网络配置更新（v${configRetest?.version}），正在使用新配置重新测速…",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            platformTestSummary?.let { summary ->
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    summary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+                }
+            },
+        )
     }
 
     // ---- 详情覆盖层 ----
@@ -814,233 +748,6 @@ private fun KomikkuSettingsDialog(
                 },
             ) {
                 navigator.lastItem.Content()
-            }
-        }
-    }
-}
-
-@Composable
-private fun StartupNetworkStatus(info: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(
-                stringResource(KMR.strings.startup_network_status_title),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                info,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun StartupBrand() {
-    Column(
-        modifier = Modifier.padding(vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            "ZYComic",
-            style = MaterialTheme.typography.headlineLarge.copy(fontSize = 40.sp, letterSpacing = 0.5.sp),
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Box(
-            modifier = Modifier.width(36.dp).height(4.dp)
-                .background(MaterialTheme.colorScheme.tertiary, RoundedCornerShape(2.dp)),
-        )
-    }
-}
-
-@Composable
-private fun StartupGuidanceCard() {
-    val copy = stringResource(KMR.strings.startup_guidance_copy)
-    val evening = stringResource(KMR.strings.startup_guidance_evening)
-    val time = stringResource(KMR.strings.startup_guidance_time)
-    val first = stringResource(KMR.strings.startup_guidance_first)
-    val networkOptimization = stringResource(KMR.strings.startup_guidance_network_optimization)
-    val emphasizedCopy = buildAnnotatedString {
-        append(copy)
-        listOf(evening, time, first, networkOptimization).forEach { phrase ->
-            val start = copy.indexOf(phrase)
-            if (start >= 0) {
-                val isNetworkOptimization = phrase == networkOptimization
-                addStyle(
-                    SpanStyle(
-                        fontWeight = if (phrase == time || isNetworkOptimization) FontWeight.ExtraBold else FontWeight.Bold,
-                        color = when {
-                            isNetworkOptimization -> MaterialTheme.colorScheme.tertiary
-                            phrase == time -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurface
-                        },
-                        background = when {
-                            isNetworkOptimization -> MaterialTheme.colorScheme.tertiaryContainer
-                            phrase == time -> MaterialTheme.colorScheme.primaryContainer
-                            else -> androidx.compose.ui.graphics.Color.Unspecified
-                        },
-                    ),
-                    start,
-                    start + phrase.length,
-                )
-            }
-        }
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
-        Text(
-            emphasizedCopy,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun StartupPlatformSwitches(fullRequested: Boolean = false) {
-    val mode by PlatformSpeedTestCoordinator.testMode.collectAsState()
-    val runningLabel = if (fullRequested || mode == com.zycomic.app.net.StartupTestMode.FULL) {
-        stringResource(KMR.strings.startup_full_test_running)
-    } else {
-        stringResource(KMR.strings.startup_quick_test_running)
-    }
-    val policy by StartupPlatformPolicy.state.collectAsState()
-    val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()
-    val checkStatuses by PlatformSpeedTestCoordinator.startupCheckStatuses.collectAsState()
-    val context = LocalContext.current
-    val keepOneSourceMessage = stringResource(KMR.strings.startup_platform_keep_one_toast)
-    Column(modifier = Modifier.fillMaxWidth()) {
-        StartupSwitch(stringResource(KMR.strings.startup_enable_manwa), !policy.disableManwa, ContentPlatform.MANWA, platformStatuses[ContentPlatform.MANWA], runningLabel) {
-            if (!StartupPlatformPolicy.setManwaEnabled(it)) {
-                Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
-            }
-        }
-        StartupSwitch(stringResource(KMR.strings.startup_enable_picacg), !policy.disablePicacg, ContentPlatform.PICACG, platformStatuses[ContentPlatform.PICACG], runningLabel) {
-            if (!StartupPlatformPolicy.setPicacgEnabled(it)) {
-                Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
-            }
-        }
-        StartupSwitch(stringResource(KMR.strings.startup_enable_jm), !policy.disableJm, ContentPlatform.JM, platformStatuses[ContentPlatform.JM], runningLabel) {
-            if (!StartupPlatformPolicy.setJmEnabled(it)) {
-                Toast.makeText(context, keepOneSourceMessage, Toast.LENGTH_SHORT).show()
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        LinearProgressIndicator(
-            modifier = Modifier.fillMaxWidth().height(6.dp),
-        )
-        Text(
-            runningLabel,
-            modifier = Modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            checkStatuses.forEach { check ->
-                val passed = check.result.isReady
-                val resultLabel = if (check.result == StartupCheckResult.REUSED) {
-                    stringResource(KMR.strings.startup_check_reused)
-                } else {
-                    check.result.label
-                }
-                Column(
-                    modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        if (passed) {
-                            "✓"
-                        } else {
-                            when (check.result) {
-                                StartupCheckResult.NOT_TESTED -> "·"
-                                StartupCheckResult.RUNNING -> "…"
-                                StartupCheckResult.SUCCESS -> "✓"
-                                StartupCheckResult.REUSED -> "✓"
-                                StartupCheckResult.FAILED -> "×"
-                                StartupCheckResult.DISABLED -> "禁"
-                                StartupCheckResult.BLOCKED -> "阻"
-                                StartupCheckResult.NO_SAMPLE -> "缺"
-                                StartupCheckResult.NOT_RUN -> "—"
-                                StartupCheckResult.INTERRUPTED -> "!"
-                            }
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        check.phase.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        resultLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        textAlign = TextAlign.Center,
-                        color = if (passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StartupSwitch(
-    title: String,
-    checked: Boolean,
-    platform: ContentPlatform,
-    status: com.zycomic.app.net.PlatformStartupStatus?,
-    runningLabel: String,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    val accent = rememberContentPlatformAccent(platform)
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = accent.copy(alpha = 0.10f),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = accent)
-                    Text(
-                        if (status?.running == true) {
-                            runningLabel
-                        } else {
-                            status?.message ?: "等待测速"
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = checked,
-                    onCheckedChange = onCheckedChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = accent,
-                        checkedTrackColor = accent.copy(alpha = 0.42f),
-                        checkedBorderColor = accent,
-                    ),
-                )
-            }
-            if (status?.running == true) {
-                LinearProgressIndicator(color = accent, modifier = Modifier.fillMaxWidth().height(3.dp))
             }
         }
     }
