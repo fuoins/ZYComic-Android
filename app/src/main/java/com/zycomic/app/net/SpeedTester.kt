@@ -903,9 +903,11 @@ object SpeedTester {
                 val quickLineRetest = reuseLines
                 val quickImageRetest = allowImageReuse
                 val preparedLineTargets = adaptiveSession.prepareBlocking(quickLineRetest) { lineTargets() }
+                val preparedImageTargets = adaptiveSession.prepareBlocking(quickImageRetest) { imgTargets() }
                 val currentLineTargets = preparedLineTargets.orEmpty()
-                // 图源候选延后到图源阶段再解析（见 PREPARING_IMAGES）。首次安装时 77 个域名的 DNS
-                // 解析曾排在线路探测之前，把“开始测第一个线路”推迟十几秒；而图源不参与进入判定。
+                // Image preparation shares the quick-run budget, but timing out DNS preparation must not turn a full image pass into zero probes.
+                // Re-enumerate without the probe deadline; the later two-stage runner still drains every discovered candidate.
+                val currentImageTargets = preparedImageTargets ?: imgTargets()
                 fun identity(endpoint: DomainIp, type: String, request: String, probe: String): String {
                     val routes = RouteManager.customRule.entries.firstOrNull { it.key.equals(endpoint.domain, true) }
                         ?.value.orEmpty()
@@ -923,6 +925,9 @@ object SpeedTester {
                 }
                 val lineIdentities = currentLineTargets.associate { target ->
                     target.endpoint to identity(target.endpoint, "line", target.url.trimEnd('/') + LINE_PROBE_PATH, "line-json-v2")
+                }
+                val imageIdentities = currentImageTargets.associate { endpoint ->
+                    endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2")
                 }
                 fun lineKey(target: LineTarget): String =
                     "${target.endpoint.domain}|${target.endpoint.ip}|" +
@@ -1082,11 +1087,6 @@ object SpeedTester {
                 val reusedImageCount = AtomicInteger(0)
                 val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
                 reportStage(Progress(Phase.PREPARING_IMAGES))
-                // 迟到解析：线路已开始/完成探测，图源解析不再挡在进入路径上。
-                val currentImageTargets = adaptiveSession.prepareBlocking(quickImageRetest) { imgTargets() } ?: imgTargets()
-                val imageIdentities = currentImageTargets.associate { endpoint ->
-                    endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2")
-                }
                 val imageProbeTargets = currentImageTargets
                 reportStage(
                     Progress(
@@ -1241,13 +1241,6 @@ object SpeedTester {
                     ) {
                         NetworkModule.rebuildApi("测速选出线路")
                     }
-                }
-                // 线路阶段结束兜底：本轮没有“足够快”的端点时，只要已有一条可用线路就放行，
-                // 图源继续在后台测。首次安装没有历史，靠这一条把进入时间从“整轮”缩到“线路阶段”。
-                if (runIsCurrent() && allowPublication() && currentLineHasFreshSuccess() &&
-                    qualifiedEndpointSent.compareAndSet(false, true)
-                ) {
-                    onQualifiedEndpoint?.invoke()
                 }
                 reportStage(
                     Progress(
