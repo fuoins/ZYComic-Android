@@ -30,6 +30,15 @@ internal object AdaptiveSpeedProbe {
     private const val NIGHT_BUCKET = "18:20-06:20"
     private const val ALL_TIMES = "all-times"
 
+    /**
+     * 完整测速的“可用”上限：首个成功端点只要不超过 2s 就先放行进入，
+     * 更慢的候选不抢放行资格，交给后台继续测完后再替换。
+     */
+    private const val FULL_RELEASE_CEILING_MS = 2_000L
+
+    /** 完整测速放行后尾部仍保持的并发数（不追求吞吐，但避免几十个候选串行拖太久）。 */
+    private const val FULL_TAIL_CONCURRENCY = 2
+
     // OS DNS can ignore interruption. Daemon workers bound both caller wait and abandoned work.
     private val preparationExecutor = ThreadPoolExecutor(
         4,
@@ -291,6 +300,14 @@ internal object AdaptiveSpeedProbe {
                 .take(2)
                 .maxOrNull()
             val fastThresholdMs = baseline?.let { maxOf(200L, it.coerceAtMost(Long.MAX_VALUE / 2) * 2) } ?: Long.MAX_VALUE
+            // 完整测速不追求“最快”，只要求“能用”：沿用快测阈值会让弱网下第一个能打开的线路
+            // 也判为不合格，只能等 30s 兜底才放行。这里给完整测速一个更宽的放行阈值（上限 2s），
+            // 先进入，再在后台用本轮全量结果替换成真正最快的端点。
+            val releaseThresholdMs = if (quick) {
+                fastThresholdMs
+            } else {
+                maxOf(fastThresholdMs, FULL_RELEASE_CEILING_MS)
+            }
             if (explorationOnly) {
                 // One low-priority peer, outside the recent reliable pool; no cooldown waiting.
                 val target = ordered.filter { eligible(it) && it.endpoint !in preferredKeys && it.tier >= 2 }
@@ -311,7 +328,10 @@ internal object AdaptiveSpeedProbe {
                         "consecutiveFailures=${it.allTimes?.failures ?: 0}; cooldownUntil=${it.allTimes?.cooldownUntil ?: 0L}",
                 )
             }
-            emit("exploration=optional-deferred; explorationOnly=$explorationOnly; baselineMs=$baseline; fastThresholdMs=$fastThresholdMs")
+            emit(
+                "exploration=optional-deferred; explorationOnly=$explorationOnly; baselineMs=$baseline; " +
+                    "fastThresholdMs=$fastThresholdMs; releaseThresholdMs=$releaseThresholdMs",
+            )
             val guard = Any()
             val results = mutableListOf<Pair<T, R>>()
             var bestUsable: Pair<T, R>? = null
@@ -332,7 +352,9 @@ internal object AdaptiveSpeedProbe {
                     val best = synchronized(guard) { bestUsable }
                     if (best != null) {
                         val elapsed = elapsedMs(best.second).coerceAtLeast(0L)
-                        if (elapsed < publishedElapsed && (force || elapsed <= fastThresholdMs || remaining() <= 0L)) {
+                        if (elapsed < publishedElapsed &&
+                            (force || elapsed <= releaseThresholdMs || remaining() <= 0L)
+                        ) {
                             publishedElapsed = elapsed
                             synchronized(guard) { foregroundReleased = true }
                             callback(best.first, best.second)
@@ -366,8 +388,14 @@ internal object AdaptiveSpeedProbe {
                                 // the primary two can still establish a healthy pool.
                                 waitFor = changed
                                 null
-                            } else if (onUsable != null && (foregroundReleased || remaining() <= 0L) && inFlight > 0) {
-                                // Foreground attempts finish; after the deadline only one worker drains the tail.
+                            } else if (
+                                onUsable != null &&
+                                (foregroundReleased || remaining() <= 0L) &&
+                                inFlight >= (if (quick) 1 else FULL_TAIL_CONCURRENCY)
+                            ) {
+                                // Foreground attempts finish, then a bounded tail keeps draining the rest:
+                                // quick stays strictly serial (its budget is already tight), while a full
+                                // pass keeps two probes in flight so replacement is not delayed by minutes.
                                 waitFor = changed
                                 null
                             } else {
@@ -518,8 +546,8 @@ internal object AdaptiveSpeedProbe {
                             changed.complete(Unit)
                             changed = CompletableDeferred()
                         }
-                        if (ok && onUsable != null) publishBest(force = elapsedMs(result!!) <= fastThresholdMs)
-                        if (ok && elapsedMs(result!!) <= fastThresholdMs) {
+                        if (ok && onUsable != null) publishBest(force = elapsedMs(result!!) <= releaseThresholdMs)
+                        if (ok && elapsedMs(result!!) <= releaseThresholdMs) {
                             // Qualification is distinct from forced/deadline usability publication.
                             // This executes only for this real, successful in-round sample and only
                             // after any onUsable route-application callback has returned.
@@ -535,7 +563,7 @@ internal object AdaptiveSpeedProbe {
                                 else -> "endpoint-failure"
                             }}; elapsedMs=${result?.let(elapsedMs)}; consecutiveFailures=$failures; " +
                                 "cooldown=$endpointFailure; cooldownMs=$backoff; cooldownUntil=$cooldownUntil; " +
-                                "exploration=${if (ok && elapsedMs(result!!) <= fastThresholdMs) "completion-refill" else "slow-or-failed-continue"}",
+                                "exploration=${if (ok && elapsedMs(result!!) <= releaseThresholdMs) "completion-refill" else "slow-or-failed-continue"}",
                         )
                     }
                 }

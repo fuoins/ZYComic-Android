@@ -186,9 +186,9 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
         val initialHost = RouteManager.lineHost
         val generationCurrent = AtomicBoolean(true)
         val qualified = AtomicBoolean(false)
-        ManwaProbeFixture.onRequestStart = { _, path ->
-            if (path == "/api/users/info") generationCurrent.set(false)
-        }
+        // 第一个探测请求发出后就判定该轮过期：验证过期轮次不会应用路由或放行启动门。
+        // 中途接管的场景由 StartupCoordinatorRuntimeTest 的 supersede 用例覆盖。
+        ManwaProbeFixture.onRequestStart = { _, _ -> generationCurrent.set(false) }
         SpeedTester.runAndApply(
             isCurrent = { generationCurrent.get() },
             onQualifiedEndpoint = { qualified.set(true) },
@@ -196,7 +196,7 @@ class ManwaTwoStageSpeedTesterRuntimeTest {
         assertEquals(initialHost, RouteManager.lineHost)
         assertTrue(RouteManager.selectedLineIp.isNullOrBlank(), "stale run must not pin an endpoint")
         assertFalse(qualified.get(), "a stale generation must not release the startup gate")
-        assertNotNull(ManwaProbeFixture.started.firstOrNull { it.second == "/api/users/info" })
+        assertNotNull(ManwaProbeFixture.started.firstOrNull(), "the stale round must still have probed before expiring")
     }
     @Test
     fun imageEndpointCanQualifyWhenManualLineEndpointDoesNotMatchProbe() = runBlocking {
