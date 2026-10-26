@@ -151,7 +151,9 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
 
     def test_added_tab_is_selected_without_accepting_a_stale_pager_page(self):
         self.assertIn("programmaticTabSelection = index.takeUnless { it == pagerState.settledPage }", BROWSE)
-        self.assertIn("if (programmaticTabSelection == target) pagerState.scrollToPage(target)", BROWSE)
+        # 新增 tab 后必须先等 pager 的 pageCount 覆盖目标页，否则会被旧上限截断到前一个 tab。
+        self.assertIn("snapshotFlow { pagerState.pageCount }.first { it > target }", BROWSE)
+        self.assertIn("pagerState.scrollToPage(target)", BROWSE)
         self.assertIn("if (page == programmaticTabSelection) programmaticTabSelection = null", BROWSE)
         self.assertIn("if (page == vm.mainTab.value) return@collect", BROWSE)
 
