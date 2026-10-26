@@ -69,6 +69,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -109,6 +110,7 @@ import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -163,7 +165,17 @@ private fun LegacyBrowseScreen(
     LaunchedEffect(platform, mainTab, tabs.size, programmaticTabSelection) {
         val target = (programmaticTabSelection ?: mainTab).coerceIn(0, tabs.lastIndex.coerceAtLeast(0))
         if (pagerState.currentPage != target || pagerState.settledPage != target) {
-            if (programmaticTabSelection == target) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target)
+            if (programmaticTabSelection == target) {
+                // 新增 tab 时 tabs.size 先变化、pager 的 pageCount 后生效；直接 scrollToPage
+                // 会被旧上限截断到前一个 tab，表现成“新增后停在同一平台的旧标签页”。
+                // 先等 pageCount 覆盖目标页，再落位并补一次校验。
+                snapshotFlow { pagerState.pageCount }.first { it > target }
+                pagerState.scrollToPage(target)
+                withFrameNanos { }
+                if (pagerState.settledPage != target) pagerState.scrollToPage(target)
+            } else {
+                pagerState.animateScrollToPage(target)
+            }
         }
     }
     LaunchedEffect(Unit) { vm.initDefaultRankType(SpecialTabPrefs.getRankType(context)) }

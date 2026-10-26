@@ -353,7 +353,12 @@ fun AppContent(
     var speedTesting by remember { mutableStateOf(isLaunch && !com.zycomic.app.ui.settings.SettingsViewModel.autoTestDone) }
     var fullSpeedTestRequested by remember { mutableStateOf(false) }
     val speedTestScope = rememberCoroutineScope()
-    val blockingSpeedTest = speedTesting || fullSpeedTestRequested || (configRetest?.duringStartup == true && !foregroundRoutesReady)
+    // 完整重测一旦有平台端点就绪就放行主界面，剩余平台继续在后台测：
+    // 之前把 fullSpeedTestRequested 直接算进阻塞条件，慢网下三平台全测完才进主页，
+    // 表现成“点了重新完整测速后一直卡在开屏页不放行”。
+    val blockingSpeedTest = speedTesting ||
+        (configRetest?.duringStartup == true && !foregroundRoutesReady) ||
+        (fullSpeedTestRequested && !foregroundRoutesReady)
 
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
     var onboardingDone by remember {

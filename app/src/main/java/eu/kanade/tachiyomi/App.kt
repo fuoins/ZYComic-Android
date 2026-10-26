@@ -181,12 +181,19 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     }
                 }
                 var configurationUpdated = false
+                // 兜底放行：远端正向/反向代理异常时，配置检查可能长时间不返回，
+                // 而整轮测速要等这个门控。20s 后按“未更新”放行，避免开屏永久停在测速中。
+                val configGateWatchdog = launch(Dispatchers.IO) {
+                    kotlinx.coroutines.delay(CONFIG_CHECK_TIMEOUT_MS)
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.finishStartupConfigCheck(false)
+                }
                 val result = try {
                     timings.start(com.zycomic.app.net.SpeedTestTimings.Phase.CONFIG_CHECK).use {
                         runCatching { com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = false) }.getOrNull()
                     }
                         .also { configurationUpdated = it?.configurationUpdated == true }
                 } finally {
+                    configGateWatchdog.cancel()
                     // Unblock selection only after the authoritative generation is known.
                     // Cached probes from a different generation cannot cross this barrier.
                     com.zycomic.app.net.PlatformSpeedTestCoordinator.finishStartupConfigCheck(configurationUpdated)
@@ -702,3 +709,6 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 }
 
 private const val ACTION_DISABLE_INCOGNITO_MODE = "tachi.action.DISABLE_INCOGNITO_MODE"
+
+/** 启动配置检查的兜底放行时限（毫秒）。 */
+private const val CONFIG_CHECK_TIMEOUT_MS = 20_000L
