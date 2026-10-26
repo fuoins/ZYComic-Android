@@ -13,13 +13,14 @@ class LibraryHistoryRefreshContractTest {
     }
 
     @Test
-    fun `Picacg favorites keeps refresh action without a separate spinner and disables it while busy`() {
+    fun `Picacg favorites keeps an independent refresh spinner and stays clickable except while deleting`() {
         val screen = source("PicacgLibraryScreen")
         assertTrue(screen.contains("refreshSupported = !history,"))
         assertTrue(screen.contains("refreshBusy = loading || removingSelected,"))
         assertTrue(screen.contains("refreshEnabled = loggedIn,"))
-        assertFalse(screen.contains("refreshIndicatorSeparate = true,"))
-        assertFalse(screen.contains("refreshEnabledWhileBusy = loading && !removingSelected,"))
+        // e6ab89e：收藏页使用独立刷新指示器；加载中允许再次刷新，删除进行中才禁用。
+        assertTrue(screen.contains("refreshIndicatorSeparate = true,"))
+        assertTrue(screen.contains("refreshEnabledWhileBusy = loading && !removingSelected,"))
         assertTrue(screen.contains("onRefresh = {"))
         assertTrue(screen.contains("loading && comics.isEmpty() -> LoadingScreen("))
         assertFalse(screen.contains("refreshSupported = !history && loggedIn && !loading"))

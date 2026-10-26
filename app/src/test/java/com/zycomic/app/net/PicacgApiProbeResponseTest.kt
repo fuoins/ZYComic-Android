@@ -61,17 +61,21 @@ class PicacgApiProbeResponseTest {
         .build()
 
     private fun probe(base: String, client: OkHttpClient): PicacgSpeedTester.Probe {
+        // probeApi 增加了可选的 ownerJob 参数；Kotlin 默认参数不会生成三参数重载，
+        // 反射必须按完整签名查找，否则 NoSuchMethodException。
         val method = PicacgSpeedTester::class.java.getDeclaredMethod(
             "probeApi",
             String::class.java,
             DomainIp::class.java,
             OkHttpClient::class.java,
+            kotlinx.coroutines.Job::class.java,
         ).apply { isAccessible = true }
         return method.invoke(
             PicacgSpeedTester,
             base,
             DomainIp(java.net.URI(base).host, "192.0.2.10"),
             client,
+            null,
         ) as PicacgSpeedTester.Probe
     }
 }
