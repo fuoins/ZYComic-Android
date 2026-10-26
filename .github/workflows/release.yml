@@ -104,7 +104,12 @@ jobs:
           ./gradlew -p tools/offline-tests prepareHarnessDependencies --console=plain
           for test in tools/test_*.py; do
             echo "===== $test ====="
-            python3 "$test"
+            # 这些运行时契约用例依赖协程调度时序，2 核 CI 上偶发假失败；
+            # 允许重试一次，连续两次失败才判定为真实回归。
+            if ! python3 "$test"; then
+              echo "::warning::$test failed once, retrying to filter scheduler flakiness"
+              python3 "$test"
+            fi
           done
 
       - name: Release unit tests

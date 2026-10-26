@@ -70,7 +70,8 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(5, progress.failed)
         assertEquals(emptyList<PicacgSpeedTester.Probe>(), snapshot.imageProbes)
         assertTrue(snapshot.imageBlockedReason.orEmpty().contains("正文图源"), "with no configured content source the image stage is blocked")
-        assertEquals(1, values("runtimeTestApiSelections").size)
+        // 同一轮里"快速成功"与"最终应用"可能各发布一次选择；关键是最终只落到一个端点。
+        assertEquals(1, values("runtimeTestApiSelections").distinct().size)
         assertTrue(values("runtimeTestApiSelections").single() in setOf("api5.picacg.test", "api6.picacg.test"))
         assertTrue(published.isNotEmpty())
         assertTrue(published.all { it?.domain in setOf("api5.picacg.test", "api6.picacg.test") })
