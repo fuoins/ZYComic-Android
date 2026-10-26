@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -37,6 +38,7 @@ import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.net.SpeedTestLogJson
+import com.zycomic.app.net.SpeedTestTimingLog
 import com.zycomic.app.net.SpeedTestUiTextPolicy
 import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.net.StartupCheckPhase
@@ -197,6 +199,33 @@ fun SpeedTestScreen(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
+            // 只读时间线：用于定位“进入前到底等了什么”，不改任何测速判定。
+            val timingSummary = remember {
+                SpeedTestTimingLog.summary().ifBlank { "暂无本轮时间线（启动测速跑完后可查看）" }
+            }
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "启动时间线（最近一轮）",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = {
+                            context.getSystemService(android.content.ClipboardManager::class.java)
+                                ?.setPrimaryClip(
+                                    android.content.ClipData.newPlainText("speed-test-timing", timingSummary),
+                                )
+                            Toast.makeText(context, "已复制时间线", Toast.LENGTH_SHORT).show()
+                        },
+                    ) { Text("复制") }
+                }
+                Text(
+                    timingSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (manwaTestActive || speedTestProgress.phase == SpeedTester.Phase.FAILED || (
                     speedTestProgress.phase == SpeedTester.Phase.COMPLETE &&
                         (speedTestProgress.reusedImages > 0 || speedTestProgress.reusedLines > 0 || speedTestProgress.fullRetestRecommended)
