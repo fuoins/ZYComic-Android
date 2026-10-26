@@ -303,10 +303,12 @@ internal object AdaptiveSpeedProbe {
             // 完整测速不追求“最快”，只要求“能用”：沿用快测阈值会让弱网下第一个能打开的线路
             // 也判为不合格，只能等 30s 兜底才放行。这里给完整测速一个更宽的放行阈值（上限 2s），
             // 先进入，再在后台用本轮全量结果替换成真正最快的端点。
-            val releaseThresholdMs = if (quick) {
-                fastThresholdMs
+            val releaseThresholdMs = if (!quick && baseline == null) {
+                // 首次没有历史：用固定 2s 作为“可用”标准，既不把 4~5s 的慢节点放进来，
+                // 也不会像快测那样对任何成功都放行。
+                FULL_RELEASE_CEILING_MS
             } else {
-                maxOf(fastThresholdMs, FULL_RELEASE_CEILING_MS)
+                fastThresholdMs
             }
             if (explorationOnly) {
                 // One low-priority peer, outside the recent reliable pool; no cooldown waiting.

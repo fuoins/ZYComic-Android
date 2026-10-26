@@ -360,6 +360,32 @@ fun AppContent(
         (configRetest?.duringStartup == true && !foregroundRoutesReady) ||
         (fullSpeedTestRequested && !foregroundRoutesReady)
 
+    // 进入主界面时提示一次“已用可用节点进入、后台继续测速”：
+    // 每轮测速只在就绪边沿提示，进度刷新不会重复弹；手动重新测速会重新提示一次。
+    var readyToastShown by remember { mutableStateOf(false) }
+    LaunchedEffect(foregroundRoutesReady, blockingSpeedTest) {
+        if (!foregroundRoutesReady || blockingSpeedTest) {
+            if (!foregroundRoutesReady) readyToastShown = false
+            return@LaunchedEffect
+        }
+        if (readyToastShown) return@LaunchedEffect
+        readyToastShown = true
+        val enabled = ContentPlatform.entries.filter { StartupPlatformPolicy.isEnabled(it) }
+        val scopeLabel = when {
+            enabled.size >= ContentPlatform.entries.size -> "三平台"
+            enabled.isEmpty() -> ""
+            else -> enabled.joinToString("、") { platform ->
+                when (platform) {
+                    ContentPlatform.MANWA -> "漫蛙"
+                    ContentPlatform.PICACG -> "哔咔"
+                    ContentPlatform.JM -> "禁漫"
+                }
+            }
+        }
+        val prefix = if (scopeLabel.isEmpty()) "已选择可用节点" else "$scopeLabel 已选择可用节点"
+        Toast.makeText(context, "$prefix进入，后台持续测速并自动更新最快节点", Toast.LENGTH_SHORT).show()
+    }
+
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
     var onboardingDone by remember {
         mutableStateOf(com.zycomic.app.ui.onboarding.OnboardingPrefs.isDone(context))

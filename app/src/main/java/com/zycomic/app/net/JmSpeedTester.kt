@@ -479,6 +479,18 @@ object JmSpeedTester {
                                 }
                             }
                         }
+                        // 线路阶段结束兜底：本轮没有“足够快”的合格回调时，只要有一条线路可用就放行，
+                        // 图源继续在后台测。首次安装没有历史时，避免等到图源全部测完才进主页。
+                        val boundLineEndpoint = JmRouteManager.currentLineEndpoint()
+                        val appliedLineIsUsable = boundLineEndpoint != null && lineResults.any { (target, result) ->
+                            result.delayMs < Long.MAX_VALUE &&
+                                target.endpoint.normalizedForComparison() == boundLineEndpoint.normalizedForComparison()
+                        }
+                        if (stillCurrent() && appliedLineIsUsable &&
+                            qualifiedEndpointNotified.compareAndSet(false, true)
+                        ) {
+                            onQualifiedEndpoint?.invoke()
+                        }
                         lineCount = lineResults.size
                         lineTiming.close()
                         val measuredLineHistory = lineResults.map { (target, result) ->
