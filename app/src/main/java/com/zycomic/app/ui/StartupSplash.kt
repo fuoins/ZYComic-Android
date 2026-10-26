@@ -467,6 +467,7 @@ private fun PlatformChips(
                 platform = platform,
                 on = on,
                 progress = platformProgress(platform, checks),
+                checks = checks,
                 running = statuses[platform]?.running == true,
                 onClick = { onToggle(platform, !on) },
             )
@@ -479,6 +480,7 @@ private fun PlatformChip(
     platform: ContentPlatform,
     on: Boolean,
     progress: Float,
+    checks: List<StartupCheckStatus>,
     running: Boolean,
     onClick: () -> Unit,
 ) {

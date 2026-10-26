@@ -2,6 +2,7 @@ package com.zycomic.app.ui
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
