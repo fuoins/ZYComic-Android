@@ -17,13 +17,14 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
     }
 
     @Test
-    fun `updated config runs full probes and duplicate no-sample request reuses other phases`() = runBlocking {
+    fun `updated config keeps quick history ordering and duplicate no-sample request reuses other phases`() = runBlocking {
         val first = PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
 
         assertEquals(listOf(1, 1, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
-        assertEquals(listOf(false), SpeedTester.reuseLines)
+        // R2：配置更新不再强制全量，仍按历史排序快测；新增/移除端点由各 tester 的 reconcile 处理。
+        assertEquals(listOf(true), SpeedTester.reuseLines)
         assertEquals(listOf(false to false), PicacgSpeedTester.reuseFlags)
-        assertEquals(listOf(false to false), JmSpeedTester.reuseFlags)
+        assertEquals(listOf(true to true), JmSpeedTester.reuseFlags)
         assertEquals("incomplete", first.single { it.platform == "哔咔" }.status)
         assertEquals("tested", first.single { it.platform == "漫蛙" }.status)
         assertEquals("tested", first.single { it.platform == "禁漫天堂" }.status)
@@ -43,17 +44,17 @@ class CompletedSpeedTestCoordinatorRuntimeTest {
         PicacgRouteManager.verifiedImageSampleUrl = "https://img.picacg.test/chapter/cover.jpg"
 
         val first = PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true)
-        assertEquals(listOf(false), SpeedTester.reuseLines)
-        assertEquals(listOf(false), SpeedTester.reuseImages)
-        assertEquals(listOf(false to false), JmSpeedTester.reuseFlags)
+        assertEquals(listOf(true), SpeedTester.reuseLines)
+        assertEquals(listOf(true), SpeedTester.reuseImages)
+        assertEquals(listOf(true to true), JmSpeedTester.reuseFlags)
         assertEquals(listOf(false to false), PicacgSpeedTester.reuseFlags)
         assertTrue(first.all { it.status == "tested" })
 
         val duplicate = PlatformSpeedTestCoordinator.run()
 
         assertEquals(listOf(1, 1, 1), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
-        assertEquals(listOf(false), SpeedTester.reuseLines)
-        assertEquals(listOf(false to false), JmSpeedTester.reuseFlags)
+        assertEquals(listOf(true), SpeedTester.reuseLines)
+        assertEquals(listOf(true to true), JmSpeedTester.reuseFlags)
         assertEquals(1, PicacgSpeedTester.apiProbeCount)
         assertEquals(1, PicacgSpeedTester.imageProbeCount)
         assertEquals(listOf(false to false), PicacgSpeedTester.reuseFlags)

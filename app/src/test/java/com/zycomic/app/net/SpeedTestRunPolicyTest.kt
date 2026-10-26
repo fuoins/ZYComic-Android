@@ -71,12 +71,13 @@ class SpeedTestRunPolicyTest {
     }
 
     @Test
-    fun `new config disables history guided fast test for every line and image toggle combination`() {
+    fun `new config keeps history guided fast test for every line and image toggle combination`() {
+        // R2：配置更新不再禁用快测，新增端点由 reconcile + carry-over 优先补测。
         for (line in listOf(false, true)) {
             for (image in listOf(false, true)) {
-                assertFalse(SpeedTestRunPolicy.canFastTest(line, false, remoteConfigUpdated = true))
-                assertFalse(SpeedTestRunPolicy.canFastTest(image, false, remoteConfigUpdated = true))
-                assertFalse(SpeedTestRunPolicy.canReuseImages(image, false, key, key, key, remoteConfigUpdated = true))
+                assertTrue(SpeedTestRunPolicy.canFastTest(line, false, remoteConfigUpdated = true) == line)
+                assertTrue(SpeedTestRunPolicy.canFastTest(image, false, remoteConfigUpdated = true) == image)
+                assertTrue(SpeedTestRunPolicy.canReuseImages(image, false, key, key, key, remoteConfigUpdated = true) == image)
             }
         }
     }

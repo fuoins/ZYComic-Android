@@ -129,7 +129,7 @@ class StartupCoordinatorRuntimeTest {
     }
 
     @Test
-    fun `configuration generation change discards old startup outcome and reruns current generation`() = runBlocking {
+    fun `configuration generation change keeps the same network waiter released and reruns current generation`() = runBlocking {
         configureManwaOnly()
         val oldGenerationReady = CompletableDeferred<Unit>()
         val releaseOldGeneration = CompletableDeferred<Unit>()
@@ -143,14 +143,15 @@ class StartupCoordinatorRuntimeTest {
         val startup = async { PlatformSpeedTestCoordinator.awaitStartup() }
         withTimeout(5_000) { oldGenerationReady.await() }
         val oldRevision = RouteManager.configRevision
+        // 配置代变化但网络未变：已实测可用的端点照样放行，用户不必再等一整轮。
         RouteManager.configRevision++
         releaseOldGeneration.complete(Unit)
+        assertTrue(withTimeout(5_000) { startup.await() }.isEmpty(), "early readiness is not a completed report list")
+        // 旧代结果不参与发布；后台按新代重跑并给出完整报告。
         withTimeout(5_000) {
             while (SpeedTester.runCount < 2) yield()
         }
         assertEquals(oldRevision + 1, RouteManager.configRevision)
-        assertTrue(PlatformSpeedTestCoordinator.reports.value.isEmpty(), "no stale-generation report may publish")
-        withTimeout(5_000) { startup.await() }
         withTimeout(5_000) {
             while (PlatformSpeedTestCoordinator.running.value) yield()
         }

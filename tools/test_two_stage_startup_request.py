@@ -21,7 +21,8 @@ def main():
         jar("org.jetbrains", "annotations", "13.0"),
     ])
     classpath = os.pathsep.join([stdlib, coroutines, junit, jar("org.jetbrains", "annotations", "13.0")])
-    names = ["StartupSpeedTestRequest", "FullSpeedTestRequest"]
+    # SpeedTestRunKey 来自 SpeedTestRunPolicy，测试里用它验证“同网络不同配置代仍放行”。
+    names = ["StartupSpeedTestRequest", "FullSpeedTestRequest", "SpeedTestRunPolicy"]
     sources = [ROOT / f"app/src/main/java/com/zycomic/app/net/{name}.kt" for name in names]
     sources += [ROOT / f"app/src/test/java/com/zycomic/app/net/{name}Test.kt" for name in names]
     sources += [ROOT / "app/src/test/java/com/zycomic/app/ui/StartupUiContractTest.kt"]

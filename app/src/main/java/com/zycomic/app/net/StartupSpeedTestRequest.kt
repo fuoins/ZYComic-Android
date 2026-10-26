@@ -45,9 +45,14 @@ internal class StartupSpeedTestRequest<K, T>(
     suspend fun run(currentKey: () -> K, block: suspend () -> Pair<K, T>): T =
         runUntilReady(currentKey) { block() }
 
+    /**
+     * @param compatible 判断“已发布的就绪代”是否仍能满足当前等待者。默认要求完全相同；
+     *   调用方可以放宽到“同一网络”这类更粗的语义，避免测速途中的配置代变化让前台永远等不到。
+     */
     suspend fun runUntilReady(
         currentKey: () -> K,
         reuseCompletedResult: Boolean = reuseCompleted,
+        compatible: (published: K, current: K) -> Boolean = { published, current -> published == current },
         block: suspend (publishReady: (K, T) -> Unit) -> Pair<K, T>,
     ): T {
         synchronized(lock) { replacement }?.let { return it() }
@@ -83,12 +88,12 @@ internal class StartupSpeedTestRequest<K, T>(
                 }
             }
         }
-        if (request == null) return runUntilReady(currentKey, reuseCompletedResult, block)
+        if (request == null) return runUntilReady(currentKey, reuseCompletedResult, compatible, block)
         request.job.start()
         return try {
             coroutineScope {
                 val foreground = async {
-                    request.ready.filterNotNull().first { it.key == currentKey() }
+                    request.ready.filterNotNull().first { compatible(it.key, currentKey()) }
                 }
                 try {
                     // Completion stays an actual completion. Early readiness returns no fabricated final report.
@@ -99,9 +104,10 @@ internal class StartupSpeedTestRequest<K, T>(
                         }
                         val next = synchronized(lock) { replacement }
                         if (next != null) return@coroutineScope next()
-                        if (result.first == null || result.first == currentKey()) return@coroutineScope result.second
+                        val published = result.first
+                        if (published == null || compatible(published, currentKey())) return@coroutineScope result.second
                         // A generation changed between observing readiness and resuming this waiter.
-                        return@coroutineScope runUntilReady(currentKey, reuseCompletedResult, block)
+                        return@coroutineScope runUntilReady(currentKey, reuseCompletedResult, compatible, block)
                     }
                     @Suppress("UNREACHABLE_CODE")
                     error("unreachable")

@@ -74,8 +74,21 @@ object PlatformSpeedTestCoordinator {
         reuseCompleted = false,
     )
 
+    /**
+     * 前台进入只要求“同一网络身份”。
+     *
+     * 测速途中如果权威配置刚好应用（配置代变化）或平台开关代变化，已实测可用的端点仍然让用户进入；
+     * 否则前台会等到整轮后台测速结束，表现为“点了很久没反应”。真正的代校验仍在 execute 内部完成，
+     * 旧代的结果不会用于自动选路。
+     */
+    private val foregroundCompatible: (SpeedTestRunKey, SpeedTestRunKey) -> Boolean =
+        { published, current -> published.networkIdentity == current.networkIdentity }
+
     /** App warm-up and UI waiters share the same startup worker without resetting progress. */
-    suspend fun awaitStartup(): List<PlatformSpeedTestReport> = startupRequest.runUntilReady(::currentKey) { ready ->
+    suspend fun awaitStartup(): List<PlatformSpeedTestReport> = startupRequest.runUntilReady(
+        ::currentKey,
+        compatible = foregroundCompatible,
+    ) { ready ->
         var publishedKey: SpeedTestRunKey? = null
         val result = execute(isStartupRun = true, onCompleted = { publishedKey = it }, onForegroundReady = { ready(it, emptyList()) })
         checkNotNull(publishedKey) to result
@@ -87,7 +100,11 @@ object PlatformSpeedTestCoordinator {
     }
 
     private suspend fun awaitFullStartup(reuseCompleted: Boolean = false): List<PlatformSpeedTestReport> =
-        fullStartupRequest.runUntilReady(::currentKey, reuseCompletedResult = reuseCompleted) { ready ->
+        fullStartupRequest.runUntilReady(
+            ::currentKey,
+            reuseCompletedResult = reuseCompleted,
+            compatible = foregroundCompatible,
+        ) { ready ->
             _testMode.value = StartupTestMode.FULL
             _foregroundReady.value = false
             startupRequest.supersedeWith { awaitFullStartup(reuseCompleted = true) }
@@ -100,6 +117,19 @@ object PlatformSpeedTestCoordinator {
             )
             checkNotNull(publishedKey) to result
         }
+
+    /**
+     * 后台配置检查在“应用新配置”前等待当前启动轮结束。
+     *
+     * 中途换配置会让正在跑的整轮判为过期并从头重来（首屏进入被推迟一整轮）。
+     * 非首次启动已经有可用配置，先测完再换配置，下一轮再按增量核对补新端点。
+     */
+    suspend fun awaitStartupRoundIdle(timeoutMs: Long = 60_000L) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (_running.value && System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(200L)
+        }
+    }
 
     internal fun finishStartupConfigCheck(configurationUpdated: Boolean) {
         startupConfig.complete(configurationUpdated)

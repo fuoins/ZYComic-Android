@@ -78,13 +78,14 @@ class CoordinatorUpdatedStartupRuntimeTest {
         PlatformSpeedTestCoordinator.finishStartupConfigCheck(true)
         PicacgRouteManager.verifiedImageSampleUrl = null
         PlatformSpeedTestCoordinator.run()
-        assertEquals(listOf(false), SpeedTester.reuseLines)
+        // R2：配置更新也走历史排序快测；新端点靠 carry-over 优先补测，不再强制全量。
+        assertEquals(listOf(true), SpeedTester.reuseLines)
         assertEquals("incomplete", PlatformSpeedTestCoordinator.reports.value.single { it.platform == "哔咔" }.status)
 
         NetworkModule.direct = false
         PlatformSpeedTestCoordinator.run()
-        assertEquals(listOf(false, true), SpeedTester.reuseLines)
-        assertEquals(listOf(false, true), SpeedTester.reuseImages)
-        assertEquals(listOf(false to false, true to true), JmSpeedTester.reuseFlags)
+        assertEquals(listOf(true, true), SpeedTester.reuseLines)
+        assertEquals(listOf(true, true), SpeedTester.reuseImages)
+        assertEquals(listOf(true to true, true to true), JmSpeedTester.reuseFlags)
     }
 }

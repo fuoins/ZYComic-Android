@@ -76,6 +76,35 @@ class StartupSpeedTestRequestTest {
     }
 
     @Test
+    fun `network compatible readiness releases a waiter whose configuration generation changed`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val request = StartupSpeedTestRequest<SpeedTestRunKey, String>(scope)
+            var key = SpeedTestRunKey(1, 1, 1, "wifi")
+            val published = CompletableDeferred<Unit>()
+            val finish = CompletableDeferred<Unit>()
+            val waiter = async(start = CoroutineStart.UNDISPATCHED) {
+                request.runUntilReady(
+                    { key },
+                    compatible = { publishedKey, currentKey -> publishedKey.networkIdentity == currentKey.networkIdentity },
+                ) { publish ->
+                    publish(key, "usable")
+                    published.complete(Unit)
+                    finish.await()
+                    key to "complete"
+                }
+            }
+            published.await()
+            // 同一网络下配置代变化（例如后台刚应用了新配置）不应让前台继续等到整轮结束。
+            key = key.copy(manwaConfigRevision = 2, remoteVersion = 2)
+            assertEquals("usable", withTimeout(2_000) { waiter.await() })
+            finish.complete(Unit)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun `full request shares active background work but does not cache a completed full round`() = runBlocking {
         val scope = CoroutineScope(coroutineContext + SupervisorJob())
         try {

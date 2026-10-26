@@ -127,6 +127,12 @@ object RemoteConfigFetcher {
                                 }
                                 return@use fail("远程配置版本必须高于已应用版本；当前没有可用缓存，请提高版本号后重试")
                             }
+                            // 非首次启动：已有可用配置在跑，先让当前测速轮结束再换配置。
+                            // 中途换配置会把正在跑的整轮判为过期并从头上重来，首屏进入反而被推迟一整轮；
+                            // 新配置在这里应用后，下一轮测速按 endpoint identity 增量核对补新端点。
+                            if (!manual && DevConfig.hasUsableRouteConfig) {
+                                PlatformSpeedTestCoordinator.awaitStartupRoundIdle()
+                            }
                             val applied = timings.start(SpeedTestTimings.Phase.CONFIG_APPLY).use {
                                 DevConfig.applyRemoteConfig(body, etag)
                             }
