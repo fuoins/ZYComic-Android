@@ -75,11 +75,14 @@ class ConfigUpdateStartupStateRuntimeTest {
         release.complete(Unit)
 
         val reports = withTimeout(5_000) { startup.await() }
-        assertEquals(reports, withTimeout(5_000) { notification.await() })
+        val notificationReports = withTimeout(5_000) { notification.await() }
+        // 开屏等待者可能提前放行（空列表），重复请求返回本轮完整报告；关键是不得触发第三轮。
+        assertTrue(reports.isEmpty() || reports == notificationReports)
+        assertEquals(3, notificationReports.size)
         assertEquals(listOf(2, 2, 2), listOf(SpeedTester.runCount, PicacgSpeedTester.runCount, JmSpeedTester.runCount))
         assertEquals(7, startupChecksPassed(PlatformSpeedTestCoordinator.startupCheckStatuses.value))
         val checks = PlatformSpeedTestCoordinator.startupCheckStatuses.value
-        assertEquals(reports, PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true))
+        assertEquals(notificationReports, PlatformSpeedTestCoordinator.run(remoteConfigUpdated = true))
         assertEquals(checks, PlatformSpeedTestCoordinator.startupCheckStatuses.value)
         assertEquals(2, PicacgSpeedTester.apiProbeCount)
         awaitHealth()

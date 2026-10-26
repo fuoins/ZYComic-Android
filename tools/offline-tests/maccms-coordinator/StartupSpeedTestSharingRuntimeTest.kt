@@ -113,8 +113,13 @@ class StartupSpeedTestSharingRuntimeTest {
 
         allowApply.complete(Unit)
         val result = withTimeout(5_000) { survivingWaiter.await() }
-        assertEquals("tested", result.single { it.platform == "哔咔" }.status)
+        // 所有平台都有结论时先放行（空列表），报告随后由后台轮次发布。
+        assertTrue(result.isEmpty() || result.single { it.platform == "哔咔" }.status == "tested")
         assertEquals(1, PicacgSpeedTester.runCount)
+        withTimeout(5_000) {
+            while (PlatformSpeedTestCoordinator.running.value) yield()
+        }
+        assertEquals("tested", PlatformSpeedTestCoordinator.reports.value.single { it.platform == "哔咔" }.status)
         awaitMaccmsHealth()
         assertEquals(3, MaccmsProbeRecorder.invocations.size)
     }
@@ -152,9 +157,12 @@ class StartupSpeedTestSharingRuntimeTest {
         mutations.forEachIndexed { index, mutate ->
             val before = PicacgSpeedTester.runCount
             mutate()
-            val result = PlatformSpeedTestCoordinator.awaitStartup()
+            PlatformSpeedTestCoordinator.awaitStartup()
+            withTimeout(5_000) {
+                while (PlatformSpeedTestCoordinator.running.value) yield()
+            }
             assertEquals(before + 1, PicacgSpeedTester.runCount, "identity mutation $index must start a new generation")
-            assertEquals("tested", result.single { it.platform == "哔咔" }.status)
+            assertEquals("tested", PlatformSpeedTestCoordinator.reports.value.single { it.platform == "哔咔" }.status)
         }
     }
 
@@ -177,7 +185,11 @@ class StartupSpeedTestSharingRuntimeTest {
         PicacgRouteManager.apiUrls = listOf("https://latest-generation.picacg.test")
         allowApply.complete(Unit)
 
-        val reports = withTimeout(5_000) { startup.await() }
+        withTimeout(5_000) { startup.await() }
+        withTimeout(5_000) {
+            while (PlatformSpeedTestCoordinator.running.value) yield()
+        }
+        val reports = PlatformSpeedTestCoordinator.reports.value
         val report = reports.single { it.platform == "哔咔" }
         val latestIp = "192.0.2.12"
         assertEquals(2, PicacgSpeedTester.runCount, "stale work must be retried against the new route generation")

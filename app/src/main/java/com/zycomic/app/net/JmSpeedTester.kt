@@ -60,6 +60,7 @@ object JmSpeedTester {
         beforeApply: suspend () -> Boolean = { true },
         onRouteReady: (() -> Unit)? = null,
         onQualifiedEndpoint: (() -> Unit)? = null,
+        onStageUsable: ((StartupTestStage) -> Unit)? = null,
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): RunResult = lock.withLock {
         check(running.compareAndSet(false, true)) { "JM 测速已在运行" }
@@ -162,6 +163,8 @@ object JmSpeedTester {
                     }
                     val routeReadyGuard = Any()
                     val qualifiedEndpointNotified = AtomicBoolean(false)
+                    val lineStageNotified = AtomicBoolean(false)
+                    val imageStageNotified = AtomicBoolean(false)
                     var lineRouteReady = false
                     var imageRouteReady = false
                     var routeReadyEmitted = false
@@ -204,10 +207,13 @@ object JmSpeedTester {
                         } else {
                             JmRouteManager.currentLineEndpoint()
                         }
-                        if (appliedEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison() &&
-                            stillCurrent() && qualifiedEndpointNotified.compareAndSet(false, true)
-                        ) {
-                            onQualifiedEndpoint?.invoke()
+                        if (appliedEndpoint?.normalizedForComparison() == endpoint.normalizedForComparison() && stillCurrent()) {
+                            if (image) {
+                                if (imageStageNotified.compareAndSet(false, true)) onStageUsable?.invoke(StartupTestStage.IMAGE)
+                            } else {
+                                if (lineStageNotified.compareAndSet(false, true)) onStageUsable?.invoke(StartupTestStage.LINE)
+                            }
+                            if (qualifiedEndpointNotified.compareAndSet(false, true)) onQualifiedEndpoint?.invoke()
                         }
                     }
                     var progress = JmSpeedTestProgress()

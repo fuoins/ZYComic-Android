@@ -41,6 +41,7 @@ def main() -> None:
     sources += [net / f"{name}.kt" for name in [
         "DomainIp", "MaccmsPinnedTransport", "MaccmsSpeedTester", "CompletedSpeedTestPhases",
         "StartupSpeedTestGate", "StartupSpeedTestRequest", "SpeedTestRunPolicy", "FullSpeedTestRequest",
+        "StartupTestStage",
         "PlatformStartupStatus", "PlatformSpeedTestCoordinator", "PlatformSpeedTestReport",
         "SpeedTestTimings", "SpeedTestTimingLog", "SpeedTestUiTextPolicy", "ImageSourceDisplayPolicy",
         "ImgDomainPolicy", "StartupTestMode",

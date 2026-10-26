@@ -286,12 +286,39 @@ object PlatformSpeedTestCoordinator {
                     val requiredPlatforms = ContentPlatform.entries.filter {
                         StartupPlatformPolicy.isEnabled(policy, it) && (onlyPlatform == null || onlyPlatform == it)
                     }.toSet()
-                    fun qualifiedEndpointReady(platform: ContentPlatform) {
-                        if (!generationIsCurrent() || startupConfig.configurationUpdated == null || platform !in requiredPlatforms) return
-                        // The tester attests a current, applied, threshold-qualified endpoint.
-                        // Other businesses and final reports remain in flight.
+                    // 放行判定：每个启用平台都必须同时具备“可用线路”和“可用图源”，
+                    // 这样进入后任意平台标签页都不是坏的。阶段内已经发出的探测不会被取消，
+                    // 只是继续在后台跑完；确认没有可用端点的平台按“已得出结论”记，避免卡死开屏。
+                    val stageReadyLock = Any()
+                    val stageReady = ContentPlatform.entries.associateWith { mutableSetOf<StartupTestStage>() }
+                    val foregroundReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+                    fun releaseIfAllPlatformsReady() {
+                        if (startupConfig.configurationUpdated == null || !generationIsCurrent()) return
+                        val ready = synchronized(stageReadyLock) {
+                            requiredPlatforms.all { stageReady.getValue(it).size == StartupTestStage.entries.size }
+                        }
+                        if (!ready) return
+                        if (!foregroundReleased.compareAndSet(false, true)) return
                         _foregroundReady.value = true
                         onForegroundReady?.invoke(key)
+                    }
+                    fun stageUsable(platform: ContentPlatform, stage: StartupTestStage) {
+                        // 先记下来再判放行：权威配置门控可能晚于第一个可用端点完成，
+                        // 记下来才能在门控完成时立刻放行，而不是丢掉这个阶段信号。
+                        if (!generationIsCurrent() || platform !in requiredPlatforms) return
+                        val added = synchronized(stageReadyLock) { stageReady.getValue(platform).add(stage) }
+                        if (added) releaseIfAllPlatformsReady()
+                    }
+                    /** 平台本轮的线路/图源阶段都已经有结论（可用，或确认本轮没有可用端点）。 */
+                    fun platformConcluded(platform: ContentPlatform) {
+                        if (!generationIsCurrent() || platform !in requiredPlatforms) return
+                        val added = synchronized(stageReadyLock) {
+                            val stages = stageReady.getValue(platform)
+                            val before = stages.size
+                            stages.addAll(StartupTestStage.entries)
+                            stages.size != before
+                        }
+                        if (added) releaseIfAllPlatformsReady()
                     }
                     suspend fun beforeApply(): Boolean {
                         startupConfig.awaitConfigurationUpdated()
@@ -363,6 +390,7 @@ object PlatformSpeedTestCoordinator {
                                         // must revalidate its lines before binding the independent Maccms pool.
                                         if (cached != null && platform != ContentPlatform.PICACG) {
                                             publishPlatformStatus(platform, platformCompletionStatus(cached), running = false)
+                                            platformConcluded(platform)
                                             return@async cached
                                         }
                                     }
@@ -387,7 +415,7 @@ object PlatformSpeedTestCoordinator {
                                                 reconcileConfig = !forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onQualifiedEndpoint = { qualifiedEndpointReady(platform) },
+                                                onStageUsable = { stage -> stageUsable(platform, stage) },
                                                 onStageProgress = { progress ->
                                                     if (generationIsCurrent()) {
                                                         when (progress.phase) {
@@ -430,7 +458,7 @@ object PlatformSpeedTestCoordinator {
                                                 forceFresh = forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onQualifiedEndpoint = { qualifiedEndpointReady(platform) },
+                                                onStageUsable = { stage -> stageUsable(platform, stage) },
                                                 onApiPublished = { endpoint -> publishMaccmsRoute(endpoint?.ip) },
                                                 onProgress = { progress ->
                                                     if (generationIsCurrent()) {
@@ -472,7 +500,7 @@ object PlatformSpeedTestCoordinator {
                                             }
                                             publishPlatformStatus(platform, _progressText.value.orEmpty(), running = false)
                                         } else {
-                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply, onQualifiedEndpoint = { qualifiedEndpointReady(platform) }) { progress ->
+                                            val run = JmSpeedTester.run(reuseLines = reuseLines, reuseImages = reuseImages, reconcileConfig = !forceFresh, isCurrent = ::generationIsCurrent, beforeApply = ::beforeApply, onStageUsable = { stage -> stageUsable(platform, stage) }) { progress ->
                                                 if (generationIsCurrent()) {
                                                     when (progress.phase) {
                                                         JmSpeedTestProgress.Phase.TESTING_LINES -> jmLineProgress = progress
@@ -520,6 +548,8 @@ object PlatformSpeedTestCoordinator {
                                 }
                                 report(platform, status, reason, picacgSnapshot).also { platformReport ->
                                     if (generationIsCurrent()) {
+                                        // 本轮结论已定（成功或确认没有可用端点）：不再阻塞进入。
+                                        platformConcluded(platform)
                                         publishPlatformStatus(platform, platformCompletionStatus(platformReport), running = false)
                                         blockUnresolvedChecks(platform)
                                     }
@@ -530,6 +560,8 @@ object PlatformSpeedTestCoordinator {
                     // Even all-disabled/failed warm-ups must wait for authoritative config.
                     startupConfig.awaitConfigurationUpdated()
                     if (!generationIsCurrent()) continue
+                    // 门控完成得比阶段信号晚时，这里补一次放行判定。
+                    releaseIfAllPlatformsReady()
                     _foregroundReady.value = true
                     _reports.value = result
                     _startupSummary.value = startupSummary(result)

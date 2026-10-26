@@ -43,7 +43,7 @@ def main() -> None:
         FIXTURE / "JmTwoStageRuntimeTest.kt",
         MAIN / "DomainIp.kt", MAIN / "DomainIpProbePolicy.kt", MAIN / "SpeedTestProbeBudget.kt",
         MAIN / "AdaptiveSpeedProbe.kt", MAIN / "AdaptiveSpeedHistory.kt",
-        MAIN / "SpeedTestRunPolicy.kt", MAIN / "SpeedTestTimings.kt", MAIN / "SpeedTestTimingLog.kt",
+        MAIN / "SpeedTestRunPolicy.kt", MAIN / "StartupTestStage.kt", MAIN / "SpeedTestTimings.kt", MAIN / "SpeedTestTimingLog.kt",
         MAIN / "JmSpeedTester.kt", MAIN / "JmSpeedTestQuickProbePolicy.kt", MAIN / "JmSpeedTestValidityPolicy.kt",
         MAIN / "SpeedTestHistoryPolicy.kt", MAIN / "JmApiEndpointRecovery.kt", MAIN / "RuntimeRecoveryPolicy.kt",
         MAIN / "JmSpeedTestHistory.kt",

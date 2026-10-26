@@ -2,6 +2,8 @@ package com.zycomic.app.net
 
 import com.zycomic.app.platform.StartupPlatformPolicy
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -43,13 +45,17 @@ class CoordinatorRetestAllRuntimeTest {
             revision = 1,
         )
 
-        val result = PlatformSpeedTestCoordinator.retestAllEnabled()
+        PlatformSpeedTestCoordinator.retestAllEnabled()
+        withTimeout(5_000) {
+            while (PlatformSpeedTestCoordinator.running.value) yield()
+        }
 
         assertEquals(1, SpeedTester.runCount)
         assertEquals(0, PicacgSpeedTester.runCount)
         assertEquals(1, JmSpeedTester.runCount)
-        assertEquals("skipped", result.single { it.platform == "哔咔" }.status)
-        assertFalse(result.any { it.platform == "哔咔" && it.status != "skipped" })
+        val reports = PlatformSpeedTestCoordinator.reports.value
+        assertEquals("skipped", reports.single { it.platform == "哔咔" }.status)
+        assertFalse(reports.any { it.platform == "哔咔" && it.status != "skipped" })
     }
 
     @Test

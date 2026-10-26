@@ -833,6 +833,8 @@ object SpeedTester {
         beforeApply: suspend () -> Boolean = { true },
         reconcileConfig: Boolean = false,
         onQualifiedEndpoint: (() -> Unit)? = null,
+        /** 该阶段本轮第一个“已应用”的可用端点；用于“所有平台都具备可用线路与图源”后才放行。 */
+        onStageUsable: ((StartupTestStage) -> Unit)? = null,
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         coroutineScope {
             val configRevisionAtStart = RouteManager.configRevision
@@ -967,6 +969,8 @@ object SpeedTester {
                     }
                 }
                 val qualifiedEndpointSent = AtomicBoolean(false)
+                val lineStageNotified = AtomicBoolean(false)
+                val imageStageNotified = AtomicBoolean(false)
                 // The runner owns scheduling history and never synthesizes current outcomes from it.
                 // Candidate order remains configured/DNS order.
                 val lineProbeTargets = currentLineTargets
@@ -1022,10 +1026,9 @@ object SpeedTester {
                                 val appliedEndpointMatches =
                                     lineDomain(RouteManager.baseUrl).equals(target.endpoint.domain, ignoreCase = true) &&
                                         RouteManager.selectedLineIp.equals(target.endpoint.ip, ignoreCase = true)
-                                if (appliedEndpointMatches && runIsCurrent() && allowPublication() &&
-                                    qualifiedEndpointSent.compareAndSet(false, true)
-                                ) {
-                                    onQualifiedEndpoint?.invoke()
+                                if (appliedEndpointMatches && runIsCurrent() && allowPublication()) {
+                                    if (qualifiedEndpointSent.compareAndSet(false, true)) onQualifiedEndpoint?.invoke()
+                                    if (lineStageNotified.compareAndSet(false, true)) onStageUsable?.invoke(StartupTestStage.LINE)
                                 }
                             }
                         },
@@ -1141,10 +1144,9 @@ object SpeedTester {
                             val appliedEndpointMatches =
                                 (RouteManager.imgRewriteTarget ?: RouteManager.imgHost).equals(endpoint.domain, ignoreCase = true) &&
                                     RouteManager.selectedImgIp.equals(endpoint.ip, ignoreCase = true)
-                            if (appliedEndpointMatches && runIsCurrent() && allowPublication() &&
-                                qualifiedEndpointSent.compareAndSet(false, true)
-                            ) {
-                                onQualifiedEndpoint?.invoke()
+                            if (appliedEndpointMatches && runIsCurrent() && allowPublication()) {
+                                if (qualifiedEndpointSent.compareAndSet(false, true)) onQualifiedEndpoint?.invoke()
+                                if (imageStageNotified.compareAndSet(false, true)) onStageUsable?.invoke(StartupTestStage.IMAGE)
                             }
                         }
                     },

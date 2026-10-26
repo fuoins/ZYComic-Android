@@ -113,6 +113,7 @@ object PicacgSpeedTester {
         onApiPublished: (DomainIp?) -> Unit = {},
         onRouteReady: (() -> Unit)? = null,
         onQualifiedEndpoint: (() -> Unit)? = null,
+        onStageUsable: ((StartupTestStage) -> Unit)? = null,
         onProgress: (Progress) -> Unit = {},
     ): Snapshot = withContext(Dispatchers.IO) {
         runLock.withLock {
@@ -121,6 +122,8 @@ object PicacgSpeedTester {
                 val progressLock = Any()
                 val apiReady = AtomicBoolean(false)
                 val qualifiedEndpointNotified = AtomicBoolean(false)
+                val lineStageNotified = AtomicBoolean(false)
+                val imageStageNotified = AtomicBoolean(false)
                 val applyGateMutex = Mutex()
                 var applyGateResult: Boolean? = null
                 suspend fun awaitApplyGate(): Boolean = applyGateMutex.withLock {
@@ -191,14 +194,16 @@ object PicacgSpeedTester {
                     fun current(): Boolean = isCurrent() && revision == PicacgRouteManager.configRevision &&
                         activeVersion == PicacgRouteManager.remoteVersion &&
                         networkIdentity == PlatformSpeedTestCoordinator.currentNetworkIdentity()
-                    suspend fun notifyQualifiedIfApplied(matches: Boolean) {
+                    suspend fun notifyQualifiedIfApplied(matches: Boolean, stage: StartupTestStage) {
                         if (!current()) return
                         if (!awaitApplyGate() || !current()) {
                             publicationRejected.set(true)
                             return
                         }
-                        if (matches && current() && qualifiedEndpointNotified.compareAndSet(false, true)) {
-                            onQualifiedEndpoint?.invoke()
+                        if (matches && current()) {
+                            val stageNotified = if (stage == StartupTestStage.LINE) lineStageNotified else imageStageNotified
+                            if (stageNotified.compareAndSet(false, true)) onStageUsable?.invoke(stage)
+                            if (qualifiedEndpointNotified.compareAndSet(false, true)) onQualifiedEndpoint?.invoke()
                         }
                     }
                     fun logAdaptive(message: String) {
@@ -326,7 +331,7 @@ object PicacgSpeedTester {
                                             val ranking = if (target.content) currentState.contentRanking else currentState.coverRanking
                                             ranking.firstOrNull() == target.endpoint && source.equals(target.endpoint.domain, true)
                                         }
-                                        notifyQualifiedIfApplied(routeMatches)
+                                        notifyQualifiedIfApplied(routeMatches, StartupTestStage.IMAGE)
                                     },
                                     probe = probe@{ target ->
                                         if (!current()) return@probe null
@@ -484,6 +489,7 @@ object PicacgSpeedTester {
                                 notifyQualifiedIfApplied(
                                     PicacgRouteManager.selectedApiEndpoint == target.endpoint &&
                                         PicacgRouteManager.selectedApiHost.equals(URI(target.url).host, true),
+                                    StartupTestStage.LINE,
                                 )
                             },
                             probe = probe@{ target ->

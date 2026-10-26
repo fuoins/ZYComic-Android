@@ -117,6 +117,7 @@ object SpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onQualifiedEndpoint: (() -> Unit)? = null,
+        onStageUsable: ((StartupTestStage) -> Unit)? = null,
         onRouteReady: (() -> Unit)? = null,
         onStageProgress: ((Progress) -> Unit)? = null,
     ): Pair<Int, Int> {
@@ -129,6 +130,9 @@ object SpeedTester {
         if (!lastRunSkipped && emitQualifiedEndpoint) {
             suspendBeforeQualifiedEndpointHook?.invoke()
             onQualifiedEndpoint?.invoke()
+            // 线路与图源都已有本轮可用端点：协调器据此判定这个平台可以进入。
+            onStageUsable?.invoke(StartupTestStage.LINE)
+            onStageUsable?.invoke(StartupTestStage.IMAGE)
             suspendAfterQualifiedEndpointHook?.invoke(runCount)
         }
         progress.value = if (lastRunSkipped) {
@@ -209,6 +213,7 @@ object PicacgSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onQualifiedEndpoint: (() -> Unit)? = null,
+        onStageUsable: ((StartupTestStage) -> Unit)? = null,
         onApiPublished: (DomainIp?) -> Unit = {},
         onRouteReady: (() -> Unit)? = null,
         onProgress: (Progress) -> Unit = {},
@@ -277,7 +282,9 @@ object PicacgSpeedTester {
             PicacgRouteManager.selectedApiEndpoint = selectedLine
             if (emitQualifiedEndpoint && api.any { it.success && it.testedThisRound }) {
                 suspendBeforeQualifiedEndpointHook?.invoke()
-            onQualifiedEndpoint?.invoke()
+                onQualifiedEndpoint?.invoke()
+                onStageUsable?.invoke(StartupTestStage.LINE)
+                if (images.any { it.success }) onStageUsable?.invoke(StartupTestStage.IMAGE)
                 suspendAfterQualifiedEndpointHook?.invoke(runCount)
             }
             onApiPublished(selectedLine)
@@ -343,6 +350,7 @@ object JmSpeedTester {
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onQualifiedEndpoint: (() -> Unit)? = null,
+        onStageUsable: ((StartupTestStage) -> Unit)? = null,
         onRouteReady: (() -> Unit)? = null,
         onProgress: ((JmSpeedTestProgress) -> Unit)? = null,
     ): RunResult {
@@ -354,7 +362,9 @@ object JmSpeedTester {
             progressEvents.forEach { event -> onProgress?.invoke(event) }
             if (emitQualifiedEndpoint) {
                 suspendBeforeQualifiedEndpointHook?.invoke()
-            onQualifiedEndpoint?.invoke()
+                onQualifiedEndpoint?.invoke()
+                onStageUsable?.invoke(StartupTestStage.LINE)
+                onStageUsable?.invoke(StartupTestStage.IMAGE)
                 suspendAfterQualifiedEndpointHook?.invoke(runCount)
             }
             if (emitRouteReady) {

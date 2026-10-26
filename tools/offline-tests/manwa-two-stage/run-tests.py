@@ -68,7 +68,7 @@ def main() -> None:
         "SpeedTestLogModels.kt", "ProbeAttemptDiagnostics.kt", "ReusableImageSpeedTestPolicy.kt",
         "SpeedTestHistoryPolicy.kt", "SpeedTestLogSelectionPolicy.kt", "DomainIpProbePolicy.kt", "ManwaSniPolicy.kt",
         "SpeedTestProbeBudget.kt", "SpeedTestProbeCall.kt", "ManwaImageFallbackProbePolicy.kt", "SpeedTestTimings.kt", "SpeedTestTimingLog.kt",
-        "AdaptiveSpeedProbe.kt", "AdaptiveSpeedHistory.kt", "RouteManager.kt", "SpeedTester.kt",
+        "AdaptiveSpeedProbe.kt", "AdaptiveSpeedHistory.kt", "StartupTestStage.kt", "RouteManager.kt", "SpeedTester.kt",
     ]]
     kotlin_sources += [
         ROOT / "app/src/test/java/com/zycomic/app/net/SpeedTesterAdaptiveSelectionTest.kt",

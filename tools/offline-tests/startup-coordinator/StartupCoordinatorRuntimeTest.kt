@@ -260,7 +260,7 @@ class StartupCoordinatorRuntimeTest {
     }
 
     @Test
-    fun `first qualified enabled business unblocks splash while other enabled platforms continue loading`() = runBlocking {
+    fun `splash waits until every enabled platform has a usable line and image`() = runBlocking {
         configureManwaOnly()
         StartupPlatformPolicy.state.value = StartupPlatformPolicy.state.value.copy(
             disablePicacg = false,
@@ -268,25 +268,40 @@ class StartupCoordinatorRuntimeTest {
             revision = 911,
         )
         PicacgRouteManager.verifiedImageSampleUrl = "https://fixture.invalid/cover.jpg"
-        val entered = List(3) { CompletableDeferred<Unit>() }
-        val release = List(3) { CompletableDeferred<Unit>() }
-        SpeedTester.suspendAfterQualifiedEndpointHook = { entered[0].complete(Unit); release[0].await() }
-        PicacgSpeedTester.suspendBeforeApplyHook = { entered[1].complete(Unit); release[1].await() }
-        JmSpeedTester.emitRouteReady = true
-        JmSpeedTester.suspendBeforeRouteReadyHook = { entered[2].complete(Unit); release[2].await() }
+        JmSpeedTester.emitQualifiedEndpoint = true
+        PicacgSpeedTester.emitQualifiedEndpoint = true
+        // 漫蛙与禁漫先就绪、仍在后台测；哔咔还没拿到可用端点。
+        val manwaTail = CompletableDeferred<Unit>()
+        val jmTail = CompletableDeferred<Unit>()
+        val picacgEntered = CompletableDeferred<Unit>()
+        val releasePicacg = CompletableDeferred<Unit>()
+        SpeedTester.suspendAfterQualifiedEndpointHook = { manwaTail.await() }
+        JmSpeedTester.suspendAfterQualifiedEndpointHook = { jmTail.await() }
+        PicacgSpeedTester.suspendBeforeApplyHook = {
+            picacgEntered.complete(Unit)
+            releasePicacg.await()
+        }
+
         val splash = async { PlatformSpeedTestCoordinator.retestAllEnabled() }
-        withTimeout(5_000) { entered.forEach { it.await() } }
+        withTimeout(5_000) { picacgEntered.await() }
+        // 还有平台没有可用端点：此时放行会让哔咔标签页直接是坏的。
+        assertFalse(PlatformSpeedTestCoordinator.foregroundReady.value)
+        assertFalse(splash.isCompleted)
+        assertTrue(PlatformSpeedTestCoordinator.running.value)
+
+        releasePicacg.complete(Unit)
         assertTrue(withTimeout(5_000) { splash.await() }.isEmpty())
         assertTrue(PlatformSpeedTestCoordinator.foregroundReady.value)
+        // 放行不等于结束：另外两个平台的在飞工作继续跑，报告仍不发布。
         assertTrue(PlatformSpeedTestCoordinator.running.value)
-        assertTrue(PlatformSpeedTestCoordinator.reports.value.isEmpty())
-        assertTrue(PlatformSpeedTestCoordinator.platformStartupStatuses.value.getValue(com.zycomic.app.platform.ContentPlatform.JM).running)
-        assertTrue(PlatformSpeedTestCoordinator.platformStartupStatuses.value.getValue(com.zycomic.app.platform.ContentPlatform.PICACG).running)
-        release.forEach { it.complete(Unit) }
+        assertTrue(PlatformSpeedTestCoordinator.reports.value.isEmpty(),
+            "reports stay unpublished while platform work is in flight")
+
+        manwaTail.complete(Unit)
+        jmTail.complete(Unit)
         withTimeout(5_000) {
             while (PlatformSpeedTestCoordinator.running.value) yield()
         }
         assertEquals(3, PlatformSpeedTestCoordinator.reports.value.size)
     }
-
 }
