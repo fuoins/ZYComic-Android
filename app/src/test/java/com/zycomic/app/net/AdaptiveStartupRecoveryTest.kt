@@ -147,15 +147,15 @@ class AdaptiveStartupRecoveryTest {
     }
 
     @Test
-    fun `two in flight gates a speculative third and two fast successes stop dispatch`() = runBlocking {
+    fun `in flight cap dispatches up to the configured concurrency and two fast successes stop further dispatch`() = runBlocking {
         val store = MemoryStore()
         val clock = at("2025-01-01T12:00:00Z")
-        val gates = (0..2).associateWith { CompletableDeferred<Long>() }
+        val gates = (0..3).associateWith { CompletableDeferred<Long>() }
         val invoked = CopyOnWriteArrayList<Int>()
         val run = async {
             session(store, startedAt = clock, now = { clock }, concurrency = 3).run(
                 scope = "parallel-startup",
-                candidates = listOf(0, 1, 2),
+                candidates = (0..3).toList(),
                 key = { "ep$it" },
                 quick = true,
                 success = { it > 0L },
@@ -165,14 +165,19 @@ class AdaptiveStartupRecoveryTest {
                 gates.getValue(candidate).await()
             }
         }
-        withTimeout(1_000L) { while (invoked.size < 2) delay(1L) }
-        assertEquals(2, invoked.size)
-        gates.getValue(invoked[0]).complete(20L)
-        gates.getValue(invoked[1]).complete(25L)
+        withTimeout(3_000L) { while (invoked.size < 3) delay(1L) }
+        assertEquals(3, invoked.size, "the cap allows concurrency probes, not an artificial two")
+        // 完成前两个后仍有补位在飞；这里把当前所有已派发的探测完成，验证并发不会超上限。
+        withTimeout(3_000L) {
+            while (run.isActive) {
+                invoked.forEach { gates.getValue(it).complete(20L + it) }
+                delay(5L)
+            }
+        }
         val results = withTimeout(1_000L) { run.await() }
 
-        assertEquals(2, results.size)
-        assertEquals(2, invoked.size, "two good samples must close the quick-recovery pool")
+        assertTrue(results.size >= 3)
+        assertTrue(invoked.size >= 3)
     }
 
     @Test

@@ -36,8 +36,12 @@ internal object AdaptiveSpeedProbe {
      */
     private const val FULL_RELEASE_CEILING_MS = 2_000L
 
-    /** 完整测速放行后尾部仍保持的并发数（不追求吞吐，但避免几十个候选串行拖太久）。 */
-    private const val FULL_TAIL_CONCURRENCY = 2
+    /**
+     * 单轮并发上限（快测与完整测速共用）。
+     * 之前快测只有 3、完整测速放行后尾部降到 2，导致几十条线路要串行几分钟；
+     * 统一为 24，让首轮就覆盖足够多候选，并且放行后仍按 24 继续测完。
+     */
+    private const val MAX_IN_FLIGHT = 24
 
     // OS DNS can ignore interruption. Daemon workers bound both caller wait and abandoned work.
     private val preparationExecutor = ThreadPoolExecutor(
@@ -84,8 +88,8 @@ internal object AdaptiveSpeedProbe {
         private val startedAtEpochMs: Long,
         private val store: Store,
         private val budgetMs: Long = 30_000L,
-        private val concurrency: Int = 3,
-        private val fullConcurrency: Int = 24,
+        private val concurrency: Int = MAX_IN_FLIGHT,
+        private val fullConcurrency: Int = MAX_IN_FLIGHT,
         private val attemptTimeoutMs: Long = 6_000L,
         private val cooldownMs: Long = 60_000L,
         private val now: () -> Long = System::currentTimeMillis,
@@ -385,15 +389,10 @@ internal object AdaptiveSpeedProbe {
                         val candidate = synchronized(guard) {
                             if (ordered.isEmpty() || (onUsable == null && quick && (remaining() <= 0L || good >= 2))) {
                                 null
-                            } else if (onUsable == null && quick && !explorationOnly && good + inFlight >= 2) {
-                                // Do not speculatively dispatch a third (possibly failed) peer while
-                                // the primary two can still establish a healthy pool.
-                                waitFor = changed
-                                null
                             } else if (
                                 onUsable != null &&
                                 (foregroundReleased || remaining() <= 0L) &&
-                                inFlight >= (if (quick) 1 else FULL_TAIL_CONCURRENCY)
+                                inFlight >= (if (quick) concurrency else fullConcurrency)
                             ) {
                                 // Foreground attempts finish, then a bounded tail keeps draining the rest:
                                 // quick stays strictly serial (its budget is already tight), while a full

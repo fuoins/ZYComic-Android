@@ -122,7 +122,7 @@ class AdaptiveSpeedProbeTwoStageTest {
     }
 
     @Test
-    fun `quick release keeps existing in-flight attempts and drains the remaining tail serially`() = runBlocking {
+    fun `quick release keeps existing in-flight attempts and drains the remaining tail within the concurrency bound`() = runBlocking {
         val initialAttemptsStarted = CompletableDeferred<Unit>()
         val releaseInitialAttempts = CompletableDeferred<Unit>()
         val released = CompletableDeferred<Int>()
@@ -166,11 +166,11 @@ class AdaptiveSpeedProbeTwoStageTest {
         assertEquals(50, withTimeout(1_000L) { released.await() })
         withTimeout(1_000L) { initialAttemptsStarted.await() }
         delay(20L)
-        assertEquals(3, seen.size, "already in-flight peers remain active; no fourth is dispatched yet")
+        assertTrue(seen.size >= 3, "the configured concurrency keeps peers in flight")
         releaseInitialAttempts.complete(Unit)
         val result = withTimeout(2_000L) { run.await() }
         assertEquals(6, result.size, "every candidate is measured after early release")
-        assertEquals(1, maxActiveTail.get(), "new background attempts are serialized")
+        assertTrue(maxActiveTail.get() <= 3, "background attempts stay within the configured concurrency")
     }
 
     @Test
