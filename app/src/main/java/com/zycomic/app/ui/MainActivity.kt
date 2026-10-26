@@ -383,7 +383,7 @@ fun AppContent(
             }
         }
         val prefix = if (scopeLabel.isEmpty()) "已选择可用节点" else "$scopeLabel 已选择可用节点"
-        Toast.makeText(context, "$prefix进入，后台持续测速并自动更新最快节点", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "${prefix}进入，后台持续测速并自动更新最快节点", Toast.LENGTH_SHORT).show()
     }
 
     // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
