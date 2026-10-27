@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,7 +49,7 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
     }
 
     val context = LocalContext.current
-    val backdropBlurDp = GlassPrefs.backdropBlurDp(context)
+    val backdropBlurDp by GlassPrefs.backdropBlurDp.collectAsState()
     // 当前正在展示的封面（双缓冲）：entry 变化后先继续显示旧封面，新封面就绪才切换。
     var shown by remember { mutableStateOf(entry) }
     val prefetchLoader = remember(entry.platform) {

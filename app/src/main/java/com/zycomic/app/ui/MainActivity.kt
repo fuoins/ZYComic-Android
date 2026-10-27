@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.AppCoverBackdrop
+import com.zycomic.app.ui.components.BackdropSources
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
