@@ -781,6 +781,7 @@ private fun KomikkuSettingsDialog(
 @Composable
 private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val primary = MaterialTheme.colorScheme.primary
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -794,7 +795,7 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
                     ),
                 )
                 // 主题色淡染：纯白玻璃叠在白底上会“看不见”，染一层色后浅色下也有玻璃质感。
-                drawRect(MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.06f else 0.05f))
+                drawRect(primary.copy(alpha = if (dark) 0.06f else 0.05f))
                 drawLine(
                     brush = Brush.horizontalGradient(
                         listOf(
