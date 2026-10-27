@@ -161,19 +161,8 @@ private fun ToolbarSlot(
     ) {
         if (onClick != null && icon != null) {
             IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.width(width)) {
-                if (busy && !busyIndicatorSeparate) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(imageVector = icon, contentDescription = description)
-                        if (busy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.align(Alignment.BottomEnd).size(12.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        }
-                    }
-                }
+                // 加载中不再显示转圈（曾被视为蓝色刷新动画），图标原样保留。
+                Icon(imageVector = icon, contentDescription = description)
             }
         }
     }

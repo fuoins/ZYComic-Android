@@ -95,19 +95,36 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         val backdropMask by com.zycomic.app.ui.components.GlassPrefs.backdropMask.collectAsState()
         val glassStrength by com.zycomic.app.ui.components.GlassPrefs.glassStrength.collectAsState()
         val customPath by com.zycomic.app.ui.components.BackdropSources.customPath.collectAsState()
+        val perPage by com.zycomic.app.ui.components.BackdropSources.perPage.collectAsState()
         val enabledIds by com.zycomic.app.ui.components.BackdropSources.enabled.collectAsState()
+        var pickingPage by remember { mutableStateOf<String?>(null) }
         val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: android.net.Uri? ->
-            if (uri != null) {
+            val pageKey = pickingPage
+            if (uri != null && pageKey != null) {
                 runCatching {
-                    val dest = java.io.File(context.filesDir, "backdrop_custom.jpg")
+                    val dest = java.io.File(context.filesDir, "backdrop_${pageKey}.jpg")
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { out -> input.copyTo(out) }
                     }
-                    com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, dest.absolutePath)
+                    if (pageKey == "global") {
+                        com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, dest.absolutePath)
+                    } else {
+                        com.zycomic.app.ui.components.BackdropSources.setPagePath(context, pageKey, dest.absolutePath)
+                    }
                     com.zycomic.app.ui.components.AppBackdropState.refresh()
                 }
+                pickingPage = null
             }
         }
+
+        val pageLabel = mapOf(
+            "browse" to "分类页",
+            "library" to "书架页",
+            "history" to "历史页",
+            "profile" to "我的页",
+            "settings" to "设置页",
+            "search" to "搜索页",
+        )
 
         val sourceItems = com.zycomic.app.ui.components.BackdropSources.ALL.map { source ->
             Preference.PreferenceItem.CustomPreference(title = source.name) {
@@ -184,7 +201,10 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { pickImageLauncher.launch("image/*") }) { Text("选择图片") }
+                                TextButton(onClick = {
+                                    pickingPage = "global"
+                                    pickImageLauncher.launch("image/*")
+                                }) { Text("选择图片") }
                                 if (!customPath.isNullOrBlank()) {
                                     TextButton(onClick = {
                                         runCatching { java.io.File(customPath).delete() }
@@ -192,6 +212,30 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                         com.zycomic.app.ui.components.AppBackdropState.refresh()
                                     }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
                                 }
+                            }
+                        }
+                    },
+                    Preference.PreferenceItem.CustomPreference(title = "分页自定义背景") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            com.zycomic.app.ui.components.BackdropSources.PAGE_KEYS.forEach { key ->
+                                val path = perPage[key]
+                                com.zycomic.app.ui.components.GlassPreferenceRow(
+                                    title = pageLabel[key] ?: key,
+                                    subtitle = if (path.isNullOrBlank()) "跟随全局/随机源" else "已设置本页背景",
+                                    onPreferenceClick = {
+                                        pickingPage = key
+                                        pickImageLauncher.launch("image/*")
+                                    },
+                                    widget = {
+                                        if (!path.isNullOrBlank()) {
+                                            TextButton(onClick = {
+                                                runCatching { java.io.File(path).delete() }
+                                                com.zycomic.app.ui.components.BackdropSources.setPagePath(context, key, null)
+                                                com.zycomic.app.ui.components.AppBackdropState.refresh()
+                                            }) { Text("清除", color = MaterialTheme.colorScheme.error) }
+                                        }
+                                    },
+                                )
                             }
                         }
                     },

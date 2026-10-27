@@ -9,12 +9,16 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -431,13 +435,22 @@ fun AppContent(
                 }
             }
         }
-        // 全局背景：自定义图片优先，其次从开启的随机图源里取；切换底部导航页/浏览标签页/来源配置变化时刷新。
+        // 全局背景：分页自定义图优先，其次全局自定义图，再走随机图源；切页/切 tab/来源变化时刷新。
         val backdropEntry by AppBackdropState.current.collectAsState()
         val browseTabIndex by browseVm.mainTab.collectAsState()
         val backdropCustom by BackdropSources.customPath.collectAsState()
         val backdropSources by BackdropSources.enabled.collectAsState()
-        LaunchedEffect(bottomTab, browseTabIndex, backdropCustom, backdropSources) {
-            AppBackdropState.refresh()
+        val backdropPerPage by BackdropSources.perPage.collectAsState()
+        LaunchedEffect(bottomTab, browseTabIndex, backdropCustom, backdropSources, backdropPerPage, showSearch) {
+            val pageKey = when {
+                showSearch -> "search"
+                bottomTab == 0 -> "browse"
+                bottomTab == 1 -> "library"
+                bottomTab == 2 -> "history"
+                bottomTab == 3 -> "profile"
+                else -> "settings"
+            }
+            AppBackdropState.refresh(pageKey)
         }
         Box(modifier = Modifier.fillMaxSize()) {
             AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
@@ -447,47 +460,35 @@ fun AppContent(
                 contentWindowInsets = WindowInsets.navigationBars,
                 bottomBar = {
                     GlassBottomBar {
-                        val itemColors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
-                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                            indicatorColor = Color.Transparent,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        NavigationBarItem(
+                        GlassNavItem(
+                            icon = Icons.Default.Home,
+                            description = "分类",
                             selected = bottomTab == 0,
                             onClick = { bottomTab = 0 },
-                            icon = { GlassNavIcon(Icons.Default.Home, bottomTab == 0) },
-                            label = if (bottomTab == 0) ({ Text("分类", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
-                            colors = itemColors,
                         )
-                        NavigationBarItem(
+                        GlassNavItem(
+                            icon = Icons.Default.Book,
+                            description = "书架",
                             selected = bottomTab == 1,
                             onClick = { bottomTab = 1 },
-                            icon = { GlassNavIcon(Icons.Default.Book, bottomTab == 1) },
-                            label = if (bottomTab == 1) ({ Text("书架", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
-                            colors = itemColors,
                         )
-                        NavigationBarItem(
+                        GlassNavItem(
+                            icon = Icons.Default.History,
+                            description = "历史",
                             selected = bottomTab == 2,
                             onClick = { bottomTab = 2 },
-                            icon = { GlassNavIcon(Icons.Default.History, bottomTab == 2) },
-                            label = if (bottomTab == 2) ({ Text("历史", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
-                            colors = itemColors,
                         )
-                        NavigationBarItem(
+                        GlassNavItem(
+                            icon = Icons.Default.Person,
+                            description = "我的",
                             selected = bottomTab == 3,
                             onClick = { bottomTab = 3 },
-                            icon = { GlassNavIcon(Icons.Default.Person, bottomTab == 3) },
-                            label = if (bottomTab == 3) ({ Text("我的", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
-                            colors = itemColors,
                         )
-                        NavigationBarItem(
+                        GlassNavItem(
+                            icon = Icons.Default.Settings,
+                            description = "设置",
                             selected = bottomTab == 4,
                             onClick = { bottomTab = 4 },
-                            icon = { GlassNavIcon(Icons.Default.Settings, bottomTab == 4) },
-                            label = if (bottomTab == 4) ({ Text("设置", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
-                            colors = itemColors,
                         )
                     }
                 },
@@ -840,27 +841,52 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
                 )
             },
     ) {
-        NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp, content = content)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(58.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            content()
+        }
     }
 }
 
-/** 底栏图标：选中时包一个白色圆形玻璃底（正圆指示器），未选中只显示图标。 */
+/** 底栏图标项：选中 = 白色圆形玻璃底（正圆指示器），未选中只显示图标；无文字。 */
 @Composable
-private fun GlassNavIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean) {
+private fun androidx.compose.foundation.layout.RowScope.GlassNavItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     Box(
         modifier = Modifier
-            .size(42.dp)
-            .clip(androidx.compose.foundation.shape.CircleShape)
-            .then(
-                if (selected) {
-                    Modifier.background(Color.White.copy(alpha = if (dark) 0.22f else 0.65f))
-                } else {
-                    Modifier
-                },
-            ),
+            .weight(1f)
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
         contentAlignment = androidx.compose.ui.Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(21.dp))
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .then(
+                    if (selected) {
+                        Modifier.background(Color.White.copy(alpha = if (dark) 0.22f else 0.65f))
+                    } else {
+                        Modifier
+                    },
+                ),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = description,
+                modifier = Modifier.size(20.dp),
+                tint = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

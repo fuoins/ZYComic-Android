@@ -155,6 +155,10 @@ fun SearchScreen(
         }
     }
 
+    val backdropEntry by com.zycomic.app.ui.components.AppBackdropState.current.collectAsState()
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/兜底渐变）。
+        com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -407,6 +411,7 @@ fun SearchScreen(
                 )
             }
         }
+    }
     }
     if (showPicacgCategories && provider == SearchProvider.PICACG) {
         PicacgCategoryPickerDialog(

@@ -498,7 +498,12 @@ private fun PicacgMangaListRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp, horizontal = 2.dp)
+            .glassSurface(shape = RoundedCornerShape(14.dp), radius = 14.dp, stroke = false)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) Checkbox(checked = selected, onCheckedChange = onCheckedChange)
@@ -507,7 +512,7 @@ private fun PicacgMangaListRow(
             contentDescription = manga.name,
             imageLoader = PicacgImageLoader.get(LocalContext.current),
             contentScale = ContentScale.Crop,
-            modifier = Modifier.width(68.dp).height(96.dp).clip(RoundedCornerShape(8.dp)),
+            modifier = Modifier.width(56.dp).height(78.dp).clip(RoundedCornerShape(8.dp)),
         )
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(manga.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)

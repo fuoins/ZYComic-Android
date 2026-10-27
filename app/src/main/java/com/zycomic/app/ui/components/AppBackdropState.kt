@@ -23,9 +23,10 @@ object AppBackdropState {
     private val _current = MutableStateFlow<BackdropEntry?>(null)
     val current: StateFlow<BackdropEntry?> = _current.asStateFlow()
 
-    /** 按当前来源配置刷新背景。 */
-    fun refresh() {
-        val custom = BackdropSources.customPath.value
+    /** 按当前来源配置刷新背景；[pageKey] 非空时该页的自定义图优先。 */
+    fun refresh(pageKey: String? = null) {
+        val page = pageKey?.let { BackdropSources.pagePath(it) }
+        val custom = page ?: BackdropSources.customPath.value
         if (!custom.isNullOrBlank()) {
             _current.value = BackdropEntry(platform = null, url = custom)
             return
