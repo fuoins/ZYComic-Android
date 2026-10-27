@@ -68,7 +68,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
-import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
@@ -459,7 +459,7 @@ fun AppContent(
         // 真磨砂玻璃的模糊源：整个主界面内容区（背景 + 页面）作为被模糊对象。
         val hazeState = rememberHazeState()
         CompositionLocalProvider(LocalAppHaze provides hazeState) {
-        Box(modifier = Modifier.fillMaxSize().haze(state = hazeState)) {
+        Box(modifier = Modifier.fillMaxSize().hazeSource(state = hazeState)) {
             AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
             Scaffold(
                 modifier = Modifier.fillMaxSize(),

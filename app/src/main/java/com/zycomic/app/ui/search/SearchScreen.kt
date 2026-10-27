@@ -82,7 +82,7 @@ import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
-import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.picacg.PicacgThemes
@@ -161,7 +161,7 @@ fun SearchScreen(
     val backdropEntry by com.zycomic.app.ui.components.AppBackdropState.current.collectAsState()
     val searchHazeState = rememberHazeState()
     CompositionLocalProvider(com.zycomic.app.ui.components.LocalAppHaze provides searchHazeState) {
-    Box(modifier = Modifier.fillMaxSize().haze(state = searchHazeState)) {
+    Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
         // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/兜底渐变）。
         com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
     Column(

@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeChild
+import dev.chrisbanes.haze.hazeEffect
 
 /**
  * 液态玻璃组件库（全 App 统一外观语言）。
@@ -105,14 +105,11 @@ fun GlassShell(
             .clip(shape)
             .then(
                 if (hazeState != null) {
-                    Modifier.hazeChild(
+                    Modifier.hazeEffect(
                         state = hazeState,
-                        shape = shape,
                         style = HazeStyle(
                             backgroundColor = Color.Transparent,
-                            tints = listOf(
-                                HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
-                            ),
+                            tint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
                             blurRadius = blurRadius,
                             noiseFactor = 0f,
                         ),
@@ -341,12 +338,11 @@ fun Modifier.glassSurface(
         .clip(shape)
         .then(
             if (hazeState != null) {
-                Modifier.hazeChild(
+                Modifier.hazeEffect(
                     state = hazeState,
-                    shape = shape,
                     style = HazeStyle(
                         backgroundColor = Color.Transparent,
-                        tints = listOf(HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver)),
+                        tint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
                         blurRadius = 18.dp,
                         noiseFactor = 0f,
                     ),
