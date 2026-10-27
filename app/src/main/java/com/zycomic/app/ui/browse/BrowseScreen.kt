@@ -805,7 +805,7 @@ private fun BrowseTabContent(
     val mangas by vm.mangasForTab(page).collectAsState()
     // 把这一页的封面注册为全局随机背景的候选池；切换标签/页面时随机取一张做模糊背景。
     LaunchedEffect(page, mangas) {
-        AppBackdropState.registerCovers(tabPlatform.id, mangas.mapNotNull { it.thumbnail_url })
+        AppBackdropState.registerCovers(tabPlatform.id, mangas.mapNotNull { it.thumbnailUrl })
     }
     val loading by vm.loadingForTab(page).collectAsState()
     val appending by vm.appendingForTab(page).collectAsState()
