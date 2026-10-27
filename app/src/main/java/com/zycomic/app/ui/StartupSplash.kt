@@ -1,10 +1,9 @@
 package com.zycomic.app.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import android.graphics.Bitmap
+import android.graphics.Paint
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -13,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -21,12 +22,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,17 +42,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zycomic.app.net.PlatformStartupStatus
@@ -61,15 +70,21 @@ import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
+private val BrandGreen = Color(0xFF0FAE79)
+private val BrandMint = Color(0xFF2FD3A0)
+private val BrandAmber = Color(0xFFFFC063)
+private val MarkHighlight = Color(0xFFFFE3B0)
+
 /**
- * 开屏页（测速中）：极光背景 + 品牌圆环 + 平台胶囊。
+ * 开屏页：动态光斑背景 + 液态玻璃面板 + 单一不确定加载。
  *
- * 进入条件已经是“每个平台都有可用线路和图源”，所以不再逐项打勾；
- * 圆环的三段弧分别表示一个平台的线路/图源完成度，胶囊只用于开关与状态提示。
+ * 进入条件已经是“每个平台都有可用线路和图源”，等待时间从几百毫秒到几十秒不等，
+ * 所以这里不画任何百分比进度，只有一条不确定的加载状态。
  */
 @Composable
 internal fun StartupSplash(
@@ -84,442 +99,484 @@ internal fun StartupSplash(
     onRetestAll: () -> Unit,
 ) {
     val policy by StartupPlatformPolicy.state.collectAsState()
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val platforms = ContentPlatform.entries
     val enabled = platforms.filter { StartupPlatformPolicy.isEnabled(policy, it) }
     val readyCount = enabled.count { platformProgress(it, checks) >= 1f }
     val full = fullRequested || mode == StartupTestMode.FULL
+    val accent = if (dark) Color(0xFF46E7B4) else BrandGreen
 
-    StartupShell(
+    SplashScaffold(
+        dark = dark,
         topInfo = networkInfo,
         notice = configUpdateVersion?.let { "网络配置已更新到 v$it，本轮按新配置测速" },
-        arcs = platforms.map { PlatformArc(it, platformProgress(it, checks), it in enabled) },
-        indeterminate = false,
-    ) {
-        Text(
-            when {
-                enabled.isNotEmpty() && readyCount >= enabled.size -> "全部平台就绪"
-                full -> "完整测速中"
-                else -> "正在挑选最优节点"
-            },
-            style = MaterialTheme.typography.titleMedium.copy(letterSpacing = 1.sp),
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = 0.92f),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            when {
-                enabled.isEmpty() -> "请在下方至少启用一个平台"
-                readyCount >= enabled.size -> "正在进入主界面…"
-                else -> "已就绪 $readyCount/${enabled.size} 个平台 · 其余线路后台继续测"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.55f),
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(26.dp))
-        PlatformChips(
-            platforms = platforms,
-            enabled = enabled,
-            checks = checks,
-            statuses = statuses,
-            onToggle = onTogglePlatform,
-        )
-        Spacer(Modifier.height(12.dp))
-        StartupHint()
-        summary?.takeIf { it.isNotBlank() }?.let {
+        hero = {
+            BrandStack(dark)
+            Spacer(Modifier.height(16.dp))
+            BrandWordmark(dark, accent)
+            Spacer(Modifier.height(8.dp))
+            Tagline(dark)
+            Spacer(Modifier.height(30.dp))
+            LoadingRow(
+                dark = dark,
+                accent = accent,
+                title = when {
+                    enabled.isNotEmpty() && readyCount >= enabled.size -> "全部平台就绪"
+                    full -> "完整测速中"
+                    else -> "正在准备线路与图源"
+                },
+            )
             Spacer(Modifier.height(8.dp))
             Text(
-                it,
+                when {
+                    enabled.isEmpty() -> "请在下方至少启用一个平台"
+                    readyCount >= enabled.size -> "正在进入主界面…"
+                    else -> "首次启动会久一点，之后就秒进"
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.45f),
+                color = if (dark) Color.White.copy(alpha = 0.52f) else Color(0xFF8B95A2),
                 textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             )
-        }
-        Spacer(Modifier.height(4.dp))
-        TextButton(onClick = onRetestAll, enabled = !fullRequested) {
-            Text(
-                stringResource(KMR.strings.startup_retest_all),
-                style = MaterialTheme.typography.labelLarge,
-                color = if (fullRequested) Color.White.copy(alpha = 0.32f) else Color.White.copy(alpha = 0.86f),
+            Spacer(Modifier.height(26.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                platforms.forEach { platform ->
+                    PlatformChip(
+                        platform = platform,
+                        enabled = platform in enabled,
+                        ready = platformProgress(platform, checks) >= 1f,
+                        running = statuses[platform]?.running == true,
+                        dark = dark,
+                        onClick = { onTogglePlatform(platform, platform !in enabled) },
+                    )
+                }
+            }
+        },
+        bottom = {
+            HintPanel(
+                dark = dark,
+                accent = accent,
+                summary = summary,
+                fullRequested = fullRequested,
+                onRetestAll = onRetestAll,
             )
-        }
-    }
+        },
+    )
 }
 
-/** 首帧配置加载 / 失败页：与测速页共用同一套视觉外壳。 */
+/** 首帧配置加载 / 失败页：同一套视觉外壳，只有文案和重试不同。 */
 @Composable
 internal fun StartupConfigGate(
     loading: Boolean,
     detail: String?,
     onRetry: () -> Unit,
 ) {
-    StartupShell(
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val accent = if (dark) Color(0xFF8FB7FF) else Color(0xFF2F6FD0)
+    SplashScaffold(
+        dark = dark,
         topInfo = if (loading) "正在从网络加载线路与图源配置…" else "尚未取得有效的网络配置",
         notice = null,
-        arcs = emptyList(),
-        indeterminate = loading,
-    ) {
-        Text(
-            if (loading) "正在准备线路" else "网络配置不可用",
-            style = MaterialTheme.typography.titleMedium.copy(letterSpacing = 1.sp),
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = 0.92f),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            if (loading) "首次启动需要先取得线路与图源" else (detail ?: "请检查网络后重试"),
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.55f),
-            textAlign = TextAlign.Center,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        )
-        if (!loading) {
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = onRetry) {
-                Text("重试", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.9f))
-            }
-        }
-    }
-}
-
-// ==================== 视觉外壳 ====================
-
-private data class PlatformArc(val platform: ContentPlatform, val progress: Float, val enabled: Boolean)
-
-@Composable
-private fun StartupShell(
-    topInfo: String,
-    notice: String?,
-    arcs: List<PlatformArc>,
-    indeterminate: Boolean,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val accent = MaterialTheme.colorScheme.primary
-    val accentAlt = MaterialTheme.colorScheme.tertiary
-    Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackdrop(accent = accent, accentAlt = accentAlt)
-        Column(
-            modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                .padding(horizontal = 22.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), contentAlignment = Alignment.Center) {
-                TopStatusPill(topInfo)
-            }
-            notice?.let {
-                Spacer(Modifier.height(8.dp))
-                NoticePill(it)
-            }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    HeroRing(arcs = arcs, indeterminate = indeterminate, accent = accent, accentAlt = accentAlt)
-                    Spacer(Modifier.height(20.dp))
-                    content()
+        hero = {
+            BrandStack(dark)
+            Spacer(Modifier.height(16.dp))
+            BrandWordmark(dark, accent)
+            Spacer(Modifier.height(8.dp))
+            Tagline(dark)
+            Spacer(Modifier.height(30.dp))
+            LoadingRow(
+                dark = dark,
+                accent = accent,
+                title = if (loading) "正在准备线路" else "网络配置不可用",
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (loading) "首次启动需要先取得线路与图源" else (detail ?: "请检查网络后重试"),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (dark) Color.White.copy(alpha = 0.5f) else Color(0xFF8B95A2),
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 28.dp),
+            )
+            if (!loading) {
+                Spacer(Modifier.height(10.dp))
+                TextButton(onClick = onRetry) {
+                    Text("重试", style = MaterialTheme.typography.labelLarge, color = accent)
                 }
             }
+        },
+        bottom = {},
+    )
+}
+
+// ==================== 外壳 ====================
+
+@Composable
+private fun SplashScaffold(
+    dark: Boolean,
+    topInfo: String,
+    notice: String?,
+    hero: @Composable ColumnScope.() -> Unit,
+    bottom: @Composable ColumnScope.() -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        SplashBackground(dark = dark)
+        Column(
+            modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+                .padding(start = 22.dp, end = 22.dp, top = 54.dp, bottom = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            TopPill(dark = dark, text = topInfo)
+            notice?.let {
+                Spacer(Modifier.height(9.dp))
+                NoticePill(text = it, dark = dark)
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, content = hero)
+            }
+            Column(modifier = Modifier.fillMaxWidth(), content = bottom)
         }
     }
 }
 
 @Composable
-private fun AuroraBackdrop(accent: Color, accentAlt: Color) {
-    val transition = rememberInfiniteTransition(label = "aurora")
-    val phase by transition.animateFloat(
+private fun SplashBackground(dark: Boolean) {
+    val transition = rememberInfiniteTransition(label = "splash-orbs")
+    val phaseA = transition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(24_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "auroraPhase",
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(23_000, easing = LinearEasing)),
+        label = "orbA",
     )
-    val breathe by transition.animateFloat(
+    val phaseB = transition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(6_000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "auroraBreathe",
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(31_000, easing = LinearEasing)),
+        label = "orbB",
     )
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        drawRect(
-            Brush.verticalGradient(
-                listOf(Color(0xFF0B0B14), Color(0xFF141024), Color(0xFF06060B)),
-            ),
-        )
-        fun bloom(cx: Float, cy: Float, radius: Float, color: Color, drift: Float, strength: Float) {
-            val angle = (phase + drift) * 2f * PI.toFloat()
-            val x = cx + sin(angle) * size.width * 0.10f
-            val y = cy + cos(angle) * size.height * 0.05f
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(color.copy(alpha = strength), color.copy(alpha = strength * 0.35f), Color.Transparent),
-                    center = Offset(x, y),
-                    radius = radius,
-                ),
-                radius = radius,
-                center = Offset(x, y),
+    val phaseC = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(27_000, easing = LinearEasing)),
+        label = "orbC",
+    )
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val widthPx = with(density) { maxWidth.toPx() }
+        val heightPx = with(density) { maxHeight.toPx() }
+        val spacingPx = with(density) { 9.dp.toPx() }
+        val dots = remember(widthPx, heightPx, spacingPx, dark) {
+            halftoneDots(
+                width = widthPx.toInt().coerceAtLeast(1),
+                height = heightPx.toInt().coerceAtLeast(1),
+                spacing = spacingPx.coerceAtLeast(1f),
+                dark = dark,
             )
         }
-        bloom(size.width * 0.18f, size.height * 0.16f, size.width * 0.78f, accent, 0f, 0.30f + breathe * 0.08f)
-        bloom(size.width * 0.88f, size.height * 0.34f, size.width * 0.62f, accentAlt, 0.4f, 0.24f + breathe * 0.06f)
-        bloom(size.width * 0.42f, size.height * 0.92f, size.width * 0.86f, accent, 0.75f, 0.20f)
-        // 底部压暗，保证文字永远可读
-        drawRect(
-            Brush.verticalGradient(
-                0f to Color.Transparent,
-                0.55f to Color.Transparent,
-                1f to Color.Black.copy(alpha = 0.55f),
-            ),
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawRect(
+                Brush.verticalGradient(
+                    if (dark) {
+                        listOf(Color(0xFF15151D), Color(0xFF191627), Color(0xFF0D0C13))
+                    } else {
+                        listOf(Color(0xFFFDFBF7), Color(0xFFF7F4FB), Color(0xFFFFF8F0))
+                    },
+                ),
+            )
+            // 一大两中两小，全部偏置，避免“均匀铺满”的配色图感
+            fun orb(cx: Float, cy: Float, radius: Float, color: Color, alpha: Float, phase: Float, drift: Float) {
+                val x = cx + sin(phase) * size.width * drift
+                val y = cy + cos(phase) * size.height * drift * 0.6f
+                val center = Offset(x, y)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(color.copy(alpha = alpha), color.copy(alpha = alpha * 0.35f), Color.Transparent),
+                        center = center,
+                        radius = radius,
+                    ),
+                    radius = radius,
+                    center = center,
+                )
+            }
+            val boost = if (dark) 0.72f else 1f
+            orb(-0.09f * size.width, -0.10f * size.height, 0.55f * size.width, Color(0xFF3FE0B2), 0.80f * boost, phaseA.value, 0.06f)
+            orb(1.05f * size.width, 0.26f * size.height, 0.46f * size.width, Color(0xFF9F86FF), 0.66f * boost, phaseB.value, 0.05f)
+            orb(0.77f * size.width, 1.04f * size.height, 0.54f * size.width, Color(0xFFFFA75E), 0.78f * boost, phaseC.value, 0.045f)
+            orb(0.87f * size.width, 0.59f * size.height, 0.26f * size.width, Color(0xFF5FB4FF), 0.42f * boost, phaseB.value, 0.035f)
+            orb(0.10f * size.width, 0.51f * size.height, 0.20f * size.width, Color(0xFF6FF0CF), 0.50f * boost, phaseA.value, 0.04f)
+
+            // 中央柔光，保证文字区域干净
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = if (dark) 0.06f else 0.34f),
+                        Color.Transparent,
+                    ),
+                    center = Offset(size.width * 0.46f, size.height * 0.38f),
+                    radius = size.width * 0.95f,
+                ),
+            )
+            dots?.let {
+                drawImage(image = it, dstSize = IntSize(size.width.toInt(), size.height.toInt()))
+            }
+            // 底部压暗，托住玻璃面板
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.66f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = if (dark) 0.34f else 0.06f),
+                ),
+            )
+        }
+    }
+}
+
+/** 漫画网点：一次性画进位图，运行时只是一张贴图，避免每帧几千个圆。 */
+private fun halftoneDots(width: Int, height: Int, spacing: Float, dark: Boolean): ImageBitmap? {
+    if (width <= 0 || height <= 0) return null
+    return runCatching {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = if (dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+        }
+        val cx = width / 2f
+        val cy = height * 0.34f
+        val maxDistance = hypot(width.toFloat(), height.toFloat()) * 0.55f
+        val peakAlpha = if (dark) 46f else 32f
+        var y = spacing / 2f
+        while (y < height) {
+            var x = spacing / 2f
+            while (x < width) {
+                val weight = ((hypot(x - cx, y - cy) / maxDistance - 0.42f) / 0.54f).coerceIn(0f, 1f)
+                if (weight > 0.03f) {
+                    paint.alpha = (peakAlpha * weight).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(x, y, spacing * 0.11f, paint)
+                }
+                x += spacing
+            }
+            y += spacing
+        }
+        bitmap.asImageBitmap()
+    }.getOrNull()
+}
+
+// ==================== 品牌区 ====================
+
+@Composable
+private fun BrandStack(dark: Boolean) {
+    Box(modifier = Modifier.size(108.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.size(80.dp).rotate(-9f).offset(x = (-9).dp, y = 3.dp)
+                .background(
+                    BrandMint.copy(alpha = if (dark) 0.16f else 0.20f),
+                    RoundedCornerShape(25.dp),
+                ),
         )
+        Box(
+            modifier = Modifier.size(80.dp).rotate(7f).offset(x = 9.dp, y = (-2).dp)
+                .background(
+                    BrandAmber.copy(alpha = if (dark) 0.16f else 0.22f),
+                    RoundedCornerShape(25.dp),
+                ),
+        )
+        Box(
+            modifier = Modifier.size(80.dp)
+                .shadow(if (dark) 18.dp else 22.dp, RoundedCornerShape(25.dp))
+                .clip(RoundedCornerShape(25.dp))
+                .background(Brush.linearGradient(listOf(BrandGreen, BrandMint, BrandAmber)))
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0f to Color.White.copy(alpha = 0.34f),
+                            0.6f to Color.Transparent,
+                        ),
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            BookMark(
+                modifier = Modifier.size(56.dp),
+                page = Color.White,
+                highlight = MarkHighlight,
+            )
+        }
     }
 }
 
 @Composable
-private fun TopStatusPill(info: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(6.dp).background(Color(0xFF6BE39A), CircleShape))
-        Spacer(Modifier.width(7.dp))
+private fun BrandWordmark(dark: Boolean, accent: Color) {
+    Row(verticalAlignment = Alignment.Bottom) {
         Text(
-            info.ifBlank { "网络就绪" },
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.55f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            "ZY",
+            style = MaterialTheme.typography.headlineLarge.copy(fontSize = 33.sp, letterSpacing = 1.sp),
+            fontWeight = FontWeight.ExtraBold,
+            color = if (dark) Color.White else Color(0xFF10151C),
+        )
+        Text(
+            "Comic",
+            style = MaterialTheme.typography.headlineLarge.copy(fontSize = 33.sp, letterSpacing = 1.sp),
+            fontWeight = FontWeight.ExtraBold,
+            color = accent,
         )
     }
 }
 
 @Composable
-private fun NoticePill(text: String) {
+private fun Tagline(dark: Boolean) {
+    val color = if (dark) Color.White.copy(alpha = 0.48f) else Color(0xFF8D97A5)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(20.dp).height(1.dp).background(color.copy(alpha = 0.4f)))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "漫 画 聚 合 阅 读",
+            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 3.sp),
+            color = color,
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.width(20.dp).height(1.dp).background(color.copy(alpha = 0.4f)))
+    }
+}
+
+/** 品牌标记：两页书 + 书脊留缝 + 右页折角高光。 */
+@Composable
+private fun BookMark(
+    modifier: Modifier = Modifier,
+    page: Color,
+    highlight: Color,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val left = Path().apply {
+            moveTo(w * 0.49f, h * 0.40f)
+            cubicTo(w * 0.43f, h * 0.35f, w * 0.33f, h * 0.32f, w * 0.24f, h * 0.35f)
+            lineTo(w * 0.24f, h * 0.68f)
+            cubicTo(w * 0.33f, h * 0.65f, w * 0.43f, h * 0.67f, w * 0.49f, h * 0.72f)
+            close()
+        }
+        val right = Path().apply {
+            moveTo(w * 0.51f, h * 0.40f)
+            cubicTo(w * 0.57f, h * 0.35f, w * 0.67f, h * 0.32f, w * 0.76f, h * 0.35f)
+            lineTo(w * 0.76f, h * 0.68f)
+            cubicTo(w * 0.67f, h * 0.65f, w * 0.57f, h * 0.67f, w * 0.51f, h * 0.72f)
+            close()
+        }
+        val folded = Path().apply {
+            moveTo(w * 0.51f, h * 0.40f)
+            cubicTo(w * 0.57f, h * 0.35f, w * 0.67f, h * 0.32f, w * 0.76f, h * 0.35f)
+            lineTo(w * 0.76f, h * 0.43f)
+            cubicTo(w * 0.67f, h * 0.40f, w * 0.57f, h * 0.42f, w * 0.51f, h * 0.47f)
+            close()
+        }
+        drawPath(left, color = page)
+        drawPath(right, color = page)
+        drawPath(folded, color = highlight)
+    }
+}
+
+// ==================== 加载与状态 ====================
+
+@Composable
+private fun LoadingRow(dark: Boolean, accent: Color, title: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            color = accent,
+            strokeWidth = 2.dp,
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 0.3.sp),
+            fontWeight = FontWeight.SemiBold,
+            color = if (dark) Color.White.copy(alpha = 0.94f) else Color(0xFF2B3340),
+        )
+    }
+}
+
+@Composable
+private fun TopPill(dark: Boolean, text: String) {
+    Box {
+        GlassBox(dark = dark, corner = 999.dp, elevation = 6.dp) {
+            Row(
+                modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(6.dp).background(Color(0xFF17B981), CircleShape))
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text.ifBlank { "已连接" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (dark) Color.White.copy(alpha = 0.78f) else Color(0xFF46505F),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoticePill(text: String, dark: Boolean) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(Color(0xFFFFC661).copy(alpha = 0.14f))
+            .background(BrandAmber.copy(alpha = 0.16f))
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Text(
             text,
             style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFFFFD79A),
+            color = if (dark) Color(0xFFFFD79A) else Color(0xFF8A5A12),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-@Composable
-private fun HeroRing(arcs: List<PlatformArc>, indeterminate: Boolean, accent: Color, accentAlt: Color) {
-    val ringSize = 268.dp
-    val stroke = 9.dp
-    val manwaAccent = rememberContentPlatformAccent(ContentPlatform.MANWA)
-    val picacgAccent = rememberContentPlatformAccent(ContentPlatform.PICACG)
-    val jmAccent = rememberContentPlatformAccent(ContentPlatform.JM)
-    val colors = listOf(manwaAccent, picacgAccent, jmAccent)
-    val transition = rememberInfiniteTransition(label = "ring")
-    val spin by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(4_200, easing = LinearEasing), RepeatMode.Restart),
-        label = "ringSpin",
-    )
-    val pulse by transition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2_600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "ringPulse",
-    )
-    // 固定三个槽位，避免平台开关变化时改变 remember 顺序。
-    val manwaTarget = arcs.firstOrNull { it.platform == ContentPlatform.MANWA }?.progress ?: 0f
-    val picacgTarget = arcs.firstOrNull { it.platform == ContentPlatform.PICACG }?.progress ?: 0f
-    val jmTarget = arcs.firstOrNull { it.platform == ContentPlatform.JM }?.progress ?: 0f
-    val manwaArc by animateFloatAsState(manwaTarget, tween(700, easing = FastOutSlowInEasing), label = "arcManwa")
-    val picacgArc by animateFloatAsState(picacgTarget, tween(700, easing = FastOutSlowInEasing), label = "arcPicacg")
-    val jmArc by animateFloatAsState(jmTarget, tween(700, easing = FastOutSlowInEasing), label = "arcJm")
-    val animated = listOf(manwaArc, picacgArc, jmArc)
-    val drawn = arcs.filter { it.enabled }
-
-    Box(modifier = Modifier.size(ringSize), contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokePx = stroke.toPx()
-            val radius = (size.minDimension - strokePx) / 2f
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val arcSize = Size(radius * 2, radius * 2)
-            val topLeft = Offset(center.x - radius, center.y - radius)
-            drawCircle(
-                color = Color.White.copy(alpha = 0.07f),
-                radius = radius,
-                center = center,
-                style = Stroke(width = strokePx),
-            )
-            if (indeterminate) {
-                drawArc(
-                    brush = Brush.sweepGradient(listOf(Color.Transparent, accent, accentAlt, Color.Transparent)),
-                    startAngle = spin,
-                    sweepAngle = 110f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                )
-            } else if (drawn.isNotEmpty()) {
-                val slot = 360f / drawn.size
-                val gap = if (drawn.size == 1) 18f else 30f
-                drawn.forEachIndexed { index, arc ->
-                    val color = colors[arcs.indexOf(arc).coerceAtLeast(0)]
-                    val start = -90f + index * slot + gap / 2f
-                    val sweep = slot - gap
-                    drawArc(
-                        color = color.copy(alpha = 0.16f),
-                        startAngle = start,
-                        sweepAngle = sweep,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                    )
-                    val done = animated[arcs.indexOf(arc).coerceAtLeast(0)]
-                    if (done > 0.001f) {
-                        drawArc(
-                            brush = Brush.sweepGradient(
-                                listOf(color.copy(alpha = 0.55f), color, Color.White.copy(alpha = 0.92f), color.copy(alpha = 0.55f)),
-                            ),
-                            startAngle = start,
-                            sweepAngle = sweep * done,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                        )
-                    }
-                }
-            }
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(accent.copy(alpha = 0.22f * pulse), Color.Transparent),
-                    center = center,
-                    radius = radius * 0.86f,
-                ),
-                radius = radius * 0.86f,
-                center = center,
-            )
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            LogoMark(accent = accent, accentAlt = accentAlt, pulse = pulse)
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "ZYComic",
-                style = MaterialTheme.typography.headlineMedium.copy(fontSize = 30.sp, letterSpacing = 3.sp),
-                fontWeight = FontWeight.ExtraBold,
-                color = Color.White,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "漫 画 聚 合 阅 读",
-                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
-                color = Color.White.copy(alpha = 0.42f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LogoMark(accent: Color, accentAlt: Color, pulse: Float) {
-    Canvas(modifier = Modifier.size(74.dp)) {
-        val w = size.width
-        val h = size.height
-        val corner = CornerRadius(w * 0.28f, w * 0.28f)
-        drawRoundRect(
-            brush = Brush.linearGradient(listOf(accent, accentAlt), start = Offset(0f, 0f), end = Offset(w, h)),
-            cornerRadius = corner,
-            alpha = 0.9f + pulse * 0.1f,
-        )
-        drawRoundRect(
-            brush = Brush.verticalGradient(
-                listOf(Color.White.copy(alpha = 0.26f), Color.Transparent),
-                startY = 0f,
-                endY = h * 0.7f,
-            ),
-            cornerRadius = corner,
-        )
-        val z = Path().apply {
-            moveTo(w * 0.27f, h * 0.30f)
-            lineTo(w * 0.73f, h * 0.30f)
-            lineTo(w * 0.33f, h * 0.70f)
-            lineTo(w * 0.75f, h * 0.70f)
-        }
-        drawPath(path = z, color = Color.White.copy(alpha = 0.95f), style = Stroke(width = w * 0.085f, cap = StrokeCap.Round))
-    }
-}
-
-@Composable
-private fun PlatformChips(
-    platforms: List<ContentPlatform>,
-    enabled: List<ContentPlatform>,
-    checks: List<StartupCheckStatus>,
-    statuses: Map<ContentPlatform, PlatformStartupStatus>,
-    onToggle: (ContentPlatform, Boolean) -> Unit,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        platforms.forEach { platform ->
-            val on = platform in enabled
-            PlatformChip(
-                platform = platform,
-                on = on,
-                progress = platformProgress(platform, checks),
-                checks = checks,
-                running = statuses[platform]?.running == true,
-                onClick = { onToggle(platform, !on) },
-            )
-        }
-    }
-}
+// ==================== 平台开关 ====================
 
 @Composable
 private fun PlatformChip(
     platform: ContentPlatform,
-    on: Boolean,
-    progress: Float,
-    checks: List<StartupCheckStatus>,
+    enabled: Boolean,
+    ready: Boolean,
     running: Boolean,
+    dark: Boolean,
     onClick: () -> Unit,
 ) {
     val accent = rememberContentPlatformAccent(platform)
-    val alpha = if (on) 1f else 0.38f
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color.White.copy(alpha = if (on) 0.07f else 0.03f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier.size(6.dp).background(
-                if (!on) Color.White.copy(alpha = 0.2f) else if (progress >= 1f) accent else accent.copy(alpha = 0.45f),
-                CircleShape,
-            ),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            platformShortName(platform),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Medium,
-            color = Color.White.copy(alpha = 0.86f * alpha),
-        )
-        Spacer(Modifier.width(7.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-            phasesOf(platform).forEachIndexed { index, phase ->
-                val ready = on && checks.firstOrNull { it.phase == phase }?.result?.isReady == true
-                val inProgress = on && !ready && running && progress * 2f > index
-                Box(
-                    modifier = Modifier.width(9.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(
-                        when {
-                            ready -> accent
-                            inProgress -> accent.copy(alpha = 0.4f)
-                            else -> Color.White.copy(alpha = 0.14f)
-                        },
-                    ),
+    val dotColor = when {
+        !enabled -> if (dark) Color.White.copy(alpha = 0.22f) else Color(0xFFC6CED8)
+        ready -> accent
+        running -> accent.copy(alpha = 0.55f)
+        else -> accent.copy(alpha = 0.4f)
+    }
+    GlassBox(dark = dark, corner = 16.dp, elevation = if (enabled) 12.dp else 6.dp) {
+        Row(
+            modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.size(7.dp).background(dotColor, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                platformShortName(platform),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal,
+                color = when {
+                    enabled -> if (dark) Color(0xFFF0FBF6) else Color(0xFF17212C)
+                    else -> if (dark) Color.White.copy(alpha = 0.55f) else Color(0xFF8D97A5)
+                },
+            )
+            Spacer(Modifier.width(9.dp))
+            TrackSwitch(checked = enabled, dark = dark)
+            if (!enabled) {
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "已关闭",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = if (dark) Color.White.copy(alpha = 0.38f) else Color(0xFFAAB2BD),
                 )
             }
         }
@@ -527,29 +584,163 @@ private fun PlatformChip(
 }
 
 @Composable
-private fun StartupHint() {
+private fun TrackSwitch(checked: Boolean, dark: Boolean) {
+    Box(
+        modifier = Modifier
+            .width(30.dp)
+            .height(17.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                when {
+                    checked -> Brush.verticalGradient(listOf(Color(0xFF17C48C), Color(0xFF0A9C6A)))
+                    dark -> Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.20f), Color.White.copy(alpha = 0.12f)))
+                    else -> Brush.verticalGradient(listOf(Color(0xFFDCE1E8), Color(0xFFCDD4DD)))
+                },
+            ),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 2.5.dp)
+                .size(12.dp)
+                .shadow(1.dp, CircleShape)
+                .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF2F4F8))), CircleShape),
+        )
+    }
+}
+
+// ==================== 底部提示 ====================
+
+@Composable
+private fun HintPanel(
+    dark: Boolean,
+    accent: Color,
+    summary: String?,
+    fullRequested: Boolean,
+    onRetestAll: () -> Unit,
+) {
     val copy = stringResource(KMR.strings.startup_guidance_copy)
     var expanded by remember { mutableStateOf(false) }
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            copy,
-            style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
-            color = Color.White.copy(alpha = 0.38f),
-            textAlign = TextAlign.Center,
-            maxLines = if (expanded) Int.MAX_VALUE else 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.height(30.dp)) {
+    GlassBox(dark = dark, corner = 22.dp, elevation = 14.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 15.dp, bottom = 6.dp)) {
             Text(
-                if (expanded) "收起" else "使用提示",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.45f),
+                if (expanded) copy else copy.substringBefore("\n"),
+                style = MaterialTheme.typography.labelSmall.copy(lineHeight = 17.5.sp),
+                color = if (dark) Color.White.copy(alpha = 0.72f) else Color(0xFF59616E),
+                maxLines = if (expanded) Int.MAX_VALUE else 4,
+                overflow = TextOverflow.Ellipsis,
             )
+            summary?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (dark) Color.White.copy(alpha = 0.42f) else Color(0xFF9AA2AE),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().drawBehind {
+                    drawLine(
+                        color = if (dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, 0f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.weight(1f)) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            if (expanded) "收起" else "使用提示 ›",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
+                            color = if (dark) Color.White.copy(alpha = 0.66f) else Color(0xFF6F7885),
+                        )
+                    }
+                }
+                TextButton(onClick = onRetestAll, enabled = !fullRequested) {
+                    Text(
+                        stringResource(KMR.strings.startup_retest_all),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (fullRequested) accent.copy(alpha = 0.4f) else accent,
+                    )
+                }
+            }
         }
     }
+}
+
+// ==================== 液态玻璃 ====================
+
+@Composable
+private fun GlassBox(
+    dark: Boolean,
+    corner: Dp,
+    elevation: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(corner)
+    Box(
+        modifier = modifier
+            .shadow(elevation = elevation, shape = shape)
+            .clip(shape)
+            .drawBehind {
+                val radius = CornerRadius(corner.toPx(), corner.toPx())
+                // 底色
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = if (dark) 0.10f else 0.22f),
+                            Color.White.copy(alpha = if (dark) 0.03f else 0.06f),
+                        ),
+                    ),
+                    cornerRadius = radius,
+                )
+                // 斜向液面反光
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        colorStops = arrayOf(
+                            0f to Color.White.copy(alpha = 0f),
+                            0.34f to Color.White.copy(alpha = if (dark) 0.05f else 0.16f),
+                            0.48f to Color.White.copy(alpha = if (dark) 0.09f else 0.28f),
+                            0.62f to Color.White.copy(alpha = if (dark) 0.05f else 0.16f),
+                            1f to Color.White.copy(alpha = 0f),
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height * 0.55f),
+                    ),
+                    cornerRadius = radius,
+                )
+                // 顶部弧光
+                drawRoundRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = if (dark) 0.14f else 0.55f),
+                            Color.White.copy(alpha = if (dark) 0.04f else 0.16f),
+                            Color.Transparent,
+                        ),
+                        center = Offset(size.width / 2f, -0.14f * size.height),
+                        radius = 1.25f * size.width,
+                    ),
+                    cornerRadius = radius,
+                )
+                // 底部折射暗影：玻璃厚度
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.58f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = if (dark) 0.14f else 0.05f),
+                    ),
+                    cornerRadius = radius,
+                )
+            },
+        content = content,
+    )
 }
 
 // ==================== 数据映射 ====================

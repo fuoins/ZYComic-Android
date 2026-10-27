@@ -39,8 +39,8 @@ class StartupUiContractTest {
         assertTrue(gate.contains("StartupConfigGate(loading = true"))
         assertTrue(gate.contains("StartupConfigGate(loading = false"))
         assertFalse(gate.contains("MangaGridSkeleton"))
-        assertTrue(splash.contains("private fun StartupShell("))
-        assertTrue(splash.contains("AuroraBackdrop("))
+        assertTrue(splash.contains("private fun SplashScaffold("))
+        assertTrue(splash.contains("SplashBackground("))
     }
 
     @Test
@@ -60,19 +60,43 @@ class StartupUiContractTest {
     }
 
     @Test
-    fun `splash draws a readiness ring from stage state and keeps platform toggles`() {
+    fun `splash uses liquid glass and shows platform toggles without progress rings`() {
         assertTrue(splash.contains("StartupSplash("))
-        assertTrue(splash.contains("HeroRing("))
-        assertTrue(splash.contains("PlatformChips("))
+        assertTrue(splash.contains("SplashBackground("))
+        assertTrue(splash.contains("GlassBox("))
+        assertTrue(splash.contains("BookMark("))
+        assertTrue(splash.contains("TrackSwitch("))
         assertTrue(splash.contains("PlatformChip("))
         assertTrue(splash.contains("phasesOf(platform)"))
         assertTrue(splash.contains(".result?.isReady"))
         assertTrue(splash.contains("rememberInfiniteTransition("))
-        assertTrue(splash.contains("drawArc("))
+        // 等待时长不可预测，因此不再有按阶段填充的进度环
+        assertFalse(splash.contains("HeroRing("))
+        assertFalse(splash.contains("drawArc("))
         assertTrue(splash.contains("startup_retest_all"))
         assertTrue(splash.contains("startup_guidance_copy"))
         assertFalse(splash.contains("startupChecksPassed"))
         assertFalse(splash.contains("startup_checks_ready_count"))
+    }
+
+    @Test
+    fun `launcher icon and system splash use the book mark instead of the letter z`() {
+        val drawable = File(root, "app/src/main/res/drawable")
+        val foreground = File(drawable, "ic_launcher_foreground.xml").readText()
+        assertTrue(foreground.contains("left_page"))
+        assertTrue(foreground.contains("right_page"))
+        assertFalse(foreground.contains("letter_z"))
+        val monochrome = File(drawable, "ic_launcher_monochrome.xml").readText()
+        assertTrue(monochrome.contains("left_page"))
+        assertFalse(monochrome.contains("letter_z"))
+        val background = File(drawable, "ic_launcher_background.xml").readText()
+        assertTrue(background.contains("#FF0FAE79"))
+        assertFalse(background.contains("#FF42A5F5"))
+        val systemSplash = File(drawable, "ic_splash.xml").readText()
+        assertTrue(systemSplash.contains("@drawable/ic_splash_icon"))
+        assertFalse(systemSplash.contains("ic_komikku_dark"))
+        val splashIcon = File(drawable, "ic_splash_icon.xml").readText()
+        assertTrue(splashIcon.contains("left_page") || splashIcon.contains("211.7,172.8"))
     }
 
     @Test

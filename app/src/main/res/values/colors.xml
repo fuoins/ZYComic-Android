@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher">#ff5555</color>
+    <!-- 系统启动帧背景：与开屏页浅色底色一致，避免冷启动闪一下蓝底 -->
+    <color name="splash">#FFFDFBF7</color>
 </resources>

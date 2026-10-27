@@ -5,7 +5,11 @@
     android:viewportWidth="432"
     android:viewportHeight="432">
     <path
-        android:name="letter_z"
+        android:name="left_page"
         android:fillColor="#FFFFFFFF"
-        android:pathData="M156,150 L276,150 L276,186 L198,246 L276,246 L276,282 L156,282 L156,246 L234,186 L156,186 Z"/>
+        android:pathData="M211.7,172.8 C185.8,151.2 142.6,138.2 103.7,151.2 L103.7,293.8 C142.6,280.8 185.8,289.4 211.7,311 Z" />
+    <path
+        android:name="right_page"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M220.3,172.8 C246.2,151.2 289.4,138.2 328.3,151.2 L328.3,293.8 C289.4,280.8 246.2,289.4 220.3,311 Z" />
 </vector>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色主题下的启动帧背景：与开屏页深色底色一致 -->
+    <color name="splash">#FF0D0C13</color>
+</resources>
