@@ -59,12 +59,18 @@ data class BrowseTabItem(
     val platformId: ContentPlatform = ContentPlatform.MANWA,
     val picacgFilter: PicacgBrowseFilter? = null,
     val picacgRankingMode: PicacgRankingMode = PicacgRankingMode.H24,
+    /**
+     * 背景封面来源（平台 id 列表）。为空表示不使用随机封面背景（与旧版一致）。
+     * 新增 tab 时自动加入自身平台；删除 tab 时随 tab 一起删除。
+     */
+    val backgroundSources: List<String> = emptyList(),
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)
         put("kind", kind.name)
         put("builtin", builtin)
+        put("backgroundSources", JSONArray(backgroundSources))
         put("platformId", platformId.id)
         if (platformId == ContentPlatform.MANWA) filter?.let { put("filter", it.toJson()) }
         if (platformId == ContentPlatform.PICACG) {
@@ -98,6 +104,13 @@ data class BrowseTabItem(
             val rankingMode = runCatching {
                 PicacgRankingMode.valueOf(o.optString("picacgRankingMode", PicacgRankingMode.H24.name))
             }.getOrDefault(PicacgRankingMode.H24)
+            // 背景源缺省时自动加入自身平台（“添加 tab 时自动加入背景源”的迁移语义）。
+            val backgroundArr = o.optJSONArray("backgroundSources")
+            val backgroundSources = if (backgroundArr != null) {
+                List(backgroundArr.length()) { backgroundArr.getString(it) }
+            } else {
+                listOf(platformId.id)
+            }
             return BrowseTabItem(
                 id = id,
                 name = o.optString("name"),
@@ -108,6 +121,7 @@ data class BrowseTabItem(
                 platformId = platformId,
                 picacgFilter = picacgFilter,
                 picacgRankingMode = rankingMode,
+                backgroundSources = backgroundSources,
             )
         }
     }
@@ -121,3 +135,7 @@ fun BrowseTabItem.isPicacgRanking(): Boolean =
 fun BrowseTabItem.isPicacgCategory(): Boolean =
     platformId == ContentPlatform.PICACG &&
         (id == "picacg_category" || pageType == BrowsePageType.PICACG_CATEGORY)
+
+/** 新构造的 tab（无论内置还是新增）自动把自己的平台作为背景源；用户可在管理面板清空。 */
+fun BrowseTabItem.withDefaultBackgrounds(): BrowseTabItem =
+    if (backgroundSources.isNotEmpty()) this else copy(backgroundSources = listOf(platformId.id))

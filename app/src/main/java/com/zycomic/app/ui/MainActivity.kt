@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
@@ -42,7 +43,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.unit.dp
+import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.AppCoverBackdrop
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -415,45 +423,56 @@ fun AppContent(
                 }
             }
         }
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            contentWindowInsets = WindowInsets.navigationBars,
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = bottomTab == 0,
-                        onClick = { bottomTab = 0 },
-                        icon = { Icon(Icons.Default.Home, contentDescription = "分类") },
-                        label = { Text("分类") },
-                    )
-                    NavigationBarItem(
-                        selected = bottomTab == 1,
-                        onClick = { bottomTab = 1 },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "书架") },
-                        label = { Text("书架") },
-                    )
-                    NavigationBarItem(
-                        selected = bottomTab == 2,
-                        onClick = { bottomTab = 2 },
-                        icon = { Icon(Icons.Default.History, contentDescription = "历史") },
-                        label = { Text("历史") },
-                    )
-                    NavigationBarItem(
-                        selected = bottomTab == 3,
-                        onClick = { bottomTab = 3 },
-                        icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
-                        label = { Text("我的") },
-                    )
-                    NavigationBarItem(
-                        selected = bottomTab == 4,
-                        onClick = { bottomTab = 4 },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
-                        label = { Text("设置") },
-                    )
-                }
-            },
-        ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        // 随机封面背景：切换底部导航页 / 浏览标签页时从当前 tab 配置的背景源重新随机一张；
+        // 背景源为空时清空背景，恢复普通主题底色。
+        val backdropUrl by AppBackdropState.current.collectAsState()
+        val browseTabIndex by browseVm.mainTab.collectAsState()
+        LaunchedEffect(bottomTab, browseTabIndex, browseVm.tabs.toList()) {
+            val sources = browseVm.tabs.getOrNull(browseTabIndex)?.backgroundSources.orEmpty()
+            if (sources.isEmpty()) AppBackdropState.clear() else AppBackdropState.randomFrom(sources)
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            AppCoverBackdrop(url = backdropUrl, modifier = Modifier.fillMaxSize())
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets.navigationBars,
+                bottomBar = {
+                    GlassBottomBar {
+                        NavigationBarItem(
+                            selected = bottomTab == 0,
+                            onClick = { bottomTab = 0 },
+                            icon = { Icon(Icons.Default.Home, contentDescription = "分类") },
+                            label = { Text("分类") },
+                        )
+                        NavigationBarItem(
+                            selected = bottomTab == 1,
+                            onClick = { bottomTab = 1 },
+                            icon = { Icon(Icons.Default.Book, contentDescription = "书架") },
+                            label = { Text("书架") },
+                        )
+                        NavigationBarItem(
+                            selected = bottomTab == 2,
+                            onClick = { bottomTab = 2 },
+                            icon = { Icon(Icons.Default.History, contentDescription = "历史") },
+                            label = { Text("历史") },
+                        )
+                        NavigationBarItem(
+                            selected = bottomTab == 3,
+                            onClick = { bottomTab = 3 },
+                            icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
+                            label = { Text("我的") },
+                        )
+                        NavigationBarItem(
+                            selected = bottomTab == 4,
+                            onClick = { bottomTab = 4 },
+                            icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
+                            label = { Text("设置") },
+                        )
+                    }
+                },
+            ) { innerPadding ->
+                Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 when (bottomTab) {
                     0 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_CATEGORY_STATE_KEY) {
                         BrowseScreen(
@@ -517,6 +536,7 @@ fun AppContent(
                 }
             }
         }
+            }
     } else if (!blockingSpeedTest) {
         // 测速已结束但首启向导未完成：全屏进入 3 页向导
         com.zycomic.app.ui.onboarding.OnboardingHost(
@@ -751,5 +771,47 @@ private fun KomikkuSettingsDialog(
                 navigator.lastItem.Content()
             }
         }
+    }
+}
+
+
+/** 液态玻璃底栏：半透明白 + 顶部 1px 内高光，与开屏页同一套玻璃语言。 */
+@Composable
+private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = if (dark) 0.10f else 0.80f),
+                            Color.White.copy(alpha = if (dark) 0.04f else 0.56f),
+                        ),
+                    ),
+                )
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            Color.Transparent,
+                            Color.White.copy(alpha = if (dark) 0.24f else 0.95f),
+                            Color.Transparent,
+                        ),
+                    ),
+                    start = Offset(0f, 0.6f),
+                    end = Offset(size.width, 0.6f),
+                    strokeWidth = 1.2f,
+                )
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.85f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = if (dark) 0.10f else 0.035f),
+                    ),
+                )
+            },
+    ) {
+        NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp, content = content)
     }
 }

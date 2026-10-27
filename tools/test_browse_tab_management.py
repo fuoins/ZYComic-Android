@@ -53,7 +53,29 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
     def test_managed_tab_pill_has_minimum_48dp_height_and_targets(self):
         pill = SHEET.split("private fun ManagedTabPill(", 1)[1]
         self.assertIn("Modifier.heightIn(min = 48.dp)", pill)
-        self.assertIn("modifier = Modifier.size(48.dp)", pill)
+        # 编辑 / 背景源 / 删除三个动作按钮
+        self.assertIn("Icons.Outlined.Edit", pill)
+        self.assertIn("Icons.Outlined.Photo", pill)
+        self.assertIn("Icons.Outlined.Delete", pill)
+        self.assertIn("onBackground: () -> Unit", pill)
+
+    def test_background_sources_are_editable_per_tab_and_persisted_with_the_tab(self):
+        self.assertIn("backgroundSources", TAB_MODELS)
+        self.assertIn('put("backgroundSources", JSONArray(backgroundSources))', TAB_MODELS)
+        self.assertIn('optJSONArray("backgroundSources")', TAB_MODELS)
+        self.assertIn("fun BrowseTabItem.withDefaultBackgrounds", TAB_MODELS)
+        self.assertIn("withDefaultBackgrounds()", (BROWSE_DIR / "BrowseTabStore.kt").read_text())
+        self.assertIn("fun updateTabBackgroundSources", BROWSE_VM)
+        self.assertIn("BackgroundSourcesDialog(", SHEET)
+        self.assertIn("vm.updateTabBackgroundSources(item.id, sources.toList())", SHEET)
+        self.assertIn("initialBackgroundSources", SHEET)
+        # 全局随机背景与玻璃底栏在主界面
+        main_activity = (MAIN / "com/zycomic/app/ui/MainActivity.kt").read_text()
+        self.assertIn("AppCoverBackdrop(url = backdropUrl", main_activity)
+        self.assertIn("GlassBottomBar {", main_activity)
+        self.assertIn("AppBackdropState.randomFrom(sources)", main_activity)
+        # 浏览页把封面注册进全局候选池
+        self.assertIn("AppBackdropState.registerCovers(tabPlatform.id", BROWSE)
 
     def test_filter_summary_uses_high_contrast_theme_colors(self):
         form = SHEET.split("private fun FilterTabFormDialog(", 1)[1].split("\n@Composable\nprivate fun TabNameSupportingText", 1)[0]
