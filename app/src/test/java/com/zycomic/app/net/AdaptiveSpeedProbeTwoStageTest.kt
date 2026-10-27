@@ -122,13 +122,14 @@ class AdaptiveSpeedProbeTwoStageTest {
     }
 
     @Test
-    fun `quick release keeps existing in-flight attempts and drains the remaining tail within the concurrency bound`() = runBlocking {
+    fun `quick release keeps in-flight attempts but stops dispatching after enough fast successes`() = runBlocking {
         val initialAttemptsStarted = CompletableDeferred<Unit>()
         val releaseInitialAttempts = CompletableDeferred<Unit>()
         val released = CompletableDeferred<Int>()
         val seen = CopyOnWriteArrayList<Int>()
         val activeTail = AtomicInteger(0)
         val maxActiveTail = AtomicInteger(0)
+        var exhausted: Boolean? = null
         val run = async {
             session(storeWithBaseline("drain"), budgetMs = 500L, concurrency = 3).run(
                 scope = "drain",
@@ -137,6 +138,7 @@ class AdaptiveSpeedProbeTwoStageTest {
                 quick = true,
                 success = { true },
                 elapsedMs = { it.toLong() },
+                onExhausted = { exhausted = it },
                 onUsable = { _, value -> released.complete(value) },
             ) { candidate ->
                 seen += candidate
@@ -169,8 +171,10 @@ class AdaptiveSpeedProbeTwoStageTest {
         assertTrue(seen.size >= 3, "the configured concurrency keeps peers in flight")
         releaseInitialAttempts.complete(Unit)
         val result = withTimeout(2_000L) { run.await() }
-        assertEquals(6, result.size, "every candidate is measured after early release")
-        assertTrue(maxActiveTail.get() <= 3, "background attempts stay within the configured concurrency")
+        // 快测早停：不再把剩余候选全部测完，剩下的留给下一轮补测。
+        assertTrue(result.size < 6, "quick stops dispatching after enough fast successes: measured ${result.size}")
+        assertEquals(false, exhausted, "the quick round leaves untested candidates for the next round")
+        assertTrue(maxActiveTail.get() <= 3, "in-flight attempts stay within the configured concurrency")
     }
 
     @Test

@@ -50,6 +50,10 @@ object JmRouteManager {
         val testedImageEndpoints: Set<DomainIp> = emptySet(),
         val lineQuickTest: Boolean = false,
         val imageQuickTest: Boolean = false,
+        /** 本轮线路候选是否全部测完（快测早停/预算截断时为 false）。 */
+        val lineDrainedAll: Boolean = false,
+        /** 本轮图源候选是否全部测完。 */
+        val imageDrainedAll: Boolean = false,
         val lineQuickTestAllFailed: Boolean = false,
         val imageQuickTestAllFailed: Boolean = false,
         /** Endpoint selected when this round was published; not a live route value. */

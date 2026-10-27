@@ -62,6 +62,8 @@ object JmRouteManager {
         val imageIpDelaysMs: Map<DomainIp, Long> = emptyMap(),
         val lineQuickTest: Boolean = false,
         val imageQuickTest: Boolean = false,
+        val lineDrainedAll: Boolean = true,
+        val imageDrainedAll: Boolean = true,
         val lineQuickTestAllFailed: Boolean = false,
         val imageQuickTestAllFailed: Boolean = false,
         val runId: String? = null,
@@ -91,6 +93,8 @@ object SpeedTester {
         val reusedImages: Int = 0,
         val lineQuickTest: Boolean = false,
         val imageQuickTest: Boolean = false,
+        val lineDrainedAll: Boolean = true,
+        val imageDrainedAll: Boolean = true,
         val fullRetestRecommended: Boolean = false,
     )
     data class ImgVerdict(val ok: Boolean = true)

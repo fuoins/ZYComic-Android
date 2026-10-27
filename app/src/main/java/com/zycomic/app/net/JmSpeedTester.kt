@@ -132,6 +132,8 @@ object JmSpeedTester {
                     }
                     val quickLines = reuseLines
                     val quickImages = reuseImages
+                    val lineDrainedAll = java.util.concurrent.atomic.AtomicBoolean(false)
+                    val imageDrainedAll = java.util.concurrent.atomic.AtomicBoolean(false)
                     val reconcileLines = !quickLines && requestedLineReconciliation
                     val reconcileImages = !quickImages && requestedImageReconciliation
                     fun configurationIsCurrent(): Boolean =
@@ -322,6 +324,8 @@ object JmSpeedTester {
                                 log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                                 onUsable = { target, result -> applyLineRoute(target, result) },
                                 onQualified = { target, _ -> notifyQualifiedIfApplied(target.endpoint, image = false) },
+                                stopAfterQualified = if (quickLines) 2 else Int.MAX_VALUE,
+                                onExhausted = { drained -> if (stillCurrent()) lineDrainedAll.set(drained) },
                                 probe = probe@{ target ->
                                     if (!stillCurrent()) return@probe null
                                     endpointStarted(target.endpoint)
@@ -395,6 +399,8 @@ object JmSpeedTester {
                             log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                             onUsable = { endpoint, result -> applyImageRoute(endpoint, result) },
                             onQualified = { endpoint, _ -> notifyQualifiedIfApplied(endpoint, image = true) },
+                            stopAfterQualified = if (quickImages) 2 else Int.MAX_VALUE,
+                            onExhausted = { drained -> if (stillCurrent()) imageDrainedAll.set(drained) },
                             probe = probe@{ endpoint ->
                                 if (!stillCurrent()) return@probe null
                                 endpointStarted(endpoint)
@@ -567,6 +573,7 @@ object JmSpeedTester {
                             untestedImageIpTestedAtEpochMs = untestedImageIpTestedAt,
                             testedLineEndpoints = testedLineEndpoints, testedImageEndpoints = testedImageEndpoints,
                             lineQuickTest = quickLines, imageQuickTest = quickImages,
+                            lineDrainedAll = lineDrainedAll.get(), imageDrainedAll = imageDrainedAll.get(),
                             lineQuickTestAllFailed = quickLines && freshLineIpDelays.isNotEmpty() && freshLineIpDelays.values.none { it < Long.MAX_VALUE },
                             imageQuickTestAllFailed = quickImages && freshImageIpDelays.isNotEmpty() &&
                                 freshImageIpDelays.all { (endpoint, delay) ->

@@ -359,6 +359,9 @@ object PlatformSpeedTestCoordinator {
                         }
                     }
                     val measuredPlatforms = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+                    // 本轮各平台是否把候选全部测完。快测早停/预算截断 → false，剩余候选交给下一轮补测；
+                    // 未测（跳过/复用缓存）的平台默认 true，不阻塞“本轮测完”判定。
+                    val drainedFlags = java.util.concurrent.ConcurrentHashMap<ContentPlatform, Boolean>()
                     val result = coroutineScope {
                         listOf(ContentPlatform.MANWA, ContentPlatform.PICACG, ContentPlatform.JM).map { platform ->
                             async {
@@ -432,6 +435,8 @@ object PlatformSpeedTestCoordinator {
                                             )
                                             if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                             status = if (SpeedTester.lastRunSkipped) "incomplete" else "tested"
+                                            drainedFlags[ContentPlatform.MANWA] =
+                                                SpeedTester.progress.value.lineDrainedAll && SpeedTester.progress.value.imageDrainedAll
                                             if (status == "tested") {
                                                 manwaLineProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.MANWA_LINE, it.completed, it.successful) }
                                                 manwaImageProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.MANWA_IMAGE, it.completed, it.successful) }
@@ -477,6 +482,8 @@ object PlatformSpeedTestCoordinator {
                                             if (picacgSnapshot == null && MaccmsSpeedTester.routeSelection().lines3Ip == null) {
                                                 publishMaccmsRoute(null)
                                             }
+                                            // 哔咔 API 只有 5 个内置端点、图源全量探测，没有早停，视为测完。
+                                            drainedFlags[ContentPlatform.PICACG] = true
                                             status = if (picacgSnapshot?.let { snapshot ->
                                                     snapshot.apiProbes.any { it.testedThisRound } && snapshot.imageProbes.any { it.testedThisRound }
                                                 } == true
@@ -521,6 +528,8 @@ object PlatformSpeedTestCoordinator {
                                                 submission.identity.takeIf { generationIsCurrent() },
                                             ) == true
                                             status = if (complete) "tested" else "incomplete"
+                                            drainedFlags[ContentPlatform.JM] =
+                                                run.snapshot.lineDrainedAll && run.snapshot.imageDrainedAll
                                             if (complete) {
                                                 jmLineProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.JM_LINE, it.completed, it.successful) }
                                                 jmImageProgress?.let { publishFinalMeasuredCheck(StartupCheckPhase.JM_IMAGE, it.completed, it.successful) }
@@ -536,6 +545,7 @@ object PlatformSpeedTestCoordinator {
                                         if (!generationIsCurrent()) return@async report(platform, "incomplete", "配置已变化，丢弃预热结果")
                                         status = "incomplete"
                                         reason = "本轮检测失败，保留当前选择"
+                                        drainedFlags[platform] = false
                                         if (platform == ContentPlatform.PICACG && MaccmsSpeedTester.routeSelection().lines3Ip == null) publishMaccmsRoute(null)
                                         failRunningChecks(platform, "本轮检测失败")
                                         if (platform == ContentPlatform.MANWA) {
@@ -571,17 +581,21 @@ object PlatformSpeedTestCoordinator {
                             val phaseKey = phaseKey(key, platform)
                             completedReports[platform] = phaseKey to platformReport
                             completedChecks[platform] = phaseKey to _startupCheckStatuses.value.filter { it.phase in phasesFor(platform) }
-                            if (platformReport.lineStatus in setOf("tested", "quick")) {
+                            // 只有“候选全部测完”的阶段才允许下一轮整轮复用；快测早停留下的未测候选
+                            // 不能把这一阶段标记为完成，否则补测（carry-over）永远不会发生。
+                            val drained = drainedFlags[platform] == true
+                            if (platformReport.lineStatus in setOf("tested", "quick") && drained) {
                                 completedPhases.record(phaseKey, CompletedSpeedTestPhases.Phase.LINES)
                             }
-                            if (platformReport.imageStatus in setOf("tested", "quick")) {
+                            if (platformReport.imageStatus in setOf("tested", "quick") && drained) {
                                 completedPhases.record(phaseKey, CompletedSpeedTestPhases.Phase.IMAGES)
                             }
                         }
                     }
                     if (onlyPlatform == null) {
-                        completedKey = key.takeIf { result.none { it.status == "incomplete" } }
-                        // 只有整轮无 incomplete 才算测完；否则下次启动继续补未测端点。
+                        val allDrained = ContentPlatform.entries.filter { it in requiredPlatforms }
+                            .all { drainedFlags[it] == true }
+                        completedKey = key.takeIf { result.none { it.status == "incomplete" } && allDrained }
                         if (completedKey != null) roundCompletedHook?.invoke()
                     }
                     checkedConfigurationVersion = version

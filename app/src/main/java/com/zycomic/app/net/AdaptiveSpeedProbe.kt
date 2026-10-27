@@ -248,6 +248,10 @@ internal object AdaptiveSpeedProbe {
             preferredKeys: Set<String> = emptySet(),
             independenceKey: (T) -> String = key,
             explorationOnly: Boolean = false,
+            /** 快测在本轮拿到多少个“快速成功”后停止派发新候选（已在飞的照常跑完）。完整测速不早停。 */
+            stopAfterQualified: Int = 2,
+            /** 本轮是否把候选全部测完（没有任何因早停/预算/冷却而剩余的候选）。 */
+            onExhausted: (Boolean) -> Unit = {},
             onUsable: (suspend (T, R) -> Unit)? = null,
             onQualified: (suspend (T, R) -> Unit)? = null,
             probe: suspend (T) -> R?,
@@ -314,16 +318,11 @@ internal object AdaptiveSpeedProbe {
                 .take(2)
                 .maxOrNull()
             val fastThresholdMs = baseline?.let { maxOf(200L, it.coerceAtMost(Long.MAX_VALUE / 2) * 2) } ?: Long.MAX_VALUE
-            // 完整测速不追求“最快”，只要求“能用”：沿用快测阈值会让弱网下第一个能打开的线路
-            // 也判为不合格，只能等 30s 兜底才放行。这里给完整测速一个更宽的放行阈值（上限 2s），
-            // 先进入，再在后台用本轮全量结果替换成真正最快的端点。
-            val releaseThresholdMs = if (!quick && baseline == null) {
-                // 首次没有历史：用固定 2s 作为“可用”标准，既不把 4~5s 的慢节点放进来，
-                // 也不会像快测那样对任何成功都放行。
-                FULL_RELEASE_CEILING_MS
-            } else {
-                fastThresholdMs
-            }
+            // 放行阈值只回答“多快算可用”，与候选排序无关：
+            // - 快测：沿用历史基线 ×2；没有历史（首次）时不设限，任何成功都算可用。
+            // - 完整测速：恒为 2s 上限。之前有历史时错误地沿用了快测阈值，弱网下第一个能打开的
+            //   线路（例如 800ms，而 baseline×2 只有 400ms）永远判不合格，只能等 30s 兜底才放行。
+            val releaseThresholdMs = if (quick) fastThresholdMs else FULL_RELEASE_CEILING_MS
             if (explorationOnly) {
                 // One low-priority peer, outside the recent reliable pool; no cooldown waiting.
                 val target = ordered.filter { eligible(it) && it.endpoint !in preferredKeys && it.tier >= 2 }
@@ -368,9 +367,13 @@ internal object AdaptiveSpeedProbe {
                     val best = synchronized(guard) { bestUsable }
                     if (best != null) {
                         val elapsed = elapsedMs(best.second).coerceAtLeast(0L)
-                        if (elapsed < publishedElapsed &&
-                            (force || elapsed <= releaseThresholdMs || remaining() <= 0L)
-                        ) {
+                        if (elapsed >= publishedElapsed) return@withLock
+                        val first = publishedElapsed == Long.MAX_VALUE
+                        val qualifies = elapsed <= releaseThresholdMs || remaining() <= 0L
+                        // 首个结果必须是“合格/兜底”才发布，避免把一个比当前在用的还慢的端点先换上去；
+                        // 之后的替换只有在快 ≥20% 时才做（轮末仍会用本轮绝对最优值强制应用）。
+                        val swapWorthy = !first && elapsed * 5 <= publishedElapsed * 4
+                        if (force || (first && qualifies) || (!first && (qualifies || swapWorthy))) {
                             publishedElapsed = elapsed
                             synchronized(guard) { foregroundReleased = true }
                             callback(best.first, best.second)
@@ -397,18 +400,28 @@ internal object AdaptiveSpeedProbe {
                         var waitMs = 0L
                         var waitFor: CompletableDeferred<Unit>? = null
                         val candidate = synchronized(guard) {
-                            if (ordered.isEmpty() || (onUsable == null && quick && (remaining() <= 0L || good >= 2))) {
-                                null
-                            } else if (
-                                onUsable != null &&
-                                (foregroundReleased || remaining() <= 0L) &&
-                                inFlight >= (if (quick) concurrency else fullConcurrency)
-                            ) {
-                                // Foreground attempts finish, then a bounded tail keeps draining the rest:
-                                // quick stays strictly serial (its budget is already tight), while a full
-                                // pass keeps two probes in flight so replacement is not delayed by minutes.
-                                waitFor = changed
-                                null
+                            // 停止派发（不再取新候选，已在飞的照常跑完）：
+                            // - 候选耗尽；
+                            // - 快测拿到 stopAfterQualified 个“快速成功”（前台/后台同一规则，快测必须快）；
+                            // - 快测预算到点（剩下的留给下一轮 carry-over 补测）。
+                            // 完整测速永不早停，把全部候选测完。
+                            val stopDispatching = ordered.isEmpty() ||
+                                (quick && (good >= stopAfterQualified || remaining() <= 0L))
+                            if (stopDispatching) {
+                                if (inFlight > 0) {
+                                    waitFor = changed
+                                    null
+                                } else if (
+                                    !explorationOnly && quick && ordered.isNotEmpty() &&
+                                    remaining() > 0L && good < stopAfterQualified &&
+                                    ordered.all { (it.allTimes?.cooldownUntil ?: 0L) > now() }
+                                ) {
+                                    // 候选全在冷却：预算内且未达到早停数时，等最近的冷却到期再测。
+                                    waitMs = (ordered.minOf { it.allTimes?.cooldownUntil ?: 0L } - now()).coerceAtLeast(1L)
+                                    null
+                                } else {
+                                    null
+                                }
                             } else {
                                 val next = if (!quick) {
                                     0
@@ -426,12 +439,10 @@ internal object AdaptiveSpeedProbe {
                                     dispatched++
                                     inFlight++
                                     ordered.removeAt(next).also { usedGroups += independenceKey(it.target) }
-                                } else if (!explorationOnly && inFlight == 0) {
-                                    // Legacy recovery defers cooled peers at the budget; two-stage runs drain them.
-                                    waitMs = (ordered.minOf { it.allTimes?.cooldownUntil ?: 0L } - now()).coerceAtLeast(1L)
+                                } else if (inFlight > 0) {
+                                    waitFor = changed
                                     null
                                 } else {
-                                    if (inFlight > 0) waitFor = changed
                                     null
                                 }
                             }
@@ -586,16 +597,17 @@ internal object AdaptiveSpeedProbe {
                 publishBest(force = true)
                 stageTimer?.cancelAndJoin()
             }
+            // 只有候选一个不剩才算“测完”。快测早停/预算截断会留下候选，交给下一轮补测。
+            onExhausted(ordered.isEmpty())
             val valid = results.filter { !sampleInvalid(it.second) && success(it.second) }
             val selected = valid.minByOrNull { elapsedMs(it.second) }
             emit(
                 "dispatched=$dispatched; completed=$completed; untested=${ordered.size}; explorationOnly=$explorationOnly; stop=${when {
-                    onUsable != null -> "two-stage-complete"
-                    !quick -> "full-complete"
-                    remaining() <= 0L -> "run-budget"
-                    good >= 2 -> "enough-current-successes"
-                    ordered.isNotEmpty() -> "cooldown-deferred-to-next-run"
-                    else -> "pool-exhausted"
+                    ordered.isEmpty() && !quick -> "full-complete"
+                    ordered.isEmpty() && quick -> "quick-pool-exhausted"
+                    quick && remaining() <= 0L -> "quick-run-budget"
+                    quick && good >= stopAfterQualified -> "enough-current-successes"
+                    else -> "cooldown-deferred-to-next-run"
                 }}; finalBasis=current-round-valid-only; selectedCandidate=${selected?.first?.let(key)}; historyApplied=false",
             )
             results.toList()

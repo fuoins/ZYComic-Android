@@ -217,6 +217,10 @@ object SpeedTester {
         val imageTopFiveAllFailed: Boolean = false,
         val lineQuickTest: Boolean = false,
         val imageQuickTest: Boolean = false,
+        /** 本轮线路候选是否全部测完（快测早停/预算截断时为 false，剩余候选留给下一轮补测）。 */
+        val lineDrainedAll: Boolean = false,
+        /** 本轮图源候选是否全部测完。 */
+        val imageDrainedAll: Boolean = false,
         // Frozen log metadata, independent of subsequent manual selection or runtime recovery.
         val roundSelectedLine: DomainIp? = null,
         val roundSelectedImage: DomainIp? = null,
@@ -890,6 +894,8 @@ object SpeedTester {
             val inUseImageDomain = RouteManager.imgRewriteTarget ?: RouteManager.imgHost
             var samplePath: ManwaImageFallbackProbePolicy.SharedLazy<String?>? = null
             val lineRouteSettled = CompletableDeferred<Unit>()
+            val lineDrainedAll = java.util.concurrent.atomic.AtomicBoolean(false)
+            val imageDrainedAll = java.util.concurrent.atomic.AtomicBoolean(false)
             val applyGate = Mutex()
             var applyGateResolved = false
             var applyGateAllowed = false
@@ -1032,6 +1038,8 @@ object SpeedTester {
                                 }
                             }
                         },
+                        stopAfterQualified = if (quickLineRetest) 2 else Int.MAX_VALUE,
+                        onExhausted = { drained -> if (runIsCurrent()) lineDrainedAll.set(drained) },
                     ) { target ->
                         val outcome = if (runIsCurrent()) {
                             probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
@@ -1150,6 +1158,8 @@ object SpeedTester {
                             }
                         }
                     },
+                    stopAfterQualified = if (quickImageRetest) 2 else Int.MAX_VALUE,
+                    onExhausted = { drained -> if (runIsCurrent()) imageDrainedAll.set(drained) },
                 ) { endpoint ->
                     val result = if (runIsCurrent()) {
                         probeScheduler.withPermit(ContentPlatform.MANWA, { SpeedTestTimingLog.recordQueueWait(SpeedTestTimingLog.Scope.MANWA, it) }) {
@@ -1308,6 +1318,8 @@ object SpeedTester {
                         imageTopFiveAllFailed = imageQuickAllFailed,
                         lineQuickTest = quickLineRetest,
                         imageQuickTest = quickImageRetest,
+                        lineDrainedAll = lineDrainedAll.get(),
+                        imageDrainedAll = imageDrainedAll.get(),
                     ),
                 )
                 if (!runIsCurrent()) return@coroutineScope (-1 to -1)
