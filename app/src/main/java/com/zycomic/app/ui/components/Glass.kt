@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -96,11 +97,12 @@ fun GlassCard(
 ) {
     val spec = glassSpec(tint, tintAlpha)
     val shape = RoundedCornerShape(radius)
+    val radiusPx = with(LocalDensity.current) { radius.toPx() }
     Box(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
             .clip(shape)
-            .glassBase(spec, radius.toPx()),
+            .glassBase(spec, radiusPx),
         content = content,
     )
 }
@@ -130,11 +132,12 @@ fun GlassPreferenceRow(
         ) {
             if (icon != null) {
                 val spec = glassSpec(iconTint, 0.16f)
+                val badgeRadiusPx = with(LocalDensity.current) { 13.dp.toPx() }
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(13.dp))
-                        .glassBase(spec, 13.dp.toPx()),
+                        .glassBase(spec, badgeRadiusPx),
                     contentAlignment = Alignment.Center,
                 ) {
                     when (icon) {
@@ -264,4 +267,7 @@ fun Modifier.glassSurface(
     radius: Dp = 14.dp,
     tint: Color = MaterialTheme.colorScheme.primary,
     tintAlpha: Float = 0.10f,
-): Modifier = this.clip(shape).glassBase(glassSpec(tint, tintAlpha), radius.toPx())
+): Modifier {
+    val radiusPx = with(LocalDensity.current) { radius.toPx() }
+    return this.clip(shape).glassBase(glassSpec(tint, tintAlpha), radiusPx)
+}
