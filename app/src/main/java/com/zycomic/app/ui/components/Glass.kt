@@ -99,6 +99,9 @@ fun GlassShell(
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val topAlpha = glassTopAlpha * strength
     val bottomAlpha = glassBottomAlpha * strength
+    // 白玻璃渐变始终绘制：磨砂正常时它是淡淡的高光层；磨砂失效时它就是玻璃本体（兜底可见）。
+    val gradientTop = if (hazeState != null) 0.12f * strength else topAlpha
+    val gradientBottom = if (hazeState != null) 0.06f * strength else bottomAlpha
     Box(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
@@ -112,6 +115,8 @@ fun GlassShell(
                             tint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
                             blurRadius = blurRadius,
                             noiseFactor = 0f,
+                            // 平台不支持真模糊时（API<31）用 scrim 兜底，保证玻璃可见。
+                            fallbackTint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
                         ),
                     )
                 } else {
@@ -119,9 +124,7 @@ fun GlassShell(
                 },
             )
             .drawBehind {
-                if (hazeState == null) {
-                    drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = topAlpha), 1f to Color.White.copy(alpha = bottomAlpha)))
-                }
+                drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = gradientTop), 1f to Color.White.copy(alpha = gradientBottom)))
                 if (tintLayer.alpha > 0f) drawRect(tintLayer)
                 if (stroke) {
                     drawRoundRect(
@@ -334,6 +337,9 @@ fun Modifier.glassSurface(
     val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
     val topAlpha = 0.30f * strength
     val bottomAlpha = 0.16f * strength
+    // 白玻璃渐变始终绘制：磨砂正常时是淡高光层；磨砂失效时就是玻璃本体（兜底可见）。
+    val gradientTop = if (hazeState != null) 0.12f * strength else topAlpha
+    val gradientBottom = if (hazeState != null) 0.06f * strength else bottomAlpha
     return this
         .clip(shape)
         .then(
@@ -345,6 +351,8 @@ fun Modifier.glassSurface(
                         tint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
                         blurRadius = 18.dp,
                         noiseFactor = 0f,
+                        // 平台不支持真模糊时（API<31）用 scrim 兜底，保证玻璃可见。
+                        fallbackTint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
                     ),
                 )
             } else {
@@ -352,9 +360,7 @@ fun Modifier.glassSurface(
             },
         )
         .drawBehind {
-            if (hazeState == null) {
-                drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = topAlpha), 1f to Color.White.copy(alpha = bottomAlpha)))
-            }
+            drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = gradientTop), 1f to Color.White.copy(alpha = gradientBottom)))
             if (tintLayer.alpha > 0f) drawRect(tintLayer)
             if (stroke) {
                 drawRoundRect(
