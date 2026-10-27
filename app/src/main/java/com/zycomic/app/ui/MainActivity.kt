@@ -789,16 +789,16 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
                 drawRect(
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = if (dark) 0.10f else 0.66f),
-                            Color.White.copy(alpha = if (dark) 0.05f else 0.44f),
+                            Color.White.copy(alpha = if (dark) 0.12f else 0.70f),
+                            Color.White.copy(alpha = if (dark) 0.06f else 0.48f),
                         ),
                     ),
                 )
                 // 主题色淡染：白玻璃叠白底时靠它撑起可见度。
-                drawRect(primary.copy(alpha = if (dark) 0.08f else 0.10f))
+                drawRect(primary.copy(alpha = if (dark) 0.10f else 0.16f))
                 // 顶部 1px 主题色描边 + 白色内高光，描出玻璃上缘。
                 drawLine(
-                    color = primary.copy(alpha = if (dark) 0.18f else 0.28f),
+                    color = primary.copy(alpha = if (dark) 0.22f else 0.45f),
                     start = Offset(0f, 0f),
                     end = Offset(size.width, 0f),
                     strokeWidth = 1.dp.toPx(),

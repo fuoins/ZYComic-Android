@@ -20,11 +20,23 @@ import com.zycomic.app.platform.ContentPlatform
 /**
  * 全应用随机封面背景：封面放大模糊 + 只压顶部（状态栏/搜索栏区）与底部（底栏区）两段渐隐，
  * 中部大面积完全放开。按封面所属平台选择图片加载器（漫蛙走全局栈、哔咔/JM 走各自专用栈）。
- * 无封面时整个组件为空，页面露出全局背景。
+ * 封面池为空时退化为主题色淡渐变背景（页面绝不纯白，玻璃层始终有依托）。
  */
 @Composable
 fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
-    if (entry == null) return
+    if (entry == null) {
+        // 池空兜底：主题色淡渐变，保证背景系统可见、玻璃底栏不叠在纯白上。
+        Box(
+            modifier.background(
+                Brush.verticalGradient(
+                    0f to MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                    0.35f to MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                    1f to MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                ),
+            ),
+        )
+        return
+    }
     val context = LocalContext.current
     val loader = remember(entry.platform) {
         when (entry.platform) {
@@ -38,17 +50,17 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
             model = entry.url,
             contentDescription = null,
             imageLoader = loader,
-            modifier = Modifier.matchParentSize().blur(8.dp).alpha(0.55f),
+            modifier = Modifier.matchParentSize().blur(8.dp).alpha(0.65f),
             contentScale = ContentScale.Crop,
         )
         // 遮罩只做两件事：顶部保住状态栏/搜索栏文字、底部托住玻璃底栏，中间大面积放开让封面可见。
         Box(
             Modifier.matchParentSize().background(
                 Brush.verticalGradient(
-                    0f to MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
-                    0.10f to Color.Transparent,
-                    0.85f to Color.Transparent,
-                    1f to MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
+                    0f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f),
+                    0.08f to Color.Transparent,
+                    0.88f to Color.Transparent,
+                    1f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f),
                 ),
             ),
         )

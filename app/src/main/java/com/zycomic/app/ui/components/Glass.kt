@@ -57,7 +57,7 @@ private fun glassSpec(tint: Color, tintAlpha: Float): GlassSpec {
         glassBottom = Color.White.copy(alpha = if (dark) 0.035f else 0.40f),
         tint = tint.copy(alpha = if (dark) 0.09f else tintAlpha),
         highlight = Color.White.copy(alpha = if (dark) 0.18f else 0.90f),
-        edge = tint.copy(alpha = if (dark) 0.16f else 0.24f),
+        edge = tint.copy(alpha = if (dark) 0.18f else 0.34f),
         shadow = Color.Black.copy(alpha = if (dark) 0.24f else 0.10f),
     )
 }
@@ -91,7 +91,7 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     radius: Dp = 18.dp,
     tint: Color = MaterialTheme.colorScheme.primary,
-    tintAlpha: Float = 0.10f,
+    tintAlpha: Float = 0.13f,
     elevated: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -196,7 +196,7 @@ fun GlassTopBar(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val spec = glassSpec(MaterialTheme.colorScheme.primary, 0.10f)
+    val spec = glassSpec(MaterialTheme.colorScheme.primary, 0.14f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -266,7 +266,7 @@ fun Modifier.glassSurface(
     shape: RoundedCornerShape = RoundedCornerShape(14.dp),
     radius: Dp = 14.dp,
     tint: Color = MaterialTheme.colorScheme.primary,
-    tintAlpha: Float = 0.10f,
+    tintAlpha: Float = 0.12f,
 ): Modifier {
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     return this.clip(shape).glassBase(glassSpec(tint, tintAlpha), radiusPx)

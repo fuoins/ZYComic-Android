@@ -104,9 +104,11 @@ data class BrowseTabItem(
             val rankingMode = runCatching {
                 PicacgRankingMode.valueOf(o.optString("picacgRankingMode", PicacgRankingMode.H24.name))
             }.getOrDefault(PicacgRankingMode.H24)
-            // 旧版本把背景源存成平台 id 数组（非空=加入）；新版本是布尔开关，非空数组迁移为 true。
+            // 旧版本把背景源存成平台 id 数组（非空=明确加入）；空数组/无字段 = 从未配置过，
+            // 一律按新版本默认值「开启」处理，只有写入了 backgroundEnabled=false 才关闭。
             val backgroundArr = o.optJSONArray("backgroundSources")
-            val backgroundEnabled = if (backgroundArr != null) backgroundArr.length() > 0 else o.optBoolean("backgroundEnabled", true)
+            val legacyExplicit = backgroundArr != null && backgroundArr.length() > 0
+            val backgroundEnabled = if (legacyExplicit) true else o.optBoolean("backgroundEnabled", true)
             return BrowseTabItem(
                 id = id,
                 name = o.optString("name"),
