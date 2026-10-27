@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.RowScope
@@ -449,47 +450,43 @@ fun AppContent(
                         val itemColors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.onSurface,
                             selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                            indicatorColor = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) {
-                                Color.White.copy(alpha = 0.14f)
-                            } else {
-                                Color.White.copy(alpha = 0.60f)
-                            },
+                            indicatorColor = Color.Transparent,
                             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 0,
                             onClick = { bottomTab = 0 },
-                            icon = { Icon(Icons.Default.Home, contentDescription = "分类") },
-                            label = { Text("分类") },
+                            icon = { GlassNavIcon(Icons.Default.Home, bottomTab == 0) },
+                            label = if (bottomTab == 0) ({ Text("分类", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
                             colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 1,
                             onClick = { bottomTab = 1 },
-                            icon = { Icon(Icons.Default.Book, contentDescription = "书架") },
-                            label = { Text("书架") },
+                            icon = { GlassNavIcon(Icons.Default.Book, bottomTab == 1) },
+                            label = if (bottomTab == 1) ({ Text("书架", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
                             colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 2,
                             onClick = { bottomTab = 2 },
-                            icon = { Icon(Icons.Default.History, contentDescription = "历史") },
-                            label = { Text("历史") },
+                            icon = { GlassNavIcon(Icons.Default.History, bottomTab == 2) },
+                            label = if (bottomTab == 2) ({ Text("历史", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
                             colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 3,
                             onClick = { bottomTab = 3 },
-                            icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
-                            label = { Text("我的") },
+                            icon = { GlassNavIcon(Icons.Default.Person, bottomTab == 3) },
+                            label = if (bottomTab == 3) ({ Text("我的", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
                             colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 4,
                             onClick = { bottomTab = 4 },
-                            icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
-                            label = { Text("设置") },
+                            icon = { GlassNavIcon(Icons.Default.Settings, bottomTab == 4) },
+                            label = if (bottomTab == 4) ({ Text("设置", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }) else null,
                             colors = itemColors,
                         )
                     }
@@ -844,5 +841,26 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
             },
     ) {
         NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp, content = content)
+    }
+}
+
+/** 底栏图标：选中时包一个白色圆形玻璃底（正圆指示器），未选中只显示图标。 */
+@Composable
+private fun GlassNavIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .then(
+                if (selected) {
+                    Modifier.background(Color.White.copy(alpha = if (dark) 0.22f else 0.65f))
+                } else {
+                    Modifier
+                },
+            ),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(21.dp))
     }
 }

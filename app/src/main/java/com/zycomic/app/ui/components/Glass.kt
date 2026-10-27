@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,26 +61,16 @@ private fun glassSpec(): GlassSpec {
         glassBottom = Color.White.copy(alpha = (if (dark) 0.035f else 0.16f) * strength),
         highlight = Color.White.copy(alpha = (if (dark) 0.22f else 0.78f) * (0.4f + 0.6f * strength)),
         edge = Color.White.copy(alpha = (if (dark) 0.16f else 0.55f) * (0.5f + 0.5f * strength)),
-        shadow = Color.Black.copy(alpha = if (dark) 0.30f else 0.12f),
+        shadow = Color.Black.copy(alpha = if (dark) 0.30f else 0.05f),
     )
 }
 
-/** 玻璃底板绘制：白玻璃渐变 + 可选平台色淡染 + 顶部内高光 + 描边。需配合 [clip] 使用。 */
+/** 玻璃底板绘制：白玻璃渐变 + 可选平台色淡染 + 描边。需配合 [clip] 使用。
+ *  注意：按钮/卡片场景不画高光线（曾被视为按钮里的「长方形框」），高光只保留在顶栏。 */
 private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float, tintLayer: Color, stroke: Boolean): Modifier =
     this.drawBehind {
         drawRect(Brush.verticalGradient(0f to spec.glassTop, 1f to spec.glassBottom))
         if (tintLayer.alpha > 0f) drawRect(tintLayer)
-        drawLine(
-            brush = Brush.horizontalGradient(
-                0f to Color.Transparent,
-                0.22f to spec.highlight,
-                0.78f to spec.highlight,
-                1f to Color.Transparent,
-            ),
-            start = Offset(size.width * 0.05f, 0.8f),
-            end = Offset(size.width * 0.95f, 0.8f),
-            strokeWidth = 1.6f,
-        )
         if (stroke) {
             drawRoundRect(
                 color = spec.edge,
@@ -130,7 +121,12 @@ fun GlassPreferenceRow(
     ) {
         Row(
             modifier = Modifier
-                .clickable(enabled = onPreferenceClick != null) { onPreferenceClick?.invoke() }
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    enabled = onPreferenceClick != null,
+                    onClick = { onPreferenceClick?.invoke() },
+                )
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

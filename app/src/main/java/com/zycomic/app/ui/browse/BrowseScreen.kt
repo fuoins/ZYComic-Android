@@ -85,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
+import com.zycomic.app.ui.components.GlassChip
 import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.data.dto.Manga
@@ -405,19 +406,21 @@ private fun LegacyBrowseScreen(
                     searchQuery = null,
                     onChangeSearchQuery = {},
                     actions = {
-                        // Keep the compact direct-ID entry immediately beside search.
-                        FilledTonalButton(
+                        // 禁漫号跳转：玻璃胶囊按钮，图标/文字用 JM 平台色。
+                        val jmAccent = com.zycomic.app.platform.rememberContentPlatformAccent(ContentPlatform.JM)
+                        GlassChip(
+                            selected = true,
                             onClick = {
                                 if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
                                     showJmAlbumJumpDialog = true
                                 }
                             },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                         ) {
-                            Icon(Icons.Outlined.Tag, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(2.dp))
-                            Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.Tag, contentDescription = null, tint = jmAccent, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelSmall, color = jmAccent, maxLines = 1)
+                            }
                         }
                         AppBarActions(
                             if (platform == ContentPlatform.MANWA) {
@@ -531,7 +534,9 @@ private fun LegacyBrowseScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LazyRow(
                         state = tabRowState,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         tabs.forEachIndexed { index, item ->

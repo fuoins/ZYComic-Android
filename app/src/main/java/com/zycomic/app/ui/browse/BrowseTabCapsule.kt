@@ -37,7 +37,8 @@ fun BrowseTabCapsule(
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
     val platformAccent = rememberContentPlatformAccent(platform)
-    val accent = if (isYuzongRank) MaterialTheme.colorScheme.primary else platformAccent
+    // 宇总排行用品牌绿（开屏页品牌色），不跟随外观主题色；其余用各自平台色。
+    val accent = if (isYuzongRank) Color(0xFF0FAE79) else platformAccent
     // 玻璃语言：选中 = 白玻璃胶囊底，文字始终保留平台色区分。
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val background = if (selected) {

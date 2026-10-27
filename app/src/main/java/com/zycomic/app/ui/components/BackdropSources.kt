@@ -16,9 +16,6 @@ object BackdropSources {
 
     val ALL: List<RandomSource> = listOf(
         RandomSource("elaina", "Elaina", "https://api.elaina.cat/random/"),
-        RandomSource("picsum", "Picsum", "https://picsum.photos/1080/1920"),
-        RandomSource("dmoe", "Dmoe 二次元", "https://www.dmoe.cc/random.php"),
-        RandomSource("btstu", "彼岸壁纸", "https://api.btstu.cn/sjbz/api.php?lx=dongman&format=images"),
     )
 
     private const val PREFS_NAME = "zy_backdrop_sources"

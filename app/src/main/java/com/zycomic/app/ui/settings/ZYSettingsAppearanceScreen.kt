@@ -92,6 +92,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     private fun getGlassGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
         val backdropBlur by com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp.collectAsState()
+        val backdropMask by com.zycomic.app.ui.components.GlassPrefs.backdropMask.collectAsState()
         val glassStrength by com.zycomic.app.ui.components.GlassPrefs.glassStrength.collectAsState()
         val customPath by com.zycomic.app.ui.components.BackdropSources.customPath.collectAsState()
         val enabledIds by com.zycomic.app.ui.components.BackdropSources.enabled.collectAsState()
@@ -138,6 +139,21 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                     com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, it)
                                 },
                                 valueRange = 0f..24f,
+                            )
+                        }
+                    },
+                    Preference.PreferenceItem.CustomPreference(title = "背景遮罩强度") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                "背景遮罩强度：${(backdropMask * 100).toInt()}%（顶部与底部的渐隐压色）",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Slider(
+                                value = backdropMask,
+                                onValueChange = {
+                                    com.zycomic.app.ui.components.GlassPrefs.setBackdropMask(context, it)
+                                },
+                                valueRange = 0f..1f,
                             )
                         }
                     },
