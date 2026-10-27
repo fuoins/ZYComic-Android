@@ -58,6 +58,7 @@ import eu.kanade.presentation.more.settings.widget.ThemeColorPickerWidget
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -123,71 +124,73 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
 
         return Preference.PreferenceGroup(
             title = "背景与液态玻璃",
-            preferenceItems = persistentListOf(
-                Preference.PreferenceItem.CustomPreference(title = "背景封面模糊度") {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Text(
-                            "背景封面模糊度：${backdropBlur.toInt()} dp",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Slider(
-                            value = backdropBlur,
-                            onValueChange = {
-                                com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, it)
-                            },
-                            valueRange = 0f..24f,
-                        )
-                    }
-                },
-                Preference.PreferenceItem.CustomPreference(title = "液态玻璃强度") {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Text(
-                            "液态玻璃强度：${(glassStrength * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Slider(
-                            value = glassStrength,
-                            onValueChange = {
-                                com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, it)
-                            },
-                            valueRange = 0f..1f,
-                        )
-                    }
-                },
-                Preference.PreferenceItem.CustomPreference(title = "自定义背景图片") {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Text(
-                            if (customPath.isNullOrBlank()) {
-                                "选择一张本地图片作为全局背景；设置后优先于随机图源。"
-                            } else {
-                                "已设置自定义背景（优先于随机图源）。"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { pickImageLauncher.launch("image/*") }) { Text("选择图片") }
-                            if (!customPath.isNullOrBlank()) {
-                                TextButton(onClick = {
-                                    runCatching { java.io.File(customPath).delete() }
-                                    com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, null)
-                                    com.zycomic.app.ui.components.AppBackdropState.refresh()
-                                }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
+            preferenceItems = (
+                persistentListOf(
+                    Preference.PreferenceItem.CustomPreference(title = "背景封面模糊度") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                "背景封面模糊度：${backdropBlur.toInt()} dp",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Slider(
+                                value = backdropBlur,
+                                onValueChange = {
+                                    com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, it)
+                                },
+                                valueRange = 0f..24f,
+                            )
+                        }
+                    },
+                    Preference.PreferenceItem.CustomPreference(title = "液态玻璃强度") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                "液态玻璃强度：${(glassStrength * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Slider(
+                                value = glassStrength,
+                                onValueChange = {
+                                    com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, it)
+                                },
+                                valueRange = 0f..1f,
+                            )
+                        }
+                    },
+                    Preference.PreferenceItem.CustomPreference(title = "自定义背景图片") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                if (customPath.isNullOrBlank()) {
+                                    "选择一张本地图片作为全局背景；设置后优先于随机图源。"
+                                } else {
+                                    "已设置自定义背景（优先于随机图源）。"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { pickImageLauncher.launch("image/*") }) { Text("选择图片") }
+                                if (!customPath.isNullOrBlank()) {
+                                    TextButton(onClick = {
+                                        runCatching { java.io.File(customPath).delete() }
+                                        com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, null)
+                                        com.zycomic.app.ui.components.AppBackdropState.refresh()
+                                    }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
+                                }
                             }
                         }
-                    }
-                },
-                Preference.PreferenceItem.CustomPreference(title = "随机图源（可多选）") {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        Text(
-                            "未设置自定义图片时，从开启的随机图源里随机取图；全部关闭则使用默认渐变背景。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                },
-            ) + sourceItems,
+                    },
+                    Preference.PreferenceItem.CustomPreference(title = "随机图源（可多选）") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Text(
+                                "未设置自定义图片时，从开启的随机图源里随机取图；全部关闭则使用默认渐变背景。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    },
+                ) + sourceItems
+                ).toImmutableList(),
         )
     }
 
