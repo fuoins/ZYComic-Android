@@ -53,6 +53,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -81,6 +82,8 @@ import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.rememberHazeState
 import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.picacg.PicacgThemes
 import eu.kanade.presentation.components.TabbedDialog
@@ -156,7 +159,9 @@ fun SearchScreen(
     }
 
     val backdropEntry by com.zycomic.app.ui.components.AppBackdropState.current.collectAsState()
-    Box(modifier = Modifier.fillMaxSize()) {
+    val searchHazeState = rememberHazeState()
+    CompositionLocalProvider(com.zycomic.app.ui.components.LocalAppHaze provides searchHazeState) {
+    Box(modifier = Modifier.fillMaxSize().haze(state = searchHazeState)) {
         // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/兜底渐变）。
         com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
     Column(
@@ -411,6 +416,7 @@ fun SearchScreen(
                 )
             }
         }
+    }
     }
     }
     if (showPicacgCategories && provider == SearchProvider.PICACG) {

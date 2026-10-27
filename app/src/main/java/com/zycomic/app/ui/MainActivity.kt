@@ -61,11 +61,15 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.AppCoverBackdrop
 import com.zycomic.app.ui.components.BackdropSources
+import com.zycomic.app.ui.components.GlassShell
+import com.zycomic.app.ui.components.LocalAppHaze
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.rememberHazeState
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
@@ -452,7 +456,10 @@ fun AppContent(
             }
             AppBackdropState.refresh(pageKey)
         }
-        Box(modifier = Modifier.fillMaxSize()) {
+        // 真磨砂玻璃的模糊源：整个主界面内容区（背景 + 页面）作为被模糊对象。
+        val hazeState = rememberHazeState()
+        CompositionLocalProvider(LocalAppHaze provides hazeState) {
+        Box(modifier = Modifier.fillMaxSize().haze(state = hazeState)) {
             AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
@@ -558,6 +565,7 @@ fun AppContent(
             }
         }
             }
+        }
     } else if (!blockingSpeedTest) {
         // 测速已结束但首启向导未完成：全屏进入 3 页向导
         com.zycomic.app.ui.onboarding.OnboardingHost(
@@ -797,54 +805,47 @@ private fun KomikkuSettingsDialog(
 
 
 /**
- * 液态玻璃底栏：悬浮胶囊，与参考 HTML 的 tabbar 同语言——
- * 灰白两层玻璃（rgba(210,215,220,.55) + 白 .18）+ 白描边 + 顶部内高光 + 底部内阴影，
- * 圆角胶囊悬空，不带主题色。
+ * 液态玻璃底栏：真磨砂悬浮胶囊（Haze backdrop blur）——
+ * 灰白玻璃淡染 + 白描边 + 顶部内高光 + 底部内阴影，圆角胶囊悬空，不带主题色。
  */
 @Composable
 private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(50))
-            .drawBehind {
-                // 两层玻璃：灰白底 + 白上层
-                drawRect(Color(0xFFD2D7DC).copy(alpha = if (dark) 0.14f else 0.55f))
-                drawRect(Color.White.copy(alpha = if (dark) 0.10f else 0.18f))
-                // 顶部内高光（HTML: inset 0 1px 0 rgba(255,255,255,.60)）
-                drawLine(
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color.Transparent,
-                            Color.White.copy(alpha = if (dark) 0.20f else 0.85f),
-                            Color.Transparent,
-                        ),
-                    ),
-                    start = Offset(size.width * 0.15f, 0.8f),
-                    end = Offset(size.width * 0.85f, 0.8f),
-                    strokeWidth = 1.4f,
-                )
-                // 底部内阴影线
-                drawLine(
-                    color = Color.Black.copy(alpha = if (dark) 0.25f else 0.06f),
-                    start = Offset(0f, size.height - 0.5f),
-                    end = Offset(size.width, size.height - 0.5f),
-                    strokeWidth = 1.dp.toPx(),
-                )
-                // 白描边（HTML: 1px solid rgba(255,255,255,.38)）
-                drawRoundRect(
-                    color = Color.White.copy(alpha = if (dark) 0.16f else 0.38f),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f, size.height / 2f),
-                )
-            },
+    GlassShell(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(50),
+        radius = 999.dp,
+        stroke = true,
+        glassTopAlpha = if (dark) 0.16f else 0.55f,
+        glassBottomAlpha = if (dark) 0.08f else 0.20f,
+        elevated = false,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(58.dp),
+                .height(58.dp)
+                .drawBehind {
+                    // 顶部内高光（HTML: inset 0 1px 0 rgba(255,255,255,.60)）
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color.White.copy(alpha = if (dark) 0.20f else 0.85f),
+                                Color.Transparent,
+                            ),
+                        ),
+                        start = Offset(size.width * 0.15f, 0.8f),
+                        end = Offset(size.width * 0.85f, 0.8f),
+                        strokeWidth = 1.4f,
+                    )
+                    // 底部内阴影线
+                    drawLine(
+                        color = Color.Black.copy(alpha = if (dark) 0.25f else 0.06f),
+                        start = Offset(0f, size.height - 0.5f),
+                        end = Offset(size.width, size.height - 0.5f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                },
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         ) {
             content()

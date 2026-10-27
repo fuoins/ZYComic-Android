@@ -249,6 +249,9 @@ dependencies {
     }
     implementation(libs.image.decoder)
 
+    // Real backdrop blur (liquid glass)
+    implementation(libs.haze)
+
     // UI libraries
     implementation(libs.material)
     implementation(libs.flexible.adapter.core)
