@@ -357,7 +357,7 @@ private fun LegacyBrowseScreen(
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
-            GlassTopBar {
+            GlassTopBar(bottomLine = false) {
             if (activeSelectionMode) {
                 AppBar(
                     titleContent = { Text(activeSelectionCount.toString()) },

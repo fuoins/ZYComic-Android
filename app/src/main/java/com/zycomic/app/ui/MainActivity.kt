@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.History
@@ -29,6 +30,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +46,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -441,35 +444,51 @@ fun AppContent(
                 contentWindowInsets = WindowInsets.navigationBars,
                 bottomBar = {
                     GlassBottomBar {
+                        val itemColors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) {
+                                Color.White.copy(alpha = 0.14f)
+                            } else {
+                                Color.White.copy(alpha = 0.60f)
+                            },
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         NavigationBarItem(
                             selected = bottomTab == 0,
                             onClick = { bottomTab = 0 },
                             icon = { Icon(Icons.Default.Home, contentDescription = "分类") },
                             label = { Text("分类") },
+                            colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 1,
                             onClick = { bottomTab = 1 },
                             icon = { Icon(Icons.Default.Book, contentDescription = "书架") },
                             label = { Text("书架") },
+                            colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 2,
                             onClick = { bottomTab = 2 },
                             icon = { Icon(Icons.Default.History, contentDescription = "历史") },
                             label = { Text("历史") },
+                            colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 3,
                             onClick = { bottomTab = 3 },
                             icon = { Icon(Icons.Default.Person, contentDescription = "我的") },
                             label = { Text("我的") },
+                            colors = itemColors,
                         )
                         NavigationBarItem(
                             selected = bottomTab == 4,
                             onClick = { bottomTab = 4 },
                             icon = { Icon(Icons.Default.Settings, contentDescription = "设置") },
                             label = { Text("设置") },
+                            colors = itemColors,
                         )
                     }
                 },
@@ -777,40 +796,48 @@ private fun KomikkuSettingsDialog(
 }
 
 
-/** 液态玻璃底栏：纯白玻璃渐变 + 顶部内高光 + 白描边，跟随浅色/深色，不带主题色。 */
+/**
+ * 液态玻璃底栏：悬浮胶囊，与参考 HTML 的 tabbar 同语言——
+ * 灰白两层玻璃（rgba(210,215,220,.55) + 白 .18）+ 白描边 + 顶部内高光 + 底部内阴影，
+ * 圆角胶囊悬空，不带主题色。
+ */
 @Composable
 private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(50))
             .drawBehind {
-                drawRect(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = if (dark) 0.09f else 0.34f),
-                            Color.White.copy(alpha = if (dark) 0.04f else 0.18f),
-                        ),
-                    ),
-                )
-                // 顶部 1px 白描边 + 白色内高光，描出玻璃上缘。
-                drawLine(
-                    color = Color.White.copy(alpha = if (dark) 0.18f else 0.65f),
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width, 0f),
-                    strokeWidth = 1.dp.toPx(),
-                )
+                // 两层玻璃：灰白底 + 白上层
+                drawRect(Color(0xFFD2D7DC).copy(alpha = if (dark) 0.14f else 0.55f))
+                drawRect(Color.White.copy(alpha = if (dark) 0.10f else 0.18f))
+                // 顶部内高光（HTML: inset 0 1px 0 rgba(255,255,255,.60)）
                 drawLine(
                     brush = Brush.horizontalGradient(
                         listOf(
                             Color.Transparent,
-                            Color.White.copy(alpha = if (dark) 0.22f else 0.90f),
+                            Color.White.copy(alpha = if (dark) 0.20f else 0.85f),
                             Color.Transparent,
                         ),
                     ),
-                    start = Offset(0f, 0.8f),
-                    end = Offset(size.width, 0.8f),
+                    start = Offset(size.width * 0.15f, 0.8f),
+                    end = Offset(size.width * 0.85f, 0.8f),
                     strokeWidth = 1.4f,
+                )
+                // 底部内阴影线
+                drawLine(
+                    color = Color.Black.copy(alpha = if (dark) 0.25f else 0.06f),
+                    start = Offset(0f, size.height - 0.5f),
+                    end = Offset(size.width, size.height - 0.5f),
+                    strokeWidth = 1.dp.toPx(),
+                )
+                // 白描边（HTML: 1px solid rgba(255,255,255,.38)）
+                drawRoundRect(
+                    color = Color.White.copy(alpha = if (dark) 0.16f else 0.38f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f, size.height / 2f),
                 )
             },
     ) {

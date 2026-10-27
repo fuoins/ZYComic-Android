@@ -21,6 +21,7 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.platform.ContentPlatform
@@ -50,6 +51,7 @@ fun LibraryHistoryToolbar(
     onSelectAll: () -> Unit,
     onInvertSelection: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior?,
+    backgroundColor: Color = Color.Transparent,
     history: Boolean = false,
     selectionSupported: Boolean = true,
     refreshBusy: Boolean = false,
@@ -127,6 +129,7 @@ fun LibraryHistoryToolbar(
             isActionMode = true,
             onCancelActionMode = onExitSelection,
             scrollBehavior = scrollBehavior,
+            backgroundColor = backgroundColor,
         )
     } else {
         SearchToolbar(
@@ -137,6 +140,7 @@ fun LibraryHistoryToolbar(
             onClickCloseSearch = { onChangeSearchQuery(null) },
             actions = actions,
             scrollBehavior = scrollBehavior,
+            backgroundColor = backgroundColor,
         )
     }
 }

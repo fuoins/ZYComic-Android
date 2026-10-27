@@ -16,6 +16,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -81,6 +82,52 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
 
         return listOf(
             getThemeGroup(uiPreferences = uiPreferences),
+            getGlassGroup(),
+        )
+    }
+
+    /** 背景与液态玻璃参数：封面背景模糊度 + 玻璃主体强度，实时生效。 */
+    @Composable
+    private fun getGlassGroup(): Preference.PreferenceGroup {
+        val context = LocalContext.current
+        var backdropBlur by remember { mutableStateOf(com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp(context)) }
+        var glassStrength by remember { mutableStateOf(com.zycomic.app.ui.components.GlassPrefs.glassStrength(context)) }
+        return Preference.PreferenceGroup(
+            title = "背景与液态玻璃",
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.CustomPreference(title = "背景封面模糊度") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "背景封面模糊度：${backdropBlur.toInt()} dp",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = backdropBlur,
+                            onValueChange = {
+                                backdropBlur = it
+                                com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, it)
+                            },
+                            valueRange = 0f..24f,
+                        )
+                    }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "液态玻璃强度") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "液态玻璃强度：${(glassStrength * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = glassStrength,
+                            onValueChange = {
+                                glassStrength = it
+                                com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, it)
+                            },
+                            valueRange = 0f..1f,
+                        )
+                    }
+                },
+            ),
         )
     }
 

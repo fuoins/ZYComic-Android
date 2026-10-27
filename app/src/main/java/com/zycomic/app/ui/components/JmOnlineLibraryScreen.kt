@@ -380,6 +380,7 @@ private fun JmOnlineLibraryContent(
     Scaffold(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
+            GlassTopBar {
             LibraryHistoryToolbar(
                 platform = ContentPlatform.JM,
                 onSelectPlatform = onSelectPlatform,
@@ -405,6 +406,7 @@ private fun JmOnlineLibraryContent(
                 scrollBehavior = scrollBehavior,
                 history = history,
             )
+            }
         },
         bottomBar = {
             if (selectionMode) {

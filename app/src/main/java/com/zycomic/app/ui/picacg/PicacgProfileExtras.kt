@@ -35,6 +35,8 @@ import com.zycomic.app.picacg.PicacgAutoPunchCoordinator
 import com.zycomic.app.picacg.PicacgProfile
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.picacg.StoredPicacgAutoPunchPreference
+import com.zycomic.app.ui.components.GlassPreferenceRow
+import com.zycomic.app.ui.components.GlassSwitchRow
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import kotlinx.coroutines.CancellationException
@@ -129,7 +131,7 @@ fun PicacgAccountProfileContent(
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (!loggedIn) {
             Text(stringResource(KMR.strings.picacg_session_required))
-            TextPreferenceWidget(
+            GlassPreferenceRow(
                 title = stringResource(KMR.strings.picacg_login_action),
                 icon = Icons.Outlined.Info,
                 onPreferenceClick = onRequireLogin,
@@ -137,21 +139,21 @@ fun PicacgAccountProfileContent(
         } else {
             val user = profile
             if (user == null) {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = stringResource(KMR.strings.picacg_profile_email, "资料加载中…"),
                     subtitle = "账户资料正在加载",
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = {},
                 )
             } else {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = stringResource(KMR.strings.picacg_profile_email, user.email.ifBlank { user.name }),
                     subtitle = stringResource(KMR.strings.picacg_profile_level_exp, user.level, user.exp),
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = {},
                 )
             }
-            TextPreferenceWidget(
+            GlassPreferenceRow(
                 title = stringResource(
                     KMR.strings.picacg_profile_punched,
                     when (user?.isPunched) {
@@ -185,7 +187,7 @@ fun PicacgAccountProfileContent(
                     }
                 },
             )
-            SwitchPreferenceWidget(
+            GlassSwitchRow(
                 title = stringResource(KMR.strings.picacg_auto_punch_in),
                 subtitle = stringResource(KMR.strings.picacg_auto_punch_in_summary),
                 icon = Icons.Outlined.EventRepeat,
@@ -197,13 +199,13 @@ fun PicacgAccountProfileContent(
             )
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             message?.let { Text(it) }
-            TextPreferenceWidget(
+            GlassPreferenceRow(
                 title = stringResource(KMR.strings.picacg_logout),
                 icon = Icons.Outlined.Logout,
                 onPreferenceClick = { if (!busy) PicacgRepository.logout() },
             )
         }
-        TextPreferenceWidget(
+        GlassPreferenceRow(
             title = stringResource(KMR.strings.picacg_block_keyword_entry),
             icon = Icons.Outlined.Info,
             onPreferenceClick = { showBlockKeywordScreen = true },

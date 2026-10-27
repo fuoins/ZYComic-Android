@@ -61,6 +61,7 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.JmOnlineLibraryScreen
+import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -156,6 +157,7 @@ fun HistoryScreen(
     Scaffold(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
+            GlassTopBar {
             LibraryHistoryToolbar(
                 platform = platform,
                 onSelectPlatform = selectPlatform,
@@ -185,6 +187,7 @@ fun HistoryScreen(
                 scrollBehavior = scrollBehavior,
                 history = true,
             )
+            }
         },
         bottomBar = {
             if (manwaSelectionMode) {

@@ -50,12 +50,14 @@ private data class GlassSpec(
 
 @Composable
 private fun glassSpec(): GlassSpec {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val strength = GlassPrefs.glassStrength(context)
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     return GlassSpec(
-        glassTop = Color.White.copy(alpha = if (dark) 0.08f else 0.30f),
-        glassBottom = Color.White.copy(alpha = if (dark) 0.035f else 0.16f),
-        highlight = Color.White.copy(alpha = if (dark) 0.22f else 0.78f),
-        edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f),
+        glassTop = Color.White.copy(alpha = (if (dark) 0.08f else 0.30f) * strength),
+        glassBottom = Color.White.copy(alpha = (if (dark) 0.035f else 0.16f) * strength),
+        highlight = Color.White.copy(alpha = (if (dark) 0.22f else 0.78f) * (0.4f + 0.6f * strength)),
+        edge = Color.White.copy(alpha = (if (dark) 0.16f else 0.55f) * (0.5f + 0.5f * strength)),
         shadow = Color.Black.copy(alpha = if (dark) 0.30f else 0.12f),
     )
 }
@@ -125,23 +127,13 @@ fun GlassPreferenceRow(
             modifier = Modifier
                 .clickable(enabled = onPreferenceClick != null) { onPreferenceClick?.invoke() }
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                val spec = glassSpec()
-                val badgeRadiusPx = with(LocalDensity.current) { 13.dp.toPx() }
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .glassBase(spec, badgeRadiusPx, Color.Transparent),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    when (icon) {
-                        is ImageVector -> Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(21.dp))
-                        is Painter -> Icon(painter = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(21.dp))
-                    }
+                when (icon) {
+                    is ImageVector -> Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
+                    is Painter -> Icon(painter = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
                 }
             }
             Column(modifier = Modifier.weight(1f).padding(horizontal = if (icon != null) 12.dp else 0.dp)) {
@@ -192,6 +184,7 @@ fun GlassSwitchRow(
 @Composable
 fun GlassTopBar(
     modifier: Modifier = Modifier,
+    bottomLine: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
     val spec = glassSpec()
@@ -211,12 +204,14 @@ fun GlassTopBar(
                     end = Offset(size.width * 0.95f, 0.8f),
                     strokeWidth = 1.6f,
                 )
-                drawLine(
-                    color = spec.edge,
-                    start = Offset(0f, size.height - 0.5f),
-                    end = Offset(size.width, size.height - 0.5f),
-                    strokeWidth = 1.dp.toPx(),
-                )
+                if (bottomLine) {
+                    drawLine(
+                        color = spec.edge,
+                        start = Offset(0f, size.height - 0.5f),
+                        end = Offset(size.width, size.height - 0.5f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
             },
         content = content,
     )

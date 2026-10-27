@@ -48,6 +48,7 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
     }
 
     val context = LocalContext.current
+    val backdropBlurDp = GlassPrefs.backdropBlurDp(context)
     // 当前正在展示的封面（双缓冲）：entry 变化后先继续显示旧封面，新封面就绪才切换。
     var shown by remember { mutableStateOf(entry) }
     val prefetchLoader = remember(entry.platform) {
@@ -86,7 +87,7 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
                 model = shownEntry.url,
                 contentDescription = null,
                 imageLoader = shownLoader,
-                modifier = Modifier.matchParentSize().blur(8.dp).alpha(0.65f),
+                modifier = Modifier.matchParentSize().blur(backdropBlurDp.dp).alpha(0.65f),
                 contentScale = ContentScale.Crop,
             )
             // 遮罩只做两件事：顶部保住状态栏/搜索栏文字、底部托住玻璃底栏，中间大面积放开让封面可见。

@@ -68,6 +68,7 @@ import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.LibraryHistoryTitle
+import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -177,6 +178,7 @@ fun LibraryScreen(
     Scaffold(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
+            GlassTopBar {
             val subtitle = if (platform == ContentPlatform.MANWA) {
                 user?.let { currentUser ->
                     val max = when {
@@ -223,6 +225,7 @@ fun LibraryScreen(
                 onInvertSelection = vm::invertSelection,
                 scrollBehavior = scrollBehavior,
             )
+            }
         },
         bottomBar = {
             if (selectionMode && platform == ContentPlatform.MANWA) {

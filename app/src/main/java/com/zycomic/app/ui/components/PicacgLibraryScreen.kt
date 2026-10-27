@@ -236,6 +236,7 @@ fun PicacgLibraryScreen(
     Scaffold(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
+            GlassTopBar {
             LibraryHistoryToolbar(
                 platform = ContentPlatform.PICACG,
                 onSelectPlatform = onSelectPlatform,
@@ -273,6 +274,7 @@ fun PicacgLibraryScreen(
                 history = history,
                 selectionSupported = !history && loggedIn,
             )
+            }
         },
         bottomBar = {
             if (selectionMode) {
