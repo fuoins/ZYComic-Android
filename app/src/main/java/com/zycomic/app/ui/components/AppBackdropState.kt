@@ -46,12 +46,15 @@ object AppBackdropState {
     }
 
     /**
-     * 从所有开启背景开关的 tab 的缓存并集里随机取一张。
-     * 取不到时**保持当前背景不变**（切到还没加载封面的 tab 时不闪、不黑屏）。
+     * 从所有开启背景开关的 tab 的缓存并集里随机取一张（优先排除当前正在显示的那张，
+     * 避免切换时随机到同一张白换一次）。取不到时**保持当前背景不变**（不闪、不黑屏）。
      */
     fun randomFrom(enabledTabIds: Set<String>) {
         val candidates = enabledTabIds.flatMap { pools[it].orEmpty() }
-        val picked = candidates.randomOrNull() ?: return
+        if (candidates.isEmpty()) return
+        val currentUrl = _current.value?.url
+        val fresh = candidates.filter { it.url != currentUrl }
+        val picked = (if (fresh.isNotEmpty()) fresh else candidates).randomOrNull() ?: return
         _current.value = picked
     }
 

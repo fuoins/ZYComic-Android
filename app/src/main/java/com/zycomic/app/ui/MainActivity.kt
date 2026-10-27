@@ -777,11 +777,10 @@ private fun KomikkuSettingsDialog(
 }
 
 
-/** 液态玻璃底栏：白玻璃渐变 + 主题色淡染 + 顶部内高光 + 主题色描边。叠在纯白页面上也一眼可见。 */
+/** 液态玻璃底栏：纯白玻璃渐变 + 顶部内高光 + 白描边，跟随浅色/深色，不带主题色。 */
 @Composable
 private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val primary = MaterialTheme.colorScheme.primary
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -789,16 +788,14 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
                 drawRect(
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = if (dark) 0.12f else 0.70f),
-                            Color.White.copy(alpha = if (dark) 0.06f else 0.48f),
+                            Color.White.copy(alpha = if (dark) 0.09f else 0.34f),
+                            Color.White.copy(alpha = if (dark) 0.04f else 0.18f),
                         ),
                     ),
                 )
-                // 主题色淡染：白玻璃叠白底时靠它撑起可见度。
-                drawRect(primary.copy(alpha = if (dark) 0.10f else 0.16f))
-                // 顶部 1px 主题色描边 + 白色内高光，描出玻璃上缘。
+                // 顶部 1px 白描边 + 白色内高光，描出玻璃上缘。
                 drawLine(
-                    color = primary.copy(alpha = if (dark) 0.22f else 0.45f),
+                    color = Color.White.copy(alpha = if (dark) 0.18f else 0.65f),
                     start = Offset(0f, 0f),
                     end = Offset(size.width, 0f),
                     strokeWidth = 1.dp.toPx(),

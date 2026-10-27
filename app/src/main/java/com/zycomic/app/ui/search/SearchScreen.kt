@@ -172,7 +172,7 @@ fun SearchScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp, tintAlpha = 0.08f),
+                    .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp),
             ) {
                 OutlinedTextField(
                     value = keyword,
@@ -677,7 +677,7 @@ private fun SearchHistorySection(vm: SearchViewModel) {
                     Row(
                         modifier = Modifier
                             .widthIn(max = 320.dp)
-                            .glassSurface(shape = RoundedCornerShape(50), radius = 999.dp, tintAlpha = 0.08f)
+                            .glassSurface(shape = RoundedCornerShape(50), radius = 999.dp)
                             .clickable(enabled = !deleting) { vm.searchHistoryItem(k) }
                             .padding(start = 12.dp, end = if (deleting) 2.dp else 12.dp, top = 2.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,

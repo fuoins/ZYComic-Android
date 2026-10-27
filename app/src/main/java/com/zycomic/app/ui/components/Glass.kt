@@ -35,38 +35,36 @@ import androidx.compose.ui.unit.dp
 /**
  * 液态玻璃组件库（全 App 统一外观语言）。
  *
- * 设计要点：不依赖背后必须有封面图——玻璃本体是「半透明白渐变 + 主题色淡染 + 顶部内高光
- * + 主题色描边 + 底部投影」，叠在纯白/纯黑页面上也一眼可见；叠在模糊封面上则更通透。
- * 深色/浅色两套参数自动切换。
+ * 玻璃本体是「纯白半透明渐变 + 顶部内高光 + 白描边 + 中性投影」，完全跟随系统浅色/深色，
+ * 不带任何主题色；只有显式传入 [accent] 的场景（平台开关、平台选择器等）才叠平台色。
+ * 叠在纯白/纯黑页面或模糊封面上都成立。
  */
 
 private data class GlassSpec(
     val glassTop: Color,
     val glassBottom: Color,
-    val tint: Color,
     val highlight: Color,
     val edge: Color,
     val shadow: Color,
 )
 
 @Composable
-private fun glassSpec(tint: Color, tintAlpha: Float): GlassSpec {
+private fun glassSpec(): GlassSpec {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     return GlassSpec(
-        glassTop = Color.White.copy(alpha = if (dark) 0.09f else 0.62f),
-        glassBottom = Color.White.copy(alpha = if (dark) 0.035f else 0.40f),
-        tint = tint.copy(alpha = if (dark) 0.09f else tintAlpha),
-        highlight = Color.White.copy(alpha = if (dark) 0.18f else 0.90f),
-        edge = tint.copy(alpha = if (dark) 0.18f else 0.34f),
-        shadow = Color.Black.copy(alpha = if (dark) 0.24f else 0.10f),
+        glassTop = Color.White.copy(alpha = if (dark) 0.08f else 0.30f),
+        glassBottom = Color.White.copy(alpha = if (dark) 0.035f else 0.16f),
+        highlight = Color.White.copy(alpha = if (dark) 0.22f else 0.78f),
+        edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f),
+        shadow = Color.Black.copy(alpha = if (dark) 0.30f else 0.12f),
     )
 }
 
-/** 玻璃底板绘制：白玻璃渐变 + 主题色淡染 + 顶部内高光 + 描边。需配合 [clip] 使用。 */
-private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float): Modifier =
+/** 玻璃底板绘制：白玻璃渐变 + 可选平台色淡染 + 顶部内高光 + 描边。需配合 [clip] 使用。 */
+private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float, tintLayer: Color): Modifier =
     this.drawBehind {
         drawRect(Brush.verticalGradient(0f to spec.glassTop, 1f to spec.glassBottom))
-        drawRect(spec.tint)
+        if (tintLayer.alpha > 0f) drawRect(tintLayer)
         drawLine(
             brush = Brush.horizontalGradient(
                 0f to Color.Transparent,
@@ -85,24 +83,25 @@ private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float): Modifier =
         )
     }
 
-/** 独立玻璃卡片（用户信息卡、分组容器等）。 */
+/** 独立玻璃卡片（用户信息卡、分组容器等）。[accent] 非空时叠加平台色淡染。 */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
     radius: Dp = 18.dp,
-    tint: Color = MaterialTheme.colorScheme.primary,
-    tintAlpha: Float = 0.13f,
+    accent: Color? = null,
+    accentAlpha: Float = 0.10f,
     elevated: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val spec = glassSpec(tint, tintAlpha)
+    val spec = glassSpec()
     val shape = RoundedCornerShape(radius)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
+    val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
     Box(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
             .clip(shape)
-            .glassBase(spec, radiusPx),
+            .glassBase(spec, radiusPx, tintLayer),
         content = content,
     )
 }
@@ -114,14 +113,13 @@ fun GlassPreferenceRow(
     title: String? = null,
     subtitle: CharSequence? = null,
     icon: Any? = null,
-    iconTint: Color = MaterialTheme.colorScheme.primary,
+    iconTint: Color = MaterialTheme.colorScheme.onSurface,
     widget: @Composable (() -> Unit)? = null,
     onPreferenceClick: (() -> Unit)? = null,
 ) {
     GlassCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
         radius = 18.dp,
-        tint = iconTint,
     ) {
         Row(
             modifier = Modifier
@@ -131,13 +129,13 @@ fun GlassPreferenceRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                val spec = glassSpec(iconTint, 0.16f)
+                val spec = glassSpec()
                 val badgeRadiusPx = with(LocalDensity.current) { 13.dp.toPx() }
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(13.dp))
-                        .glassBase(spec, badgeRadiusPx),
+                        .glassBase(spec, badgeRadiusPx, Color.Transparent),
                     contentAlignment = Alignment.Center,
                 ) {
                     when (icon) {
@@ -196,13 +194,12 @@ fun GlassTopBar(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val spec = glassSpec(MaterialTheme.colorScheme.primary, 0.14f)
+    val spec = glassSpec()
     Row(
         modifier = modifier
             .fillMaxWidth()
             .drawBehind {
                 drawRect(Brush.verticalGradient(0f to spec.glassTop, 1f to spec.glassBottom))
-                drawRect(spec.tint)
                 drawLine(
                     brush = Brush.horizontalGradient(
                         0f to Color.Transparent,
@@ -225,16 +222,17 @@ fun GlassTopBar(
     )
 }
 
-/** 玻璃胶囊 Chip（标签栏选中态、平台选择器等）。 */
+/** 玻璃胶囊 Chip（标签栏选中态、平台选择器等）。[accent] 非空时叠加平台色淡染。 */
 @Composable
 fun GlassChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    tint: Color = MaterialTheme.colorScheme.primary,
+    accent: Color? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val spec = glassSpec(tint, 0.16f)
+    val spec = glassSpec()
+    val tintLayer = accent?.copy(alpha = 0.14f) ?: Color.Transparent
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(50))
@@ -242,7 +240,7 @@ fun GlassChip(
                 if (selected) {
                     Modifier.drawBehind {
                         drawRect(Brush.verticalGradient(0f to spec.glassTop, 1f to spec.glassBottom))
-                        drawRect(spec.tint)
+                        if (tintLayer.alpha > 0f) drawRect(tintLayer)
                         drawRoundRect(
                             color = spec.edge,
                             style = Stroke(width = 1.dp.toPx()),
@@ -265,9 +263,10 @@ fun GlassChip(
 fun Modifier.glassSurface(
     shape: RoundedCornerShape = RoundedCornerShape(14.dp),
     radius: Dp = 14.dp,
-    tint: Color = MaterialTheme.colorScheme.primary,
-    tintAlpha: Float = 0.12f,
+    accent: Color? = null,
+    accentAlpha: Float = 0.10f,
 ): Modifier {
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
-    return this.clip(shape).glassBase(glassSpec(tint, tintAlpha), radiusPx)
+    val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
+    return this.clip(shape).glassBase(glassSpec(), radiusPx, tintLayer)
 }

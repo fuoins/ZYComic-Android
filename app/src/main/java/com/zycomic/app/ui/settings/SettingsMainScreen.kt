@@ -243,8 +243,8 @@ private fun SettingsPlatformSwitch(
     GlassCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
         radius = 16.dp,
-        tint = accent,
-        tintAlpha = 0.10f,
+        accent = accent,
+        accentAlpha = 0.10f,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
