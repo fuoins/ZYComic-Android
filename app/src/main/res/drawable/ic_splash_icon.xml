@@ -1,31 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="432"
-    android:viewportHeight="432">
-    <path android:pathData="M104,0 L328,0 A104,104 0 0 1 432,104 L432,328 A104,104 0 0 1 328,432 L104,432 A104,104 0 0 1 0,328 L0,104 A104,104 0 0 1 104,0 Z">
-        <aapt:attr name="android:fillColor">
+<!-- 系统启动帧：圆形渐变底 + 漫画气泡前景。windowSplashScreen 会把整层裁成圆。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
             <gradient
-                android:endX="432"
-                android:endY="432"
-                android:startX="0"
-                android:startY="0"
-                android:type="linear">
-                <item android:color="#FF0FAE79" android:offset="0" />
-                <item android:color="#FF2FD3A0" android:offset="0.55" />
-                <item android:color="#FFFFC063" android:offset="1" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M211.7,172.8 C185.8,151.2 142.6,138.2 103.7,151.2 L103.7,293.8 C142.6,280.8 185.8,289.4 211.7,311 Z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M220.3,172.8 C246.2,151.2 289.4,138.2 328.3,151.2 L328.3,293.8 C289.4,280.8 246.2,289.4 220.3,311 Z" />
-    <path
-        android:fillColor="#FFFFE3B0"
-        android:pathData="M220.3,172.8 C246.2,151.2 289.4,138.2 328.3,151.2 L328.3,185.8 C289.4,172.8 246.2,181.4 220.3,203 Z" />
-</vector>
+                android:angle="270"
+                android:startColor="#FFB018ED"
+                android:centerColor="#FFF32E9B"
+                android:endColor="#FFFDAB1D"
+                android:type="linear" />
+        </shape>
+    </item>
+    <item
+        android:drawable="@drawable/ic_splash_fg"
+        android:gravity="center" />
+</layer-list>

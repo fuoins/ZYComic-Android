@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,6 +64,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import eu.kanade.tachiyomi.R
 import com.zycomic.app.net.PlatformStartupStatus
 import com.zycomic.app.net.StartupCheckPhase
 import com.zycomic.app.net.StartupCheckStatus
@@ -412,46 +415,20 @@ private fun BrandStack(dark: Boolean) {
             modifier = Modifier.size(108.dp).offset(y = (-4f * floaty).dp),
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier.size(80.dp).rotate(-9f).offset(x = (-9).dp, y = 3.dp)
-                    .background(
-                        BrandMint.copy(alpha = if (dark) 0.16f else 0.20f),
-                        RoundedCornerShape(25.dp),
-                    ),
-            )
-            Box(
-                modifier = Modifier.size(80.dp).rotate(7f).offset(x = 9.dp, y = (-2).dp)
-                    .background(
-                        BrandAmber.copy(alpha = if (dark) 0.16f else 0.22f),
-                        RoundedCornerShape(25.dp),
-                    ),
-            )
-            Box(
-                modifier = Modifier.size(80.dp)
+            // 与桌面图标、启动帧同一套品牌标识：漫画气泡 + 分镜 + 书签
+            Image(
+                painter = painterResource(R.drawable.ic_zycomic),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(86.dp)
                     .shadow(
                         elevation = if (dark) 18.dp else 22.dp,
-                        shape = RoundedCornerShape(25.dp),
-                        ambientColor = BrandGreen.copy(alpha = 0.55f),
-                        spotColor = BrandGreen.copy(alpha = 0.75f),
+                        shape = RoundedCornerShape(19.dp),
+                        ambientColor = Color(0xFF7A1FD0).copy(alpha = 0.45f),
+                        spotColor = Color(0xFFFDAB1D).copy(alpha = 0.45f),
                     )
-                    .clip(RoundedCornerShape(25.dp))
-                    .background(Brush.linearGradient(listOf(BrandGreen, BrandMint, BrandAmber)))
-                    .drawBehind {
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to Color.White.copy(alpha = 0.34f),
-                                0.6f to Color.Transparent,
-                            ),
-                        )
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                BookMark(
-                    modifier = Modifier.size(56.dp),
-                    page = Color.White,
-                    highlight = MarkHighlight,
-                )
-            }
+                    .clip(RoundedCornerShape(19.dp)),
+            )
         }
     }
 }
@@ -487,43 +464,6 @@ private fun Tagline(dark: Boolean) {
         )
         Spacer(Modifier.width(10.dp))
         Box(Modifier.width(20.dp).height(1.dp).background(color.copy(alpha = 0.4f)))
-    }
-}
-
-/** 品牌标记：两页书 + 书脊留缝 + 右页折角高光。 */
-@Composable
-private fun BookMark(
-    modifier: Modifier = Modifier,
-    page: Color,
-    highlight: Color,
-) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val left = Path().apply {
-            moveTo(w * 0.49f, h * 0.40f)
-            cubicTo(w * 0.43f, h * 0.35f, w * 0.33f, h * 0.32f, w * 0.24f, h * 0.35f)
-            lineTo(w * 0.24f, h * 0.68f)
-            cubicTo(w * 0.33f, h * 0.65f, w * 0.43f, h * 0.67f, w * 0.49f, h * 0.72f)
-            close()
-        }
-        val right = Path().apply {
-            moveTo(w * 0.51f, h * 0.40f)
-            cubicTo(w * 0.57f, h * 0.35f, w * 0.67f, h * 0.32f, w * 0.76f, h * 0.35f)
-            lineTo(w * 0.76f, h * 0.68f)
-            cubicTo(w * 0.67f, h * 0.65f, w * 0.57f, h * 0.67f, w * 0.51f, h * 0.72f)
-            close()
-        }
-        val folded = Path().apply {
-            moveTo(w * 0.51f, h * 0.40f)
-            cubicTo(w * 0.57f, h * 0.35f, w * 0.67f, h * 0.32f, w * 0.76f, h * 0.35f)
-            lineTo(w * 0.76f, h * 0.43f)
-            cubicTo(w * 0.67f, h * 0.40f, w * 0.57f, h * 0.42f, w * 0.51f, h * 0.47f)
-            close()
-        }
-        drawPath(left, color = page)
-        drawPath(right, color = page)
-        drawPath(folded, color = highlight)
     }
 }
 

@@ -64,7 +64,9 @@ class StartupUiContractTest {
         assertTrue(splash.contains("StartupSplash("))
         assertTrue(splash.contains("SplashBackground("))
         assertTrue(splash.contains("GlassBox("))
-        assertTrue(splash.contains("BookMark("))
+        // 品牌 logo 与桌面图标同源（漫画气泡整图），不再手绘书页
+        assertTrue(splash.contains("painterResource(R.drawable.ic_zycomic)"))
+        assertFalse(splash.contains("BookMark("))
         assertTrue(splash.contains("TrackSwitch("))
         assertTrue(splash.contains("PlatformChip("))
         assertTrue(splash.contains("phasesOf(platform)"))
@@ -89,30 +91,32 @@ class StartupUiContractTest {
     }
 
     @Test
-    fun `launcher icon and system splash use the book mark instead of the letter z`() {
+    fun `launcher icon and system splash share the comic bubble artwork`() {
         val drawable = File(root, "app/src/main/res/drawable")
-        val foreground = File(drawable, "ic_launcher_foreground.xml").readText()
-        assertTrue(foreground.contains("left_page"))
-        assertTrue(foreground.contains("right_page"))
-        assertFalse(foreground.contains("letter_z"))
-        val monochrome = File(drawable, "ic_launcher_monochrome.xml").readText()
-        assertTrue(monochrome.contains("left_page"))
-        assertFalse(monochrome.contains("letter_z"))
+        // 前景与单色层是从用户提供的原图抠出的 PNG（气泡 + 分镜 + 书签），按密度分发
+        for (dpi in listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")) {
+            val dir = File(root, "app/src/main/res/drawable-$dpi")
+            assertTrue(File(dir, "ic_launcher_foreground.png").isFile, "missing foreground for $dpi")
+            assertTrue(File(dir, "ic_launcher_monochrome.png").isFile, "missing monochrome for $dpi")
+        }
         val background = File(drawable, "ic_launcher_background.xml").readText()
-        assertTrue(background.contains("#FF0FAE79"))
+        assertTrue(background.contains("#FFB018ED"))
+        assertTrue(background.contains("#FFFDAB1D"))
         assertFalse(background.contains("#FF42A5F5"))
         val systemSplash = File(drawable, "ic_splash.xml").readText()
         assertTrue(systemSplash.contains("@drawable/ic_splash_icon"))
         assertFalse(systemSplash.contains("ic_komikku_dark"))
         val splashIcon = File(drawable, "ic_splash_icon.xml").readText()
-        assertTrue(splashIcon.contains("left_page") || splashIcon.contains("211.7,172.8"))
+        assertTrue(splashIcon.contains("ic_splash_fg"))
+        assertTrue(splashIcon.contains("oval"))
+        assertTrue(File(root, "app/src/main/res/drawable-nodpi/ic_splash_fg.png").isFile)
         // 深色模式曾经走 drawable-night 的旧启动图（Komikku 的 Z），必须一起换掉
         val nightSplash = File(root, "app/src/main/res/drawable-night/ic_splash.xml").readText()
         assertTrue(nightSplash.contains("@drawable/ic_splash_icon"))
         assertFalse(nightSplash.contains("ic_komikku_dark"))
-        val brandMark = File(drawable, "ic_zycomic.xml").readText()
-        assertFalse(brandMark.contains("letter_z"))
-        assertTrue(brandMark.contains("172.8"))
+        // 关于页 / 开屏 logo：与桌面图标同一张整图
+        assertTrue(File(root, "app/src/main/res/drawable-nodpi/ic_zycomic.png").isFile)
+        assertFalse(File(drawable, "ic_zycomic.xml").isFile)
     }
 
     @Test
