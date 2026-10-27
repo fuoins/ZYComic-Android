@@ -242,7 +242,7 @@ private fun SettingsPlatformSwitch(
     val accent = rememberContentPlatformAccent(platform)
     GlassCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
-        shape = RoundedCornerShape(16.dp),
+        radius = 16.dp,
         tint = accent,
         tintAlpha = 0.10f,
     ) {

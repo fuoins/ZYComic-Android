@@ -24,11 +24,11 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -62,7 +62,7 @@ private fun glassSpec(tint: Color, tintAlpha: Float): GlassSpec {
 }
 
 /** 玻璃底板绘制：白玻璃渐变 + 主题色淡染 + 顶部内高光 + 描边。需配合 [clip] 使用。 */
-private fun Modifier.glassBase(shape: RoundedCornerShape, spec: GlassSpec): Modifier =
+private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float): Modifier =
     this.drawBehind {
         drawRect(Brush.verticalGradient(0f to spec.glassTop, 1f to spec.glassBottom))
         drawRect(spec.tint)
@@ -80,7 +80,7 @@ private fun Modifier.glassBase(shape: RoundedCornerShape, spec: GlassSpec): Modi
         drawRoundRect(
             color = spec.edge,
             style = Stroke(width = 1.dp.toPx()),
-            cornerRadius = CornerRadius(shape.topStart.x, shape.topStart.y),
+            cornerRadius = CornerRadius(radiusPx, radiusPx),
         )
     }
 
@@ -88,18 +88,19 @@ private fun Modifier.glassBase(shape: RoundedCornerShape, spec: GlassSpec): Modi
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    shape: RoundedCornerShape = RoundedCornerShape(18.dp),
+    radius: Dp = 18.dp,
     tint: Color = MaterialTheme.colorScheme.primary,
     tintAlpha: Float = 0.10f,
     elevated: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val spec = glassSpec(tint, tintAlpha)
+    val shape = RoundedCornerShape(radius)
     Box(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
             .clip(shape)
-            .glassBase(shape, spec),
+            .glassBase(spec, radius.toPx()),
         content = content,
     )
 }
@@ -117,7 +118,7 @@ fun GlassPreferenceRow(
 ) {
     GlassCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(18.dp),
+        radius = 18.dp,
         tint = iconTint,
     ) {
         Row(
@@ -133,7 +134,7 @@ fun GlassPreferenceRow(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(RoundedCornerShape(13.dp))
-                        .glassBase(RoundedCornerShape(13.dp), spec),
+                        .glassBase(spec, 13.dp.toPx()),
                     contentAlignment = Alignment.Center,
                 ) {
                     when (icon) {
@@ -260,6 +261,7 @@ fun GlassChip(
 @Composable
 fun Modifier.glassSurface(
     shape: RoundedCornerShape = RoundedCornerShape(14.dp),
+    radius: Dp = 14.dp,
     tint: Color = MaterialTheme.colorScheme.primary,
     tintAlpha: Float = 0.10f,
-): Modifier = this.clip(shape).glassBase(shape, glassSpec(tint, tintAlpha))
+): Modifier = this.clip(shape).glassBase(glassSpec(tint, tintAlpha), radius.toPx())

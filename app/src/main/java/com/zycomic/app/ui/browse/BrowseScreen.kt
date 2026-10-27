@@ -455,6 +455,7 @@ private fun LegacyBrowseScreen(
                         .fillMaxWidth()
                         .glassSurface(
                             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                            radius = 16.dp,
                             tintAlpha = 0.12f,
                         ),
                 ) {
