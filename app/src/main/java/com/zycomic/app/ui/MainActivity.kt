@@ -865,7 +865,11 @@ private fun androidx.compose.foundation.layout.RowScope.GlassNavItem(
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
         contentAlignment = androidx.compose.ui.Alignment.Center,
     ) {
         Box(

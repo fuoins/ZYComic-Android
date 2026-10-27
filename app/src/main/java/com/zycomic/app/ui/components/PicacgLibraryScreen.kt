@@ -242,7 +242,9 @@ fun PicacgLibraryScreen(
                 onSelectPlatform = onSelectPlatform,
                 searchQuery = query,
                 onChangeSearchQuery = { query = it },
-                titleContent = { Text(stringResource(if (history) KMR.strings.picacg_history_title else KMR.strings.picacg_library_title)) },
+                titleContent = {
+                    LibraryHistoryTitle(if (history) "历史" else "收藏")
+                },
                 searchSupported = !history && loggedIn,
                 refreshSupported = !history,
                 refreshBusy = loading || removingSelected,

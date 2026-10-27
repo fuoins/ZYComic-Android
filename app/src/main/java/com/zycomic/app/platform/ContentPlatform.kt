@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -189,6 +190,8 @@ fun ContentPlatformSelector(
                         .selectable(
                             selected = isSelected,
                             role = Role.RadioButton,
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
                             onClick = { onSelect(platform) },
                         )
                         .clip(RoundedCornerShape(50))

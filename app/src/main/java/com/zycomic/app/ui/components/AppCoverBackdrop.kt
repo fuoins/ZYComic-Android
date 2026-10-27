@@ -9,9 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
@@ -23,12 +21,73 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import coil3.imageLoader
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
-import coil3.request.SuccessResult
 import coil3.size.Size
 import com.zycomic.app.platform.ContentPlatform
+
+/**
+ * 全应用背景：按封面所属平台选择图片加载器（漫蛙走全局栈、哔咔/JM 走各自专用栈），
+ * 随机图源/自定义本地图走纯净 loader。模糊、遮罩、透明度均由外观页滑杆实时控制。
+ *
+ * 切换策略：**瞬时切换**——entry 变化立即开始 350ms 淡入动画，图片未就绪时底层
+ * 丰富渐变兜底（绝不白屏）；同时后台预取新图写进缓存，让图片尽快显示。
+ */
+@Composable
+fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val backdropBlurDp by GlassPrefs.backdropBlurDp.collectAsState()
+    val backdropMask by GlassPrefs.backdropMask.collectAsState()
+    val backdropAlpha by GlassPrefs.backdropAlpha.collectAsState()
+
+    // 后台预热（不阻塞切换）：把当前图下载进磁盘/内存缓存。
+    LaunchedEffect(entry) {
+        entry ?: return@LaunchedEffect
+        val metrics = context.resources.displayMetrics
+        val request = ImageRequest.Builder(context)
+            .data(entry.url)
+            .size(Size(metrics.widthPixels, metrics.heightPixels))
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .build()
+        loaderFor(context, entry.platform).execute(request)
+    }
+
+    Box(modifier) {
+        // 兜底渐变永远垫底：图未就绪或没有来源时页面也绝不纯白。
+        RichFallbackBackdrop(Modifier.matchParentSize())
+        if (entry != null) {
+            Crossfade(targetState = entry, animationSpec = tween(350), label = "appBackdrop") { current ->
+                val currentLoader = remember(current.platform) { loaderFor(context, current.platform) }
+                AsyncImage(
+                    model = current.url,
+                    contentDescription = null,
+                    imageLoader = currentLoader,
+                    modifier = Modifier.matchParentSize().blur(backdropBlurDp.dp).alpha(backdropAlpha),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            // 遮罩只做两件事：顶部保住状态栏/搜索栏文字、底部托住玻璃底栏，中间大面积放开让封面可见。
+            // 强度由外观页「背景遮罩强度」调整。
+            Box(
+                Modifier.matchParentSize().background(
+                    Brush.verticalGradient(
+                        0f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f * backdropMask),
+                        0.08f to Color.Transparent,
+                        0.88f to Color.Transparent,
+                        1f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f * backdropMask),
+                    ),
+                ),
+            )
+        }
+    }
+}
+
+private fun loaderFor(context: android.content.Context, platform: ContentPlatform?) = when (platform) {
+    ContentPlatform.PICACG -> PicacgImageLoader.get(context)
+    ContentPlatform.JM -> JmCoverImageLoader.get(context)
+    else -> com.zycomic.app.platform.PlatformImageLoader.get(context)
+}
 
 /**
  * 兜底丰富渐变：与开屏页同一套语言（三段冷暖底色 + 六个柔和色团 + 中央柔光），
@@ -76,73 +135,5 @@ private fun RichFallbackBackdrop(modifier: Modifier = Modifier) {
                 radius = size.width * 0.72f,
             ),
         )
-    }
-}
-@Composable
-fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
-    if (entry == null) {
-        // 兜底：与开屏页同语言的丰富渐变（三段冷暖底色 + 六个柔和色团），深浅色自适应。
-        RichFallbackBackdrop(modifier)
-        return
-    }
-
-    val context = LocalContext.current
-    val backdropBlurDp by GlassPrefs.backdropBlurDp.collectAsState()
-    val backdropMask by GlassPrefs.backdropMask.collectAsState()
-    // 当前正在展示的封面（双缓冲）：entry 变化后先继续显示旧封面，新封面就绪才切换。
-    var shown by remember { mutableStateOf(entry) }
-    val prefetchLoader = remember(entry.platform) {
-        when (entry.platform) {
-            ContentPlatform.PICACG -> PicacgImageLoader.get(context)
-            ContentPlatform.JM -> JmCoverImageLoader.get(context)
-            // 随机图源/自定义本地图：纯净 loader（仅 UA），不经过漫蛙图片栈的域改写与解密。
-            else -> com.zycomic.app.platform.PlatformImageLoader.get(context)
-        }
-    }
-    LaunchedEffect(entry, prefetchLoader) {
-        if (entry != shown) {
-            val metrics = context.resources.displayMetrics
-            val request = ImageRequest.Builder(context)
-                .data(entry.url)
-                .size(Size(metrics.widthPixels, metrics.heightPixels))
-                .memoryCachePolicy(CachePolicy.ENABLED)
-                .diskCachePolicy(CachePolicy.ENABLED)
-                .build()
-            // 预取成功（图已在缓存）后才切换，旧封面全程兜底，杜绝白屏。
-            if (prefetchLoader.execute(request) is SuccessResult) {
-                shown = entry
-            }
-        }
-    }
-
-    Crossfade(targetState = shown, animationSpec = tween(450), label = "appBackdrop") { shownEntry ->
-        val shownLoader = remember(shownEntry.platform) {
-            when (shownEntry.platform) {
-                ContentPlatform.PICACG -> PicacgImageLoader.get(context)
-                ContentPlatform.JM -> JmCoverImageLoader.get(context)
-                else -> com.zycomic.app.platform.PlatformImageLoader.get(context)
-            }
-        }
-        Box(modifier) {
-            AsyncImage(
-                model = shownEntry.url,
-                contentDescription = null,
-                imageLoader = shownLoader,
-                modifier = Modifier.matchParentSize().blur(backdropBlurDp.dp).alpha(0.85f),
-                contentScale = ContentScale.Crop,
-            )
-            // 遮罩只做两件事：顶部保住状态栏/搜索栏文字、底部托住玻璃底栏，中间大面积放开让封面可见。
-            // 强度由外观页「背景遮罩强度」调整。
-            Box(
-                Modifier.matchParentSize().background(
-                    Brush.verticalGradient(
-                        0f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f * backdropMask),
-                        0.08f to Color.Transparent,
-                        0.88f to Color.Transparent,
-                        1f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f * backdropMask),
-                    ),
-                ),
-            )
-        }
     }
 }

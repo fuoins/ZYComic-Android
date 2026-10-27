@@ -93,6 +93,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         val context = LocalContext.current
         val backdropBlur by com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp.collectAsState()
         val backdropMask by com.zycomic.app.ui.components.GlassPrefs.backdropMask.collectAsState()
+        val backdropAlpha by com.zycomic.app.ui.components.GlassPrefs.backdropAlpha.collectAsState()
         val glassStrength by com.zycomic.app.ui.components.GlassPrefs.glassStrength.collectAsState()
         val customPath by com.zycomic.app.ui.components.BackdropSources.customPath.collectAsState()
         val perPage by com.zycomic.app.ui.components.BackdropSources.perPage.collectAsState()
@@ -174,6 +175,21 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             )
                         }
                     },
+                    Preference.PreferenceItem.CustomPreference(title = "背景图透明度") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                "背景图透明度：${(backdropAlpha * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Slider(
+                                value = backdropAlpha,
+                                onValueChange = {
+                                    com.zycomic.app.ui.components.GlassPrefs.setBackdropAlpha(context, it)
+                                },
+                                valueRange = 0.3f..1f,
+                            )
+                        }
+                    },
                     Preference.PreferenceItem.CustomPreference(title = "液态玻璃强度") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                             Text(
@@ -204,7 +220,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 TextButton(onClick = {
                                     pickingPage = "global"
                                     pickImageLauncher.launch("image/*")
-                                }) { Text("选择图片") }
+                                }) { Text("自定义图片") }
                                 if (!customPath.isNullOrBlank()) {
                                     TextButton(onClick = {
                                         runCatching { java.io.File(customPath).delete() }
@@ -222,11 +238,11 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 com.zycomic.app.ui.components.GlassPreferenceRow(
                                     title = pageLabel[key] ?: key,
                                     subtitle = if (path.isNullOrBlank()) "跟随全局/随机源" else "已设置本页背景",
-                                    onPreferenceClick = {
-                                        pickingPage = key
-                                        pickImageLauncher.launch("image/*")
-                                    },
                                     widget = {
+                                        TextButton(onClick = {
+                                            pickingPage = key
+                                            pickImageLauncher.launch("image/*")
+                                        }) { Text("自定义图片") }
                                         if (!path.isNullOrBlank()) {
                                             TextButton(onClick = {
                                                 runCatching { java.io.File(path).delete() }

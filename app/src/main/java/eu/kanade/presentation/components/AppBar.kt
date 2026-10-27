@@ -181,6 +181,7 @@ fun AppBar(
             actions = actions,
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = barBg,
+                scrolledContainerColor = barBg,
             ),
             scrollBehavior = scrollBehavior,
         )
