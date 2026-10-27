@@ -4,6 +4,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,13 +58,18 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
         // 兜底渐变永远垫底：图未就绪或没有来源时页面也绝不纯白。
         RichFallbackBackdrop(Modifier.matchParentSize())
         if (entry != null) {
-            Crossfade(targetState = entry, animationSpec = tween(350), label = "appBackdrop") { current ->
+            Crossfade(
+                targetState = entry,
+                modifier = Modifier.fillMaxSize(),
+                animationSpec = tween(350),
+                label = "appBackdrop",
+            ) { current ->
                 val currentLoader = remember(current.platform) { loaderFor(context, current.platform) }
                 AsyncImage(
                     model = current.url,
                     contentDescription = null,
                     imageLoader = currentLoader,
-                    modifier = Modifier.matchParentSize().blur(backdropBlurDp.dp).alpha(backdropAlpha),
+                    modifier = Modifier.fillMaxSize().blur(backdropBlurDp.dp).alpha(backdropAlpha),
                     contentScale = ContentScale.Crop,
                 )
             }
