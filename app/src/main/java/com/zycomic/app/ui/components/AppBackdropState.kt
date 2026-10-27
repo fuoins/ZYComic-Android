@@ -1,8 +1,15 @@
 package com.zycomic.app.ui.components
 
+import com.zycomic.app.platform.ContentPlatform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
+/** 背景候选：URL 连同所属平台，背景层按平台选择图片加载器。 */
+data class BackdropEntry(
+    val platform: ContentPlatform?,
+    val url: String,
+)
 
 /**
  * 全局随机封面背景的候选缓存。
@@ -14,9 +21,9 @@ import kotlinx.coroutines.flow.asStateFlow
 object AppBackdropState {
     private const val MAX_POOL_PER_TAB = 60
 
-    private val pools = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
-    private val _current = MutableStateFlow<String?>(null)
-    val current: StateFlow<String?> = _current.asStateFlow()
+    private val pools = java.util.concurrent.ConcurrentHashMap<String, List<BackdropEntry>>()
+    private val _current = MutableStateFlow<BackdropEntry?>(null)
+    val current: StateFlow<BackdropEntry?> = _current.asStateFlow()
 
     /**
      * 池内容修订号：只在“池从空变非空”时 +1（此后翻页写入不再变化）。
@@ -26,8 +33,12 @@ object AppBackdropState {
     val poolRevision: StateFlow<Long> = _poolRevision.asStateFlow()
 
     /** 由浏览页在列表加载后调用；空列表忽略。 */
-    fun registerCovers(tabId: String, urls: List<String>) {
-        val clean = urls.filter { it.isNotBlank() }.distinct().take(MAX_POOL_PER_TAB)
+    fun registerCovers(tabId: String, platform: ContentPlatform?, urls: List<String>) {
+        val clean = urls
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(MAX_POOL_PER_TAB)
+            .map { BackdropEntry(platform, it) }
         if (clean.isEmpty()) return
         val wasEmpty = pools.isEmpty()
         pools[tabId] = clean

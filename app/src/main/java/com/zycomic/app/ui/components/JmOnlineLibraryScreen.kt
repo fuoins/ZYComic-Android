@@ -378,6 +378,7 @@ private fun JmOnlineLibraryContent(
     BackHandler(enabled = query != null && !selectionMode) { query = null }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             LibraryHistoryToolbar(
                 platform = ContentPlatform.JM,

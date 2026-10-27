@@ -74,12 +74,14 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
         self.assertNotIn("BackgroundSourcesDialog(", SHEET)
         # 全局随机背景与玻璃底栏在主界面：开启开关的 tab 的缓存并集 + 池就绪信号触发
         main_activity = (MAIN / "com/zycomic/app/ui/MainActivity.kt").read_text()
-        self.assertIn("AppCoverBackdrop(url = backdropUrl", main_activity)
+        self.assertIn("AppCoverBackdrop(entry = backdropEntry", main_activity)
         self.assertIn("GlassBottomBar {", main_activity)
         self.assertIn("AppBackdropState.poolRevision", main_activity)
         self.assertIn("randomFrom(enabledIds)", main_activity)
-        # 浏览页把封面按 tab id 注册进全局候选缓存
-        self.assertIn("AppBackdropState.registerCovers(item?.id", BROWSE)
+        # 浏览页把封面按 tab id + 平台注册进全局候选缓存
+        self.assertIn("AppBackdropState.registerCovers(", BROWSE)
+        self.assertIn("tabId = item?.id", BROWSE)
+        self.assertIn("platform = item?.platformId", BROWSE)
 
     def test_filter_summary_uses_high_contrast_theme_colors(self):
         form = SHEET.split("private fun FilterTabFormDialog(", 1)[1].split("\n@Composable\nprivate fun TabNameSupportingText", 1)[0]

@@ -43,10 +43,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.browse.BrowseGuideDialog
+import com.zycomic.app.ui.components.GlassCard
+import com.zycomic.app.ui.components.GlassPreferenceRow
+import com.zycomic.app.ui.components.GlassTopBar
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -92,14 +96,13 @@ fun SettingsMainScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
-            Column(
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface),
-            ) {
+            GlassTopBar {
                 TopAppBar(
                     title = { Text("设置") },
                     scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 )
             }
         },
@@ -109,7 +112,7 @@ fun SettingsMainScreen(
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         ) {
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "外观",
                     icon = Icons.Outlined.Palette,
                     onPreferenceClick = onOpenAppearance,
@@ -136,15 +139,15 @@ fun SettingsMainScreen(
                 }
             }
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "阅读器",
                     icon = Icons.AutoMirrored.Outlined.ChromeReaderMode,
                     onPreferenceClick = onOpenReader,
                 )
             }
-            item { HorizontalDivider() }
+
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "开发者设置",
                     subtitle = "测速日志与可用域名工具",
                     icon = Icons.Outlined.Code,
@@ -152,15 +155,15 @@ fun SettingsMainScreen(
                 )
             }
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "数据与存储",
                     icon = Icons.Outlined.Storage,
                     onPreferenceClick = onOpenDataStorage,
                 )
             }
-            item { HorizontalDivider() }
+
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "赞助",
                     icon = Icons.Outlined.FavoriteBorder,
                     onPreferenceClick = {
@@ -172,16 +175,16 @@ fun SettingsMainScreen(
                     },
                 )
             }
-            item { HorizontalDivider() }
+
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = stringResource(KMR.strings.usage_guide_title),
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = { showGuide = true },
                 )
             }
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "新手引导",
                     subtitle = "重新查看使用说明",
                     icon = Icons.Outlined.Info,
@@ -189,7 +192,7 @@ fun SettingsMainScreen(
                 )
             }
             item {
-                TextPreferenceWidget(
+                GlassPreferenceRow(
                     title = "关于",
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = onOpenAbout,
@@ -237,10 +240,11 @@ private fun SettingsPlatformSwitch(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val accent = rememberContentPlatformAccent(platform)
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = accent.copy(alpha = 0.10f),
+    GlassCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
+        shape = RoundedCornerShape(16.dp),
+        tint = accent,
+        tintAlpha = 0.10f,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)

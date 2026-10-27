@@ -76,6 +76,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.SignDay
+import com.zycomic.app.ui.components.GlassCard
+import com.zycomic.app.ui.components.GlassPreferenceRow
+import com.zycomic.app.ui.components.GlassSwitchRow
 import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.JmCheckInRepository
 import com.zycomic.app.data.repository.ManwaSessionStatus
@@ -292,6 +295,7 @@ fun ProfileScreen(
     // KMK <--
 
     tachiyomi.presentation.core.components.material.Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { contentPadding ->
         ScrollbarLazyColumn(contentPadding = contentPadding) {
@@ -351,7 +355,7 @@ fun ProfileScreen(
                         onBusyChanged = { picacgRefreshing = it },
                     )
                 } else if (platform == ContentPlatform.JM) {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = jmAccount.takeIf { jmLoggedIn } ?: stringResource(KMR.strings.jm_account_title),
                         subtitle = if (jmLoggedIn) {
                             stringResource(
@@ -372,15 +376,16 @@ fun ProfileScreen(
                         },
                     )
                 } else if (user == null) {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "点击登录",
                         subtitle = if (manwaSessionStatus == ManwaSessionStatus.EXPIRED) manwaSessionExpired else "登录后可使用收藏、评论等功能",
                         icon = Icons.Outlined.Login,
                         onPreferenceClick = onRequireLogin,
                     )
                 } else {
+                    GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
@@ -416,13 +421,14 @@ fun ProfileScreen(
                             }
                         }
                     }
+                    }
                 }
             }
 
             // KMK --> JM preferences remain visible while signed out; network calls require login.
             if (platform == ContentPlatform.JM) {
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(KMR.strings.jm_calendar_title),
                         subtitle = stringResource(KMR.strings.jm_calendar_summary),
                         icon = Icons.Outlined.CalendarMonth,
@@ -437,7 +443,7 @@ fun ProfileScreen(
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(KMR.strings.jm_makeup_title),
                         subtitle = stringResource(KMR.strings.jm_makeup_description),
                         icon = Icons.Outlined.EditCalendar,
@@ -452,7 +458,7 @@ fun ProfileScreen(
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(KMR.strings.jm_annual_awards_title),
                         subtitle = "按年份浏览月度奖励图片，不会领取月奖",
                         icon = Icons.Filled.Star,
@@ -467,14 +473,14 @@ fun ProfileScreen(
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(KMR.strings.jm_my_comments_title),
                         icon = Icons.Outlined.Info,
                         onPreferenceClick = { showJmMyComments = true },
                     )
                 }
                 item {
-                    SwitchPreferenceWidget(
+                    GlassSwitchRow(
                         title = stringResource(KMR.strings.jm_auto_check_in),
                         subtitle = stringResource(KMR.strings.jm_auto_check_in_summary),
                         icon = Icons.Outlined.EventRepeat,
@@ -486,7 +492,7 @@ fun ProfileScreen(
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(if (jmCheckingIn) KMR.strings.jm_check_in_working else KMR.strings.jm_manual_check_in),
                         subtitle = jmCheckInMessage,
                         icon = Icons.Outlined.EventAvailable,
@@ -504,14 +510,14 @@ fun ProfileScreen(
 
             if (platform == ContentPlatform.JM && jmLoggedIn) {
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(KMR.strings.jm_change_password),
                         icon = Icons.Outlined.Lock,
                         onPreferenceClick = { showJmChangePwd = true },
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = stringResource(KMR.strings.jm_logout),
                         icon = Icons.Outlined.Logout,
                         onPreferenceClick = {
@@ -525,14 +531,14 @@ fun ProfileScreen(
             // ---- 积分明细 / 退出 ----
             if (platform == ContentPlatform.MANWA && user != null) {
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "积分明细(仔细看等级划分)",
                         icon = Icons.Filled.Star,
                         onPreferenceClick = { showPointLogs = true },
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = if (rewarding) "领取中..." else "每日奖励破解领取",
                         icon = Icons.Outlined.Code,
                         onPreferenceClick = { if (!rewarding) showRewardDialog = true },
@@ -542,21 +548,21 @@ fun ProfileScreen(
 
             if (platform == ContentPlatform.MANWA) {
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "标签屏蔽",
                         icon = Icons.AutoMirrored.Outlined.Label,
                         onPreferenceClick = onOpenTagBlock,
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "漫画屏蔽",
                         icon = Icons.Outlined.VisibilityOff,
                         onPreferenceClick = onOpenBookBlock,
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "gay标签一键屏蔽",
                         icon = Icons.Outlined.Block,
                         onPreferenceClick = onBlockGayTags,
@@ -567,14 +573,14 @@ fun ProfileScreen(
             // Account actions follow all feature rows; no bottom account divider.
             if (platform == ContentPlatform.MANWA && user != null) {
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "修改密码",
                         icon = Icons.Outlined.Lock,
                         onPreferenceClick = { showChangePwd = true },
                     )
                 }
                 item {
-                    TextPreferenceWidget(
+                    GlassPreferenceRow(
                         title = "退出登录",
                         icon = Icons.Outlined.Logout,
                         onPreferenceClick = {

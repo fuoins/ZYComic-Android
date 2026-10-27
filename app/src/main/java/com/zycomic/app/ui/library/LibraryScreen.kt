@@ -175,6 +175,7 @@ fun LibraryScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             val subtitle = if (platform == ContentPlatform.MANWA) {
                 user?.let { currentUser ->

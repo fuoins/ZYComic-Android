@@ -49,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -79,6 +80,7 @@ import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.picacg.PicacgThemes
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
@@ -155,10 +157,9 @@ fun SearchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding(),
     ) {
-        // 顶部搜索栏
+        // 顶部搜索栏（玻璃条）
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -168,17 +169,30 @@ fun SearchScreen(
             IconButton(onClick = onClose) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
             }
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { vm.updateKeyword(it) },
-                placeholder = { Text("搜索漫画") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(
-                    onSearch = { vm.doSearch() },
-                ),
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .glassSurface(shape = RoundedCornerShape(16.dp), tintAlpha = 0.08f),
+            ) {
+                OutlinedTextField(
+                    value = keyword,
+                    onValueChange = { vm.updateKeyword(it) },
+                    placeholder = { Text("搜索漫画") },
+                    singleLine = true,
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = { vm.doSearch() },
+                    ),
+                )
+            }
             // 搜索历史垃圾桶：放最右，只在关键词为空（显示历史）时出现。
             // 点一下进删除模式，每条历史右侧露出 ❌ 逐条删；再点退出。清空走历史区的"清空"按钮。
             if (keyword.isBlank()) {
@@ -663,8 +677,7 @@ private fun SearchHistorySection(vm: SearchViewModel) {
                     Row(
                         modifier = Modifier
                             .widthIn(max = 320.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .glassSurface(shape = RoundedCornerShape(50), tintAlpha = 0.08f)
                             .clickable(enabled = !deleting) { vm.searchHistoryItem(k) }
                             .padding(start = 12.dp, end = if (deleting) 2.dp else 12.dp, top = 2.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,

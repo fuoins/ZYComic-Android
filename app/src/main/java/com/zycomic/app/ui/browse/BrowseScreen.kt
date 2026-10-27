@@ -86,6 +86,8 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
 import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.GlassTopBar
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.JmFavoriteFolder
 import com.zycomic.app.data.repository.JmOnlineLibraryRepository
@@ -353,10 +355,13 @@ private fun LegacyBrowseScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
+            GlassTopBar {
             if (activeSelectionMode) {
                 AppBar(
                     titleContent = { Text(activeSelectionCount.toString()) },
+                    backgroundColor = Color.Transparent,
                     actions = {
                         AppBarActions(
                             persistentListOf(
@@ -388,6 +393,7 @@ private fun LegacyBrowseScreen(
                 )
             } else {
                 SearchToolbar(
+                    backgroundColor = Color.Transparent,
                     titleContent = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -440,13 +446,17 @@ private fun LegacyBrowseScreen(
                     },
                 )
             }
+            }
         },
         bottomBar = {
             if (activeSelectionMode) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .glassSurface(
+                            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                            tintAlpha = 0.12f,
+                        ),
                 ) {
                     Box(
                         modifier = Modifier
@@ -805,7 +815,11 @@ private fun BrowseTabContent(
     val mangas by vm.mangasForTab(page).collectAsState()
     // 把这一页的封面写进本 tab 自己的候选缓存；背景从所有开启背景开关的 tab 的缓存里随机取。
     LaunchedEffect(page, mangas) {
-        AppBackdropState.registerCovers(item?.id ?: page.toString(), mangas.mapNotNull { com.zycomic.app.ui.components.coverUrl(it).takeIf(String::isNotBlank) })
+        AppBackdropState.registerCovers(
+            tabId = item?.id ?: page.toString(),
+            platform = item?.platformId,
+            urls = mangas.mapNotNull { com.zycomic.app.ui.components.coverUrl(it).takeIf(String::isNotBlank) },
+        )
     }
     val loading by vm.loadingForTab(page).collectAsState()
     val appending by vm.appendingForTab(page).collectAsState()

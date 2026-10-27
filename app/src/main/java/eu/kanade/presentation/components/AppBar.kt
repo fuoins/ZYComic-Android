@@ -318,6 +318,7 @@ fun SearchToolbar(
     searchQuery: String?,
     onChangeSearchQuery: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    backgroundColor: Color? = null,
     titleContent: @Composable () -> Unit = {},
     navigateUp: (() -> Unit)? = null,
     searchEnabled: Boolean = true,
@@ -447,6 +448,7 @@ fun SearchToolbar(
 
             key("actions") { actions() }
         },
+        backgroundColor = backgroundColor,
         isActionMode = false,
         scrollBehavior = scrollBehavior,
     )

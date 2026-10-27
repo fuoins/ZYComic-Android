@@ -67,6 +67,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
+import com.zycomic.app.ui.components.AppBackdropState
 
 internal enum class PicacgFeedMode(val timeframe: String? = null) {
     LEADERBOARD_24H("H24"),
@@ -192,6 +193,14 @@ fun PicacgBrowseScreen(
     var pageSnapshots by remember(queryIdentity) { mutableStateOf(mapOf(1 to initialSnapshot?.items.orEmpty())) }
     val mangas = pageSnapshots.filterKeys { it <= page }.toSortedMap().values.fold(emptyList<Manga>()) { previous, items ->
         PicacgCollectionPolicy.merge(previous, items, false) { it.id }
+    }
+    // 把本 tab 的哔咔封面写进全局背景候选池（picx 原样直传：哔咔封面不走漫蛙图域改写）。
+    LaunchedEffect(tabId, mangas) {
+        AppBackdropState.registerCovers(
+            tabId = tabId,
+            platform = com.zycomic.app.platform.ContentPlatform.PICACG,
+            urls = mangas.mapNotNull { it.picx.ifBlank { it.pic }.takeIf(String::isNotBlank) },
+        )
     }
     var hasSnapshot by remember(queryIdentity) { mutableStateOf(initialSnapshot != null) }
     var hasMore by remember(queryIdentity) { mutableStateOf(initialSnapshot?.hasMore ?: false) }

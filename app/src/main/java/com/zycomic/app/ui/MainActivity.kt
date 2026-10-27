@@ -426,7 +426,7 @@ fun AppContent(
         }
         // 随机封面背景：从所有开启背景开关的 tab 的封面缓存里随机取一张。
         // 触发时机：切换底部导航页 / 浏览标签页 / 开关集合变化 / 首个 tab 的封面缓存就绪。
-        val backdropUrl by AppBackdropState.current.collectAsState()
+        val backdropEntry by AppBackdropState.current.collectAsState()
         val browseTabIndex by browseVm.mainTab.collectAsState()
         val poolRevision by AppBackdropState.poolRevision.collectAsState()
         LaunchedEffect(bottomTab, browseTabIndex, poolRevision, browseVm.tabs.toList()) {
@@ -434,7 +434,7 @@ fun AppContent(
             if (enabledIds.isEmpty()) AppBackdropState.clear() else AppBackdropState.randomFrom(enabledIds)
         }
         Box(modifier = Modifier.fillMaxSize()) {
-            AppCoverBackdrop(url = backdropUrl, modifier = Modifier.fillMaxSize())
+            AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 containerColor = Color.Transparent,
@@ -777,7 +777,7 @@ private fun KomikkuSettingsDialog(
 }
 
 
-/** 液态玻璃底栏：半透明白 + 顶部 1px 内高光，与开屏页同一套玻璃语言。 */
+/** 液态玻璃底栏：白玻璃渐变 + 主题色淡染 + 顶部内高光 + 主题色描边。叠在纯白页面上也一眼可见。 */
 @Composable
 private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -789,31 +789,31 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
                 drawRect(
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = if (dark) 0.10f else 0.80f),
-                            Color.White.copy(alpha = if (dark) 0.04f else 0.56f),
+                            Color.White.copy(alpha = if (dark) 0.10f else 0.66f),
+                            Color.White.copy(alpha = if (dark) 0.05f else 0.44f),
                         ),
                     ),
                 )
-                // 主题色淡染：纯白玻璃叠在白底上会“看不见”，染一层色后浅色下也有玻璃质感。
-                drawRect(primary.copy(alpha = if (dark) 0.06f else 0.05f))
+                // 主题色淡染：白玻璃叠白底时靠它撑起可见度。
+                drawRect(primary.copy(alpha = if (dark) 0.08f else 0.10f))
+                // 顶部 1px 主题色描边 + 白色内高光，描出玻璃上缘。
+                drawLine(
+                    color = primary.copy(alpha = if (dark) 0.18f else 0.28f),
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1.dp.toPx(),
+                )
                 drawLine(
                     brush = Brush.horizontalGradient(
                         listOf(
                             Color.Transparent,
-                            Color.White.copy(alpha = if (dark) 0.24f else 0.95f),
+                            Color.White.copy(alpha = if (dark) 0.22f else 0.90f),
                             Color.Transparent,
                         ),
                     ),
-                    start = Offset(0f, 0.6f),
-                    end = Offset(size.width, 0.6f),
-                    strokeWidth = 1.2f,
-                )
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.85f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = if (dark) 0.10f else 0.035f),
-                    ),
+                    start = Offset(0f, 0.8f),
+                    end = Offset(size.width, 0.8f),
+                    strokeWidth = 1.4f,
                 )
             },
     ) {
