@@ -803,9 +803,9 @@ private fun BrowseTabContent(
         return
     }
     val mangas by vm.mangasForTab(page).collectAsState()
-    // 把这一页的封面注册为全局随机背景的候选池；切换标签/页面时随机取一张做模糊背景。
+    // 把这一页的封面写进本 tab 自己的候选缓存；背景从所有开启背景开关的 tab 的缓存里随机取。
     LaunchedEffect(page, mangas) {
-        AppBackdropState.registerCovers(tabPlatform.id, mangas.mapNotNull { com.zycomic.app.ui.components.coverUrl(it).takeIf(String::isNotBlank) })
+        AppBackdropState.registerCovers(item?.id ?: page.toString(), mangas.mapNotNull { com.zycomic.app.ui.components.coverUrl(it).takeIf(String::isNotBlank) })
     }
     val loading by vm.loadingForTab(page).collectAsState()
     val appending by vm.appendingForTab(page).collectAsState()

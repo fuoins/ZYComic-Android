@@ -924,11 +924,11 @@ class BrowseViewModel {
         return true
     }
 
-    /** 更新某个 tab 的背景封面来源；为空表示不使用随机封面背景。 */
-    fun updateTabBackgroundSources(id: String, sources: List<String>): Boolean {
+    /** 更新某个 tab 是否把封面加入全局随机背景来源。 */
+    fun updateTabBackgroundEnabled(id: String, enabled: Boolean): Boolean {
         val index = tabs.indexOfFirst { it.id == id }
         if (index < 0) return false
-        tabs[index] = tabs[index].copy(backgroundSources = sources.distinct())
+        tabs[index] = tabs[index].copy(backgroundEnabled = enabled)
         persist()
         return true
     }
@@ -1016,7 +1016,7 @@ class BrowseViewModel {
         platform: ContentPlatform = currentPlatform.value,
         jmFilters: JmBrowsePolicy.Filters = JmBrowsePolicy.customCategoryFilters(),
         picacgFilter: PicacgBrowseFilter = PicacgBrowseFilter(),
-        backgroundSources: List<String> = listOf(platform.id),
+        backgroundEnabled: Boolean = true,
     ): Boolean {
         if (!StartupPlatformPolicy.isEnabled(platform)) return false
         val n = name.trim()
@@ -1029,7 +1029,7 @@ class BrowseViewModel {
             filter = snapshot.takeIf { platform == ContentPlatform.MANWA },
             platformId = platform,
             picacgFilter = picacgFilter.normalized().takeIf { platform == ContentPlatform.PICACG },
-            backgroundSources = backgroundSources.distinct(),
+            backgroundEnabled = backgroundEnabled,
         )
         if (platform == ContentPlatform.JM) BrowseTabStore.saveJmFilters(item.id, JmBrowsePolicy.customCategoryFilters(jmFilters))
         addNewTab(item)
@@ -1048,7 +1048,7 @@ class BrowseViewModel {
                 kind = TabKind.SPECIAL,
                 builtin = false,
                 pageType = BrowsePageType.LATEST,
-            ).withDefaultBackgrounds(),
+            ),
         )
         persist()
         goTo(tabs.lastIndex)
@@ -1067,7 +1067,7 @@ class BrowseViewModel {
                 kind = TabKind.SPECIAL,
                 builtin = false,
                 pageType = BrowsePageType.RANKING,
-            ).withDefaultBackgrounds(),
+            ),
         )
         persist()
         goTo(tabs.lastIndex)
@@ -1086,7 +1086,7 @@ class BrowseViewModel {
                 kind = TabKind.SPECIAL,
                 builtin = false,
                 pageType = BrowsePageType.YUZONG_RANK,
-            ).withDefaultBackgrounds(),
+            ),
         )
         persist()
         goTo(tabs.lastIndex)

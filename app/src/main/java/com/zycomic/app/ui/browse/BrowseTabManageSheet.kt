@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -45,6 +46,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -296,7 +298,6 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int)
     var tagPicker by remember { mutableStateOf<Pair<Set<String>, (Set<String>) -> Unit>?>(null) }
     var editingSpecial by remember { mutableStateOf<BrowseTabItem?>(null) }
     var showReorder by remember { mutableStateOf(false) }
-    var editingBackground by remember { mutableStateOf<BrowseTabItem?>(null) }
 
     AdaptiveSheet(
         onDismissRequest = onDismiss,
@@ -439,7 +440,7 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int)
                                     ManagedTabPill(
                                         item = item,
                                         onEdit = { if (item.kind == TabKind.FILTER || item.platformId == ContentPlatform.PICACG) editing = item else editingSpecial = item },
-                                        onBackground = { editingBackground = item },
+                                        onToggleBackground = { vm.updateTabBackgroundEnabled(item.id, !item.backgroundEnabled) },
                                         onDelete = { deletingItem = item },
                                     )
                                 }
@@ -485,12 +486,12 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int)
             jmCategoryOnly = JmBrowsePolicy.isCustomCategoryTab(item.id),
             initialPlatform = item.platformId,
             allowPlatformSelect = false,
-            initialBackgroundSources = item.backgroundSources,
+            initialBackgroundEnabled = item.backgroundEnabled,
             onDismiss = { editing = null },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, item.id, platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, jmFilters, platform, picacgFilter, rankingMode, backgroundSources ->
-                vm.updateTabBackgroundSources(item.id, backgroundSources)
+            onSave = { nm, snap, jmFilters, platform, picacgFilter, rankingMode, backgroundEnabled ->
+                vm.updateTabBackgroundEnabled(item.id, backgroundEnabled)
                 if (platform == ContentPlatform.PICACG) {
                     if (item.isPicacgRanking()) {
                         vm.updateTabDefaultPicacgRankingMode(item.id, rankingMode)
@@ -525,8 +526,8 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int)
             onDismiss = { adding = false },
             checkNameTaken = { nm, platform -> vm.isNameTaken(nm, platform = platform) },
             onOpenTagDialog = { initSet, cb -> tagPicker = initSet to cb },
-            onSave = { nm, snap, jmFilters, platform, picacgFilter, _, backgroundSources ->
-                if (vm.addFilterTab(nm, snap, platform, jmFilters, picacgFilter, backgroundSources)) {
+            onSave = { nm, snap, jmFilters, platform, picacgFilter, _, backgroundEnabled ->
+                if (vm.addFilterTab(nm, snap, platform, jmFilters, picacgFilter, backgroundEnabled)) {
                     onTabAdded(vm.mainTab.value)
                     adding = false
                     onDismiss()
@@ -573,17 +574,6 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int)
             onDismiss = { showReorder = false },
             onSave = { draft ->
                 if (vm.reorderTabs(draft)) showReorder = false
-            },
-        )
-    }
-    editingBackground?.let { item ->
-        BackgroundSourcesDialog(
-            tabName = item.name,
-            initial = item.backgroundSources.toSet(),
-            onDismiss = { editingBackground = null },
-            onSave = { sources ->
-                vm.updateTabBackgroundSources(item.id, sources.toList())
-                editingBackground = null
             },
         )
     }
@@ -750,9 +740,9 @@ private fun FilterTabFormDialog(
     jmCategoryOnly: Boolean,
     initialPlatform: ContentPlatform,
     allowPlatformSelect: Boolean,
-    initialBackgroundSources: List<String> = listOf(initialPlatform.id),
+    initialBackgroundEnabled: Boolean = true,
     onDismiss: () -> Unit,
-    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform, PicacgBrowseFilter, PicacgRankingMode, List<String>) -> Unit,
+    onSave: (String, FilterSnapshot?, JmBrowsePolicy.Filters, ContentPlatform, PicacgBrowseFilter, PicacgRankingMode, Boolean) -> Unit,
     onOpenTagDialog: (Set<String>, (Set<String>) -> Unit) -> Unit,
     checkNameTaken: (String, ContentPlatform) -> Boolean,
 ) {
@@ -763,7 +753,7 @@ private fun FilterTabFormDialog(
     var picacgDraft by remember(title) { mutableStateOf(initialPicacgFilter.normalized()) }
     var rankingDraft by remember(title) { mutableStateOf(initialRankingMode) }
     var targetPlatform by remember(title) { mutableStateOf(initialPlatform) }
-    var backgroundSources by remember(title) { mutableStateOf(initialBackgroundSources.toSet()) }
+    var backgroundEnabled by remember(title) { mutableStateOf(initialBackgroundEnabled) }
 
     val trimmed = name.trim()
     val nameError = when {
@@ -816,10 +806,6 @@ private fun FilterTabFormDialog(
                                 selected = targetPlatform,
                                 onSelect = {
                                     if (StartupPlatformPolicy.checkSelection(context, it)) {
-                                        // 还没动过背景源时，跟随平台切换自动调整默认背景源。
-                                        if (backgroundSources == setOf(targetPlatform.id)) {
-                                            backgroundSources = setOf(it.id)
-                                        }
                                         targetPlatform = it
                                     }
                                 },
@@ -827,31 +813,22 @@ private fun FilterTabFormDialog(
                             )
                         }
 
-                        Text("背景封面来源", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                        Text(
-                            "随机封面背景从所选平台取图；全部不选则不显示背景。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                         ) {
-                            ContentPlatform.entries.forEach { platform ->
-                                FilterChip(
-                                    text = backgroundSourceLabel(platform),
-                                    selected = platform.id in backgroundSources,
-                                    onClick = {
-                                        backgroundSources = if (platform.id in backgroundSources) {
-                                            backgroundSources - platform.id
-                                        } else {
-                                            backgroundSources + platform.id
-                                        }
-                                    },
+                            Column(Modifier.weight(1f)) {
+                                Text("加入背景封面来源", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "开启后，本 tab 加载出的漫画封面会作为全局随机背景的候选。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Switch(
+                                checked = backgroundEnabled,
+                                onCheckedChange = { backgroundEnabled = it },
+                            )
                         }
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
@@ -943,7 +920,7 @@ private fun FilterTabFormDialog(
                                     targetPlatform,
                                     picacgDraft.normalized(),
                                     rankingDraft,
-                                    backgroundSources.toList(),
+                                    backgroundEnabled,
                                 )
                             },
                         ) { Text("保存") }
@@ -1119,7 +1096,7 @@ private fun SpecialAddButton(
 }
 
 @Composable
-private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onBackground: () -> Unit, onDelete: () -> Unit) {
+private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onToggleBackground: () -> Unit, onDelete: () -> Unit) {
     val accent = if (item.pageType == BrowsePageType.YUZONG_RANK) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -1141,73 +1118,16 @@ private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onBackground
             IconButton(onClick = onEdit, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Outlined.Edit, contentDescription = "编辑 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
             }
-            IconButton(onClick = onBackground, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Outlined.Photo, contentDescription = "背景源 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
+            IconButton(onClick = onToggleBackground, modifier = Modifier.size(40.dp)) {
+                if (item.backgroundEnabled) {
+                    Icon(Icons.Filled.Photo, contentDescription = "背景封面来源已开启 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
+                } else {
+                    Icon(Icons.Outlined.Photo, contentDescription = "背景封面来源已关闭 ${item.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), modifier = Modifier.size(16.dp))
+                }
             }
             IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Outlined.Delete, contentDescription = "删除 ${item.name}", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
             }
         }
     }
-}
-
-/** 背景源多选对话框：不选任何平台 = 不使用随机封面背景（与旧版一致）。 */
-@Composable
-private fun BackgroundSourcesDialog(
-    tabName: String,
-    initial: Set<String>,
-    onDismiss: () -> Unit,
-    onSave: (Set<String>) -> Unit,
-) {
-    var selection by remember { mutableStateOf(initial) }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(16.dp),
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text("背景封面来源", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 6.dp))
-                Text(
-                    "「$tabName」的背景会从所选平台随机取一张漫画封面并模糊显示。全部不选则恢复普通背景。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(vertical = 4.dp),
-                ) {
-                    ContentPlatform.entries.forEach { platform ->
-                        FilterChip(
-                            text = backgroundSourceLabel(platform),
-                            selected = platform.id in selection,
-                            onClick = {
-                                selection = if (platform.id in selection) selection - platform.id else selection + platform.id
-                            },
-                        )
-                    }
-                }
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { selection = emptySet() }) { Text("全部不选") }
-                    Row {
-                        TextButton(onClick = onDismiss) { Text("取消") }
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = { onSave(selection) }) { Text("保存") }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun backgroundSourceLabel(platform: ContentPlatform): String = when (platform) {
-    ContentPlatform.MANWA -> "漫蛙"
-    ContentPlatform.PICACG -> "哔咔"
-    ContentPlatform.JM -> "禁漫"
 }

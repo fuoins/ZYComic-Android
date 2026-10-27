@@ -424,13 +424,14 @@ fun AppContent(
                 }
             }
         }
-        // 随机封面背景：切换底部导航页 / 浏览标签页时从当前 tab 配置的背景源重新随机一张；
-        // 背景源为空时清空背景，恢复普通主题底色。
+        // 随机封面背景：从所有开启背景开关的 tab 的封面缓存里随机取一张。
+        // 触发时机：切换底部导航页 / 浏览标签页 / 开关集合变化 / 首个 tab 的封面缓存就绪。
         val backdropUrl by AppBackdropState.current.collectAsState()
         val browseTabIndex by browseVm.mainTab.collectAsState()
-        LaunchedEffect(bottomTab, browseTabIndex, browseVm.tabs.toList()) {
-            val sources = browseVm.tabs.getOrNull(browseTabIndex)?.backgroundSources.orEmpty()
-            if (sources.isEmpty()) AppBackdropState.clear() else AppBackdropState.randomFrom(sources)
+        val poolRevision by AppBackdropState.poolRevision.collectAsState()
+        LaunchedEffect(bottomTab, browseTabIndex, poolRevision, browseVm.tabs.toList()) {
+            val enabledIds = browseVm.tabs.filter { it.backgroundEnabled }.mapTo(mutableSetOf()) { it.id }
+            if (enabledIds.isEmpty()) AppBackdropState.clear() else AppBackdropState.randomFrom(enabledIds)
         }
         Box(modifier = Modifier.fillMaxSize()) {
             AppCoverBackdrop(url = backdropUrl, modifier = Modifier.fillMaxSize())
@@ -792,6 +793,8 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
                         ),
                     ),
                 )
+                // 主题色淡染：纯白玻璃叠在白底上会“看不见”，染一层色后浅色下也有玻璃质感。
+                drawRect(MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.06f else 0.05f))
                 drawLine(
                     brush = Brush.horizontalGradient(
                         listOf(

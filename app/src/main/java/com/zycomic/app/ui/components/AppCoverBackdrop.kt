@@ -28,25 +28,18 @@ fun AppCoverBackdrop(url: String?, modifier: Modifier = Modifier) {
             model = url,
             contentDescription = null,
             imageLoader = imageLoader,
-            modifier = Modifier.matchParentSize().blur(14.dp).alpha(0.22f),
+            modifier = Modifier.matchParentSize().blur(12.dp).alpha(0.30f),
             contentScale = ContentScale.Crop,
         )
+        // 遮罩只负责两件事：顶部保住顶栏文字、底部托住玻璃底栏，中间大面积放开让封面可见。
         Box(
             Modifier.matchParentSize().background(
                 Brush.verticalGradient(
                     0f to MaterialTheme.colorScheme.background,
-                    0.42f to MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
-                    1f to MaterialTheme.colorScheme.background,
-                ),
-            ),
-        )
-        // 底部导航区域再压一层，保证液态玻璃底栏上的图标文字清晰
-        Box(
-            Modifier.matchParentSize().background(
-                Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.78f to Color.Transparent,
-                    1f to MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
+                    0.18f to MaterialTheme.colorScheme.background.copy(alpha = 0.30f),
+                    0.55f to Color.Transparent,
+                    0.82f to Color.Transparent,
+                    1f to MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
                 ),
             ),
         )

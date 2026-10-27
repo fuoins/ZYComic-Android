@@ -5,29 +5,42 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * 全局随机封面背景的封面池。
+ * 全局随机封面背景的候选缓存。
  *
- * 浏览页每加载出一页漫画，就把这一页的封面 URL 按平台注册进来（只保留最近 N 张）；
- * 切换标签页 / 底部导航页时，按当前 tab 配置的“背景源”随机取一张。
+ * 每个 tab 加载出一页漫画后，把这一页的封面 URL 写进**自己 tab 的缓存**（key = tab id，
+ * 不是平台：同一平台的不同 tab 各自独立）。背景从“所有开启背景开关的 tab”的缓存并集里
+ * 随机取一张，所以任何页面都可能有背景，且切到空 tab 也不会黑屏。
  */
 object AppBackdropState {
-    private const val MAX_POOL_PER_SOURCE = 60
+    private const val MAX_POOL_PER_TAB = 60
 
     private val pools = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
     private val _current = MutableStateFlow<String?>(null)
     val current: StateFlow<String?> = _current.asStateFlow()
 
+    /**
+     * 池内容修订号：只在“池从空变非空”时 +1（此后翻页写入不再变化）。
+     * 主界面把它作为随机触发信号——首次加载出封面时立刻随机一次，翻页不随机。
+     */
+    private val _poolRevision = MutableStateFlow(0L)
+    val poolRevision: StateFlow<Long> = _poolRevision.asStateFlow()
+
     /** 由浏览页在列表加载后调用；空列表忽略。 */
-    fun registerCovers(platformId: String, urls: List<String>) {
-        val clean = urls.filter { it.isNotBlank() }.distinct().take(MAX_POOL_PER_SOURCE)
+    fun registerCovers(tabId: String, urls: List<String>) {
+        val clean = urls.filter { it.isNotBlank() }.distinct().take(MAX_POOL_PER_TAB)
         if (clean.isEmpty()) return
-        pools[platformId] = clean
+        val wasEmpty = pools.isEmpty()
+        pools[tabId] = clean
+        if (wasEmpty) _poolRevision.value += 1L
     }
 
-    /** 从指定来源（平台 id 列表）随机取一张；全部为空时回落到任意池，再没有则清空。 */
-    fun randomFrom(sourceIds: List<String>) {
-        val candidates = sourceIds.flatMap { pools[it].orEmpty() }
-        val picked = candidates.randomOrNull() ?: pools.values.flatten().randomOrNull()
+    /**
+     * 从所有开启背景开关的 tab 的缓存并集里随机取一张。
+     * 取不到时**保持当前背景不变**（切到还没加载封面的 tab 时不闪、不黑屏）。
+     */
+    fun randomFrom(enabledTabIds: Set<String>) {
+        val candidates = enabledTabIds.flatMap { pools[it].orEmpty() }
+        val picked = candidates.randomOrNull() ?: return
         _current.value = picked
     }
 

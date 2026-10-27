@@ -60,17 +60,17 @@ data class BrowseTabItem(
     val picacgFilter: PicacgBrowseFilter? = null,
     val picacgRankingMode: PicacgRankingMode = PicacgRankingMode.H24,
     /**
-     * 背景封面来源（平台 id 列表）。为空表示不使用随机封面背景（与旧版一致）。
-     * 新增 tab 时自动加入自身平台；删除 tab 时随 tab 一起删除。
+     * 是否把本 tab 加载出的漫画封面加入全局随机背景来源。
+     * 默认开启；关闭后该 tab 的封面不再作为背景候选。删除 tab 时随 tab 一起删除。
      */
-    val backgroundSources: List<String> = emptyList(),
+    val backgroundEnabled: Boolean = true,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)
         put("kind", kind.name)
         put("builtin", builtin)
-        put("backgroundSources", JSONArray(backgroundSources))
+        put("backgroundEnabled", backgroundEnabled)
         put("platformId", platformId.id)
         if (platformId == ContentPlatform.MANWA) filter?.let { put("filter", it.toJson()) }
         if (platformId == ContentPlatform.PICACG) {
@@ -104,13 +104,9 @@ data class BrowseTabItem(
             val rankingMode = runCatching {
                 PicacgRankingMode.valueOf(o.optString("picacgRankingMode", PicacgRankingMode.H24.name))
             }.getOrDefault(PicacgRankingMode.H24)
-            // 背景源缺省时自动加入自身平台（“添加 tab 时自动加入背景源”的迁移语义）。
+            // 旧版本把背景源存成平台 id 数组（非空=加入）；新版本是布尔开关，非空数组迁移为 true。
             val backgroundArr = o.optJSONArray("backgroundSources")
-            val backgroundSources = if (backgroundArr != null) {
-                List(backgroundArr.length()) { backgroundArr.getString(it) }
-            } else {
-                listOf(platformId.id)
-            }
+            val backgroundEnabled = if (backgroundArr != null) backgroundArr.length() > 0 else o.optBoolean("backgroundEnabled", true)
             return BrowseTabItem(
                 id = id,
                 name = o.optString("name"),
@@ -121,7 +117,7 @@ data class BrowseTabItem(
                 platformId = platformId,
                 picacgFilter = picacgFilter,
                 picacgRankingMode = rankingMode,
-                backgroundSources = backgroundSources,
+                backgroundEnabled = backgroundEnabled,
             )
         }
     }
@@ -135,7 +131,3 @@ fun BrowseTabItem.isPicacgRanking(): Boolean =
 fun BrowseTabItem.isPicacgCategory(): Boolean =
     platformId == ContentPlatform.PICACG &&
         (id == "picacg_category" || pageType == BrowsePageType.PICACG_CATEGORY)
-
-/** 新构造的 tab（无论内置还是新增）自动把自己的平台作为背景源；用户可在管理面板清空。 */
-fun BrowseTabItem.withDefaultBackgrounds(): BrowseTabItem =
-    if (backgroundSources.isNotEmpty()) this else copy(backgroundSources = listOf(platformId.id))

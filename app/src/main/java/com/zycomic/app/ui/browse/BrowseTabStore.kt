@@ -61,16 +61,16 @@ object BrowseTabStore {
     const val JM_ALL_HOT_NAME = "jm热门"
     val LEGACY_JM_ALL_HOT_NAMES = setOf("JM 全部热门", "JM全部热门")
 
-    private fun specialLatest() = BrowseTabItem(id = ID_LATEST_ADD, name = LATEST_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.LATEST).withDefaultBackgrounds()
-    private fun specialRanking() = BrowseTabItem(id = ID_RANKING, name = RANKING_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.RANKING).withDefaultBackgrounds()
-    private fun specialYuzong() = BrowseTabItem(id = ID_YUZONG, name = YUZONG_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.YUZONG_RANK).withDefaultBackgrounds()
+    private fun specialLatest() = BrowseTabItem(id = ID_LATEST_ADD, name = LATEST_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.LATEST)
+    private fun specialRanking() = BrowseTabItem(id = ID_RANKING, name = RANKING_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.RANKING)
+    private fun specialYuzong() = BrowseTabItem(id = ID_YUZONG, name = YUZONG_NAME, kind = TabKind.SPECIAL, builtin = false, pageType = BrowsePageType.YUZONG_RANK)
     fun jmHomeTab() = BrowseTabItem(
         id = ID_JM_HOME,
         name = JM_HOME_NAME,
         kind = TabKind.FILTER,
         builtin = true,
         platformId = ContentPlatform.JM,
-    ).withDefaultBackgrounds()
+    )
 
     fun jmAllHotTab() = BrowseTabItem(
         id = JmBrowsePolicy.ALL_HOT_TAB_ID,
@@ -78,7 +78,7 @@ object BrowseTabStore {
         kind = TabKind.FILTER,
         builtin = true,
         platformId = ContentPlatform.JM,
-    ).withDefaultBackgrounds()
+    )
 
     fun picacgHomeTab() = BrowseTabItem(
         id = ID_PICACG_HOME,
@@ -87,7 +87,7 @@ object BrowseTabStore {
         builtin = true,
         platformId = ContentPlatform.PICACG,
         picacgRankingMode = com.zycomic.app.ui.picacg.PicacgRankingMode.H24,
-    ).withDefaultBackgrounds()
+    )
 
     /** The legacy homepage identity is retained for existing users, but now represents the 24-hour ranking. */
     fun picacgRankingDefaultTab() = picacgHomeTab().copy(name = PICACG_RANKING_NAME)
@@ -99,7 +99,7 @@ object BrowseTabStore {
         pageType = BrowsePageType.PICACG_RANKING,
         platformId = ContentPlatform.PICACG,
         picacgRankingMode = com.zycomic.app.ui.picacg.PicacgRankingMode.H24,
-    ).withDefaultBackgrounds()
+    )
 
     fun picacgCategoryTab() = BrowseTabItem(
         id = ID_PICACG_CATEGORY,
@@ -108,7 +108,7 @@ object BrowseTabStore {
         pageType = BrowsePageType.PICACG_CATEGORY,
         platformId = ContentPlatform.PICACG,
         picacgFilter = com.zycomic.app.ui.picacg.PicacgBrowseFilter(),
-    ).withDefaultBackgrounds()
+    )
 
     fun defaultTabs(platform: ContentPlatform = ContentPlatform.MANWA): List<BrowseTabItem> {
         if (platform == ContentPlatform.JM) return listOf(jmHomeTab(), jmAllHotTab())
@@ -121,21 +121,21 @@ object BrowseTabStore {
                 kind = TabKind.FILTER,
                 builtin = true,
                 filter = FilterSnapshot(gender = 2, tags = emptyList(), area = 0, end = 0, st = 2),
-            ).withDefaultBackgrounds(),
+            ),
             BrowseTabItem(
                 id = ID_JINMAN,
                 name = "mw禁漫向热门",
                 kind = TabKind.FILTER,
                 builtin = true,
                 filter = FilterSnapshot(gender = 1, tags = emptyList(), area = 0, end = 0, st = 2),
-            ).withDefaultBackgrounds(),
+            ),
             BrowseTabItem(
                 id = ID_REXUE,
                 name = "mw热血热门",
                 kind = TabKind.FILTER,
                 builtin = true,
                 filter = FilterSnapshot(gender = 2, tags = listOf("热血"), area = 0, end = 0, st = 2),
-            ).withDefaultBackgrounds(),
+            ),
         )
     }
 
