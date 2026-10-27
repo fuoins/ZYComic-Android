@@ -2,8 +2,10 @@ package com.zycomic.app.ui
 
 import android.graphics.Bitmap
 import android.graphics.Paint
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -36,7 +38,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -274,23 +275,23 @@ private fun SplashBackground(dark: Boolean) {
             )
         }
         Canvas(modifier = Modifier.fillMaxSize()) {
+            // 底色：三段冷暖交错，避免整屏只有一个色温
             drawRect(
-                Brush.verticalGradient(
-                    if (dark) {
-                        listOf(Color(0xFF15151D), Color(0xFF191627), Color(0xFF0D0C13))
-                    } else {
-                        listOf(Color(0xFFFDFBF7), Color(0xFFF7F4FB), Color(0xFFFFF8F0))
-                    },
+                brush = Brush.linearGradient(
+                    0f to if (dark) Color(0xFF17131F) else Color(0xFFFFFBF4),
+                    0.42f to if (dark) Color(0xFF1B1A33) else Color(0xFFF1F7FF),
+                    1f to if (dark) Color(0xFF0B0A11) else Color(0xFFFFF3E8),
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, size.height),
                 ),
             )
-            // 一大两中两小，全部偏置，避免“均匀铺满”的配色图感
             fun orb(cx: Float, cy: Float, radius: Float, color: Color, alpha: Float, phase: Float, drift: Float) {
                 val x = cx + sin(phase) * size.width * drift
                 val y = cy + cos(phase) * size.height * drift * 0.6f
                 val center = Offset(x, y)
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(color.copy(alpha = alpha), color.copy(alpha = alpha * 0.35f), Color.Transparent),
+                        colors = listOf(color.copy(alpha = alpha), color.copy(alpha = alpha * 0.42f), Color.Transparent),
                         center = center,
                         radius = radius,
                     ),
@@ -298,33 +299,50 @@ private fun SplashBackground(dark: Boolean) {
                     center = center,
                 )
             }
-            val boost = if (dark) 0.72f else 1f
-            orb(-0.09f * size.width, -0.10f * size.height, 0.55f * size.width, Color(0xFF3FE0B2), 0.80f * boost, phaseA.value, 0.06f)
-            orb(1.05f * size.width, 0.26f * size.height, 0.46f * size.width, Color(0xFF9F86FF), 0.66f * boost, phaseB.value, 0.05f)
-            orb(0.77f * size.width, 1.04f * size.height, 0.54f * size.width, Color(0xFFFFA75E), 0.78f * boost, phaseC.value, 0.045f)
-            orb(0.87f * size.width, 0.59f * size.height, 0.26f * size.width, Color(0xFF5FB4FF), 0.42f * boost, phaseB.value, 0.035f)
-            orb(0.10f * size.width, 0.51f * size.height, 0.20f * size.width, Color(0xFF6FF0CF), 0.50f * boost, phaseA.value, 0.04f)
+            val boost = if (dark) 0.72f else 1.02f
+            // 六个色团：薄荷 / 紫 / 珊瑚橙 / 天蓝 / 粉 / 青，全部偏置且半径差异大
+            orb(-0.10f * size.width, -0.08f * size.height, 0.62f * size.width, Color(0xFF2FE3AE), 0.84f * boost, phaseA.value, 0.07f)
+            orb(1.02f * size.width, 0.22f * size.height, 0.52f * size.width, Color(0xFFA78BFA), 0.78f * boost, phaseB.value, 0.05f)
+            orb(0.72f * size.width, 1.02f * size.height, 0.60f * size.width, Color(0xFFFFA45C), 0.82f * boost, phaseC.value, 0.05f)
+            orb(0.94f * size.width, 0.62f * size.height, 0.26f * size.width, Color(0xFF5FB4FF), 0.52f * boost, phaseB.value, 0.04f)
+            orb(0.16f * size.width, 0.20f * size.height, 0.24f * size.width, Color(0xFFFF8FB1), 0.40f * boost, phaseC.value, 0.05f)
+            orb(0.06f * size.width, 0.56f * size.height, 0.22f * size.width, Color(0xFF6FF0DF), 0.56f * boost, phaseA.value, 0.045f)
 
-            // 中央柔光，保证文字区域干净
+            // 一条斜向彩带：把几个色团串起来，画面不再是一块块孤立的圆
+            drawRect(
+                brush = Brush.linearGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        0.28f to Color(0xFF2FE3AE).copy(alpha = if (dark) 0.10f else 0.12f),
+                        0.52f to Color(0xFFA78BFA).copy(alpha = if (dark) 0.10f else 0.12f),
+                        0.76f to Color(0xFFFFA45C).copy(alpha = if (dark) 0.09f else 0.10f),
+                        1f to Color.Transparent,
+                    ),
+                    start = Offset(0f, size.height * 0.16f),
+                    end = Offset(size.width, size.height * 0.86f),
+                ),
+            )
+
+            // 中央柔光只留一点点，保证文字干净又不把颜色洗白
             drawRect(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = if (dark) 0.06f else 0.34f),
+                        Color.White.copy(alpha = if (dark) 0.05f else 0.20f),
                         Color.Transparent,
                     ),
-                    center = Offset(size.width * 0.46f, size.height * 0.38f),
-                    radius = size.width * 0.95f,
+                    center = Offset(size.width * 0.46f, size.height * 0.40f),
+                    radius = size.width * 0.72f,
                 ),
             )
             dots?.let {
                 drawImage(image = it, dstSize = IntSize(size.width.toInt(), size.height.toInt()))
             }
-            // 底部压暗，托住玻璃面板
+            // 底部轻微压暗，托住玻璃面板
             drawRect(
                 brush = Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.66f to Color.Transparent,
-                    1f to Color.Black.copy(alpha = if (dark) 0.34f else 0.06f),
+                    0.70f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = if (dark) 0.32f else 0.08f),
                 ),
             )
         }
@@ -343,7 +361,7 @@ private fun halftoneDots(width: Int, height: Int, spacing: Float, dark: Boolean)
         val cx = width / 2f
         val cy = height * 0.34f
         val maxDistance = hypot(width.toFloat(), height.toFloat()) * 0.55f
-        val peakAlpha = if (dark) 46f else 32f
+        val peakAlpha = if (dark) 34f else 22f
         var y = spacing / 2f
         while (y < height) {
             var x = spacing / 2f
@@ -365,41 +383,75 @@ private fun halftoneDots(width: Int, height: Int, spacing: Float, dark: Boolean)
 
 @Composable
 private fun BrandStack(dark: Boolean) {
+    val transition = rememberInfiniteTransition(label = "splash-logo")
+    val floaty by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(5_000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "floaty",
+    )
     Box(modifier = Modifier.size(108.dp), contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier.size(80.dp).rotate(-9f).offset(x = (-9).dp, y = 3.dp)
-                .background(
-                    BrandMint.copy(alpha = if (dark) 0.16f else 0.20f),
-                    RoundedCornerShape(25.dp),
+        // 底部品牌光晕：让 logo 像是浮在光上，而不是贴在背景上
+        Canvas(modifier = Modifier.width(176.dp).height(64.dp).offset(y = 30.dp)) {
+            drawOval(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        BrandMint.copy(alpha = if (dark) 0.30f else 0.34f),
+                        BrandGreen.copy(alpha = if (dark) 0.14f else 0.16f),
+                        Color.Transparent,
+                    ),
+                    center = center,
+                    radius = size.width / 2f,
                 ),
-        )
+            )
+        }
         Box(
-            modifier = Modifier.size(80.dp).rotate(7f).offset(x = 9.dp, y = (-2).dp)
-                .background(
-                    BrandAmber.copy(alpha = if (dark) 0.16f else 0.22f),
-                    RoundedCornerShape(25.dp),
-                ),
-        )
-        Box(
-            modifier = Modifier.size(80.dp)
-                .shadow(if (dark) 18.dp else 22.dp, RoundedCornerShape(25.dp))
-                .clip(RoundedCornerShape(25.dp))
-                .background(Brush.linearGradient(listOf(BrandGreen, BrandMint, BrandAmber)))
-                .drawBehind {
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.34f),
-                            0.6f to Color.Transparent,
-                        ),
-                    )
-                },
+            modifier = Modifier.size(108.dp).offset(y = (-4f * floaty).dp),
             contentAlignment = Alignment.Center,
         ) {
-            BookMark(
-                modifier = Modifier.size(56.dp),
-                page = Color.White,
-                highlight = MarkHighlight,
+            Box(
+                modifier = Modifier.size(80.dp).rotate(-9f).offset(x = (-9).dp, y = 3.dp)
+                    .background(
+                        BrandMint.copy(alpha = if (dark) 0.16f else 0.20f),
+                        RoundedCornerShape(25.dp),
+                    ),
             )
+            Box(
+                modifier = Modifier.size(80.dp).rotate(7f).offset(x = 9.dp, y = (-2).dp)
+                    .background(
+                        BrandAmber.copy(alpha = if (dark) 0.16f else 0.22f),
+                        RoundedCornerShape(25.dp),
+                    ),
+            )
+            Box(
+                modifier = Modifier.size(80.dp)
+                    .shadow(
+                        elevation = if (dark) 18.dp else 22.dp,
+                        shape = RoundedCornerShape(25.dp),
+                        ambientColor = BrandGreen.copy(alpha = 0.55f),
+                        spotColor = BrandGreen.copy(alpha = 0.75f),
+                    )
+                    .clip(RoundedCornerShape(25.dp))
+                    .background(Brush.linearGradient(listOf(BrandGreen, BrandMint, BrandAmber)))
+                    .drawBehind {
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to Color.White.copy(alpha = 0.34f),
+                                0.6f to Color.Transparent,
+                            ),
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                BookMark(
+                    modifier = Modifier.size(56.dp),
+                    page = Color.White,
+                    highlight = MarkHighlight,
+                )
+            }
         }
     }
 }
@@ -553,7 +605,12 @@ private fun PlatformChip(
         running -> accent.copy(alpha = 0.55f)
         else -> accent.copy(alpha = 0.4f)
     }
-    GlassBox(dark = dark, corner = 16.dp, elevation = if (enabled) 12.dp else 6.dp) {
+    GlassBox(
+        dark = dark,
+        corner = 16.dp,
+        elevation = if (enabled) 12.dp else 5.dp,
+        tint = if (enabled) accent else null,
+    ) {
         Row(
             modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -566,19 +623,11 @@ private fun PlatformChip(
                 fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal,
                 color = when {
                     enabled -> if (dark) Color(0xFFF0FBF6) else Color(0xFF17212C)
-                    else -> if (dark) Color.White.copy(alpha = 0.55f) else Color(0xFF8D97A5)
+                    else -> if (dark) Color.White.copy(alpha = 0.50f) else Color(0xFF97A0AC)
                 },
             )
             Spacer(Modifier.width(9.dp))
             TrackSwitch(checked = enabled, dark = dark)
-            if (!enabled) {
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    "已关闭",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = if (dark) Color.White.copy(alpha = 0.38f) else Color(0xFFAAB2BD),
-                )
-            }
         }
     }
 }
@@ -620,57 +669,64 @@ private fun HintPanel(
     onRetestAll: () -> Unit,
 ) {
     val copy = stringResource(KMR.strings.startup_guidance_copy)
-    var expanded by remember { mutableStateOf(false) }
-    GlassBox(dark = dark, corner = 22.dp, elevation = 14.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 15.dp, bottom = 6.dp)) {
-            Text(
-                if (expanded) copy else copy.substringBefore("\n"),
-                style = MaterialTheme.typography.labelSmall.copy(lineHeight = 17.5.sp),
-                color = if (dark) Color.White.copy(alpha = 0.72f) else Color(0xFF59616E),
-                maxLines = if (expanded) Int.MAX_VALUE else 4,
-                overflow = TextOverflow.Ellipsis,
-            )
+    GlassBox(dark = dark, corner = 22.dp, elevation = 16.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 14.dp)) {
+            // 提示全文直接展开，不再折叠
+            copy.split("\n").filter { it.isNotBlank() }.forEachIndexed { index, line ->
+                if (index > 0) Spacer(Modifier.height(6.dp))
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall.copy(lineHeight = 18.sp),
+                    fontWeight = if (index == 0) FontWeight.Medium else FontWeight.Normal,
+                    color = when {
+                        dark && index == 0 -> Color.White.copy(alpha = 0.92f)
+                        dark -> Color.White.copy(alpha = 0.64f)
+                        index == 0 -> Color(0xFF414A58)
+                        else -> Color(0xFF606A78)
+                    },
+                )
+            }
             summary?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (dark) Color.White.copy(alpha = 0.42f) else Color(0xFF9AA2AE),
+                    style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
+                    color = if (dark) Color.White.copy(alpha = 0.40f) else Color(0xFF98A1AD),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().drawBehind {
-                    drawLine(
-                        color = if (dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, 0f),
-                        strokeWidth = 1.dp.toPx(),
-                    )
-                },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.weight(1f)) {
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            if (expanded) "收起" else "使用提示 ›",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
-                            color = if (dark) Color.White.copy(alpha = 0.66f) else Color(0xFF6F7885),
-                        )
-                    }
-                }
-                TextButton(onClick = onRetestAll, enabled = !fullRequested) {
-                    Text(
-                        stringResource(KMR.strings.startup_retest_all),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (fullRequested) accent.copy(alpha = 0.4f) else accent,
-                    )
-                }
+            Spacer(Modifier.height(16.dp))
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                RetestButton(dark = dark, accent = accent, busy = fullRequested, onClick = onRetestAll)
             }
         }
+    }
+}
+
+/** 底部唯一的主操作：居中、实心胶囊，不用文字链接（单链接居中最容易显得空）。 */
+@Composable
+private fun RetestButton(dark: Boolean, accent: Color, busy: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                brush = if (busy) {
+                    Brush.linearGradient(listOf(accent.copy(alpha = 0.34f), accent.copy(alpha = 0.26f)))
+                } else {
+                    Brush.linearGradient(listOf(accent, accent.copy(alpha = 0.84f)))
+                },
+            )
+            .clickable(enabled = !busy, onClick = onClick)
+            .padding(horizontal = 26.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (busy) "完整测速中…" else stringResource(KMR.strings.startup_retest_all),
+            style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.4.sp),
+            fontWeight = FontWeight.SemiBold,
+            color = if (dark) Color(0xFF06231A) else Color.White,
+        )
     }
 }
 
@@ -682,61 +738,86 @@ private fun GlassBox(
     corner: Dp,
     elevation: Dp,
     modifier: Modifier = Modifier,
+    tint: Color? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(corner)
+    val glow = tint ?: BrandGreen
     Box(
         modifier = modifier
-            .shadow(elevation = elevation, shape = shape)
+            .shadow(
+                elevation = elevation,
+                shape = shape,
+                clip = false,
+                ambientColor = glow.copy(alpha = if (dark) 0.26f else 0.20f),
+                spotColor = glow.copy(alpha = if (dark) 0.40f else 0.30f),
+            )
             .clip(shape)
             .drawBehind {
                 val radius = CornerRadius(corner.toPx(), corner.toPx())
-                // 底色
+                // 玻璃本体：一层干净的白（深色一层淡白）＋ 一层极淡的平台色。
+                // 之前叠了四层白，浅色背景上白叠白必然发灰，这就是“胶囊脏”的原因。
                 drawRoundRect(
                     brush = Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = if (dark) 0.10f else 0.22f),
-                            Color.White.copy(alpha = if (dark) 0.03f else 0.06f),
+                            Color.White.copy(alpha = if (dark) 0.13f else 0.74f),
+                            Color.White.copy(alpha = if (dark) 0.05f else 0.55f),
                         ),
                     ),
                     cornerRadius = radius,
                 )
-                // 斜向液面反光
+                tint?.let {
+                    drawRoundRect(
+                        color = it.copy(alpha = if (dark) 0.06f else 0.09f),
+                        cornerRadius = radius,
+                    )
+                }
+                // 顶部高光只在 40% 高度内淡出，不再是一整块径向亮区（那块亮区会形成一个内框）
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = if (dark) 0.26f else 0.88f),
+                        0.14f to Color.White.copy(alpha = if (dark) 0.09f else 0.30f),
+                        0.42f to Color.Transparent,
+                        1f to Color.Transparent,
+                    ),
+                    cornerRadius = radius,
+                )
+                // 液面反光：一条宽而淡的斜向亮带
                 drawRoundRect(
                     brush = Brush.linearGradient(
                         colorStops = arrayOf(
-                            0f to Color.White.copy(alpha = 0f),
-                            0.34f to Color.White.copy(alpha = if (dark) 0.05f else 0.16f),
-                            0.48f to Color.White.copy(alpha = if (dark) 0.09f else 0.28f),
-                            0.62f to Color.White.copy(alpha = if (dark) 0.05f else 0.16f),
-                            1f to Color.White.copy(alpha = 0f),
+                            0f to Color.Transparent,
+                            0.34f to Color.White.copy(alpha = 0f),
+                            0.48f to Color.White.copy(alpha = if (dark) 0.09f else 0.18f),
+                            0.62f to Color.White.copy(alpha = 0f),
+                            1f to Color.Transparent,
                         ),
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, size.height * 0.55f),
+                        start = Offset(0f, size.height),
+                        end = Offset(size.width, 0f),
                     ),
                     cornerRadius = radius,
                 )
-                // 顶部弧光
-                drawRoundRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = if (dark) 0.14f else 0.55f),
-                            Color.White.copy(alpha = if (dark) 0.04f else 0.16f),
-                            Color.Transparent,
-                        ),
-                        center = Offset(size.width / 2f, -0.14f * size.height),
-                        radius = 1.25f * size.width,
-                    ),
-                    cornerRadius = radius,
-                )
-                // 底部折射暗影：玻璃厚度
+                // 底部折射：一点点厚度，不压灰
                 drawRoundRect(
                     brush = Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.58f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = if (dark) 0.14f else 0.05f),
+                        0.82f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = if (dark) 0.09f else 0.03f),
                     ),
                     cornerRadius = radius,
+                )
+                // 顶部 1px 内高光：玻璃的“边”，不是描边
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            Color.Transparent,
+                            Color.White.copy(alpha = if (dark) 0.24f else 0.92f),
+                            Color.Transparent,
+                        ),
+                    ),
+                    start = Offset(corner.toPx(), 0.7f),
+                    end = Offset(size.width - corner.toPx(), 0.7f),
+                    strokeWidth = 1.2f,
                 )
             },
         content = content,

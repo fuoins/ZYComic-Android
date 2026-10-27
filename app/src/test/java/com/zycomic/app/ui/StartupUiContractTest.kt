@@ -77,6 +77,15 @@ class StartupUiContractTest {
         assertTrue(splash.contains("startup_guidance_copy"))
         assertFalse(splash.contains("startupChecksPassed"))
         assertFalse(splash.contains("startup_checks_ready_count"))
+        // 玻璃层不能再有整块径向亮区（会在胶囊内部形成一圈长方形亮框）
+        assertTrue(splash.contains("tint: Color? = null"))
+        assertFalse(splash.contains("center = Offset(size.width / 2f, -0.14f * size.height)"))
+        // 提示直接展开，开关不再附“已关闭”文字
+        assertTrue(splash.contains("copy.split"))
+        assertTrue(splash.contains("RetestButton("))
+        assertFalse(splash.contains("已关闭"))
+        assertFalse(splash.contains("使用提示"))
+        assertFalse(splash.contains("expanded"))
     }
 
     @Test
@@ -97,11 +106,21 @@ class StartupUiContractTest {
         assertFalse(systemSplash.contains("ic_komikku_dark"))
         val splashIcon = File(drawable, "ic_splash_icon.xml").readText()
         assertTrue(splashIcon.contains("left_page") || splashIcon.contains("211.7,172.8"))
+        // 深色模式曾经走 drawable-night 的旧启动图（Komikku 的 Z），必须一起换掉
+        val nightSplash = File(root, "app/src/main/res/drawable-night/ic_splash.xml").readText()
+        assertTrue(nightSplash.contains("@drawable/ic_splash_icon"))
+        assertFalse(nightSplash.contains("ic_komikku_dark"))
+        val brandMark = File(drawable, "ic_zycomic.xml").readText()
+        assertFalse(brandMark.contains("letter_z"))
+        assertTrue(brandMark.contains("172.8"))
     }
 
     @Test
     fun `startup still exposes retest and keeps the guidance copy`() {
         assertTrue(splash.contains("KMR.strings.startup_retest_all"))
+        // 提示全文直接显示：不再有“展开/收起”，按钮单独居中
+        assertTrue(splash.contains("contentAlignment = Alignment.Center"))
+        assertTrue(splash.contains("copy.split"))
         assertEquals("重新完整测速", strings["startup_retest_all"])
         assertEquals(
             "三个平台源本身晚上就卡，建议早6点到晚5点使用。网络配置是作者自己建的定时 DoH 解析，每天两次，和神秘的网络层优化；再卡顿只能 VPN 了。\\n" +
