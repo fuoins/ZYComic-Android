@@ -126,6 +126,8 @@ class MainActivity : BaseActivity() {
         StartupPlatformPolicy.load(this)
         ContentPlatformAccentPrefs.init(this)
         com.zycomic.app.net.NetworkModule.init(this)
+        com.zycomic.app.ui.components.GlassPrefs.init(this)
+        com.zycomic.app.ui.components.BackdropSources.init(this)
         setContent {
             val uiPreferences = remember { Injekt.get<UiPreferences>() }
             val appTheme by uiPreferences.appTheme().collectAsState()
@@ -427,14 +429,13 @@ fun AppContent(
                 }
             }
         }
-        // 随机封面背景：从所有开启背景开关的 tab 的封面缓存里随机取一张。
-        // 触发时机：切换底部导航页 / 浏览标签页 / 开关集合变化 / 首个 tab 的封面缓存就绪。
+        // 全局背景：自定义图片优先，其次从开启的随机图源里取；切换底部导航页/浏览标签页/来源配置变化时刷新。
         val backdropEntry by AppBackdropState.current.collectAsState()
         val browseTabIndex by browseVm.mainTab.collectAsState()
-        val poolRevision by AppBackdropState.poolRevision.collectAsState()
-        LaunchedEffect(bottomTab, browseTabIndex, poolRevision, browseVm.tabs.toList()) {
-            val enabledIds = browseVm.tabs.filter { it.backgroundEnabled }.mapTo(mutableSetOf()) { it.id }
-            if (enabledIds.isEmpty()) AppBackdropState.clear() else AppBackdropState.randomFrom(enabledIds)
+        val backdropCustom by BackdropSources.customPath.collectAsState()
+        val backdropSources by BackdropSources.enabled.collectAsState()
+        LaunchedEffect(bottomTab, browseTabIndex, backdropCustom, backdropSources) {
+            AppBackdropState.refresh()
         }
         Box(modifier = Modifier.fillMaxSize()) {
             AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())

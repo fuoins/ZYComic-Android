@@ -55,7 +55,8 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
         when (entry.platform) {
             ContentPlatform.PICACG -> PicacgImageLoader.get(context)
             ContentPlatform.JM -> JmCoverImageLoader.get(context)
-            else -> context.imageLoader
+            // 随机图源/自定义本地图：纯净 loader（仅 UA），不经过漫蛙图片栈的域改写与解密。
+            else -> com.zycomic.app.platform.PlatformImageLoader.get(context)
         }
     }
     LaunchedEffect(entry, prefetchLoader) {
@@ -79,7 +80,7 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
             when (shownEntry.platform) {
                 ContentPlatform.PICACG -> PicacgImageLoader.get(context)
                 ContentPlatform.JM -> JmCoverImageLoader.get(context)
-                else -> context.imageLoader
+                else -> com.zycomic.app.platform.PlatformImageLoader.get(context)
             }
         }
         Box(modifier) {

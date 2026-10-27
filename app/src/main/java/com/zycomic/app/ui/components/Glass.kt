@@ -13,8 +13,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,8 +53,7 @@ private data class GlassSpec(
 
 @Composable
 private fun glassSpec(): GlassSpec {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val strength = GlassPrefs.glassStrength(context)
+    val strength by GlassPrefs.glassStrength.collectAsState()
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     return GlassSpec(
         glassTop = Color.White.copy(alpha = (if (dark) 0.08f else 0.30f) * strength),
@@ -63,7 +65,7 @@ private fun glassSpec(): GlassSpec {
 }
 
 /** 玻璃底板绘制：白玻璃渐变 + 可选平台色淡染 + 顶部内高光 + 描边。需配合 [clip] 使用。 */
-private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float, tintLayer: Color): Modifier =
+private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float, tintLayer: Color, stroke: Boolean): Modifier =
     this.drawBehind {
         drawRect(Brush.verticalGradient(0f to spec.glassTop, 1f to spec.glassBottom))
         if (tintLayer.alpha > 0f) drawRect(tintLayer)
@@ -78,11 +80,13 @@ private fun Modifier.glassBase(spec: GlassSpec, radiusPx: Float, tintLayer: Colo
             end = Offset(size.width * 0.95f, 0.8f),
             strokeWidth = 1.6f,
         )
-        drawRoundRect(
-            color = spec.edge,
-            style = Stroke(width = 1.dp.toPx()),
-            cornerRadius = CornerRadius(radiusPx, radiusPx),
-        )
+        if (stroke) {
+            drawRoundRect(
+                color = spec.edge,
+                style = Stroke(width = 1.dp.toPx()),
+                cornerRadius = CornerRadius(radiusPx, radiusPx),
+            )
+        }
     }
 
 /** 独立玻璃卡片（用户信息卡、分组容器等）。[accent] 非空时叠加平台色淡染。 */
@@ -93,6 +97,7 @@ fun GlassCard(
     accent: Color? = null,
     accentAlpha: Float = 0.10f,
     elevated: Boolean = true,
+    stroke: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val spec = glassSpec()
@@ -103,7 +108,7 @@ fun GlassCard(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
             .clip(shape)
-            .glassBase(spec, radiusPx, tintLayer),
+            .glassBase(spec, radiusPx, tintLayer, stroke),
         content = content,
     )
 }
@@ -171,10 +176,19 @@ fun GlassSwitchRow(
         icon = icon,
         onPreferenceClick = { onCheckedChanged(!checked) },
         widget = {
+            val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
             Switch(
                 checked = checked,
                 onCheckedChange = { onCheckedChanged(it) },
                 modifier = Modifier.padding(start = 8.dp),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color.White.copy(alpha = if (dark) 0.30f else 0.60f),
+                    checkedBorderColor = Color.Transparent,
+                    uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
+                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.12f),
+                    uncheckedBorderColor = Color.Transparent,
+                ),
             )
         },
     )
@@ -260,8 +274,9 @@ fun Modifier.glassSurface(
     radius: Dp = 14.dp,
     accent: Color? = null,
     accentAlpha: Float = 0.10f,
+    stroke: Boolean = true,
 ): Modifier {
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
-    return this.clip(shape).glassBase(glassSpec(), radiusPx, tintLayer)
+    return this.clip(shape).glassBase(glassSpec(), radiusPx, tintLayer, stroke)
 }

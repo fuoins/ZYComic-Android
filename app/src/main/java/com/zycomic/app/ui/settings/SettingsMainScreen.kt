@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
@@ -243,25 +244,28 @@ private fun SettingsPlatformSwitch(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val accent = rememberContentPlatformAccent(platform)
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     GlassCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
         radius = 16.dp,
-        accent = accent,
-        accentAlpha = 0.10f,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
                 .semantics(mergeDescendants = true) { contentDescription = title },
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 平台区分只靠字体颜色，玻璃本体无色。
             Text(title, modifier = Modifier.weight(1f), color = accent, style = MaterialTheme.typography.bodyMedium)
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = accent,
-                    checkedTrackColor = accent.copy(alpha = 0.42f),
-                    checkedBorderColor = accent,
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color.White.copy(alpha = if (dark) 0.30f else 0.60f),
+                    checkedBorderColor = Color.Transparent,
+                    uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
+                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.12f),
+                    uncheckedBorderColor = Color.Transparent,
                 ),
             )
         }

@@ -85,7 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
-import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.data.dto.Manga
@@ -813,14 +812,6 @@ private fun BrowseTabContent(
         return
     }
     val mangas by vm.mangasForTab(page).collectAsState()
-    // 把这一页的封面写进本 tab 自己的候选缓存；背景从所有开启背景开关的 tab 的缓存里随机取。
-    LaunchedEffect(page, mangas) {
-        AppBackdropState.registerCovers(
-            tabId = item?.id ?: page.toString(),
-            platform = item?.platformId,
-            urls = mangas.mapNotNull { com.zycomic.app.ui.components.coverUrl(it).takeIf(String::isNotBlank) },
-        )
-    }
     val loading by vm.loadingForTab(page).collectAsState()
     val appending by vm.appendingForTab(page).collectAsState()
     val hasMore by vm.hasMoreForTab(page).collectAsState()

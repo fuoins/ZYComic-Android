@@ -440,7 +440,6 @@ fun TabManageSheet(vm: BrowseViewModel, onDismiss: () -> Unit, onTabAdded: (Int)
                                     ManagedTabPill(
                                         item = item,
                                         onEdit = { if (item.kind == TabKind.FILTER || item.platformId == ContentPlatform.PICACG) editing = item else editingSpecial = item },
-                                        onToggleBackground = { vm.updateTabBackgroundEnabled(item.id, !item.backgroundEnabled) },
                                         onDelete = { deletingItem = item },
                                     )
                                 }
@@ -813,23 +812,6 @@ private fun FilterTabFormDialog(
                             )
                         }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("加入背景封面来源", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    "开启后，本 tab 加载出的漫画封面会作为全局随机背景的候选。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = backgroundEnabled,
-                                onCheckedChange = { backgroundEnabled = it },
-                            )
-                        }
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
                         Surface(
@@ -1096,7 +1078,7 @@ private fun SpecialAddButton(
 }
 
 @Composable
-private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onToggleBackground: () -> Unit, onDelete: () -> Unit) {
+private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onDelete: () -> Unit) {
     val accent = if (item.pageType == BrowsePageType.YUZONG_RANK) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -1117,13 +1099,6 @@ private fun ManagedTabPill(item: BrowseTabItem, onEdit: () -> Unit, onToggleBack
             )
             IconButton(onClick = onEdit, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Outlined.Edit, contentDescription = "编辑 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onToggleBackground, modifier = Modifier.size(40.dp)) {
-                if (item.backgroundEnabled) {
-                    Icon(Icons.Filled.Photo, contentDescription = "背景封面来源已开启 ${item.name}", tint = accent, modifier = Modifier.size(16.dp))
-                } else {
-                    Icon(Icons.Outlined.Photo, contentDescription = "背景封面来源已关闭 ${item.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f), modifier = Modifier.size(16.dp))
-                }
             }
             IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Outlined.Delete, contentDescription = "删除 ${item.name}", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))

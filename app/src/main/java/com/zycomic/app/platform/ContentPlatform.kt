@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
+import com.zycomic.app.ui.components.glassSurface
 
 /** UI 平台选择；Picacg 与 JM 保持独立身份，接口未接入时不得回退到其他平台数据。 */
 enum class ContentPlatform(val id: String, val accent: Color) {
@@ -161,10 +162,9 @@ fun ContentPlatformSelector(
     compactButtonSize: androidx.compose.ui.unit.Dp? = null,
     compactJmLabel: String? = null,
 ) {
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (compact) 0.75f else 0.55f),
-        shape = RoundedCornerShape(50),
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    Box(
+        modifier = modifier.glassSurface(shape = RoundedCornerShape(50), radius = 999.dp, stroke = false),
     ) {
         Row(
             modifier = Modifier.padding(3.dp).selectableGroup(),
@@ -192,7 +192,13 @@ fun ContentPlatformSelector(
                             onClick = { onSelect(platform) },
                         )
                         .clip(RoundedCornerShape(50))
-                        .background(if (isSelected) accent else Color.Transparent)
+                        .background(
+                            if (isSelected) {
+                                Color.White.copy(alpha = if (dark) 0.18f else 0.55f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
                         .padding(horizontal = if (compact) 4.dp else 10.dp, vertical = if (compact) 5.dp else 13.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -208,11 +214,7 @@ fun ContentPlatformSelector(
                                 },
                             )
                         },
-                        color = if (isSelected) {
-                            if (accent.luminance() > 0.55f) Color.Black else Color.White
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        color = if (isSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = if (compact) 10.sp else 15.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,

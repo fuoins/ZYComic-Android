@@ -53,35 +53,37 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
     def test_managed_tab_pill_has_minimum_48dp_height_and_targets(self):
         pill = SHEET.split("private fun ManagedTabPill(", 1)[1]
         self.assertIn("Modifier.heightIn(min = 48.dp)", pill)
-        # 编辑 / 背景源 / 删除三个动作按钮
+        # 编辑 / 删除两个动作按钮（背景来源入口已迁至外观页）
         self.assertIn("Icons.Outlined.Edit", pill)
-        self.assertIn("Icons.Outlined.Photo", pill)
+        self.assertNotIn("Icons.Outlined.Photo", pill)
         self.assertIn("Icons.Outlined.Delete", pill)
-        self.assertIn("onToggleBackground: () -> Unit", pill)
+        self.assertNotIn("onToggleBackground", pill)
 
     def test_background_toggle_is_per_tab_and_persisted_with_the_tab(self):
-        # 每个 tab 一个“加入背景封面来源”开关，布尔语义，随 tab 持久化
+        # tab 数据字段保留（旧 JSON 兼容），但背景来源入口已迁至外观页（自定义图 + 随机图源）
         self.assertIn("val backgroundEnabled: Boolean = true", TAB_MODELS)
         self.assertIn('put("backgroundEnabled", backgroundEnabled)', TAB_MODELS)
         # 旧版平台数组迁移：非空 -> true
         self.assertIn('optJSONArray("backgroundSources")', TAB_MODELS)
         self.assertIn("fun updateTabBackgroundEnabled", BROWSE_VM)
-        # 管理面板：胶囊第三个图标直接切换开关；表单里是 Switch
-        self.assertIn("onToggleBackground = { vm.updateTabBackgroundEnabled(item.id, !item.backgroundEnabled) }", SHEET)
-        self.assertIn("Icons.Filled.Photo", SHEET)
-        self.assertIn("Switch(", SHEET)
-        self.assertIn("initialBackgroundEnabled", SHEET)
-        self.assertNotIn("BackgroundSourcesDialog(", SHEET)
-        # 全局随机背景与玻璃底栏在主界面：开启开关的 tab 的缓存并集 + 池就绪信号触发
+        # 管理面板不再有背景开关 UI
+        self.assertNotIn("onToggleBackground", SHEET)
+        self.assertNotIn("加入背景封面来源", SHEET)
+        # 全局背景与玻璃底栏在主界面：自定义图优先 + 随机图源多选 + 切换刷新
         main_activity = (MAIN / "com/zycomic/app/ui/MainActivity.kt").read_text()
         self.assertIn("AppCoverBackdrop(entry = backdropEntry", main_activity)
         self.assertIn("GlassBottomBar {", main_activity)
-        self.assertIn("AppBackdropState.poolRevision", main_activity)
-        self.assertIn("randomFrom(enabledIds)", main_activity)
-        # 浏览页把封面按 tab id + 平台注册进全局候选缓存
-        self.assertIn("AppBackdropState.registerCovers(", BROWSE)
-        self.assertIn("tabId = item?.id", BROWSE)
-        self.assertIn("platform = item?.platformId", BROWSE)
+        self.assertIn("AppBackdropState.refresh()", main_activity)
+        self.assertIn("BackdropSources.customPath", main_activity)
+        self.assertIn("BackdropSources.enabled", main_activity)
+        # 浏览页不再把封面写进背景池
+        self.assertNotIn("registerCovers", BROWSE)
+        # 外观页提供自定义背景与随机图源多选
+        appearance = (MAIN / "com/zycomic/app/ui/settings/ZYSettingsAppearanceScreen.kt").read_text()
+        self.assertIn("自定义背景图片", appearance)
+        self.assertIn("随机图源（可多选）", appearance)
+        self.assertIn("BackdropSources.ALL", appearance)
+        self.assertIn("GlassPrefs.setBackdropBlurDp", appearance)
 
     def test_filter_summary_uses_high_contrast_theme_colors(self):
         form = SHEET.split("private fun FilterTabFormDialog(", 1)[1].split("\n@Composable\nprivate fun TabNameSupportingText", 1)[0]

@@ -1,6 +1,8 @@
 package com.zycomic.app.ui.settings
 
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,20 +80,46 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
 
     @Composable
     override fun getPreferences(): List<Preference> {
-        val uiPreferences = remember { Injekt.get<UiPreferences>() }
-
         return listOf(
-            getThemeGroup(uiPreferences = uiPreferences),
             getGlassGroup(),
         )
     }
 
-    /** 背景与液态玻璃参数：封面背景模糊度 + 玻璃主体强度，实时生效。 */
+    /** 背景与液态玻璃参数：模糊度 + 玻璃强度 + 自定义图片 + 随机图源多选，实时生效。 */
     @Composable
     private fun getGlassGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
-        var backdropBlur by remember { mutableStateOf(com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp(context)) }
-        var glassStrength by remember { mutableStateOf(com.zycomic.app.ui.components.GlassPrefs.glassStrength(context)) }
+        val backdropBlur by com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp.collectAsState()
+        val glassStrength by com.zycomic.app.ui.components.GlassPrefs.glassStrength.collectAsState()
+        val customPath by com.zycomic.app.ui.components.BackdropSources.customPath.collectAsState()
+        val enabledIds by com.zycomic.app.ui.components.BackdropSources.enabled.collectAsState()
+        val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: android.net.Uri? ->
+            if (uri != null) {
+                runCatching {
+                    val dest = java.io.File(context.filesDir, "backdrop_custom.jpg")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        dest.outputStream().use { out -> input.copyTo(out) }
+                    }
+                    com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, dest.absolutePath)
+                    com.zycomic.app.ui.components.AppBackdropState.refresh()
+                }
+            }
+        }
+
+        val sourceItems = com.zycomic.app.ui.components.BackdropSources.ALL.map { source ->
+            Preference.PreferenceItem.CustomPreference(title = source.name) {
+                com.zycomic.app.ui.components.GlassSwitchRow(
+                    title = source.name,
+                    subtitle = source.url,
+                    checked = source.id in enabledIds,
+                    onCheckedChanged = { on ->
+                        com.zycomic.app.ui.components.BackdropSources.setEnabled(context, source.id, on)
+                        com.zycomic.app.ui.components.AppBackdropState.refresh()
+                    },
+                )
+            }
+        }
+
         return Preference.PreferenceGroup(
             title = "背景与液态玻璃",
             preferenceItems = persistentListOf(
@@ -104,7 +132,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         Slider(
                             value = backdropBlur,
                             onValueChange = {
-                                backdropBlur = it
                                 com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, it)
                             },
                             valueRange = 0f..24f,
@@ -120,14 +147,46 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         Slider(
                             value = glassStrength,
                             onValueChange = {
-                                glassStrength = it
                                 com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, it)
                             },
                             valueRange = 0f..1f,
                         )
                     }
                 },
-            ),
+                Preference.PreferenceItem.CustomPreference(title = "自定义背景图片") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            if (customPath.isNullOrBlank()) {
+                                "选择一张本地图片作为全局背景；设置后优先于随机图源。"
+                            } else {
+                                "已设置自定义背景（优先于随机图源）。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { pickImageLauncher.launch("image/*") }) { Text("选择图片") }
+                            if (!customPath.isNullOrBlank()) {
+                                TextButton(onClick = {
+                                    runCatching { java.io.File(customPath).delete() }
+                                    com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, null)
+                                    com.zycomic.app.ui.components.AppBackdropState.refresh()
+                                }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
+                            }
+                        }
+                    }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "随机图源（可多选）") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        Text(
+                            "未设置自定义图片时，从开启的随机图源里随机取图；全部关闭则使用默认渐变背景。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                },
+            ) + sourceItems,
         )
     }
 

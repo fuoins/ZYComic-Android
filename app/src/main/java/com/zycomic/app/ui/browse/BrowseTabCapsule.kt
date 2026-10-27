@@ -38,13 +38,14 @@ fun BrowseTabCapsule(
 ) {
     val platformAccent = rememberContentPlatformAccent(platform)
     val accent = if (isYuzongRank) MaterialTheme.colorScheme.primary else platformAccent
-    val background = if (selected) accent else accent.copy(alpha = if (isJmHome) 0.17f else 0.12f)
-    val foreground = when {
-        !selected -> accent
-        isYuzongRank -> MaterialTheme.colorScheme.onPrimary
-        accent.luminance() > 0.55f -> Color.Black
-        else -> Color.White
+    // 玻璃语言：选中 = 白玻璃胶囊底，文字始终保留平台色区分。
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val background = if (selected) {
+        Color.White.copy(alpha = if (dark) 0.18f else 0.55f)
+    } else {
+        Color.Transparent
     }
+    val foreground = accent
 
     Row(
         modifier = modifier

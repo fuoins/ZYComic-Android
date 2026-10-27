@@ -78,6 +78,7 @@ import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
+import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
 import com.zycomic.app.ui.components.glassSurface
@@ -160,11 +161,9 @@ fun SearchScreen(
             .statusBarsPadding(),
     ) {
         // 顶部搜索栏（玻璃条）
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        GlassTopBar(
+            modifier = Modifier.padding(bottom = 6.dp),
+            bottomLine = false,
         ) {
             IconButton(onClick = onClose) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
