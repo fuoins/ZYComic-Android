@@ -100,8 +100,8 @@ fun GlassShell(
     val topAlpha = glassTopAlpha * strength
     val bottomAlpha = glassBottomAlpha * strength
     // 白玻璃渐变始终绘制：磨砂正常时它是淡淡的高光层；磨砂失效时它就是玻璃本体（兜底可见）。
-    val gradientTop = if (hazeState != null) 0.12f * strength else topAlpha
-    val gradientBottom = if (hazeState != null) 0.06f * strength else bottomAlpha
+    val gradientTop = if (hazeState != null) 0.18f * strength else topAlpha
+    val gradientBottom = if (hazeState != null) 0.09f * strength else bottomAlpha
     Box(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
@@ -338,8 +338,8 @@ fun Modifier.glassSurface(
     val topAlpha = 0.30f * strength
     val bottomAlpha = 0.16f * strength
     // 白玻璃渐变始终绘制：磨砂正常时是淡高光层；磨砂失效时就是玻璃本体（兜底可见）。
-    val gradientTop = if (hazeState != null) 0.12f * strength else topAlpha
-    val gradientBottom = if (hazeState != null) 0.06f * strength else bottomAlpha
+    val gradientTop = if (hazeState != null) 0.18f * strength else topAlpha
+    val gradientBottom = if (hazeState != null) 0.09f * strength else bottomAlpha
     return this
         .clip(shape)
         .then(

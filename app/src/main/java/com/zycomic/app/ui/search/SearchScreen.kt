@@ -161,9 +161,12 @@ fun SearchScreen(
     val backdropEntry by com.zycomic.app.ui.components.AppBackdropState.current.collectAsState()
     val searchHazeState = rememberHazeState()
     CompositionLocalProvider(com.zycomic.app.ui.components.LocalAppHaze provides searchHazeState) {
-    Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
-        // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/兜底渐变）。
-        com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 模糊源只包背景层（Haze：玻璃必须与 source 平级，不能是其后代）。
+        Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
+            // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/兜底渐变）。
+            com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
+        }
     Column(
         modifier = Modifier
             .fillMaxSize()

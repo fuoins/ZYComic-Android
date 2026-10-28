@@ -456,11 +456,15 @@ fun AppContent(
             }
             AppBackdropState.refresh(pageKey)
         }
-        // 真磨砂玻璃的模糊源：整个主界面内容区（背景 + 页面）作为被模糊对象。
+        // 真磨砂玻璃的模糊源：只标记**背景层**。Haze 1.7 的 hazeEffect 只绘制
+        // “zIndex 低于最近祖先 hazeSource”的模糊区——玻璃必须与 source 平级（不能是 source 的后代），
+        // 否则会被过滤掉、整层透明。
         val hazeState = rememberHazeState()
         CompositionLocalProvider(LocalAppHaze provides hazeState) {
-        Box(modifier = Modifier.fillMaxSize().hazeSource(state = hazeState)) {
-            AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize().hazeSource(state = hazeState)) {
+                AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
+            }
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 containerColor = Color.Transparent,
