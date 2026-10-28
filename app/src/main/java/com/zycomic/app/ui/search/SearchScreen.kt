@@ -183,7 +183,7 @@ fun SearchScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp),
+                    .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp, part = com.zycomic.app.ui.components.GlassPart.SEARCH),
             ) {
                 OutlinedTextField(
                     value = keyword,

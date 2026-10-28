@@ -44,67 +44,59 @@ import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 
 /**
- * 液态玻璃组件库（全 App 统一外观语言）。
+ * 液态玻璃组件库（全 App 统一外观语言，但**每类部件参数独立**）。
  *
- * 真 backdrop blur：主界面把整个内容区标记为模糊源（[LocalAppHaze] 的 HazeState），
- * 所有玻璃组件通过 Haze 对**玻璃后面的内容**做实时模糊（Android 12+ RenderEffect，
- * 低版本自动退化为半透明近似），再叠淡白玻璃渐变 + 可选描边，视觉等同 CSS backdrop-filter。
- * 玻璃本体无色（跟随深浅色），平台色只在文字/图标上表达。
+ * 真 backdrop blur：主界面把背景层标记为模糊源（[LocalAppHaze]），玻璃通过 Haze 对
+ * 玻璃后面的背景做实时模糊（Android 12+ RenderEffect），再叠白玻璃 + 可选描边。
+ * 底栏/顶栏/按钮/标签/封面名字条/搜索框各自有独立的模糊度与透明度（外观页可调）。
  */
 
 /** 主界面提供的全局模糊源；玻璃组件从这里取 HazeState。 */
 val LocalAppHaze = staticCompositionLocalOf<HazeState?> { null }
 
-private data class GlassSpec(
-    val glassTop: Color,
-    val glassBottom: Color,
-    val highlight: Color,
-    val edge: Color,
-    val shadow: Color,
-)
-
 @Composable
-private fun glassSpec(): GlassSpec {
+private fun glassDark(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+/** 当前部件的玻璃参数：模糊半径 + 白玻璃透明度（都乘全局强度）。 */
+@Composable
+private fun resolveGlass(part: GlassPart, blurOverride: Dp?, alphaOverride: Float?): Pair<Dp, Float> {
     val strength by GlassPrefs.glassStrength.collectAsState()
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    return GlassSpec(
-        glassTop = Color.White.copy(alpha = (if (dark) 0.08f else 0.30f) * strength),
-        glassBottom = Color.White.copy(alpha = (if (dark) 0.035f else 0.16f) * strength),
-        highlight = Color.White.copy(alpha = (if (dark) 0.22f else 0.78f) * (0.4f + 0.6f * strength)),
-        edge = Color.White.copy(alpha = (if (dark) 0.16f else 0.55f) * (0.5f + 0.5f * strength)),
-        shadow = Color.Black.copy(alpha = if (dark) 0.30f else 0.05f),
-    )
+    val partBlur by GlassPrefs.partBlur.collectAsState()
+    val partAlpha by GlassPrefs.partAlpha.collectAsState()
+    val blur = blurOverride ?: (partBlur[part.key] ?: part.defaultBlurDp).dp
+    val alpha = (alphaOverride ?: (partAlpha[part.key] ?: part.defaultAlpha)) * strength
+    return blur to alpha
 }
 
 /**
- * 玻璃外壳：真 backdrop blur（Haze）+ 淡白玻璃渐变 + 可选平台色淡染/描边。
- * 无 HazeState 时退化为纯渐变玻璃。
+ * 玻璃外壳：真 backdrop blur（Haze）+ 淡白玻璃 + 可选平台色淡染/描边。
+ * 无 HazeState 时退化为纯渐变玻璃（保证可见）。
  */
 @Composable
 fun GlassShell(
     modifier: Modifier = Modifier,
     shape: RoundedCornerShape = RoundedCornerShape(18.dp),
     radius: Dp = 18.dp,
+    part: GlassPart = GlassPart.BUTTON,
     tintLayer: Color = Color.Transparent,
     stroke: Boolean = false,
-    glassTopAlpha: Float = 0.30f,
-    glassBottomAlpha: Float = 0.16f,
-    blurRadius: Dp = 18.dp,
+    alphaOverride: Float? = null,
+    blurOverride: Dp? = null,
     elevated: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val hazeState = LocalAppHaze.current
-    val strength by GlassPrefs.glassStrength.collectAsState()
-    val spec = glassSpec()
+    val dark = glassDark()
+    val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
-    val topAlpha = glassTopAlpha * strength
-    val bottomAlpha = glassBottomAlpha * strength
-    // 白玻璃渐变始终绘制：磨砂正常时它是淡淡的高光层；磨砂失效时它就是玻璃本体（兜底可见）。
-    val gradientTop = if (hazeState != null) 0.18f * strength else topAlpha
-    val gradientBottom = if (hazeState != null) 0.09f * strength else bottomAlpha
+    val edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f)
+    val shadowColor = Color.Black.copy(alpha = if (dark) 0.30f else 0.05f)
+    // Haze 正常时白玻璃只作薄高光层；无 Haze 时它就是玻璃本体。
+    val gradientTop = if (hazeState != null) alpha * 0.38f else alpha
+    val gradientBottom = if (hazeState != null) alpha * 0.18f else alpha * 0.55f
     Box(
         modifier = modifier
-            .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = spec.shadow, spotColor = spec.shadow) else Modifier)
+            .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = shadowColor, spotColor = shadowColor) else Modifier)
             .clip(shape)
             .then(
                 if (hazeState != null) {
@@ -112,11 +104,11 @@ fun GlassShell(
                         state = hazeState,
                         style = HazeStyle(
                             backgroundColor = Color.Transparent,
-                            tint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
-                            blurRadius = blurRadius,
+                            tint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
+                            blurRadius = blur,
                             noiseFactor = 0f,
-                            // 平台不支持真模糊时（API<31）用 scrim 兜底，保证玻璃可见。
-                            fallbackTint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
+                            // 平台不支持真模糊时用 scrim 兜底，保证玻璃可见。
+                            fallbackTint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
                         ),
                     )
                 } else {
@@ -128,7 +120,7 @@ fun GlassShell(
                 if (tintLayer.alpha > 0f) drawRect(tintLayer)
                 if (stroke) {
                     drawRoundRect(
-                        color = spec.edge,
+                        color = edge,
                         style = Stroke(width = 1.dp.toPx()),
                         cornerRadius = CornerRadius(radiusPx, radiusPx),
                     )
@@ -143,6 +135,7 @@ fun GlassShell(
 fun GlassCard(
     modifier: Modifier = Modifier,
     radius: Dp = 18.dp,
+    part: GlassPart = GlassPart.BUTTON,
     accent: Color? = null,
     accentAlpha: Float = 0.10f,
     elevated: Boolean = true,
@@ -152,6 +145,7 @@ fun GlassCard(
         modifier = modifier,
         shape = RoundedCornerShape(radius),
         radius = radius,
+        part = part,
         tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent,
         elevated = elevated,
         content = content,
@@ -172,6 +166,7 @@ fun GlassPreferenceRow(
     GlassCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
         radius = 18.dp,
+        part = GlassPart.BUTTON,
     ) {
         Row(
             modifier = Modifier
@@ -209,7 +204,7 @@ fun GlassPreferenceRow(
     }
 }
 
-/** 玻璃开关行（设置项开关的统一形态，开关为中性白色样式）。 */
+/** 玻璃开关行（设置项开关的统一形态；开关用中性对比色，开启一眼可见）。 */
 @Composable
 fun GlassSwitchRow(
     modifier: Modifier = Modifier,
@@ -226,17 +221,17 @@ fun GlassSwitchRow(
         icon = icon,
         onPreferenceClick = { onCheckedChanged(!checked) },
         widget = {
-            val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+            val dark = glassDark()
             Switch(
                 checked = checked,
                 onCheckedChange = { onCheckedChanged(it) },
                 modifier = Modifier.padding(start = 8.dp),
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color.White.copy(alpha = if (dark) 0.30f else 0.60f),
+                    checkedThumbColor = if (dark) Color(0xFF20222A) else Color.White,
+                    checkedTrackColor = if (dark) Color.White.copy(alpha = 0.75f) else Color(0xFF3A3F4B),
                     checkedBorderColor = Color.Transparent,
                     uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
-                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.12f),
+                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.16f),
                     uncheckedBorderColor = Color.Transparent,
                 ),
             )
@@ -251,17 +246,19 @@ fun GlassTopBar(
     bottomLine: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val spec = glassSpec()
+    val dark = glassDark()
+    val highlight = Color.White.copy(alpha = if (dark) 0.22f else 0.78f)
+    val edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .glassSurface(shape = RoundedCornerShape(0.dp), radius = 0.dp, stroke = false)
+            .glassSurface(shape = RoundedCornerShape(0.dp), radius = 0.dp, part = GlassPart.TOP_BAR, stroke = false)
             .drawBehind {
                 drawLine(
                     brush = Brush.horizontalGradient(
                         0f to Color.Transparent,
-                        0.22f to spec.highlight,
-                        0.78f to spec.highlight,
+                        0.22f to highlight,
+                        0.78f to highlight,
                         1f to Color.Transparent,
                     ),
                     start = Offset(size.width * 0.05f, 0.8f),
@@ -270,7 +267,7 @@ fun GlassTopBar(
                 )
                 if (bottomLine) {
                     drawLine(
-                        color = spec.edge,
+                        color = edge,
                         start = Offset(0f, size.height - 0.5f),
                         end = Offset(size.width, size.height - 0.5f),
                         strokeWidth = 1.dp.toPx(),
@@ -281,12 +278,13 @@ fun GlassTopBar(
     )
 }
 
-/** 玻璃胶囊 Chip（标签栏选中态、平台选择器等）。[accent] 非空时叠加平台色淡染。 */
+/** 玻璃胶囊 Chip（标签栏、平台选择器等）。[accent] 非空时叠加平台色淡染。 */
 @Composable
 fun GlassChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    part: GlassPart = GlassPart.TAB,
     accent: Color? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -306,6 +304,7 @@ fun GlassChip(
         modifier = modifier,
         shape = RoundedCornerShape(50),
         radius = 999.dp,
+        part = part,
         tintLayer = tintLayer,
         stroke = true,
         elevated = false,
@@ -321,25 +320,26 @@ fun GlassChip(
     )
 }
 
-/** 玻璃背景 modifier：给任意现有组件（如搜索框容器、操作条）叠一层真磨砂玻璃。 */
+/** 玻璃背景 modifier：给任意现有组件（搜索框、操作条、标签胶囊、封面名字条）叠真磨砂玻璃。 */
 @Composable
 fun Modifier.glassSurface(
     shape: RoundedCornerShape = RoundedCornerShape(14.dp),
     radius: Dp = 14.dp,
+    part: GlassPart = GlassPart.BUTTON,
     accent: Color? = null,
     accentAlpha: Float = 0.10f,
     stroke: Boolean = true,
+    alphaOverride: Float? = null,
+    blurOverride: Dp? = null,
 ): Modifier {
     val hazeState = LocalAppHaze.current
-    val strength by GlassPrefs.glassStrength.collectAsState()
-    val spec = glassSpec()
+    val dark = glassDark()
+    val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
-    val topAlpha = 0.30f * strength
-    val bottomAlpha = 0.16f * strength
-    // 白玻璃渐变始终绘制：磨砂正常时是淡高光层；磨砂失效时就是玻璃本体（兜底可见）。
-    val gradientTop = if (hazeState != null) 0.18f * strength else topAlpha
-    val gradientBottom = if (hazeState != null) 0.09f * strength else bottomAlpha
+    val edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f)
+    val gradientTop = if (hazeState != null) alpha * 0.38f else alpha
+    val gradientBottom = if (hazeState != null) alpha * 0.18f else alpha * 0.55f
     return this
         .clip(shape)
         .then(
@@ -348,11 +348,10 @@ fun Modifier.glassSurface(
                     state = hazeState,
                     style = HazeStyle(
                         backgroundColor = Color.Transparent,
-                        tint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
-                        blurRadius = 18.dp,
+                        tint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
+                        blurRadius = blur,
                         noiseFactor = 0f,
-                        // 平台不支持真模糊时（API<31）用 scrim 兜底，保证玻璃可见。
-                        fallbackTint = HazeTint(Color.White.copy(alpha = topAlpha), BlendMode.SrcOver),
+                        fallbackTint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
                     ),
                 )
             } else {
@@ -364,7 +363,7 @@ fun Modifier.glassSurface(
             if (tintLayer.alpha > 0f) drawRect(tintLayer)
             if (stroke) {
                 drawRoundRect(
-                    color = spec.edge,
+                    color = edge,
                     style = Stroke(width = 1.dp.toPx()),
                     cornerRadius = CornerRadius(radiusPx, radiusPx),
                 )

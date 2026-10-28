@@ -819,9 +819,8 @@ private fun GlassBottomBar(content: @Composable RowScope.() -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         shape = RoundedCornerShape(50),
         radius = 999.dp,
+        part = com.zycomic.app.ui.components.GlassPart.BOTTOM_BAR,
         stroke = true,
-        glassTopAlpha = if (dark) 0.16f else 0.55f,
-        glassBottomAlpha = if (dark) 0.08f else 0.20f,
         elevated = false,
     ) {
         Row(
