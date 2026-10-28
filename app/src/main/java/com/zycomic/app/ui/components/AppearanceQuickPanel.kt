@@ -1,5 +1,7 @@
 package com.zycomic.app.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +39,12 @@ fun AppearanceQuickPanel(
         radius = 20.dp,
         part = GlassPart.CARD,
     ) {
+        // 浮窗盖在真实页面上，纯透明玻璃会看不清字：垫一层近实色的 surface（保留玻璃边缘与高光）。
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)),
+        )
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier

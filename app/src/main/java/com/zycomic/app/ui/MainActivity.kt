@@ -385,11 +385,6 @@ fun AppContent(
         Toast.makeText(context, "${prefix}进入，后台持续测速并自动更新最快节点", Toast.LENGTH_SHORT).show()
     }
 
-    // 首启向导是否已完成（持久化）；未完成则测速结束后先进入 3 页向导
-    var onboardingDone by remember {
-        mutableStateOf(com.zycomic.app.ui.onboarding.OnboardingPrefs.isDone(context))
-    }
-
     // 设置子页面 Dialog 状态
     val settingsDialogSaver = androidx.compose.runtime.saveable.Saver<SettingsDialog?, String>(
         save = { it?.name },
@@ -443,9 +438,8 @@ fun AppContent(
     val openAbout = { settingsDialog = SettingsDialog.About }
     val blockGayTags = { requireLogin { showGayConfirm = true } }
 
-    // 测速完成前不渲染底层页面，避免页面用默认线路发起请求；
-    // 测速结束后若首启向导未完成，则先全屏进入向导，完成后才进主界面
-    if (!blockingSpeedTest && onboardingDone) {
+    // 测速完成前不渲染底层页面，避免页面用默认线路发起请求；测速结束后直接进主界面。
+    if (!blockingSpeedTest) {
         val browseVm = remember { BrowseViewModel() }
         val libraryVm = remember { LibraryViewModel(mode = 0) }
         val historyVm = remember { HistoryViewModel() }
@@ -584,10 +578,6 @@ fun AppContent(
                         onOpenDeveloperSettings = openDeveloperSettings,
                         onOpenDataStorage = openDataStorage,
                         onOpenAbout = openAbout,
-                        onReplayOnboarding = {
-                            com.zycomic.app.ui.onboarding.OnboardingPrefs.setDone(context, false)
-                            onboardingDone = false
-                        },
                         guideInitialPlatform = browseVm.currentPlatform.value,
                     )
                 }
@@ -595,12 +585,6 @@ fun AppContent(
         }
             }
         }
-    } else if (!blockingSpeedTest) {
-        // 测速已结束但首启向导未完成：全屏进入 3 页向导
-        com.zycomic.app.ui.onboarding.OnboardingHost(
-            settingsVm = settingsVm,
-            onFinish = { onboardingDone = true },
-        )
     } else {
         val startupMode by PlatformSpeedTestCoordinator.testMode.collectAsState()
         val platformStatuses by PlatformSpeedTestCoordinator.platformStartupStatuses.collectAsState()

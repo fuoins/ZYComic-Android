@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
  * 漫画网格骨架屏：严格复用真实网格的尺寸参数。
  *
  * - 列数与真实网格一致（[columns]）
- * - 间距 contentPadding 12dp / 横竖 arrangement spacedBy 12dp
+ * - 间距 contentPadding 6dp / 横竖 arrangement spacedBy 6dp（与真实网格一致）
  * - 封面占位用 aspectRatio(3/4)，与真实卡片同比例，不写死高度
  * - 标题占位仅舒适模式(displayMode==1)在封面下方绘制；
  *   紧凑模式(0)标题叠加在封面上、仅封面模式(2)无标题，均不画下方标题条
@@ -36,9 +36,9 @@ fun MangaGridSkeleton(
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = modifier.fillMaxSize(),
     ) {
         items(columns * 8) {

@@ -23,8 +23,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,11 +42,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.browse.BrowseGuideDialog
+import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.ui.components.GlassCard
 import com.zycomic.app.ui.components.GlassPreferenceRow
 import com.zycomic.app.ui.components.GlassTopBar
@@ -70,7 +68,6 @@ fun SettingsMainScreen(
     onOpenDeveloperSettings: () -> Unit,
     onOpenDataStorage: () -> Unit,
     onOpenAbout: () -> Unit,
-    onReplayOnboarding: () -> Unit,
     guideInitialPlatform: ContentPlatform,
 ) {
     val context = LocalContext.current
@@ -189,14 +186,6 @@ fun SettingsMainScreen(
             }
             item {
                 GlassPreferenceRow(
-                    title = "新手引导",
-                    subtitle = "重新查看使用说明",
-                    icon = Icons.Outlined.Info,
-                    onPreferenceClick = onReplayOnboarding,
-                )
-            }
-            item {
-                GlassPreferenceRow(
                     title = "关于",
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = onOpenAbout,
@@ -244,7 +233,6 @@ private fun SettingsPlatformSwitch(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val accent = rememberContentPlatformAccent(platform)
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     GlassCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
         radius = 16.dp,
@@ -256,18 +244,7 @@ private fun SettingsPlatformSwitch(
         ) {
             // 平台区分只靠字体颜色，玻璃本体无色。
             Text(title, modifier = Modifier.weight(1f), color = accent, style = MaterialTheme.typography.bodyMedium)
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = if (dark) Color(0xFF20222A) else Color.White,
-                    checkedTrackColor = if (dark) Color.White.copy(alpha = 0.75f) else Color(0xFF3A3F4B),
-                    checkedBorderColor = Color.Transparent,
-                    uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
-                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.16f),
-                    uncheckedBorderColor = Color.Transparent,
-                ),
-            )
+            AppSwitch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
 }

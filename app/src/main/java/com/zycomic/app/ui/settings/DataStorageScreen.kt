@@ -8,7 +8,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -18,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.zycomic.app.net.DevConfig
+import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.ui.components.PicacgImageLoader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import tachiyomi.i18n.kmk.KMR
@@ -101,7 +101,7 @@ fun DataStorageScreen(
                     title = stringResource(KMR.strings.picacg_image_cache_startup_title),
                     subtitle = stringResource(KMR.strings.picacg_image_cache_startup_summary),
                     widget = {
-                        Switch(
+                        AppSwitch(
                             checked = autoClear,
                             onCheckedChange = {
                                 autoClear = it

@@ -804,8 +804,11 @@ private fun BrowseTabContent(
             )
         } else if (pageMode == com.zycomic.app.ui.picacg.PicacgBrowsePageMode.RANKING) {
             // Compose only the static header during the swipe; keep data effects in the selected page.
-            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                com.zycomic.app.ui.picacg.PicacgRankingChips(selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode())
+            Column(Modifier.fillMaxSize().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.zycomic.app.ui.picacg.PicacgRankingChips(
+                    selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode(),
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
             }
         } else {
             Box(Modifier.fillMaxSize())

@@ -90,9 +90,10 @@ internal fun PicacgRankingMode.toFeedMode(): PicacgFeedMode = when (this) {
 @Composable
 internal fun PicacgRankingChips(
     selectedMode: PicacgFeedMode = PicacgFeedMode.LEADERBOARD_24H,
+    modifier: Modifier = Modifier,
     onSelectMode: (PicacgFeedMode) -> Unit = {},
 ) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    LazyRow(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         items(
             items = listOf(
                 PicacgFeedMode.LEADERBOARD_24H,
@@ -302,15 +303,25 @@ fun PicacgBrowseScreen(
         PicacgBrowsePrefs.save(context, next)
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    // 网格自己带 6dp 页边距（与收藏页 / 搜索页 / JM 首页完全一致）；
+    // 之前根布局额外的 12dp 会把哔咔排行/分类的封面挤小一圈。
+    Column(Modifier.fillMaxSize().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (pageMode == PicacgBrowsePageMode.RANKING) {
-            PicacgRankingChips(selectedMode = mode) { item ->
+            PicacgRankingChips(
+                selectedMode = mode,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            ) { item ->
                 selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter)
             }
         }
         if (!loggedIn) {
-            Text(stringResource(KMR.strings.picacg_session_required))
-            Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(stringResource(KMR.strings.picacg_session_required))
+                Button(onClick = onRequireLogin) { Text(stringResource(KMR.strings.picacg_login_action)) }
+            }
         } else {
             if (loading && mangas.isEmpty() && !hasSnapshot) {
                 if (displayMode == 3) {

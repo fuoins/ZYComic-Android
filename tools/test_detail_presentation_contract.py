@@ -226,8 +226,9 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         self.assertIn("if (isActive) {\n            com.zycomic.app.ui.picacg.PicacgBrowseScreen(", selected)
         self.assertNotIn("vm.mainTab.value", page)
         self.assertIn("pageMode = pageMode,", selected)
-        self.assertIn("com.zycomic.app.ui.picacg.PicacgRankingChips(selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode())", preview)
-        self.assertIn("padding(horizontal = 12.dp, vertical = 8.dp)", preview)
+        self.assertIn("com.zycomic.app.ui.picacg.PicacgRankingChips(", preview)
+        self.assertIn("selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode()", preview)
+        self.assertIn("Modifier.padding(horizontal = 12.dp)", preview)
         for forbidden in ("PicacgBrowseScreen(", "Repository", "LaunchedEffect", "selectMainTab"):
             self.assertNotIn(forbidden, preview)
 
@@ -245,7 +246,8 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         for forbidden in ("Repository", "LaunchedEffect", "collectAsState"):
             self.assertNotIn(forbidden, row)
         active = self.browse.split("if (pageMode == PicacgBrowsePageMode.RANKING)", 1)[1].split("if (!loggedIn)", 1)[0]
-        self.assertIn("PicacgRankingChips(selectedMode = mode)", active)
+        self.assertIn("PicacgRankingChips(", active)
+        self.assertIn("selectedMode = mode,", active)
         self.assertIn('selectMode(item, if (item == PicacgFeedMode.LATEST) PicacgBrowseFilter(sort = "dd") else filter)', active)
 
     def test_pager_selection_still_waits_for_settle_without_prefetch(self):

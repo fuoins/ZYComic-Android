@@ -24,7 +24,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +53,7 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.ui.components.AppearanceColors
 import com.zycomic.app.ui.components.AppearancePreviewState
 import com.zycomic.app.ui.components.AppearanceUiState
@@ -323,14 +323,17 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     )
                 },
                 Preference.PreferenceItem.CustomPreference(title = "开关颜色") {
+                    val accent = uiAccent ?: themePrimary
                     AppearanceColorRow(
                         title = "开关颜色",
-                        subtitle = switchColor?.let { "开启态 ${AppearanceColors.hex(it)}" } ?: "跟随系统中性样式；点此自定义",
-                        color = switchColor ?: themePrimary,
+                        // 默认就是界面主色，显示什么颜色开关就是什么颜色，不再出现「显示系统色、实际黑色」。
+                        subtitle = switchColor?.let { "开启态 ${AppearanceColors.hex(it)}" }
+                            ?: "跟随界面主色 ${AppearanceColors.hex(accent)}；点此自定义",
+                        color = switchColor ?: accent,
                         onClick = {
                             target = AppearanceColorTarget(
                                 title = "开关颜色",
-                                current = switchColor ?: themePrimary,
+                                current = switchColor ?: accent,
                                 apply = { ctx, color -> AppearanceColors.setSwitchColor(ctx, color) },
                                 reset = { ctx -> AppearanceColors.setSwitchColor(ctx, null) },
                             )
@@ -587,7 +590,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(end = 6.dp),
                                     )
-                                    Switch(
+                                    AppSwitch(
                                         checked = frosted,
                                         onCheckedChange = { GlassPrefs.setPartFrosted(context, part, it) },
                                     )

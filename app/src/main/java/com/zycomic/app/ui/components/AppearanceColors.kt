@@ -40,7 +40,7 @@ object AppearanceColors {
     private val _partTextColors = MutableStateFlow<Map<String, Color>>(emptyMap())
     val partTextColors: StateFlow<Map<String, Color>> = _partTextColors.asStateFlow()
 
-    /** 开关（设置项里的 Switch）开启态颜色；null = 跟随系统中性样式。 */
+    /** 开关（设置项里的 Switch）开启态颜色；null = 跟随界面主色（默认 #0054D6）。 */
     private val _switchColor = MutableStateFlow<Color?>(null)
     val switchColor: StateFlow<Color?> = _switchColor.asStateFlow()
 

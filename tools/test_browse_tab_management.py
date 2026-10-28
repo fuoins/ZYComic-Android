@@ -110,7 +110,8 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
         self.assertIn("PicacgRankingMode.entries.forEach", editor)
         self.assertIn("selected = mode == option", editor)
         self.assertIn("initialRankingMode.toFeedMode()", PICACG)
-        self.assertIn("PicacgRankingChips(selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode())", BROWSE)
+        self.assertIn("PicacgRankingChips(", BROWSE)
+        self.assertIn("selectedMode = (item?.picacgRankingMode ?: PicacgRankingMode.H24).toFeedMode()", BROWSE)
 
     def test_jm_add_and_edit_category_forms_keep_sort_visible_and_save_draft(self):
         editor = _function_body(SHEET, "private fun JmTabFilterEditor(", "private fun FilterTabFormDialog(")

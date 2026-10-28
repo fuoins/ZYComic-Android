@@ -22,8 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +46,7 @@ import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.ui.components.FilterChip
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -146,18 +145,17 @@ fun SettingsScreen() {
         )
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(KMR.strings.startup_enable_manwa), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = manwaAccent)
-            Switch(
+            AppSwitch(
                 checked = !platformSettings.disableManwa,
                 onCheckedChange = { enabled ->
                     val accepted = StartupPlatformPolicy.setSettingsManwaEnabled(enabled)
                     Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
                 },
-                colors = SwitchDefaults.colors(checkedThumbColor = manwaAccent, checkedTrackColor = manwaAccent.copy(alpha = 0.42f), checkedBorderColor = manwaAccent),
             )
         }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(KMR.strings.startup_enable_picacg), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = picacgAccent)
-            Switch(
+            AppSwitch(
                 checked = !platformSettings.disablePicacg,
                 onCheckedChange = { enabled ->
                     val accepted = StartupPlatformPolicy.setSettingsPicacgEnabled(enabled)
@@ -166,18 +164,16 @@ fun SettingsScreen() {
                         !enabled -> Toast.makeText(context, restartRequiredMessage, Toast.LENGTH_SHORT).show()
                     }
                 },
-                colors = SwitchDefaults.colors(checkedThumbColor = picacgAccent, checkedTrackColor = picacgAccent.copy(alpha = 0.42f), checkedBorderColor = picacgAccent),
             )
         }
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(KMR.strings.startup_enable_jm), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = jmAccent)
-            Switch(
+            AppSwitch(
                 checked = !platformSettings.disableJm,
                 onCheckedChange = { enabled ->
                     val accepted = StartupPlatformPolicy.setSettingsJmEnabled(enabled)
                     Toast.makeText(context, if (accepted) restartRequiredMessage else keepOneSourceMessage, Toast.LENGTH_SHORT).show()
                 },
-                colors = SwitchDefaults.colors(checkedThumbColor = jmAccent, checkedTrackColor = jmAccent.copy(alpha = 0.42f), checkedBorderColor = jmAccent),
             )
         }
 
@@ -191,7 +187,7 @@ fun SettingsScreen() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = filterEnabled, onCheckedChange = { vm.setFilterEnabled(it) })
+            AppSwitch(checked = filterEnabled, onCheckedChange = { vm.setFilterEnabled(it) })
         }
 
         // ===== 标签屏蔽添加 =====
@@ -327,7 +323,7 @@ fun SettingsScreen() {
                     Text("JM 自动选线", style = MaterialTheme.typography.titleSmall)
                     Text("关闭后点击线路可固定为手动模式；状态与 Manwa 分开保存。", style = MaterialTheme.typography.bodySmall)
                 }
-                Switch(
+                AppSwitch(
                     checked = jmState.autoSelect,
                     onCheckedChange = { JmRouteManager.setAutoSelectEnabled(it) },
                 )

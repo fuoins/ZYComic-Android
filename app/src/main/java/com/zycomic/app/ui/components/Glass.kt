@@ -245,23 +245,56 @@ fun GlassSwitchRow(
         icon = icon,
         onPreferenceClick = { onCheckedChanged(!checked) },
         widget = {
-            val dark = glassDark()
-            val switchTint by AppearanceColors.switchColor.collectAsState()
-            Switch(
+            AppSwitch(
                 checked = checked,
                 onCheckedChange = { onCheckedChanged(it) },
                 modifier = Modifier.padding(start = 8.dp),
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = switchTint?.let { if (it.luminance() > 0.55f) Color.Black else Color.White }
-                        ?: if (dark) Color(0xFF20222A) else Color.White,
-                    checkedTrackColor = switchTint ?: if (dark) Color.White.copy(alpha = 0.75f) else Color(0xFF3A3F4B),
-                    checkedBorderColor = switchTint ?: Color.Transparent,
-                    uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
-                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.16f),
-                    uncheckedBorderColor = Color.Transparent,
-                ),
             )
         },
+    )
+}
+
+/** 开关统一颜色：外观里自定义优先，否则跟随界面主色（默认 #0054D6）。 */
+@Composable
+fun appSwitchTint(): Color {
+    val custom by AppearanceColors.switchColor.collectAsState()
+    val accent by AppearanceColors.uiAccent.collectAsState()
+    return custom ?: accent ?: AppearanceColors.DEFAULT_UI_ACCENT
+}
+
+/**
+ * 全站统一开关：开启态 = 外观里的「开关颜色」（未自定义时跟随界面主色）。
+ *
+ * 设置页的三平台开关、各子页面开关都必须用它，否则改了开关颜色会有一部分不生效。
+ */
+@Composable
+fun AppSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val tint = appSwitchTint()
+    val dark = glassDark()
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        enabled = enabled,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = if (tint.luminance() > 0.55f) Color.Black else Color.White,
+            checkedTrackColor = tint,
+            checkedBorderColor = Color.Transparent,
+            uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
+            uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.16f),
+            uncheckedBorderColor = Color.Transparent,
+            disabledCheckedThumbColor = Color.White.copy(alpha = 0.72f),
+            disabledCheckedTrackColor = tint.copy(alpha = 0.38f),
+            disabledCheckedBorderColor = Color.Transparent,
+            disabledUncheckedThumbColor = Color.White.copy(alpha = 0.55f),
+            disabledUncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f),
+            disabledUncheckedBorderColor = Color.Transparent,
+        ),
     )
 }
 
