@@ -7,6 +7,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -27,15 +29,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -45,6 +50,15 @@ import com.materialkolor.PaletteStyle
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.AppearanceColors
+import com.zycomic.app.ui.components.BackdropSources
+import com.zycomic.app.ui.components.ColorPickerDialog
+import com.zycomic.app.ui.components.GlassPart
+import com.zycomic.app.ui.components.GlassPrefs
+import com.zycomic.app.ui.components.GlassPreferenceRow
+import com.zycomic.app.ui.components.GlassSwitchRow
+import com.zycomic.app.ui.components.glassSurface
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.domain.ui.model.AppTheme
@@ -52,12 +66,14 @@ import eu.kanade.domain.ui.model.TabletUiMode
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.more.settings.PreferenceScreen
 import eu.kanade.presentation.more.settings.screen.SearchableSettings
 import eu.kanade.presentation.more.settings.screen.appearance.AppCustomThemeColorPickerScreen
 import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.ThemeColorPickerWidget
+import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
@@ -88,57 +104,128 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         return listOf(
             getColorGroup(),
             getGlassGroup(),
+            getBackdropGroup(),
             getConfigGroup(),
         )
+    }
+
+    /** 标签页式外观页：颜色 / 背景与玻璃 / 背景图 / 配置备份。 */
+    @Composable
+    override fun Content() {
+        val handleBack = LocalBackPress.current
+        var selectedTab by rememberSaveable { mutableStateOf(0) }
+        val tabs = listOf("颜色", "背景与玻璃", "背景图", "配置备份")
+
+        Scaffold(
+            topBar = { scrollBehavior ->
+                AppBar(
+                    title = stringResource(getTitleRes()),
+                    navigateUp = handleBack,
+                    scrollBehavior = scrollBehavior,
+                )
+            },
+        ) { contentPadding ->
+            Column(modifier = Modifier.padding(contentPadding)) {
+                AppearanceTabBar(tabs = tabs, selected = selectedTab, onSelect = { selectedTab = it })
+                key(selectedTab) {
+                    PreferenceScreen(
+                        items = listOf(
+                            when (selectedTab) {
+                                0 -> getColorGroup()
+                                1 -> getGlassGroup()
+                                2 -> getBackdropGroup()
+                                else -> getConfigGroup()
+                            },
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
 
     /** 颜色：玻璃染色 / 界面主色 / 三个平台与宇总排行的标识色。 */
     @Composable
     private fun getColorGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
-        val glassTint by com.zycomic.app.ui.components.AppearanceColors.glassTint.collectAsState()
-        val uiAccent by com.zycomic.app.ui.components.AppearanceColors.uiAccent.collectAsState()
-        val yuzong by com.zycomic.app.ui.components.AppearanceColors.yuzong.collectAsState()
+        val glassTint by AppearanceColors.glassTint.collectAsState()
+        val partTints by AppearanceColors.partTints.collectAsState()
+        val uiAccent by AppearanceColors.uiAccent.collectAsState()
         val manwa by ContentPlatformAccentPrefs.manwa.collectAsState()
         val picacg by ContentPlatformAccentPrefs.picacg.collectAsState()
         val jm by ContentPlatformAccentPrefs.jm.collectAsState()
         var target by remember { mutableStateOf<AppearanceColorTarget?>(null) }
+        var applyAllConfirm by remember { mutableStateOf(false) }
         val themePrimary = MaterialTheme.colorScheme.primary
 
         val group = Preference.PreferenceGroup(
             title = "颜色",
             preferenceItems = persistentListOf(
                 Preference.PreferenceItem.CustomPreference(title = "玻璃颜色") {
-                    AppearanceColorRow(
-                        title = "玻璃颜色",
-                        subtitle = "所有液态玻璃的本体颜色（默认白）",
-                        color = glassTint,
-                        onClick = {
-                            target = AppearanceColorTarget("玻璃颜色", glassTint) { ctx, color ->
-                                com.zycomic.app.ui.components.AppearanceColors.setGlassTint(ctx, color)
-                            }
-                        },
-                    )
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        AppearanceColorRow(
+                            title = "全部玻璃颜色",
+                            subtitle = "默认 ${AppearanceColors.hex(glassTint)}；未单独设置的部件都使用这个颜色",
+                            color = glassTint,
+                            onClick = {
+                                target = AppearanceColorTarget("全部玻璃颜色", glassTint) { ctx, color ->
+                                    AppearanceColors.setGlassTint(ctx, color)
+                                }
+                            },
+                        )
+                        GlassPreferenceRow(
+                            title = "一键应用到所有玻璃",
+                            subtitle = "把当前颜色套到全部 ${GlassPart.entries.size} 类玻璃，并清除各部件单独设置",
+                            onPreferenceClick = { applyAllConfirm = true },
+                        )
+                    }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "各部件玻璃颜色") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text(
+                            "每类玻璃可以单独指定颜色；不设置则跟随「全部玻璃颜色」。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                        GlassPart.entries.forEach { part ->
+                            val overridden = partTints.containsKey(part.key)
+                            val current = partTints[part.key] ?: glassTint
+                            AppearanceColorRow(
+                                title = part.label,
+                                subtitle = if (overridden) {
+                                    "已单独设置 ${AppearanceColors.hex(current)}"
+                                } else {
+                                    "跟随全局 ${AppearanceColors.hex(glassTint)}"
+                                },
+                                color = current,
+                                onClick = {
+                                    target = AppearanceColorTarget(part.label, current) { ctx, color ->
+                                        AppearanceColors.setPartTint(ctx, part, color)
+                                    }
+                                },
+                                action = {
+                                    if (overridden) {
+                                        TextButton(onClick = {
+                                            AppearanceColors.setPartTint(context, part, null)
+                                        }) { Text("跟随全局") }
+                                    }
+                                },
+                            )
+                        }
+                    }
                 },
                 Preference.PreferenceItem.CustomPreference(title = "界面主色") {
                     AppearanceColorRow(
                         title = "界面主色",
-                        subtitle = uiAccent?.let { "弹窗按钮 / 选中文字（${com.zycomic.app.ui.components.AppearanceColors.hex(it)}）" }
-                            ?: "跟随主题；点此自定义",
+                        subtitle = "弹窗按钮 / 选中文字 / 宇总排行（${AppearanceColors.hex(uiAccent ?: themePrimary)}）",
                         color = uiAccent ?: themePrimary,
                         onClick = {
                             target = AppearanceColorTarget(
                                 "界面主色",
                                 uiAccent ?: themePrimary,
                             ) { ctx, color ->
-                                com.zycomic.app.ui.components.AppearanceColors.setUiAccent(ctx, color)
-                            }
-                        },
-                        action = {
-                            if (uiAccent != null) {
-                                TextButton(onClick = {
-                                    com.zycomic.app.ui.components.AppearanceColors.setUiAccent(context, null)
-                                }) { Text("跟随主题") }
+                                AppearanceColors.setUiAccent(ctx, color)
                             }
                         },
                     )
@@ -147,7 +234,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                         AppearanceColorRow(
                             title = "漫蛙",
-                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(manwa),
+                            subtitle = AppearanceColors.hex(manwa),
                             color = manwa,
                             onClick = {
                                 target = AppearanceColorTarget("漫蛙颜色", manwa) { _, color ->
@@ -157,7 +244,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         )
                         AppearanceColorRow(
                             title = "哔咔",
-                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(picacg),
+                            subtitle = AppearanceColors.hex(picacg),
                             color = picacg,
                             onClick = {
                                 target = AppearanceColorTarget("哔咔颜色", picacg) { _, color ->
@@ -167,7 +254,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         )
                         AppearanceColorRow(
                             title = "禁漫天堂",
-                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(jm),
+                            subtitle = AppearanceColors.hex(jm),
                             color = jm,
                             onClick = {
                                 target = AppearanceColorTarget("禁漫颜色", jm) { _, color ->
@@ -175,28 +262,42 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 }
                             },
                         )
-                        AppearanceColorRow(
-                            title = "宇总排行",
-                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(yuzong),
-                            color = yuzong,
-                            onClick = {
-                                target = AppearanceColorTarget("宇总排行颜色", yuzong) { ctx, color ->
-                                    com.zycomic.app.ui.components.AppearanceColors.setYuzong(ctx, color)
-                                }
-                            },
-                        )
                     }
                 },
             ),
         )
+
         target?.let { picked ->
-            com.zycomic.app.ui.components.ColorPickerDialog(
+            ColorPickerDialog(
                 title = picked.title,
                 initial = picked.current,
                 onDismiss = { target = null },
                 onConfirm = { color ->
                     picked.apply(context, color)
                     target = null
+                },
+            )
+        }
+
+        if (applyAllConfirm) {
+            AlertDialog(
+                onDismissRequest = { applyAllConfirm = false },
+                title = { Text("应用到所有玻璃") },
+                text = {
+                    Text(
+                        "会把全部 ${GlassPart.entries.size} 类玻璃设为 ${AppearanceColors.hex(glassTint)}，" +
+                            "并清除各部件单独设置的颜色。确定继续？",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        AppearanceColors.applyTintToAllParts(context, glassTint)
+                        applyAllConfirm = false
+                        context.toast("已应用到所有玻璃")
+                    }) { Text("应用") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { applyAllConfirm = false }) { Text("取消") }
                 },
             )
         }
@@ -255,24 +356,22 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         title = "恢复默认外观",
                         subtitle = "玻璃参数、颜色、图源全部回到默认值",
                         onPreferenceClick = {
-                            com.zycomic.app.ui.components.GlassPart.entries.forEach { part ->
-                                com.zycomic.app.ui.components.GlassPrefs.setPartBlur(context, part, part.defaultBlurDp)
-                                com.zycomic.app.ui.components.GlassPrefs.setPartAlpha(context, part, part.defaultAlpha)
+                            GlassPart.entries.forEach { part ->
+                                GlassPrefs.setPartBlur(context, part, part.defaultBlurDp)
+                                GlassPrefs.setPartAlpha(context, part, part.defaultAlpha)
+                                AppearanceColors.setPartTint(context, part, null)
                             }
-                            com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, 8f)
-                            com.zycomic.app.ui.components.GlassPrefs.setBackdropAlpha(context, 0.85f)
-                            com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, 1f)
-                            com.zycomic.app.ui.components.AppearanceColors.setGlassTint(context, Color.White)
-                            com.zycomic.app.ui.components.AppearanceColors.setUiAccent(context, null)
-                            com.zycomic.app.ui.components.AppearanceColors.setYuzong(
-                                context,
-                                com.zycomic.app.ui.components.AppearanceColors.DEFAULT_YUZONG_LIGHT,
-                            )
+                            GlassPrefs.setBackdropBlurDp(context, 8f)
+                            GlassPrefs.setBackdropAlpha(context, 0.85f)
+                            GlassPrefs.setGlassStrength(context, 1f)
+                            AppearanceColors.setGlassTint(context, Color.White)
+                            AppearanceColors.setUiAccent(context, AppearanceColors.DEFAULT_UI_ACCENT)
+                            AppearanceColors.setYuzong(context, AppearanceColors.DEFAULT_YUZONG_LIGHT)
                             ContentPlatform.entries.forEach { ContentPlatformAccentPrefs.reset(it) }
-                            com.zycomic.app.ui.components.BackdropSources.ALL.forEach { source ->
-                                com.zycomic.app.ui.components.BackdropSources.setEnabled(context, source.id, false)
+                            BackdropSources.ALL.forEach { source ->
+                                BackdropSources.setEnabled(context, source.id, false)
                             }
-                            com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
+                            AppBackdropState.refresh("settings")
                             context.toast("已恢复默认外观")
                         },
                     )
@@ -282,17 +381,97 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     }
 
     /** 背景与液态玻璃参数：模糊度 + 玻璃强度 + 自定义图片 + 随机图源多选，实时生效。 */
+    /** 背景与玻璃：模糊度 / 透明度 / 玻璃强度 / 各部件参数。 */
     @Composable
     private fun getGlassGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
-        val backdropBlur by com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp.collectAsState()
-        val backdropAlpha by com.zycomic.app.ui.components.GlassPrefs.backdropAlpha.collectAsState()
-        val glassStrength by com.zycomic.app.ui.components.GlassPrefs.glassStrength.collectAsState()
-        val partBlur by com.zycomic.app.ui.components.GlassPrefs.partBlur.collectAsState()
-        val partAlpha by com.zycomic.app.ui.components.GlassPrefs.partAlpha.collectAsState()
-        val customPath by com.zycomic.app.ui.components.BackdropSources.customPath.collectAsState()
-        val perPage by com.zycomic.app.ui.components.BackdropSources.perPage.collectAsState()
-        val enabledIds by com.zycomic.app.ui.components.BackdropSources.enabled.collectAsState()
+        val backdropBlur by GlassPrefs.backdropBlurDp.collectAsState()
+        val backdropAlpha by GlassPrefs.backdropAlpha.collectAsState()
+        val glassStrength by GlassPrefs.glassStrength.collectAsState()
+        val partBlur by GlassPrefs.partBlur.collectAsState()
+        val partAlpha by GlassPrefs.partAlpha.collectAsState()
+
+        return Preference.PreferenceGroup(
+            title = "背景与液态玻璃",
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.CustomPreference(title = "背景封面模糊度") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "背景封面模糊度：${backdropBlur.toInt()} dp",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = backdropBlur,
+                            onValueChange = { GlassPrefs.setBackdropBlurDp(context, it) },
+                            valueRange = 0f..24f,
+                        )
+                    }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "背景图透明度") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "背景图透明度：${(backdropAlpha * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = backdropAlpha,
+                            onValueChange = { GlassPrefs.setBackdropAlpha(context, it) },
+                            valueRange = 0.3f..1f,
+                        )
+                    }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "液态玻璃强度") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "液态玻璃强度：${(glassStrength * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = glassStrength,
+                            onValueChange = { GlassPrefs.setGlassStrength(context, it) },
+                            valueRange = 0f..1f,
+                        )
+                    }
+                },
+                Preference.PreferenceItem.CustomPreference(title = "各部件玻璃参数") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "每个部件独立设置：上滑杆=模糊度，下滑杆=玻璃不透明度；颜色在「颜色」页单独调整。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        GlassPart.entries.forEach { part ->
+                            val blurValue = partBlur[part.key] ?: part.defaultBlurDp
+                            val alphaValue = partAlpha[part.key] ?: part.defaultAlpha
+                            Text(
+                                "${part.label}：模糊 ${blurValue.toInt()}dp · 不透明度 ${(alphaValue * 100).toInt()}%",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                            Slider(
+                                value = blurValue,
+                                onValueChange = { GlassPrefs.setPartBlur(context, part, it) },
+                                valueRange = 0f..32f,
+                            )
+                            Slider(
+                                value = alphaValue,
+                                onValueChange = { GlassPrefs.setPartAlpha(context, part, it) },
+                                valueRange = 0f..1f,
+                            )
+                        }
+                    }
+                },
+            ),
+        )
+    }
+
+    /** 背景图：全局自定义 / 每页自定义 / 随机图源。 */
+    @Composable
+    private fun getBackdropGroup(): Preference.PreferenceGroup {
+        val context = LocalContext.current
+        val customPath by BackdropSources.customPath.collectAsState()
+        val perPage by BackdropSources.perPage.collectAsState()
+        val enabledIds by BackdropSources.enabled.collectAsState()
         var pickingPage by remember { mutableStateOf<String?>(null) }
         val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: android.net.Uri? ->
             val pageKey = pickingPage
@@ -303,11 +482,11 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         dest.outputStream().use { out -> input.copyTo(out) }
                     }
                     if (pageKey == "global") {
-                        com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, dest.absolutePath)
+                        BackdropSources.setCustomPath(context, dest.absolutePath)
                     } else {
-                        com.zycomic.app.ui.components.BackdropSources.setPagePath(context, pageKey, dest.absolutePath)
+                        BackdropSources.setPagePath(context, pageKey, dest.absolutePath)
                     }
-                    com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
+                    AppBackdropState.refresh("settings")
                 }
                 pickingPage = null
             }
@@ -322,97 +501,24 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
             "search" to "搜索页",
         )
 
-        val sourceItems = com.zycomic.app.ui.components.BackdropSources.ALL.map { source ->
+        val sourceItems = BackdropSources.ALL.map { source ->
             Preference.PreferenceItem.CustomPreference(title = source.name) {
-                com.zycomic.app.ui.components.GlassSwitchRow(
+                GlassSwitchRow(
                     title = source.name,
                     subtitle = source.url,
                     checked = source.id in enabledIds,
                     onCheckedChanged = { on ->
-                        com.zycomic.app.ui.components.BackdropSources.setEnabled(context, source.id, on)
-                        com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
+                        BackdropSources.setEnabled(context, source.id, on)
+                        AppBackdropState.refresh("settings")
                     },
                 )
             }
         }
 
         return Preference.PreferenceGroup(
-            title = "背景与液态玻璃",
+            title = "背景图",
             preferenceItems = (
                 persistentListOf(
-                    Preference.PreferenceItem.CustomPreference(title = "背景封面模糊度") {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                "背景封面模糊度：${backdropBlur.toInt()} dp",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Slider(
-                                value = backdropBlur,
-                                onValueChange = {
-                                    com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, it)
-                                },
-                                valueRange = 0f..24f,
-                            )
-                        }
-                    },
-                    Preference.PreferenceItem.CustomPreference(title = "背景图透明度") {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                "背景图透明度：${(backdropAlpha * 100).toInt()}%",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Slider(
-                                value = backdropAlpha,
-                                onValueChange = {
-                                    com.zycomic.app.ui.components.GlassPrefs.setBackdropAlpha(context, it)
-                                },
-                                valueRange = 0.3f..1f,
-                            )
-                        }
-                    },
-                    Preference.PreferenceItem.CustomPreference(title = "液态玻璃强度") {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                "液态玻璃强度：${(glassStrength * 100).toInt()}%",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Slider(
-                                value = glassStrength,
-                                onValueChange = {
-                                    com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, it)
-                                },
-                                valueRange = 0f..1f,
-                            )
-                        }
-                    },
-                    Preference.PreferenceItem.CustomPreference(title = "各部件玻璃参数") {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                "每个部件独立设置：上滑杆=模糊度，下滑杆=白玻璃透明度。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            com.zycomic.app.ui.components.GlassPart.entries.forEach { part ->
-                                val blurValue = partBlur[part.key] ?: part.defaultBlurDp
-                                val alphaValue = partAlpha[part.key] ?: part.defaultAlpha
-                                Text(
-                                    "${part.label}：模糊 ${blurValue.toInt()}dp · 透明度 ${(alphaValue * 100).toInt()}%",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    modifier = Modifier.padding(top = 10.dp),
-                                )
-                                Slider(
-                                    value = blurValue,
-                                    onValueChange = { com.zycomic.app.ui.components.GlassPrefs.setPartBlur(context, part, it) },
-                                    valueRange = 0f..32f,
-                                )
-                                Slider(
-                                    value = alphaValue,
-                                    onValueChange = { com.zycomic.app.ui.components.GlassPrefs.setPartAlpha(context, part, it) },
-                                    valueRange = 0f..1f,
-                                )
-                            }
-                        }
-                    },
                     Preference.PreferenceItem.CustomPreference(title = "自定义背景图片") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                             Text(
@@ -432,8 +538,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 if (!customPath.isNullOrBlank()) {
                                     TextButton(onClick = {
                                         runCatching { java.io.File(customPath).delete() }
-                                        com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, null)
-                                        com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
+                                        BackdropSources.setCustomPath(context, null)
+                                        AppBackdropState.refresh("settings")
                                     }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
                                 }
                             }
@@ -441,9 +547,9 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     },
                     Preference.PreferenceItem.CustomPreference(title = "分页自定义背景") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            com.zycomic.app.ui.components.BackdropSources.PAGE_KEYS.forEach { key ->
+                            BackdropSources.PAGE_KEYS.forEach { key ->
                                 val path = perPage[key]
-                                com.zycomic.app.ui.components.GlassPreferenceRow(
+                                GlassPreferenceRow(
                                     title = pageLabel[key] ?: key,
                                     subtitle = if (path.isNullOrBlank()) "跟随全局/随机源" else "已设置本页背景",
                                     widget = {
@@ -454,8 +560,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                         if (!path.isNullOrBlank()) {
                                             TextButton(onClick = {
                                                 runCatching { java.io.File(path).delete() }
-                                                com.zycomic.app.ui.components.BackdropSources.setPagePath(context, key, null)
-                                                com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
+                                                BackdropSources.setPagePath(context, key, null)
+                                                AppBackdropState.refresh("settings")
                                             }) { Text("清除", color = MaterialTheme.colorScheme.error) }
                                         }
                                     },
@@ -905,4 +1011,64 @@ private fun AppearanceColorRow(
             }
         },
     )
+}
+
+/** 外观页顶部标签栏：玻璃胶囊容器 + 选中白玻璃，与平台切换器同一套语言。 */
+@Composable
+private fun AppearanceTabBar(
+    tabs: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val accent by AppearanceColors.uiAccent.collectAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(50),
+                radius = 999.dp,
+                part = GlassPart.TAB,
+                stroke = false,
+            )
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEachIndexed { index, label ->
+            val isSelected = index == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(50))
+                    .then(
+                        if (isSelected) {
+                            Modifier.glassSurface(
+                                shape = RoundedCornerShape(50),
+                                radius = 999.dp,
+                                part = GlassPart.TAB_SELECTED,
+                                stroke = false,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .clickable { onSelect(index) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (isSelected) {
+                        accent ?: MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 }

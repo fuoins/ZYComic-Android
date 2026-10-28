@@ -68,6 +68,14 @@ private fun resolveGlass(part: GlassPart, blurOverride: Dp?, alphaOverride: Floa
     return blur to alpha
 }
 
+/** 指定部件当前使用的玻璃颜色（单独设置优先，否则跟随全局）。 */
+@Composable
+private fun glassTintFor(part: GlassPart): Color {
+    val partTints by AppearanceColors.partTints.collectAsState()
+    val globalTint by AppearanceColors.glassTint.collectAsState()
+    return partTints[part.key] ?: globalTint
+}
+
 /**
  * 玻璃外壳：真 backdrop blur（Haze）+ 淡白玻璃 + 可选平台色淡染/描边。
  * 无 HazeState 时退化为纯渐变玻璃（保证可见）。
@@ -87,7 +95,7 @@ fun GlassShell(
 ) {
     val hazeState = LocalAppHaze.current
     val dark = glassDark()
-    val glassTint by AppearanceColors.glassTint.collectAsState()
+    val glassTint = glassTintFor(part)
     val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
@@ -248,7 +256,7 @@ fun GlassTopBar(
     content: @Composable RowScope.() -> Unit,
 ) {
     val dark = glassDark()
-    val glassTint by AppearanceColors.glassTint.collectAsState()
+    val glassTint = glassTintFor(GlassPart.TOP_BAR)
     val highlight = glassTint.copy(alpha = if (dark) 0.22f else 0.78f)
     val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
     Row(
@@ -336,7 +344,7 @@ fun Modifier.glassSurface(
 ): Modifier {
     val hazeState = LocalAppHaze.current
     val dark = glassDark()
-    val glassTint by AppearanceColors.glassTint.collectAsState()
+    val glassTint = glassTintFor(part)
     val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent

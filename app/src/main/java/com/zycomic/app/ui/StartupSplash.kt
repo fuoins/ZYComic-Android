@@ -434,8 +434,8 @@ private fun BrandStack(dark: Boolean) {
                     .shadow(
                         elevation = if (dark) 18.dp else 22.dp,
                         shape = RoundedCornerShape(19.dp),
-                        ambientColor = Color(0xFF7A1FD0).copy(alpha = 0.45f),
-                        spotColor = Color(0xFFFDAB1D).copy(alpha = 0.45f),
+                        ambientColor = Color(0xFF1C4FD8).copy(alpha = 0.40f),
+                        spotColor = Color(0xFF4E9BEA).copy(alpha = 0.40f),
                     )
                     .clip(RoundedCornerShape(19.dp)),
             )

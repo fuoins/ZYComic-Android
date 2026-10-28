@@ -38,6 +38,10 @@ object AppearanceConfig {
                         JSONObject().apply {
                             put("blur", GlassPrefs.partBlur.value[part.key] ?: part.defaultBlurDp)
                             put("alpha", GlassPrefs.partAlpha.value[part.key] ?: part.defaultAlpha)
+                            put(
+                                "tint",
+                                AppearanceColors.partTints.value[part.key]?.let(AppearanceColors::hex) ?: "",
+                            )
                         },
                     )
                 }
@@ -101,6 +105,9 @@ object AppearanceConfig {
                 }
                 if (obj.has("alpha")) {
                     GlassPrefs.setPartAlpha(context, part, obj.optDouble("alpha").toFloat())
+                }
+                if (obj.has("tint")) {
+                    AppearanceColors.setPartTint(context, part, AppearanceColors.parseColor(obj.optString("tint")))
                 }
                 applied++
             }
