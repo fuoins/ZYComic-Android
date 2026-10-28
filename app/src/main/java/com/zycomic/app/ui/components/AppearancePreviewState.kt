@@ -14,11 +14,21 @@ object AppearancePreviewState {
     private val _active = MutableStateFlow(false)
     val active: StateFlow<Boolean> = _active.asStateFlow()
 
+    /** 预览浮窗是否展开（最小化后为 false）。 */
+    private val _panelExpanded = MutableStateFlow(false)
+    val panelExpanded: StateFlow<Boolean> = _panelExpanded.asStateFlow()
+
+    fun setPanelExpanded(expanded: Boolean) {
+        _panelExpanded.value = expanded
+    }
+
     fun enter() {
         _active.value = true
+        _panelExpanded.value = false
     }
 
     fun exit() {
         _active.value = false
+        _panelExpanded.value = false
     }
 }

@@ -55,6 +55,7 @@ import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.AppearanceColors
 import com.zycomic.app.ui.components.AppearancePreviewState
+import com.zycomic.app.ui.components.AppearanceUiState
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.ColorPickerDialog
 import com.zycomic.app.ui.components.GlassPart
@@ -116,7 +117,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     @Composable
     override fun Content() {
         val handleBack = LocalBackPress.current
-        var selectedTab by rememberSaveable { mutableStateOf(0) }
+        // tab 与滚动位置保存在全局，预览返回时可回到刚才的位置。
+        var selectedTab by remember { mutableStateOf(AppearanceUiState.tab) }
         val tabs = listOf("颜色", "背景与玻璃", "背景图", "配置备份")
 
         Scaffold(
@@ -140,8 +142,29 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
             },
         ) { contentPadding ->
             Column(modifier = Modifier.padding(contentPadding)) {
-                AppearanceTabBar(tabs = tabs, selected = selectedTab, onSelect = { selectedTab = it })
+                AppearanceTabBar(
+                    tabs = tabs,
+                    selected = selectedTab,
+                    onSelect = {
+                        selectedTab = it
+                        AppearanceUiState.tab = it
+                    },
+                )
                 key(selectedTab) {
+                    val saved = AppearanceUiState.scrollFor(selectedTab)
+                    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+                        initialFirstVisibleItemIndex = saved?.first ?: 0,
+                        initialFirstVisibleItemScrollOffset = saved?.second ?: 0,
+                    )
+                    androidx.compose.runtime.DisposableEffect(selectedTab) {
+                        onDispose {
+                            AppearanceUiState.saveScroll(
+                                tab = selectedTab,
+                                index = listState.firstVisibleItemIndex,
+                                offset = listState.firstVisibleItemScrollOffset,
+                            )
+                        }
+                    }
                     PreferenceScreen(
                         items = listOf(
                             when (selectedTab) {
@@ -152,6 +175,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             },
                         ),
                         modifier = Modifier.weight(1f),
+                        state = listState,
                     )
                 }
             }

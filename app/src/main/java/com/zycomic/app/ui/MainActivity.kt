@@ -11,7 +11,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -64,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.AppearanceColors
 import com.zycomic.app.ui.components.AppearancePreviewState
+import com.zycomic.app.ui.components.AppearanceQuickPanel
 import com.zycomic.app.ui.components.AppCoverBackdrop
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.GlassShell
@@ -683,22 +687,52 @@ fun AppContent(
         )
     }
 
-    // ---- 外观预览：主界面右上/右下悬浮按钮，一键回到外观设置 ----
+    // ---- 外观预览：悬浮按钮 / 快速调整浮窗 ----
     val appearancePreview by AppearancePreviewState.active.collectAsState()
+    val quickPanelExpanded by AppearancePreviewState.panelExpanded.collectAsState()
     if (appearancePreview && settingsDialog == null) {
         // 透明全屏容器不拦截触摸：预览时主界面照常可点。
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    AppearancePreviewState.exit()
-                    settingsDialog = SettingsDialog.Appearance
-                },
-                modifier = Modifier.padding(end = 18.dp, bottom = 104.dp),
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                icon = { Icon(Icons.Outlined.Palette, contentDescription = null) },
-                text = { Text("返回外观") },
-            )
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (quickPanelExpanded) {
+                AppearanceQuickPanel(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 92.dp),
+                    onMinimize = { AppearancePreviewState.setPanelExpanded(false) },
+                    onOpenFull = {
+                        AppearancePreviewState.exit()
+                        settingsDialog = SettingsDialog.Appearance
+                    },
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 18.dp, bottom = 96.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // 打开浮窗：不离开主界面就能调参数。
+                    ExtendedFloatingActionButton(
+                        onClick = { AppearancePreviewState.setPanelExpanded(true) },
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        icon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
+                        text = { Text("调整") },
+                    )
+                    // 返回完整外观设置页（会恢复到刚才的标签和滚动位置）。
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            AppearancePreviewState.exit()
+                            settingsDialog = SettingsDialog.Appearance
+                        },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        icon = { Icon(Icons.Outlined.Palette, contentDescription = null) },
+                        text = { Text("返回外观") },
+                    )
+                }
+            }
         }
     }
 
