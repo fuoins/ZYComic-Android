@@ -114,6 +114,7 @@ class PicacgSpeedTesterRuntimeTest {
             },
         )
 
+        awaitBackgroundExploration()
         val expected = (0..7).map { "full$it.picacg.test" }.toSet()
         assertEquals(expected, values("runtimeTestRequests").toSet())
         assertEquals(expected, snapshot.apiProbes.map { it.endpoint.domain }.toSet())
@@ -564,6 +565,8 @@ class PicacgSpeedTesterRuntimeTest {
         assertFalse(snapshot.complete, "API-only configuration has no real cover/body results")
         assertNotNull(PicacgSpeedTester.snapshot.value, "the final API-only snapshot is still written after all configured candidates end")
         assertEquals(0, readyCallbacks)
+        // 快测放行后后台继续补测：等待探索任务收尾，避免 2 核 CI 上漏测 ready3/ready4。
+        awaitBackgroundExploration()
         assertEquals(urls.map(::host).toSet(), values("runtimeTestRequests").toSet())
     }
 
@@ -603,6 +606,8 @@ class PicacgSpeedTesterRuntimeTest {
         assertEquals(snapshot.roundSelectedLine, PicacgRouteManager.selectedApiEndpoint)
         assertEquals(snapshot.roundSelectedLine, publications.last(), "the last improvement must match the best full-run result")
         assertEquals(publications.distinct().size, publications.size, "the final full snapshot must not re-publish/restart the same Maccms binding")
+        // 快测放行后后台补测到 QUICK_FILL_TARGET：等完再核对请求全集，避免泄漏到下一个用例。
+        awaitBackgroundExploration()
         assertEquals(urls.map(::host).toSet(), values("runtimeTestRequests").toSet())
     }
 
