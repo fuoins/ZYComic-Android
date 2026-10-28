@@ -62,6 +62,7 @@ import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.GlassTopBar
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -551,13 +552,24 @@ private fun HistoryItemRow(
                 .weight(1f)
                 .padding(start = 12.dp, end = 4.dp),
         ) {
-            Text(
-                text = item.bookName,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Box(
+                modifier = Modifier
+                    .glassSurface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = item.bookName,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             Text(
                 text = "上次阅读：${item.chapterName.ifBlank { "—" }}",
                 color = MaterialTheme.colorScheme.primary,

@@ -38,7 +38,6 @@ import com.zycomic.app.platform.ContentPlatform
 fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val backdropBlurDp by GlassPrefs.backdropBlurDp.collectAsState()
-    val backdropMask by GlassPrefs.backdropMask.collectAsState()
     val backdropAlpha by GlassPrefs.backdropAlpha.collectAsState()
 
     // 后台预热（不阻塞切换）：把当前图下载进磁盘/内存缓存。
@@ -55,8 +54,11 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
     }
 
     Box(modifier) {
-        // 兜底渐变永远垫底：图未就绪或没有来源时页面也绝不纯白。
-        RichFallbackBackdrop(Modifier.matchParentSize())
+        // 默认背景：内置图片垫底（用户自定义/随机源未就绪时也绝不白屏）。
+        DefaultBackdropImage(
+            modifier = Modifier.matchParentSize().blur(backdropBlurDp.dp).alpha(backdropAlpha),
+            fallbackAlpha = 0.9f,
+        )
         if (entry != null) {
             Crossfade(
                 targetState = entry,
@@ -73,20 +75,31 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
                     contentScale = ContentScale.Crop,
                 )
             }
-            // 遮罩只做两件事：顶部保住状态栏/搜索栏文字、底部托住玻璃底栏，中间大面积放开让封面可见。
-            // 强度由外观页「背景遮罩强度」调整。
+            // 顶部/底部轻压色，保证状态栏与底栏文字可读。
             Box(
                 Modifier.matchParentSize().background(
                     Brush.verticalGradient(
-                        0f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f * backdropMask),
+                        0f to MaterialTheme.colorScheme.background.copy(alpha = 0.35f),
                         0.08f to Color.Transparent,
-                        0.88f to Color.Transparent,
-                        1f to MaterialTheme.colorScheme.background.copy(alpha = 0.45f * backdropMask),
+                        0.90f to Color.Transparent,
+                        1f to MaterialTheme.colorScheme.background.copy(alpha = 0.35f),
                     ),
                 ),
             )
         }
     }
+}
+
+/** 内置默认背景图（assets/drawable-nodpi/backdrop_default.png），加载失败时退化渐变。 */
+@Composable
+private fun DefaultBackdropImage(modifier: Modifier = Modifier, fallbackAlpha: Float) {
+    androidx.compose.foundation.Image(
+        painter = androidx.compose.ui.res.painterResource(id = com.zycomic.app.R.drawable.backdrop_default),
+        contentDescription = null,
+        modifier = modifier,
+        contentScale = ContentScale.Crop,
+        alpha = fallbackAlpha,
+    )
 }
 
 private fun loaderFor(context: android.content.Context, platform: ContentPlatform?) = when (platform) {

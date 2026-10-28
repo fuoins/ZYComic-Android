@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.ui.components.glassSurface
 
 @Composable
 fun BrowseTabCapsule(
@@ -43,19 +45,19 @@ fun BrowseTabCapsule(
     } else {
         platformAccent
     }
-    // 玻璃语言：选中 = 白玻璃胶囊底，文字始终保留平台色区分。
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val background = if (selected) {
-        Color.White.copy(alpha = if (dark) 0.18f else 0.55f)
-    } else {
-        Color.Transparent
-    }
+    // 玻璃语言：所有标签都带磨砂胶囊底（选中更亮），文字始终保留平台色区分。
     val foreground = accent
 
     Row(
         modifier = modifier
             .clip(CircleShape)
-            .background(background)
+            .glassSurface(
+                shape = RoundedCornerShape(50),
+                radius = 999.dp,
+                part = com.zycomic.app.ui.components.GlassPart.TAB,
+                alphaOverride = if (selected) 0.42f else 0.14f,
+                stroke = false,
+            )
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),

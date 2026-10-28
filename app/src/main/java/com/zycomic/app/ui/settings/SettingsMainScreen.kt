@@ -260,11 +260,11 @@ private fun SettingsPlatformSwitch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color.White.copy(alpha = if (dark) 0.30f else 0.60f),
+                    checkedThumbColor = if (dark) Color(0xFF20222A) else Color.White,
+                    checkedTrackColor = if (dark) Color.White.copy(alpha = 0.75f) else Color(0xFF3A3F4B),
                     checkedBorderColor = Color.Transparent,
                     uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
-                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.12f),
+                    uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.16f),
                     uncheckedBorderColor = Color.Transparent,
                 ),
             )

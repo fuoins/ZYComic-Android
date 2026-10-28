@@ -116,15 +116,21 @@ fun PicacgMangaCard(
             }
             rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }
         }
-        Text(
-            text = manga.name,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp, start = 2.dp, end = 2.dp),
-        )
+                .padding(top = 6.dp)
+                .glassSurface(shape = RoundedCornerShape(8.dp), radius = 8.dp, part = GlassPart.COVER_NAME, stroke = false)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+        ) {
+            Text(
+                text = manga.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }

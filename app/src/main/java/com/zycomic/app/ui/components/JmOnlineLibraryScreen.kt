@@ -801,7 +801,19 @@ private fun JmLibraryRow(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun JmLibraryCard(item: JmOnlineLibraryItem, displayMode: Int, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(Modifier.padding(6.dp).background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Column(
+        Modifier
+            .padding(6.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(12.dp),
+                radius = 12.dp,
+                part = GlassPart.BUTTON,
+                accent = if (selected) MaterialTheme.colorScheme.secondaryContainer else null,
+                accentAlpha = 0.35f,
+                stroke = false,
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
         Box(Modifier.fillMaxWidth().aspectRatio(0.75f).clip(RoundedCornerShape(8.dp))) {
             JmLibraryCover(item, Modifier.fillMaxSize())
             if (displayMode == 0) {
@@ -823,6 +835,21 @@ private fun JmLibraryCard(item: JmOnlineLibraryItem, displayMode: Int, selected:
             }
         }
         if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
-        if (displayMode == 1) Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+        if (displayMode == 1) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }

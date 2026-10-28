@@ -92,9 +92,10 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     private fun getGlassGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
         val backdropBlur by com.zycomic.app.ui.components.GlassPrefs.backdropBlurDp.collectAsState()
-        val backdropMask by com.zycomic.app.ui.components.GlassPrefs.backdropMask.collectAsState()
         val backdropAlpha by com.zycomic.app.ui.components.GlassPrefs.backdropAlpha.collectAsState()
         val glassStrength by com.zycomic.app.ui.components.GlassPrefs.glassStrength.collectAsState()
+        val partBlur by com.zycomic.app.ui.components.GlassPrefs.partBlur.collectAsState()
+        val partAlpha by com.zycomic.app.ui.components.GlassPrefs.partAlpha.collectAsState()
         val customPath by com.zycomic.app.ui.components.BackdropSources.customPath.collectAsState()
         val perPage by com.zycomic.app.ui.components.BackdropSources.perPage.collectAsState()
         val enabledIds by com.zycomic.app.ui.components.BackdropSources.enabled.collectAsState()
@@ -160,21 +161,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             )
                         }
                     },
-                    Preference.PreferenceItem.CustomPreference(title = "背景遮罩强度") {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                "背景遮罩强度：${(backdropMask * 100).toInt()}%（顶部与底部的渐隐压色）",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Slider(
-                                value = backdropMask,
-                                onValueChange = {
-                                    com.zycomic.app.ui.components.GlassPrefs.setBackdropMask(context, it)
-                                },
-                                valueRange = 0f..1f,
-                            )
-                        }
-                    },
                     Preference.PreferenceItem.CustomPreference(title = "背景图透明度") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                             Text(
@@ -203,6 +189,34 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 },
                                 valueRange = 0f..1f,
                             )
+                        }
+                    },
+                    Preference.PreferenceItem.CustomPreference(title = "各部件玻璃参数") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                "每个部件独立设置：上滑杆=模糊度，下滑杆=白玻璃透明度。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            com.zycomic.app.ui.components.GlassPart.entries.forEach { part ->
+                                val blurValue = partBlur[part.key] ?: part.defaultBlurDp
+                                val alphaValue = partAlpha[part.key] ?: part.defaultAlpha
+                                Text(
+                                    "${part.label}：模糊 ${blurValue.toInt()}dp · 透明度 ${(alphaValue * 100).toInt()}%",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.padding(top = 10.dp),
+                                )
+                                Slider(
+                                    value = blurValue,
+                                    onValueChange = { com.zycomic.app.ui.components.GlassPrefs.setPartBlur(context, part, it) },
+                                    valueRange = 0f..32f,
+                                )
+                                Slider(
+                                    value = alphaValue,
+                                    onValueChange = { com.zycomic.app.ui.components.GlassPrefs.setPartAlpha(context, part, it) },
+                                    valueRange = 0f..1f,
+                                )
+                            }
                         }
                     },
                     Preference.PreferenceItem.CustomPreference(title = "自定义背景图片") {
