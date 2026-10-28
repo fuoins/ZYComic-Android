@@ -103,6 +103,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         val picacg by ContentPlatformAccentPrefs.picacg.collectAsState()
         val jm by ContentPlatformAccentPrefs.jm.collectAsState()
         var target by remember { mutableStateOf<AppearanceColorTarget?>(null) }
+        val themePrimary = MaterialTheme.colorScheme.primary
 
         val group = Preference.PreferenceGroup(
             title = "颜色",
@@ -124,11 +125,11 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         title = "界面主色",
                         subtitle = uiAccent?.let { "弹窗按钮 / 选中文字（${com.zycomic.app.ui.components.AppearanceColors.hex(it)}）" }
                             ?: "跟随主题；点此自定义",
-                        color = uiAccent ?: MaterialTheme.colorScheme.primary,
+                        color = uiAccent ?: themePrimary,
                         onClick = {
                             target = AppearanceColorTarget(
                                 "界面主色",
-                                uiAccent ?: MaterialTheme.colorScheme.primary,
+                                uiAccent ?: themePrimary,
                             ) { ctx, color ->
                                 com.zycomic.app.ui.components.AppearanceColors.setUiAccent(ctx, color)
                             }
