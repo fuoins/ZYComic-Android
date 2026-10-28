@@ -224,6 +224,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                     }
                                 },
                                 action = {
+                                    // 在组合作用域取默认文字色，避免在 clickable 里读 MaterialTheme。
+                                    val fallbackTextColor = MaterialTheme.colorScheme.onSurface
                                     if (overridden) {
                                         TextButton(onClick = {
                                             AppearanceColors.setPartTint(context, part, null)
@@ -244,7 +246,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                             .clickable {
                                                 target = AppearanceColorTarget(
                                                     title = "${part.label} 字体颜色",
-                                                    current = textColor ?: MaterialTheme.colorScheme.onSurface,
+                                                    current = textColor ?: fallbackTextColor,
                                                     apply = { ctx, color ->
                                                         AppearanceColors.setPartTextColor(ctx, part, color)
                                                     },
