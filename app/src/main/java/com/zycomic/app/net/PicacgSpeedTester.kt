@@ -28,6 +28,9 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Independent Picacg API and real-image probes. No endpoint is successful by assumption or synthesis. */
 object PicacgSpeedTester {
+    /** 快测拿到多少个“快速成功”后才停止派发新候选；与 JM/漫蛙一致，放行后后台继续补到 8 个。 */
+    private const val QUICK_FILL_TARGET = 8
+
     enum class Stage { PREPARING_API, TESTING_API, PREPARING_IMAGES, TESTING_IMAGES, IMAGE_BLOCKED, COMPLETE }
 
     data class Progress(
@@ -268,6 +271,7 @@ object PicacgSpeedTester {
                                     candidates = targets,
                                     key = { identityKey(it.identity, service) },
                                     quick = quickImages,
+                                    stopAfterQualified = if (quickImages) QUICK_FILL_TARGET else Int.MAX_VALUE,
                                     preferredKeys = if (quickImages) {
                                         val preferredHost = if (content) preferredContentHost else preferredCoverHost
                                         val preferredEndpoint = if (content) preferredContentEndpoint else preferredCoverEndpoint
@@ -451,6 +455,7 @@ object PicacgSpeedTester {
                             candidates = apiTargets,
                             key = { identityKey(it.identity, "api-root") },
                             quick = quickApi,
+                            stopAfterQualified = if (quickApi) QUICK_FILL_TARGET else Int.MAX_VALUE,
                             preferredKeys = if (quickApi) {
                                 apiTargets.filter { target ->
                                     target.endpoint.domain.equals(preferredApiHost, true) &&
