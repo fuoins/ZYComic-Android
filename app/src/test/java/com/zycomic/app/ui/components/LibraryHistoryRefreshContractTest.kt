@@ -39,9 +39,8 @@ class LibraryHistoryRefreshContractTest {
         assertTrue(toolbar.contains("busy = refreshBusy"))
         assertTrue(toolbar.contains("busyIndicatorSeparate = refreshIndicatorSeparate"))
         assertTrue(toolbar.contains("IconButton(onClick = onClick, enabled = enabled"))
-        assertTrue(toolbar.contains("if (busy && !busyIndicatorSeparate)"))
-        assertTrue(toolbar.contains("if (busy)"))
-        assertTrue(toolbar.contains("CircularProgressIndicator("))
+        // 按需求：加载中不再显示蓝色刷新转圈，busy 参数保留但不绘制进度指示。
+        assertTrue(toolbar.contains("加载中不再显示转圈"))
     }
 
     @Test

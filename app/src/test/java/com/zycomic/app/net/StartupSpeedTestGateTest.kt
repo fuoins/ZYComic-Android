@@ -27,7 +27,8 @@ class StartupSpeedTestGateTest {
                     val updated = gate.awaitConfigurationUpdated()
                     lock.withLock {
                         if (!SpeedTestRunPolicy.canSkip(completed, current, false, false)) {
-                            assertFalse(SpeedTestRunPolicy.canReuseImages(true, false, current, current, completed, updated))
+                            // 自适应快测下，配置已更新且请求图片时允许走快测补测；完整测速共享仍由 canSkip 保证只跑一次。
+                            assertTrue(SpeedTestRunPolicy.canReuseImages(true, false, current, current, completed, updated))
                             fullRuns++
                             completed = current
                         }
