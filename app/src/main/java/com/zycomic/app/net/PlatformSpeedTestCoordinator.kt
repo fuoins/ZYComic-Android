@@ -595,7 +595,24 @@ object PlatformSpeedTestCoordinator {
                     if (onlyPlatform == null) {
                         val allDrained = ContentPlatform.entries.filter { it in requiredPlatforms }
                             .all { drainedFlags[it] == true }
-                        completedKey = key.takeIf { result.none { it.status == "incomplete" } && allDrained }
+                        val complete = result.none { it.status == "incomplete" } && allDrained
+                        completedKey = if (complete) {
+                            // 本轮测速会应用自己选出的线路/图源，并对各平台配置做增量核对，
+                            // 这些应用会推进 routing 版本。刚测完的这一轮不能被“自己造成的版本变化”
+                            // 判成过期——否则进入主界面时的 awaitStartup 会再起一轮，表现为
+                            // “首次完整测速完又自动快测一次”。同一网络 / 远程版本 / 平台开关代下接受新 key。
+                            val applied = currentKey()
+                            if (applied.remoteVersion == key.remoteVersion &&
+                                applied.platformRevision == key.platformRevision &&
+                                applied.networkIdentity == key.networkIdentity
+                            ) {
+                                applied
+                            } else {
+                                key
+                            }
+                        } else {
+                            null
+                        }
                         if (completedKey != null) roundCompletedHook?.invoke()
                     }
                     checkedConfigurationVersion = version
@@ -605,7 +622,7 @@ object PlatformSpeedTestCoordinator {
                             it.platform in measuredPlatforms && SpeedTestUiTextPolicy.shouldShowCompletionToast(isStartupRun, it.status)
                         }.forEach { _completions.emit(it) }
                     }
-                    onCompleted?.invoke(key)
+                    onCompleted?.invoke(completedKey ?: key)
                     runCompleted = true
                     return@withLock result
                 }

@@ -194,9 +194,9 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
         refresh_handler = self.library.split("onRefresh = {", 1)[1].split("},", 1)[0]
         self.assertIn("refresh++", refresh_handler)
         self.assertNotIn("if (loading)", refresh_handler)
-        self.assertIn("if (busy && !busyIndicatorSeparate)", self.toolbar)
-        independent = self.toolbar.split("Box(contentAlignment = Alignment.Center)", 1)[1]
-        self.assertLess(independent.index("Icon(imageVector = icon"), independent.index("if (busy)"))
+        # 刷新按钮不再显示蓝色转圈：加载中图标原样保留，只由 enabled 控制可点击性。
+        self.assertNotIn("CircularProgressIndicator(", self.toolbar)
+        self.assertIn("Icon(imageVector = icon, contentDescription = description)", self.toolbar)
         self.assertIn("refreshIndicatorSeparate: Boolean = false,", self.toolbar)
 
     def test_ranking_tabs_are_outside_authentication_and_loading_branches(self):

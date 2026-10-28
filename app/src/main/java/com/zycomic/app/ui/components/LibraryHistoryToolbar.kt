@@ -13,7 +13,6 @@ import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -152,8 +151,8 @@ private fun ToolbarSlot(
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     width: androidx.compose.ui.unit.Dp = 48.dp,
     enabled: Boolean = true,
-    busy: Boolean = false,
-    busyIndicatorSeparate: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") busy: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") busyIndicatorSeparate: Boolean = false,
 ) {
     Box(
         modifier = Modifier.width(width).height(48.dp),

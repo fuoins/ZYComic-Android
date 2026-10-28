@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -120,7 +121,7 @@ internal fun StartupSplash(
             BrandWordmark(dark, accent)
             Spacer(Modifier.height(8.dp))
             Tagline(dark)
-            Spacer(Modifier.height(30.dp))
+            Spacer(Modifier.height(22.dp))
             LoadingRow(
                 dark = dark,
                 accent = accent,
@@ -135,13 +136,22 @@ internal fun StartupSplash(
                 when {
                     enabled.isEmpty() -> "请在下方至少启用一个平台"
                     readyCount >= enabled.size -> "正在进入主界面…"
-                    else -> "首次启动会久一点，之后就秒进"
+                    else -> "已就绪 $readyCount/${enabled.size} 个平台 · 首次启动会久一点，之后就秒进"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (dark) Color.White.copy(alpha = 0.52f) else Color(0xFF8B95A2),
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(26.dp))
+            if (enabled.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                StartupProgressPanel(
+                    dark = dark,
+                    platforms = enabled,
+                    statuses = statuses,
+                    checks = checks,
+                )
+            }
+            Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 platforms.forEach { platform ->
                     PlatformChip(
@@ -484,6 +494,135 @@ private fun LoadingRow(dark: Boolean, accent: Color, title: String) {
             fontWeight = FontWeight.SemiBold,
             color = if (dark) Color.White.copy(alpha = 0.94f) else Color(0xFF2B3340),
         )
+    }
+}
+
+// ==================== 逐平台进度 ====================
+
+/** 开屏页的详细进度：每个启用平台一行「阶段文案 + 细进度条」，首次测速不再只有一个转圈。 */
+@Composable
+private fun StartupProgressPanel(
+    dark: Boolean,
+    platforms: List<ContentPlatform>,
+    statuses: Map<ContentPlatform, PlatformStartupStatus>,
+    checks: List<StartupCheckStatus>,
+) {
+    GlassBox(dark = dark, corner = 20.dp, elevation = 8.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            platforms.forEach { platform ->
+                PlatformProgressLine(
+                    platform = platform,
+                    status = statuses[platform],
+                    checks = checks,
+                    dark = dark,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlatformProgressLine(
+    platform: ContentPlatform,
+    status: PlatformStartupStatus?,
+    checks: List<StartupCheckStatus>,
+    dark: Boolean,
+) {
+    val accent = rememberContentPlatformAccent(platform)
+    val shortName = platformShortName(platform)
+    val ready = phasesOf(platform).all { phase ->
+        checks.firstOrNull { it.phase == phase }?.result?.isReady == true
+    }
+    val running = status?.running == true
+    val fraction = status?.fraction
+    val detail = status?.message
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.removePrefix("$shortName · ")
+        ?.removePrefix(shortName)
+        // 面板里已经有平台名和进度条，文案去掉重复前缀，保证单行能读到“阶段 + 计数”。
+        ?.replace("测试", "")
+        ?.replace(" IP ", " ")
+        ?.trim()
+        ?.ifBlank { "等待测速…" }
+        ?: "等待测速…"
+    val transition = rememberInfiniteTransition(label = "startup-line-${platform.name}")
+    val pulse by transition.animateFloat(
+        initialValue = 0.22f,
+        targetValue = 0.62f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "startup-line-pulse",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(
+                        color = when {
+                            ready -> accent
+                            running -> accent.copy(alpha = 0.75f)
+                            else -> accent.copy(alpha = 0.28f)
+                        },
+                        shape = CircleShape,
+                    ),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                shortName,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = if (dark) Color.White.copy(alpha = 0.92f) else Color(0xFF2A333F),
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (dark) Color.White.copy(alpha = 0.55f) else Color(0xFF747F8D),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (fraction != null) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "${(fraction * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (dark) Color.White.copy(alpha = 0.60f) else Color(0xFF5C6878),
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.5.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(if (dark) Color.White.copy(alpha = 0.10f) else Color(0xFF1B2530).copy(alpha = 0.08f)),
+        ) {
+            when {
+                fraction != null -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.72f), accent))),
+                )
+                running -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.32f)
+                        .fillMaxHeight()
+                        .background(accent.copy(alpha = pulse)),
+                )
+                ready -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(accent.copy(alpha = 0.55f)),
+                )
+            }
+        }
     }
 }
 

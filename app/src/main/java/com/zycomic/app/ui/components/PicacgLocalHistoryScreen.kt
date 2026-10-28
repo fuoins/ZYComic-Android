@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +58,6 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
-import tachiyomi.presentation.core.util.selectedBackground
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.DateFormat
@@ -146,13 +146,15 @@ fun PicacgLocalHistoryScreen(
 
     Scaffold(
         modifier = modifier,
+        containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
+            GlassTopBar {
             LibraryHistoryToolbar(
                 platform = com.zycomic.app.platform.ContentPlatform.PICACG,
                 onSelectPlatform = onSelectPlatform,
                 searchQuery = searchQuery,
                 onChangeSearchQuery = { searchQuery = it },
-                titleContent = { Text(stringResource(KMR.strings.picacg_history_title)) },
+                titleContent = { LibraryHistoryTitle("历史") },
                 searchSupported = true,
                 refreshSupported = !isRefreshing && !deleting,
                 filterSupported = false,
@@ -174,11 +176,15 @@ fun PicacgLocalHistoryScreen(
                 selectionSupported = true,
                 selectionEnabled = true,
             )
+            }
         },
         bottomBar = {
             if (selectionMode) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .glassSurface(shape = RoundedCornerShape(14.dp), radius = 14.dp, stroke = false),
                     horizontalArrangement = Arrangement.Center,
                 ) {
                     TextButton(
@@ -215,8 +221,9 @@ fun PicacgLocalHistoryScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
                     contentPadding = contentPadding,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     items(rows, key = { it.history.id }) { row ->
                         PicacgLocalHistoryItem(
@@ -316,13 +323,21 @@ private fun PicacgLocalHistoryItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .selectedBackground(selected)
+            .padding(vertical = 3.dp)
+            .glassSurface(shape = RoundedCornerShape(14.dp), radius = 14.dp, stroke = false)
+            .then(
+                if (selected) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                } else {
+                    Modifier
+                },
+            )
             .combinedClickable(
                 enabled = true,
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) {
@@ -340,13 +355,24 @@ private fun PicacgLocalHistoryItem(
             modifier = Modifier.weight(1f).padding(start = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                text = history.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Box(
+                modifier = Modifier
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = history.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             if (row.author.isNotBlank()) {
                 Text(stringResource(KMR.strings.picacg_local_history_author, row.author), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
