@@ -246,9 +246,9 @@ private fun RankGrid(
         } else {
             GridCells.Fixed(gridColumns.coerceIn(1, 10))
         },
-        contentPadding = PaddingValues(start = 12.dp, top = 0.dp, end = 12.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 8.dp, top = 0.dp, end = 8.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(items = items, key = { it.rank }) { item ->
             RankCell(item = item, displayMode = displayMode, onClick = { onSearchTitle(item.title) })
@@ -272,18 +272,11 @@ private fun RankCell(item: PlatformRankItem, displayMode: Int, onClick: () -> Un
         }
         return
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.75f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        ) {
+    com.zycomic.app.ui.components.GlassMangaGridCard(
+        title = item.title,
+        displayMode = displayMode,
+        onClick = onClick,
+        cover = {
             if (item.coverUrl.isNotEmpty()) {
                 PlatformCoverImage(
                     url = item.coverUrl,
@@ -291,30 +284,9 @@ private fun RankCell(item: PlatformRankItem, displayMode: Int, onClick: () -> Un
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            RankBadge(rank = item.rank, modifier = Modifier.align(Alignment.TopStart))
-            if (displayMode == 0) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color.Black.copy(alpha = 0.62f)).padding(6.dp),
-                )
-            }
-        }
-        if (displayMode == 1) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
+        },
+        badges = { RankBadge(rank = item.rank, modifier = Modifier.align(Alignment.TopStart)) },
+    )
 }
 
 @Composable

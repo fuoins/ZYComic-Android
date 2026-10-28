@@ -474,10 +474,12 @@ private fun JmOnlineLibraryContent(
                 activeGrid -> LazyVerticalGrid(
                     columns = GridCells.Fixed(JmFavoriteLibraryUiPolicy.gridColumns(configuredGridColumns)),
                     state = gridState,
-                    modifier = Modifier.weight(1f).onGloballyPositioned {
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp).onGloballyPositioned {
                         val token = JmLibraryLayoutToken(loadGeneration, activeGrid)
                         if (listLayoutToken != token) listLayoutToken = token
                     },
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     gridItems(visibleItems, key = { it.id }) { item ->
                         JmLibraryCard(item, displayMode, item.id in selected, selectionMode, onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") }, onLongClick = {
@@ -832,58 +834,22 @@ private fun JmLibraryRow(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun JmLibraryCard(item: JmOnlineLibraryItem, displayMode: Int, selected: Boolean, selectionMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(
-        Modifier
-            .padding(6.dp)
-            .glassSurface(
-                shape = RoundedCornerShape(12.dp),
-                radius = 12.dp,
-                part = GlassPart.BUTTON,
-                accent = if (selected) MaterialTheme.colorScheme.secondaryContainer else null,
-                accentAlpha = 0.35f,
-                stroke = false,
-            )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-    ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(0.75f).clip(RoundedCornerShape(8.dp))) {
-            JmLibraryCover(item, Modifier.fillMaxSize())
-            if (displayMode == 0) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.35f)
-                        .align(Alignment.BottomCenter)
-                        .background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color(0xAA000000))),
-                )
-                Text(
-                    text = item.name,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall.copy(shadow = Shadow(color = Color.Black, blurRadius = 4f)),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-                )
-            }
-        }
-        if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
-        if (displayMode == 1) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .glassSurface(
-                        shape = RoundedCornerShape(8.dp),
-                        radius = 8.dp,
-                        part = GlassPart.COVER_NAME,
-                        stroke = false,
-                    )
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
-            ) {
-                Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
+private fun JmLibraryCard(
+    item: JmOnlineLibraryItem,
+    displayMode: Int,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    GlassMangaGridCard(
+        title = item.name,
+        displayMode = displayMode,
+        onClick = onClick,
+        selected = selected,
+        selectionMode = selectionMode,
+        onLongClick = onLongClick,
+        cover = { JmLibraryCover(item, Modifier.fillMaxSize()) },
+    )
 }

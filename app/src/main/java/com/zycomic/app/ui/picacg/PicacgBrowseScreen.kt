@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -361,8 +362,9 @@ fun PicacgBrowseScreen(
                 LazyVerticalGrid(
                     columns = if (gridColumns == 0) GridCells.Adaptive(128.dp) else GridCells.Fixed(effectiveGridColumns),
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(if (displayMode == 0) 6.dp else 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(if (displayMode == 0) 8.dp else 12.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     error?.let { failure ->
                         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -538,38 +540,13 @@ private fun PicacgBrowseFilter.summary(): String = listOf(category, tag, author,
 
 @Composable
 private fun PicacgBrowseComicGridItem(manga: Manga, displayMode: Int, rank: Int?, onClick: () -> Unit) {
-    if (displayMode == 1) {
-        com.zycomic.app.ui.components.PicacgMangaCard(manga = manga, onClick = onClick, rank = rank)
-        return
-    }
-    val context = LocalContext.current
-    Box(
-        Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick),
-    ) {
-        val cover = manga.picx.ifBlank { manga.pic }
-        if (cover.isNotBlank()) {
-            SubcomposeAsyncImage(
-                model = cover,
-                contentDescription = manga.name,
-                imageLoader = PicacgImageLoader.get(context),
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }
-        if (displayMode == 0) {
-            Text(
-                text = manga.name,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.62f)).padding(6.dp),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-    }
+    // 分类页所有平台统一使用同一个玻璃网格卡（显示模式决定标题位置）。
+    com.zycomic.app.ui.components.PicacgMangaCard(
+        manga = manga,
+        onClick = onClick,
+        displayMode = displayMode,
+        rank = rank,
+    )
 }
 
 @Composable

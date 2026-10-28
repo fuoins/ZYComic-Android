@@ -127,11 +127,13 @@ class PicacgRankBadgeContractTest(unittest.TestCase):
         self.assertRegex(grid, r"rank\s*:\s*Int\?")
         self.assertRegex(list_item, r"rank\s*:\s*Int\?")
 
-        # The comfortable grid uses the reusable card; other grid modes and list mode
-        # render their own cover, so each cover presentation must handle rank directly.
-        self.assertIn(_compact("PicacgMangaCard(manga = manga, onClick = onClick, rank = rank)"), _compact(grid))
+        # 所有网格布局统一走可复用卡片，角标由卡片内部绘制；列表仍自行包 Box 绘制。
+        self.assertIn(
+            _compact("PicacgMangaCard(manga = manga, onClick = onClick, displayMode = displayMode, rank = rank, )"),
+            _compact(grid),
+        )
+        self.assertNotIn("PicacgRankBadge(", _compact(grid))
         badge_call = _compact("rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }")
-        self.assertIn(badge_call, _compact(grid))
         self.assertIn(badge_call, _compact(list_item))
 
         # List covers must be a Box so the optional badge overlays the actual cover.

@@ -346,30 +346,25 @@ fun PicacgLibraryScreen(
             displayMode == PicacgCollectionPolicy.DISPLAY_GRID -> LazyVerticalGrid(
                 columns = GridCells.Fixed(gridColumns),
                 contentPadding = contentPadding,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
             ) {
                 gridItems(filtered, key = { it.id }) { comic ->
-                    Box {
-                        PicacgMangaCard(
-                            manga = comic,
-                            onClick = {
-                                if (selectionMode) {
-                                    selectedIds = if (comic.id in selectedIds) selectedIds - comic.id else selectedIds + comic.id
-                                } else {
-                                    onOpenManga("picacg:${comic.id}")
-                                }
-                            },
-                        )
-                        if (selectionMode) {
-                            Checkbox(
-                                checked = comic.id in selectedIds,
-                                onCheckedChange = { checked -> selectedIds = if (checked) selectedIds + comic.id else selectedIds - comic.id },
-                                modifier = Modifier.align(Alignment.TopEnd),
-                            )
-                        }
-                    }
+                    PicacgMangaCard(
+                        manga = comic,
+                        // 哔咔收藏只有“网格/列表”两种；网格固定用舒适档（标题在封面下），与禁漫默认一致。
+                        displayMode = 1,
+                        selected = comic.id in selectedIds,
+                        selectionMode = selectionMode,
+                        onClick = {
+                            if (selectionMode) {
+                                selectedIds = if (comic.id in selectedIds) selectedIds - comic.id else selectedIds + comic.id
+                            } else {
+                                onOpenManga("picacg:${comic.id}")
+                            }
+                        },
+                    )
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column {

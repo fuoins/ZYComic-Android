@@ -507,7 +507,7 @@ private fun SerializeBadge(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** 搜索结果漫画卡片，支持三种网格显示模式。 */
+/** 搜索结果漫画卡片：统一使用全站玻璃网格卡。 */
 @Composable
 private fun SearchMangaGridItem(
     manga: Manga,
@@ -516,26 +516,11 @@ private fun SearchMangaGridItem(
     picacg: Boolean,
     onClick: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(3.dp)
-            .glassSurface(
-                shape = RoundedCornerShape(12.dp),
-                radius = 12.dp,
-                part = com.zycomic.app.ui.components.GlassPart.CARD,
-                stroke = false,
-            )
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(3f / 4f)
-                .clip(RoundedCornerShape(8.dp)),
-        ) {
+    com.zycomic.app.ui.components.GlassMangaGridCard(
+        title = manga.name,
+        displayMode = displayMode,
+        onClick = onClick,
+        cover = {
             SubcomposeAsyncImage(
                 model = if (picacg) manga.picx.ifBlank { manga.pic } else coverUrl(manga),
                 imageLoader = imageLoader,
@@ -544,62 +529,14 @@ private fun SearchMangaGridItem(
                 contentScale = ContentScale.Crop,
                 error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
+        },
+        badges = {
             // 连载 / 完结：与收藏页"未读"一样放封面左上角
             serializeLabel(manga)?.let {
                 SerializeBadge(it, modifier = Modifier.align(Alignment.TopStart))
             }
-            // 紧凑网格：标题叠加封面底部
-            if (displayMode == 0) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.35f)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                1f to Color(0xAA000000),
-                            ),
-                        ),
-                ) {
-                    Text(
-                        text = manga.name,
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(8.dp),
-                    )
-                }
-            }
-        }
-        // 舒适网格显示标题；紧凑网格标题已叠加；仅封面网格不显示
-        if (displayMode == 1) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .glassSurface(
-                        shape = RoundedCornerShape(8.dp),
-                        radius = 8.dp,
-                        part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
-                        stroke = false,
-                    )
-                    .padding(horizontal = 5.dp, vertical = 3.dp),
-            ) {
-                Text(
-                    text = manga.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
+        },
+    )
 }
 
 /**

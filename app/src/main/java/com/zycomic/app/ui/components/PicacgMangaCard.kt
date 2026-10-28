@@ -86,35 +86,29 @@ object PicacgImageLoader {
 /**
  * Manga tile for Picacg results. `picx` is passed through as provided by the Picacg repository;
  * do not send it through [coverUrl], which rewrites non-JM hosts using Manwa routing.
+ *
+ * 卡片版式统一走 [GlassMangaGridCard]（与收藏页/分类页/搜索页一致）。
  */
 @Composable
 fun PicacgMangaCard(
     manga: Manga,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    displayMode: Int = 1,
     rank: Int? = null,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val rawPicacgCoverUrl = manga.picx.ifBlank { manga.pic }
-    Column(
-        modifier = modifier
-            .padding(3.dp)
-            .glassSurface(
-                shape = RoundedCornerShape(12.dp),
-                radius = 12.dp,
-                part = GlassPart.CARD,
-                stroke = false,
-            )
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.72f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        ) {
+    GlassMangaGridCard(
+        title = manga.name,
+        displayMode = displayMode,
+        onClick = onClick,
+        modifier = modifier,
+        selected = selected,
+        selectionMode = selectionMode,
+        cover = {
             if (rawPicacgCoverUrl.isNotBlank()) {
                 SubcomposeAsyncImage(
                     model = rawPicacgCoverUrl,
@@ -125,23 +119,9 @@ fun PicacgMangaCard(
                     error = { CoverError(Modifier.fillMaxSize()) },
                 )
             }
+        },
+        badges = {
             rank?.let { PicacgRankBadge(rank = it, modifier = Modifier.align(Alignment.TopStart)) }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp)
-                .glassSurface(shape = RoundedCornerShape(8.dp), radius = 8.dp, part = GlassPart.COVER_NAME, stroke = false)
-                .padding(horizontal = 5.dp, vertical = 3.dp),
-        ) {
-            Text(
-                text = manga.name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
+        },
+    )
 }

@@ -276,17 +276,12 @@ fun LibraryScreen(
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (displayMode <= 2) {
                         // 网格模式：0=紧凑 1=舒适 2=仅封面
-                        val columns = if (gridColumns > 0) {
-                            gridColumns
-                        } else if (displayMode == 1) {
-                            2
-                        } else {
-                            3
-                        }
+                        // 默认列数与禁漫/哔咔收藏保持一致（3 列），用户自定义列数仍优先。
+                        val columns = if (gridColumns > 0) gridColumns else 3
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(columns),
                             contentPadding = contentPadding,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
@@ -512,7 +507,7 @@ fun LibraryScreen(
 private fun FavoriteItem.isUnread(): Boolean =
     chapterName.isNotBlank() && readLast != chapterName
 
-/** 网格项：封面+漫画名（仅封面网格只有封面）。 */
+/** 网格项：统一使用全站玻璃网格卡（与禁漫收藏网格同款）。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FavGridItem(
@@ -526,39 +521,16 @@ private fun FavGridItem(
     onLongClick: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
-    Column(
-        modifier = Modifier
-            .padding(3.dp)
-            .glassSurface(
-                shape = RoundedCornerShape(12.dp),
-                radius = 12.dp,
-                part = com.zycomic.app.ui.components.GlassPart.CARD,
-                stroke = false,
-            )
-            .then(
-                if (selected) {
-                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
-                } else {
-                    Modifier
-                },
-            )
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onLongClick()
-                },
-            )
-            .padding(6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // 封面用 AspectRatio 保持 3:4 比例
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(3f / 4f)
-                .clip(RoundedCornerShape(8.dp)),
-        ) {
+    com.zycomic.app.ui.components.GlassMangaGridCard(
+        title = item.bookName,
+        displayMode = displayMode,
+        onClick = onClick,
+        selected = selected,
+        onLongClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onLongClick()
+        },
+        cover = {
             SubcomposeAsyncImage(
                 model = coverUrl(item.bookImg),
                 contentDescription = item.bookName,
@@ -566,6 +538,8 @@ private fun FavGridItem(
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
+        },
+        badges = {
             // 未读完标记（左上角）
             if (showUnreadBadge && item.isUnread()) {
                 Box(
@@ -577,70 +551,19 @@ private fun FavGridItem(
                     Text("未读", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
                 }
             }
-            // 更新标记（紧凑网格放右上角，避免和底部标题重合；其他网格放右下角）
+            // 更新标记（右上角）
             if (showUpdateBadge && item.isNew) {
                 Box(
                     modifier = Modifier
-                        .align(if (displayMode == 0) Alignment.TopEnd else Alignment.BottomEnd)
+                        .align(Alignment.TopEnd)
                         .background(MaterialTheme.colorScheme.error)
                         .padding(horizontal = 4.dp, vertical = 1.dp),
                 ) {
                     Text("NEW", color = MaterialTheme.colorScheme.onError, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
             }
-            // 紧凑网格：标题叠加在封面底部，带渐变背景
-            if (displayMode == 0) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.35f)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                1f to Color(0xAA000000),
-                            ),
-                        ),
-                )
-                Text(
-                    text = item.bookName,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        shadow = Shadow(color = Color.Black, blurRadius = 4f),
-                    ),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(8.dp),
-                )
-            }
-        }
-        // 舒适网格显示标题在封面下方；紧凑网格标题已叠加在封面里；仅封面网格不显示标题
-        if (displayMode == 1) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .glassSurface(
-                        shape = RoundedCornerShape(8.dp),
-                        radius = 8.dp,
-                        part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
-                        stroke = false,
-                    )
-                    .padding(horizontal = 5.dp, vertical = 3.dp),
-            ) {
-                Text(
-                    text = item.bookName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
+        },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

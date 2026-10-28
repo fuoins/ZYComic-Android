@@ -57,59 +57,31 @@ fun coverUrl(raw: String): String {
 }
 
 /**
- * 漫画卡片：封面图（Coil，圆角 8dp）+ 标题（最多 2 行 ellipsis）。
+ * 漫画卡片：统一走 [GlassMangaGridCard]（与收藏页/分类页/搜索页同一版式）。
  */
 @Composable
 fun MangaCard(
     manga: Manga,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    displayMode: Int = 1,
 ) {
-    Column(
-        modifier = modifier
-            .padding(3.dp)
-            .glassSurface(
-                shape = RoundedCornerShape(12.dp),
-                radius = 12.dp,
-                part = GlassPart.CARD,
-                stroke = false,
-            )
-            .clickable { onClick() }
-            .padding(6.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.72f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        ) {
-            val url = coverUrl(manga)
+    val url = coverUrl(manga)
+    GlassMangaGridCard(
+        title = manga.name,
+        displayMode = displayMode,
+        onClick = onClick,
+        modifier = modifier,
+        cover = {
             if (url.isNotEmpty()) {
                 SubcomposeAsyncImage(
                     model = url,
                     contentDescription = manga.name,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                     error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
                 )
             }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp)
-                .glassSurface(shape = RoundedCornerShape(8.dp), radius = 8.dp, part = GlassPart.COVER_NAME, stroke = false)
-                .padding(horizontal = 5.dp, vertical = 3.dp),
-        ) {
-            Text(
-                text = manga.name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
+        },
+    )
 }

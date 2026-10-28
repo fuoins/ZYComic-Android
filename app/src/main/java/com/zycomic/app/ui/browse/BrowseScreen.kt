@@ -901,9 +901,9 @@ private fun BrowseTabContent(
                                     GridCells.Fixed(gridColumns)
                                 },
                                 state = gridState,
-                                contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, if (displayMode == 2) 4.dp else bottomPadding + 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(8.dp, 0.dp, 8.dp, if (displayMode == 2) 4.dp else bottomPadding + 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxSize(),
                             ) {
                                 items(gridItems, key = { it.second }) { (m, _) ->
@@ -1175,67 +1175,24 @@ private fun MangaGridItem(
         }
         return
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (selected) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)) else Modifier)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(3f / 4f)
-                .clip(RoundedCornerShape(8.dp)),
-        ) {
+    com.zycomic.app.ui.components.GlassMangaGridCard(
+        title = manga.name ?: "",
+        displayMode = displayMode,
+        onClick = onClick,
+        selected = selected,
+        selectionMode = selectionMode,
+        onLongClick = onLongClick,
+        cover = {
             SubcomposeAsyncImage(
                 model = com.zycomic.app.ui.components.coverUrl(manga.picx ?: manga.pic ?: ""),
-                contentDescription = manga.name,
+                contentDescription = manga.name ?: "",
                 imageLoader = imageLoader,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 error = { com.zycomic.app.ui.components.CoverError(Modifier.fillMaxSize()) },
             )
-            // 紧凑网格：标题叠加封面底部
-            if (displayMode == 0) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.35f)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                1f to Color(0xAA000000),
-                            ),
-                        ),
-                )
-                Text(
-                    text = manga.name ?: "",
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        shadow = Shadow(color = Color.Black, blurRadius = 4f),
-                    ),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(8.dp),
-                )
-            }
-        }
-        // 舒适网格显示标题；紧凑网格标题已叠加；仅封面网格不显示
-        if (displayMode == 1) {
-            Text(
-                text = manga.name ?: "",
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-    }
+        },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
