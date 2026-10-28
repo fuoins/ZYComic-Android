@@ -113,7 +113,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     } else {
                         com.zycomic.app.ui.components.BackdropSources.setPagePath(context, pageKey, dest.absolutePath)
                     }
-                    com.zycomic.app.ui.components.AppBackdropState.refresh()
+                    com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
                 }
                 pickingPage = null
             }
@@ -136,7 +136,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     checked = source.id in enabledIds,
                     onCheckedChanged = { on ->
                         com.zycomic.app.ui.components.BackdropSources.setEnabled(context, source.id, on)
-                        com.zycomic.app.ui.components.AppBackdropState.refresh()
+                        com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
                     },
                 )
             }
@@ -239,7 +239,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                     TextButton(onClick = {
                                         runCatching { java.io.File(customPath).delete() }
                                         com.zycomic.app.ui.components.BackdropSources.setCustomPath(context, null)
-                                        com.zycomic.app.ui.components.AppBackdropState.refresh()
+                                        com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
                                     }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
                                 }
                             }
@@ -261,7 +261,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                             TextButton(onClick = {
                                                 runCatching { java.io.File(path).delete() }
                                                 com.zycomic.app.ui.components.BackdropSources.setPagePath(context, key, null)
-                                                com.zycomic.app.ui.components.AppBackdropState.refresh()
+                                                com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
                                             }) { Text("清除", color = MaterialTheme.colorScheme.error) }
                                         }
                                     },

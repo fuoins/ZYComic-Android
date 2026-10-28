@@ -135,7 +135,7 @@ fun GlassShell(
 fun GlassCard(
     modifier: Modifier = Modifier,
     radius: Dp = 18.dp,
-    part: GlassPart = GlassPart.BUTTON,
+    part: GlassPart = GlassPart.CARD,
     accent: Color? = null,
     accentAlpha: Float = 0.10f,
     elevated: Boolean = true,

@@ -13,9 +13,13 @@ enum class GlassPart(
     val defaultAlpha: Float,
 ) {
     BOTTOM_BAR("bottom_bar", "底栏", 20f, 0.50f),
+    BOTTOM_SELECTED("bottom_selected", "底栏选中圆", 14f, 0.62f),
     TOP_BAR("top_bar", "顶栏", 14f, 0.30f),
-    BUTTON("button", "按钮 / 卡片", 12f, 0.22f),
-    TAB("tab", "标签", 14f, 0.30f),
+    CARD("card", "卡片", 14f, 0.26f),
+    BUTTON("button", "按钮", 12f, 0.22f),
+    TAB("tab", "标签栏容器", 14f, 0.30f),
+    TAB_SELECTED("tab_selected", "标签选中", 16f, 0.55f),
+    TAB_UNSELECTED("tab_unselected", "标签未选中", 12f, 0.12f),
     COVER_NAME("cover_name", "封面名字条", 10f, 0.42f),
     SEARCH("search", "搜索框", 14f, 0.26f),
 }

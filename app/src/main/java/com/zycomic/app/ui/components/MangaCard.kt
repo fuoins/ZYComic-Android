@@ -67,7 +67,15 @@ fun MangaCard(
 ) {
     Column(
         modifier = modifier
-            .clickable { onClick() },
+            .padding(3.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(12.dp),
+                radius = 12.dp,
+                part = GlassPart.CARD,
+                stroke = false,
+            )
+            .clickable { onClick() }
+            .padding(6.dp),
     ) {
         Box(
             modifier = Modifier
@@ -90,9 +98,9 @@ fun MangaCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp)
+                .padding(top = 4.dp)
                 .glassSurface(shape = RoundedCornerShape(8.dp), radius = 8.dp, part = GlassPart.COVER_NAME, stroke = false)
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .padding(horizontal = 5.dp, vertical = 3.dp),
         ) {
             Text(
                 text = manga.name,

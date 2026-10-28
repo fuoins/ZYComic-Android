@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -69,6 +70,7 @@ import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.LibraryHistoryTitle
 import com.zycomic.app.ui.components.GlassTopBar
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -81,7 +83,6 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
-import tachiyomi.presentation.core.util.selectedBackground
 import androidx.compose.foundation.lazy.grid.items as gridItems
 
 @Composable
@@ -527,7 +528,20 @@ private fun FavGridItem(
     val haptic = LocalHapticFeedback.current
     Column(
         modifier = Modifier
-            .selectedBackground(selected)
+            .padding(3.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(12.dp),
+                radius = 12.dp,
+                part = com.zycomic.app.ui.components.GlassPart.CARD,
+                stroke = false,
+            )
+            .then(
+                if (selected) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                } else {
+                    Modifier
+                },
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
@@ -535,7 +549,7 @@ private fun FavGridItem(
                     onLongClick()
                 },
             )
-            .padding(4.dp),
+            .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // 封面用 AspectRatio 保持 3:4 比例
@@ -604,14 +618,27 @@ private fun FavGridItem(
         }
         // 舒适网格显示标题在封面下方；紧凑网格标题已叠加在封面里；仅封面网格不显示标题
         if (displayMode == 1) {
-            Text(
-                text = item.bookName,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = item.bookName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
@@ -633,7 +660,21 @@ private fun FavItemRow(
         // 列表2（历史页样式）
         Row(
             modifier = Modifier
-                .selectedBackground(selected)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 3.dp)
+                .glassSurface(
+                    shape = RoundedCornerShape(14.dp),
+                    radius = 14.dp,
+                    part = com.zycomic.app.ui.components.GlassPart.CARD,
+                    stroke = false,
+                )
+                .then(
+                    if (selected) {
+                        Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                    } else {
+                        Modifier
+                    },
+                )
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = {
@@ -641,9 +682,7 @@ private fun FavItemRow(
                         onLongClick()
                     },
                 )
-                .fillMaxWidth()
-                .height(96.dp)
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SubcomposeAsyncImage(
@@ -651,7 +690,7 @@ private fun FavItemRow(
                 contentDescription = item.bookName,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier
-                    .fillMaxHeight()
+                    .height(84.dp)
                     .aspectRatio(3f / 4f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -662,13 +701,24 @@ private fun FavItemRow(
                     .weight(1f)
                     .padding(start = 12.dp, end = 4.dp),
             ) {
-                Text(
-                    text = item.bookName,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Box(
+                    modifier = Modifier
+                        .glassSurface(
+                            shape = RoundedCornerShape(8.dp),
+                            radius = 8.dp,
+                            part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                            stroke = false,
+                        )
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = item.bookName,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
                 Text(
                     text = "上次阅读：${item.chapterName.ifBlank { "—" }}",
                     color = MaterialTheme.colorScheme.primary,
@@ -695,7 +745,21 @@ private fun FavItemRow(
         // 列表1（只有封面+标题）
         Row(
             modifier = Modifier
-                .selectedBackground(selected)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 3.dp)
+                .glassSurface(
+                    shape = RoundedCornerShape(14.dp),
+                    radius = 14.dp,
+                    part = com.zycomic.app.ui.components.GlassPart.CARD,
+                    stroke = false,
+                )
+                .then(
+                    if (selected) {
+                        Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                    } else {
+                        Modifier
+                    },
+                )
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = {
@@ -703,9 +767,8 @@ private fun FavItemRow(
                         onLongClick()
                     },
                 )
-                .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .heightIn(min = 64.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CoverWithBadges(
@@ -715,19 +778,55 @@ private fun FavItemRow(
                 showUnreadBadge = showUnreadBadge,
                 showUpdateBadge = showUpdateBadge,
             )
-            Text(
-                text = item.bookName,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 12.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .glassSurface(
+                            shape = RoundedCornerShape(8.dp),
+                            radius = 8.dp,
+                            part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                            stroke = false,
+                        )
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = item.bookName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     } else {
         // 列表3（当前详细样式）
         Row(
             modifier = Modifier
-                .selectedBackground(selected)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 3.dp)
+                .glassSurface(
+                    shape = RoundedCornerShape(14.dp),
+                    radius = 14.dp,
+                    part = com.zycomic.app.ui.components.GlassPart.CARD,
+                    stroke = false,
+                )
+                .then(
+                    if (selected) {
+                        Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                    } else {
+                        Modifier
+                    },
+                )
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = {
@@ -735,9 +834,7 @@ private fun FavItemRow(
                         onLongClick()
                     },
                 )
-                .fillMaxWidth()
-                .height(96.dp)
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SubcomposeAsyncImage(
@@ -745,7 +842,7 @@ private fun FavItemRow(
                 contentDescription = item.bookName,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier
-                    .fillMaxHeight()
+                    .height(84.dp)
                     .aspectRatio(3f / 4f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -756,12 +853,23 @@ private fun FavItemRow(
                     .weight(1f)
                     .padding(start = 12.dp),
             ) {
-                Text(
-                    text = item.bookName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Box(
+                    modifier = Modifier
+                        .glassSurface(
+                            shape = RoundedCornerShape(8.dp),
+                            radius = 8.dp,
+                            part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                            stroke = false,
+                        )
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = item.bookName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     text = "读到：${item.readLast.ifBlank { "未读" }}",
                     color = MaterialTheme.colorScheme.primary,

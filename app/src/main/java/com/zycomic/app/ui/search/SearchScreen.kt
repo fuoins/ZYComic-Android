@@ -162,9 +162,11 @@ fun SearchScreen(
     val searchHazeState = rememberHazeState()
     CompositionLocalProvider(com.zycomic.app.ui.components.LocalAppHaze provides searchHazeState) {
     Box(modifier = Modifier.fillMaxSize()) {
+        // 搜索页是独立窗口：先铺一层页面底色，保证背景图（半透明）下面是页面色而不是被压暗的主界面。
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
         // 模糊源只包背景层（Haze：玻璃必须与 source 平级，不能是其后代）。
         Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
-            // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/兜底渐变）。
+            // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/内置默认图）。
             com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
         }
     Column(
@@ -517,7 +519,15 @@ private fun SearchMangaGridItem(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .padding(3.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(12.dp),
+                radius = 12.dp,
+                part = com.zycomic.app.ui.components.GlassPart.CARD,
+                stroke = false,
+            )
+            .clickable(onClick = onClick)
+            .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -567,14 +577,27 @@ private fun SearchMangaGridItem(
         }
         // 舒适网格显示标题；紧凑网格标题已叠加；仅封面网格不显示
         if (displayMode == 1) {
-            Text(
-                text = manga.name,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = manga.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

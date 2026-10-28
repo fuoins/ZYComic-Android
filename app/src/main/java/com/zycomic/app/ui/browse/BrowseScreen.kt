@@ -410,6 +410,7 @@ private fun LegacyBrowseScreen(
                         val jmAccent = com.zycomic.app.platform.rememberContentPlatformAccent(ContentPlatform.JM)
                         GlassChip(
                             selected = true,
+                            part = com.zycomic.app.ui.components.GlassPart.TAB_UNSELECTED,
                             onClick = {
                                 if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
                                     showJmAlbumJumpDialog = true

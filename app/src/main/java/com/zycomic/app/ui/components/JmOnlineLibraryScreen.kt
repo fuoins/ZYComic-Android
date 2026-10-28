@@ -410,7 +410,13 @@ private fun JmOnlineLibraryContent(
         },
         bottomBar = {
             if (selectionMode) {
-                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .glassSurface(shape = RoundedCornerShape(14.dp), radius = 14.dp, part = GlassPart.BUTTON, stroke = false),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
                     if (history) {
                         TextButton(enabled = selected.isNotEmpty() && !busy, onClick = {
                             val ids = selected
@@ -784,13 +790,41 @@ private fun JmLibraryRow(
         else -> 60.dp
     }
     Row(
-        modifier = Modifier.fillMaxWidth().background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(14.dp),
+                radius = 14.dp,
+                part = GlassPart.CARD,
+                stroke = false,
+            )
+            .then(
+                if (selected) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                } else {
+                    Modifier
+                },
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onClick() })
         JmLibraryCover(item, Modifier.width(coverWidth))
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+            Box(
+                modifier = Modifier
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+            }
             if (displayMode >= 4 && item.author.isNotBlank()) Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             if (displayMode >= 5 && item.description.isNotBlank()) Text(item.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }

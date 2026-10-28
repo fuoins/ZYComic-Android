@@ -45,7 +45,7 @@ fun BrowseTabCapsule(
     } else {
         platformAccent
     }
-    // 玻璃语言：所有标签都带磨砂胶囊底（选中更亮），文字始终保留平台色区分。
+    // 玻璃语言与底栏一致：选中 = 更亮的白色玻璃胶囊，未选中 = 淡玻璃（外观页可单独调，调到 0 即无底）。
     val foreground = accent
 
     Row(
@@ -54,8 +54,11 @@ fun BrowseTabCapsule(
             .glassSurface(
                 shape = RoundedCornerShape(50),
                 radius = 999.dp,
-                part = com.zycomic.app.ui.components.GlassPart.TAB,
-                alphaOverride = if (selected) 0.42f else 0.14f,
+                part = if (selected) {
+                    com.zycomic.app.ui.components.GlassPart.TAB_SELECTED
+                } else {
+                    com.zycomic.app.ui.components.GlassPart.TAB_UNSELECTED
+                },
                 stroke = false,
             )
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),

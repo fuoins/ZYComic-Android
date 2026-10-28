@@ -62,6 +62,7 @@ import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.AppCoverBackdrop
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.GlassShell
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.components.LocalAppHaze
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
@@ -864,7 +865,6 @@ private fun androidx.compose.foundation.layout.RowScope.GlassNavItem(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     Box(
         modifier = Modifier
             .weight(1f)
@@ -879,10 +879,15 @@ private fun androidx.compose.foundation.layout.RowScope.GlassNavItem(
         Box(
             modifier = Modifier
                 .size(40.dp)
-                .clip(androidx.compose.foundation.shape.CircleShape)
                 .then(
                     if (selected) {
-                        Modifier.background(Color.White.copy(alpha = if (dark) 0.22f else 0.65f))
+                        // 选中指示器 = 白色玻璃圆，模糊度/透明度由外观页「底栏选中圆」独立控制。
+                        Modifier.glassSurface(
+                            shape = RoundedCornerShape(50),
+                            radius = 999.dp,
+                            part = com.zycomic.app.ui.components.GlassPart.BOTTOM_SELECTED,
+                            stroke = false,
+                        )
                     } else {
                         Modifier
                     },

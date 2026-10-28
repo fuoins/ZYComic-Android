@@ -10,7 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
@@ -40,7 +42,27 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
     val backdropBlurDp by GlassPrefs.backdropBlurDp.collectAsState()
     val backdropAlpha by GlassPrefs.backdropAlpha.collectAsState()
 
-    // 后台预热（不阻塞切换）：把当前图下载进磁盘/内存缓存。
+    // 双缓冲：shown 是当前画面上的图；pending 是新图（先透明预解码，成功后再换）。
+    // 首次组合时用全局记住的上一张，搜索页这种独立窗口因此不会从空白开始。
+    var shown by remember { mutableStateOf(AppBackdropState.lastRendered ?: entry) }
+    var pending by remember { mutableStateOf<BackdropEntry?>(null) }
+
+    LaunchedEffect(entry) {
+        when {
+            entry == null -> {
+                // 本页没有背景来源：退回内置默认图。
+                shown = null
+                pending = null
+            }
+            entry == shown -> pending = null
+            else -> pending = entry
+        }
+    }
+    LaunchedEffect(shown) {
+        shown?.let { AppBackdropState.lastRendered = it }
+    }
+
+    // 后台预热（不阻塞切换）：把目标图下载进磁盘/内存缓存。
     LaunchedEffect(entry) {
         entry ?: return@LaunchedEffect
         val metrics = context.resources.displayMetrics
@@ -59,23 +81,43 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
             modifier = Modifier.matchParentSize().blur(backdropBlurDp.dp).alpha(backdropAlpha),
             fallbackAlpha = 0.9f,
         )
-        if (entry != null) {
-            Crossfade(
-                targetState = entry,
-                modifier = Modifier.fillMaxSize(),
-                animationSpec = tween(350),
-                label = "appBackdrop",
-            ) { current ->
-                val currentLoader = remember(current.platform) { loaderFor(context, current.platform) }
+        // 已显示的图：切换时只在这层之间淡入淡出，永不出现“图还没来”的空档。
+        Crossfade(
+            targetState = shown,
+            modifier = Modifier.fillMaxSize(),
+            animationSpec = tween(350),
+            label = "appBackdrop",
+        ) { current ->
+            if (current != null) {
+                val loader = remember(current.platform) { loaderFor(context, current.platform) }
                 AsyncImage(
                     model = current.url,
                     contentDescription = null,
-                    imageLoader = currentLoader,
+                    imageLoader = loader,
                     modifier = Modifier.fillMaxSize().blur(backdropBlurDp.dp).alpha(backdropAlpha),
                     contentScale = ContentScale.Crop,
                 )
             }
-            // 顶部/底部轻压色，保证状态栏与底栏文字可读。
+        }
+        // 预解码层：完全透明地加载下一张；成功后替换 shown，再走 350ms 淡入。
+        pending?.let { next ->
+            val loader = remember(next.platform) { loaderFor(context, next.platform) }
+            AsyncImage(
+                model = next.url,
+                contentDescription = null,
+                imageLoader = loader,
+                modifier = Modifier.fillMaxSize().alpha(0f),
+                contentScale = ContentScale.Crop,
+                onSuccess = {
+                    shown = next
+                    AppBackdropState.lastRendered = next
+                    pending = null
+                },
+                onError = { pending = null },
+            )
+        }
+        // 顶部/底部轻压色，保证状态栏与底栏文字可读。
+        if (shown != null) {
             Box(
                 Modifier.matchParentSize().background(
                     Brush.verticalGradient(

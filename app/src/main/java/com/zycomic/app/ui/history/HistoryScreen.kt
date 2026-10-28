@@ -73,7 +73,6 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
-import tachiyomi.presentation.core.util.selectedBackground
 
 @Composable
 fun HistoryScreen(
@@ -516,7 +515,21 @@ private fun HistoryItemRow(
     val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
-            .selectedBackground(selected)
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .glassSurface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                radius = 14.dp,
+                part = com.zycomic.app.ui.components.GlassPart.CARD,
+                stroke = false,
+            )
+            .then(
+                if (selected) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                } else {
+                    Modifier
+                },
+            )
             .combinedClickable(
                 onClick = onClickRow,
                 onLongClick = {
@@ -524,9 +537,7 @@ private fun HistoryItemRow(
                     onLongClickRow()
                 },
             )
-            .fillMaxWidth()
-            .height(96.dp)
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SubcomposeAsyncImage(
@@ -534,7 +545,7 @@ private fun HistoryItemRow(
             contentDescription = item.bookName,
             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             modifier = Modifier
-                .fillMaxHeight()
+                .height(84.dp)
                 .aspectRatio(3f / 4f)
                 .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)

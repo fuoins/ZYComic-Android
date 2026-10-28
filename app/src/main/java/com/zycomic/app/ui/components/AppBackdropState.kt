@@ -23,6 +23,15 @@ object AppBackdropState {
     private val _current = MutableStateFlow<BackdropEntry?>(null)
     val current: StateFlow<BackdropEntry?> = _current.asStateFlow()
 
+    /**
+     * 最近一张真正画到屏幕上的背景。
+     *
+     * 搜索页是独立 Dialog 窗口，重新组合时如果从“空白”开始就必然会闪一下；
+     * 这里保存上一张已显示的图，新窗口先用它顶上，新图解码完成后再淡入。
+     */
+    @Volatile
+    var lastRendered: BackdropEntry? = null
+
     /** 按当前来源配置刷新背景；[pageKey] 非空时该页的自定义图优先。 */
     fun refresh(pageKey: String? = null) {
         val page = pageKey?.let { BackdropSources.pagePath(it) }
