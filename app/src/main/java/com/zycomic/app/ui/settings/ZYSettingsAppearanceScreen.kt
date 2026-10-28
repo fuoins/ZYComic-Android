@@ -1084,8 +1084,8 @@ private val DateFormats = listOf(
 private data class AppearanceColorTarget(
     val title: String,
     val current: Color,
-    val apply: (android.content.Context, Color) -> Unit,
     val reset: ((android.content.Context) -> Unit)? = null,
+    val apply: (android.content.Context, Color) -> Unit,
 )
 
 /** 外观页里的一行颜色设置：左侧标题/颜色代码，右侧色块（可附带额外操作）。 */
