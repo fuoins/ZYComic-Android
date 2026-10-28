@@ -241,14 +241,13 @@ private fun RankGrid(
     LazyVerticalGrid(
         columns = if (displayMode == 3) {
             GridCells.Fixed(1)
-        } else if (gridColumns == 0) {
-            GridCells.Adaptive(128.dp)
         } else {
-            GridCells.Fixed(gridColumns.coerceIn(1, 10))
+            // 与全站网格一致：自动时固定 3 列。
+            GridCells.Fixed(if (gridColumns > 0) gridColumns.coerceIn(1, 10) else 3)
         },
-        contentPadding = PaddingValues(start = 8.dp, top = 0.dp, end = 8.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(start = 6.dp, top = 0.dp, end = 6.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items(items = items, key = { it.rank }) { item ->
             RankCell(item = item, displayMode = displayMode, onClick = { onSearchTitle(item.title) })

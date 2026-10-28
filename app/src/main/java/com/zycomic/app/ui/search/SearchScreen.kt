@@ -368,9 +368,9 @@ fun SearchScreen(
                     // 与收藏页网格一致：8dp 页边距 + 8dp 卡片间距，默认 3 列。
                     columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
                     state = gridState,
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->

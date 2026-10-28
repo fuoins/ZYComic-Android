@@ -54,7 +54,7 @@ fun GlassMangaGridCard(
 ) {
     Column(
         modifier = modifier
-            .padding(3.dp)
+            .padding(2.dp)
             .glassSurface(
                 shape = RoundedCornerShape(12.dp),
                 radius = 12.dp,
@@ -69,7 +69,7 @@ fun GlassMangaGridCard(
                 },
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick ?: {})
-            .padding(6.dp),
+            .padding(4.dp),
     ) {
         Box(
             modifier = Modifier

@@ -895,15 +895,14 @@ private fun BrowseTabContent(
                             LazyVerticalGrid(
                                 columns = if (displayMode == 3) {
                                     GridCells.Fixed(1)
-                                } else if (gridColumns == 0) {
-                                    GridCells.Adaptive(128.dp)
                                 } else {
-                                    GridCells.Fixed(gridColumns)
+                                    // 与全站网格一致：自动时固定 3 列。
+                                    GridCells.Fixed(if (gridColumns > 0) gridColumns else 3)
                                 },
                                 state = gridState,
-                                contentPadding = PaddingValues(8.dp, 0.dp, 8.dp, if (displayMode == 2) 4.dp else bottomPadding + 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(6.dp, 0.dp, 6.dp, if (displayMode == 2) 4.dp else bottomPadding + 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier.fillMaxSize(),
                             ) {
                                 items(gridItems, key = { it.second }) { (m, _) ->

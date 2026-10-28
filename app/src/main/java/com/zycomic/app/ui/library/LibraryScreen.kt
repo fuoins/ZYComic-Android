@@ -281,9 +281,9 @@ fun LibraryScreen(
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(columns),
                             contentPadding = contentPadding,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             if (!searchQuery.isNullOrBlank()) {
                                 item(key = "global-search", contentType = "global-search", span = { GridItemSpan(columns) }) {

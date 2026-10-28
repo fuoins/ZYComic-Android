@@ -353,9 +353,9 @@ fun PicacgLibraryScreen(
             displayMode == PicacgCollectionPolicy.DISPLAY_GRID -> LazyVerticalGrid(
                 columns = GridCells.Fixed(gridColumns),
                 contentPadding = contentPadding,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
             ) {
                 gridItems(filtered, key = { it.id }) { comic ->
                     PicacgMangaCard(

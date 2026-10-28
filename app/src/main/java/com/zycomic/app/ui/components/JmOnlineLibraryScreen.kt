@@ -474,12 +474,12 @@ private fun JmOnlineLibraryContent(
                 activeGrid -> LazyVerticalGrid(
                     columns = GridCells.Fixed(JmFavoriteLibraryUiPolicy.gridColumns(configuredGridColumns)),
                     state = gridState,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp).onGloballyPositioned {
+                    modifier = Modifier.weight(1f).padding(horizontal = 6.dp).onGloballyPositioned {
                         val token = JmLibraryLayoutToken(loadGeneration, activeGrid)
                         if (listLayoutToken != token) listLayoutToken = token
                     },
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     gridItems(visibleItems, key = { it.id }) { item ->
                         JmLibraryCard(item, displayMode, item.id in selected, selectionMode, onClick = { if (selectionMode) toggleSelection(item.id) else onOpenManga("jm:${item.id}") }, onLongClick = {

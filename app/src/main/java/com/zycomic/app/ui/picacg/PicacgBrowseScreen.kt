@@ -360,11 +360,12 @@ fun PicacgBrowseScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = if (gridColumns == 0) GridCells.Adaptive(128.dp) else GridCells.Fixed(effectiveGridColumns),
+                    // 与全站网格一致：未设置（自动）时固定 3 列，避免哔咔排行/分类的封面比别处大一圈。
+                    columns = GridCells.Fixed(if (gridColumns > 0) effectiveGridColumns else 3),
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     error?.let { failure ->
                         item(span = { GridItemSpan(maxLineSpan) }) {
