@@ -2,7 +2,6 @@ package com.zycomic.app.ui
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
@@ -63,29 +62,27 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.unit.dp
-import com.zycomic.app.ui.components.AppBackdropState
-import com.zycomic.app.ui.components.AppearanceColors
-import com.zycomic.app.ui.components.AppearancePreviewState
-import com.zycomic.app.ui.components.AppearanceQuickPanel
-import com.zycomic.app.ui.components.AppCoverBackdrop
-import com.zycomic.app.ui.components.BackdropSources
-import com.zycomic.app.ui.components.GlassShell
-import com.zycomic.app.ui.components.glassSurface
-import com.zycomic.app.ui.components.LocalAppHaze
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import cafe.adriel.voyager.navigator.Navigator
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.reader.ReaderDetailRoute
 import com.zycomic.app.ui.browse.BrowseScreen
 import com.zycomic.app.ui.browse.BrowseViewModel
+import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.AppCoverBackdrop
+import com.zycomic.app.ui.components.AppearanceColors
+import com.zycomic.app.ui.components.AppearancePreviewState
+import com.zycomic.app.ui.components.AppearanceQuickPanel
+import com.zycomic.app.ui.components.BackdropSources
+import com.zycomic.app.ui.components.GlassShell
+import com.zycomic.app.ui.components.LocalAppHaze
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.history.HistoryScreen
 import com.zycomic.app.ui.history.HistoryViewModel
 import com.zycomic.app.ui.library.LibraryScreen
@@ -105,6 +102,8 @@ import com.zycomic.app.ui.settings.SettingsViewModel
 import com.zycomic.app.ui.settings.SpeedTestScreen
 import com.zycomic.app.ui.settings.TagBlockScreen
 import com.zycomic.app.ui.settings.ZYSettingsAppearanceScreen
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
 import eu.kanade.presentation.theme.TachiyomiTheme
@@ -116,6 +115,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import android.graphics.Color as AndroidColor
 
 class MainActivity : BaseActivity() {
 
@@ -167,42 +167,42 @@ class MainActivity : BaseActivity() {
                     )
                 } ?: baseScheme
                 MaterialTheme(colorScheme = themedScheme) {
-                CompositionLocalProvider(
-                    LocalTextStyle provides MaterialTheme.typography.bodySmall,
-                    LocalContentColor provides MaterialTheme.colorScheme.onBackground,
-                ) {
-                    val routeConfigState by com.zycomic.app.net.DevConfig.routeConfigState.collectAsState()
-                    val bootstrapScope = rememberCoroutineScope()
-                    if (routeConfigState is com.zycomic.app.net.RouteConfigState.Ready) {
-                        AppContent(
-                            isLaunch = savedInstanceState == null,
-                            shortcutTab = shortcutTab,
-                            onShortcutTabConsumed = { shortcutTab = -1 },
-                            readerDetailBookId = readerDetailBookId,
-                            onReaderDetailConsumed = {
-                                readerDetailBookId = null
-                                intent?.removeExtra(ReaderDetailRoute.EXTRA_BOOK_ID)
-                            },
-                        )
-                    } else {
-                        RemoteConfigGate(routeConfigState) {
-                            bootstrapScope.launch {
-                                val result = com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = true)
-                                if (result.configurationUpdated) {
-                                    com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
-                                    try {
-                                        com.zycomic.app.net.PlatformSpeedTestCoordinator.run(
-                                            remoteConfigUpdated = result.configurationUpdated,
-                                            isStartupRun = true,
-                                        )
-                                    } finally {
-                                        com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
+                    CompositionLocalProvider(
+                        LocalTextStyle provides MaterialTheme.typography.bodySmall,
+                        LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+                    ) {
+                        val routeConfigState by com.zycomic.app.net.DevConfig.routeConfigState.collectAsState()
+                        val bootstrapScope = rememberCoroutineScope()
+                        if (routeConfigState is com.zycomic.app.net.RouteConfigState.Ready) {
+                            AppContent(
+                                isLaunch = savedInstanceState == null,
+                                shortcutTab = shortcutTab,
+                                onShortcutTabConsumed = { shortcutTab = -1 },
+                                readerDetailBookId = readerDetailBookId,
+                                onReaderDetailConsumed = {
+                                    readerDetailBookId = null
+                                    intent?.removeExtra(ReaderDetailRoute.EXTRA_BOOK_ID)
+                                },
+                            )
+                        } else {
+                            RemoteConfigGate(routeConfigState) {
+                                bootstrapScope.launch {
+                                    val result = com.zycomic.app.net.RemoteConfigFetcher.checkAndApply(manual = true)
+                                    if (result.configurationUpdated) {
+                                        com.zycomic.app.net.RemoteConfigFetcher.beginConfigRetest(result.version, duringStartup = true)
+                                        try {
+                                            com.zycomic.app.net.PlatformSpeedTestCoordinator.run(
+                                                remoteConfigUpdated = result.configurationUpdated,
+                                                isStartupRun = true,
+                                            )
+                                        } finally {
+                                            com.zycomic.app.net.RemoteConfigFetcher.finishConfigRetest(result.version)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
                 }
             }
         }
@@ -480,109 +480,109 @@ fun AppContent(
         // 否则会被过滤掉、整层透明。
         val hazeState = rememberHazeState()
         CompositionLocalProvider(LocalAppHaze provides hazeState) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxSize().hazeSource(state = hazeState)) {
-                AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
-            }
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = Color.Transparent,
-                contentWindowInsets = WindowInsets.navigationBars,
-                bottomBar = {
-                    GlassBottomBar {
-                        GlassNavItem(
-                            icon = Icons.Default.Home,
-                            description = "分类",
-                            selected = bottomTab == 0,
-                            onClick = { bottomTab = 0 },
-                        )
-                        GlassNavItem(
-                            icon = Icons.Default.Book,
-                            description = "书架",
-                            selected = bottomTab == 1,
-                            onClick = { bottomTab = 1 },
-                        )
-                        GlassNavItem(
-                            icon = Icons.Default.History,
-                            description = "历史",
-                            selected = bottomTab == 2,
-                            onClick = { bottomTab = 2 },
-                        )
-                        GlassNavItem(
-                            icon = Icons.Default.Person,
-                            description = "我的",
-                            selected = bottomTab == 3,
-                            onClick = { bottomTab = 3 },
-                        )
-                        GlassNavItem(
-                            icon = Icons.Default.Settings,
-                            description = "设置",
-                            selected = bottomTab == 4,
-                            onClick = { bottomTab = 4 },
-                        )
-                    }
-                },
-            ) { innerPadding ->
-                Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                when (bottomTab) {
-                    0 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_CATEGORY_STATE_KEY) {
-                        BrowseScreen(
-                            vm = browseVm,
-                            pendingTag = pendingTag,
-                            onPendingTagConsumed = { pendingTag = null },
-                            onOpenManga = openDetail,
-                            onOpenSearch = { kw, provider ->
-                                searchKeyword = kw
-                                searchProvider = provider
-                                showSearch = true
-                            },
-                            onRequireLogin = { openLogin(browseVm.currentPlatform.value) },
-                        )
-                    }
-                    1 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_FAVORITES_STATE_KEY) {
-                        LibraryScreen(
-                            vm = libraryVm,
-                            onOpenManga = openDetail,
-                            onRequireLogin = { openLogin(libraryVm.currentPlatform.value) },
-                            onOpenSearch = { kw ->
-                                searchKeyword = kw
-                                searchProvider = null
-                                showSearch = true
-                            },
-                        )
-                    }
-                    2 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_HISTORY_STATE_KEY) {
-                        HistoryScreen(
-                            vm = historyVm,
-                            onOpenManga = openDetail,
-                            onRequireLogin = { openLogin(historyVm.currentPlatform.value) },
-                            onOpenSearch = { kw ->
-                                searchKeyword = kw
-                                searchProvider = null
-                                showSearch = true
-                            },
-                        )
-                    }
-                    3 -> ProfileScreen(
-                        onRequireLogin = { openLogin(null) },
-                        onNavigateToTab = { bottomTab = it },
-                        onOpenManga = openDetail,
-                        isDetailOpen = detailStack.isNotEmpty(),
-                        onOpenTagBlock = openTagBlock,
-                        onOpenBookBlock = openBookBlock,
-                        onBlockGayTags = blockGayTags,
-                    )
-                    4 -> SettingsMainScreen(
-                        onOpenAppearance = openAppearance,
-                        onOpenReader = openReader,
-                        onOpenDeveloperSettings = openDeveloperSettings,
-                        onOpenDataStorage = openDataStorage,
-                        onOpenAbout = openAbout,
-                        guideInitialPlatform = browseVm.currentPlatform.value,
-                    )
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.fillMaxSize().hazeSource(state = hazeState)) {
+                    AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
                 }
-            }
-        }
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = Color.Transparent,
+                    contentWindowInsets = WindowInsets.navigationBars,
+                    bottomBar = {
+                        GlassBottomBar {
+                            GlassNavItem(
+                                icon = Icons.Default.Home,
+                                description = "分类",
+                                selected = bottomTab == 0,
+                                onClick = { bottomTab = 0 },
+                            )
+                            GlassNavItem(
+                                icon = Icons.Default.Book,
+                                description = "书架",
+                                selected = bottomTab == 1,
+                                onClick = { bottomTab = 1 },
+                            )
+                            GlassNavItem(
+                                icon = Icons.Default.History,
+                                description = "历史",
+                                selected = bottomTab == 2,
+                                onClick = { bottomTab = 2 },
+                            )
+                            GlassNavItem(
+                                icon = Icons.Default.Person,
+                                description = "我的",
+                                selected = bottomTab == 3,
+                                onClick = { bottomTab = 3 },
+                            )
+                            GlassNavItem(
+                                icon = Icons.Default.Settings,
+                                description = "设置",
+                                selected = bottomTab == 4,
+                                onClick = { bottomTab = 4 },
+                            )
+                        }
+                    },
+                ) { innerPadding ->
+                    Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                        when (bottomTab) {
+                            0 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_CATEGORY_STATE_KEY) {
+                                BrowseScreen(
+                                    vm = browseVm,
+                                    pendingTag = pendingTag,
+                                    onPendingTagConsumed = { pendingTag = null },
+                                    onOpenManga = openDetail,
+                                    onOpenSearch = { kw, provider ->
+                                        searchKeyword = kw
+                                        searchProvider = provider
+                                        showSearch = true
+                                    },
+                                    onRequireLogin = { openLogin(browseVm.currentPlatform.value) },
+                                )
+                            }
+                            1 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_FAVORITES_STATE_KEY) {
+                                LibraryScreen(
+                                    vm = libraryVm,
+                                    onOpenManga = openDetail,
+                                    onRequireLogin = { openLogin(libraryVm.currentPlatform.value) },
+                                    onOpenSearch = { kw ->
+                                        searchKeyword = kw
+                                        searchProvider = null
+                                        showSearch = true
+                                    },
+                                )
+                            }
+                            2 -> tabStateHolder.SaveableStateProvider(MAIN_TAB_HISTORY_STATE_KEY) {
+                                HistoryScreen(
+                                    vm = historyVm,
+                                    onOpenManga = openDetail,
+                                    onRequireLogin = { openLogin(historyVm.currentPlatform.value) },
+                                    onOpenSearch = { kw ->
+                                        searchKeyword = kw
+                                        searchProvider = null
+                                        showSearch = true
+                                    },
+                                )
+                            }
+                            3 -> ProfileScreen(
+                                onRequireLogin = { openLogin(null) },
+                                onNavigateToTab = { bottomTab = it },
+                                onOpenManga = openDetail,
+                                isDetailOpen = detailStack.isNotEmpty(),
+                                onOpenTagBlock = openTagBlock,
+                                onOpenBookBlock = openBookBlock,
+                                onBlockGayTags = blockGayTags,
+                            )
+                            4 -> SettingsMainScreen(
+                                onOpenAppearance = openAppearance,
+                                onOpenReader = openReader,
+                                onOpenDeveloperSettings = openDeveloperSettings,
+                                onOpenDataStorage = openDataStorage,
+                                onOpenAbout = openAbout,
+                                guideInitialPlatform = browseVm.currentPlatform.value,
+                            )
+                        }
+                    }
+                }
             }
         }
     } else {
@@ -860,7 +860,6 @@ private fun KomikkuSettingsDialog(
         }
     }
 }
-
 
 /**
  * 液态玻璃底栏：真磨砂悬浮胶囊（Haze backdrop blur）——

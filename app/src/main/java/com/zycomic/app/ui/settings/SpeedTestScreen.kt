@@ -32,7 +32,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.repository.ReaderRepository
-import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.net.ImageSourceDisplayPolicy
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
@@ -44,6 +43,7 @@ import com.zycomic.app.net.SpeedTester
 import com.zycomic.app.net.StartupCheckPhase
 import com.zycomic.app.net.StartupCheckResult
 import com.zycomic.app.platform.ContentPlatform
+import com.zycomic.app.ui.components.AppSwitch
 import eu.kanade.tachiyomi.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

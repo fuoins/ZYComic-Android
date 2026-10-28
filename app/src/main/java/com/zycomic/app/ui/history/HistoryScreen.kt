@@ -60,12 +60,12 @@ import com.zycomic.app.data.dto.HistoryItem
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
-import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.GlassTopBar
-import com.zycomic.app.ui.components.glassSurface
+import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import com.zycomic.app.ui.components.glassSurface
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
@@ -158,35 +158,35 @@ fun HistoryScreen(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             GlassTopBar {
-            LibraryHistoryToolbar(
-                platform = platform,
-                onSelectPlatform = selectPlatform,
-                searchQuery = searchQuery,
-                onChangeSearchQuery = vm::updateSearchQuery,
-                titleContent = {
-                    Text(
-                        text = "历史",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                searchSupported = platform == ContentPlatform.MANWA,
-                refreshSupported = platform == ContentPlatform.MANWA,
-                filterSupported = false,
-                onRefresh = {
-                    vm.refreshHistory()
-                    scope.launch { listState.scrollToItem(0) }
-                },
-                onFilter = {},
-                onEnterSelection = vm::enterSelection,
-                selectionMode = manwaSelectionMode,
-                selectionCount = selectedIds.size,
-                onExitSelection = vm::exitSelection,
-                onSelectAll = vm::selectAll,
-                onInvertSelection = vm::invertSelection,
-                scrollBehavior = scrollBehavior,
-                history = true,
-            )
+                LibraryHistoryToolbar(
+                    platform = platform,
+                    onSelectPlatform = selectPlatform,
+                    searchQuery = searchQuery,
+                    onChangeSearchQuery = vm::updateSearchQuery,
+                    titleContent = {
+                        Text(
+                            text = "历史",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    searchSupported = platform == ContentPlatform.MANWA,
+                    refreshSupported = platform == ContentPlatform.MANWA,
+                    filterSupported = false,
+                    onRefresh = {
+                        vm.refreshHistory()
+                        scope.launch { listState.scrollToItem(0) }
+                    },
+                    onFilter = {},
+                    onEnterSelection = vm::enterSelection,
+                    selectionMode = manwaSelectionMode,
+                    selectionCount = selectedIds.size,
+                    onExitSelection = vm::exitSelection,
+                    onSelectAll = vm::selectAll,
+                    onInvertSelection = vm::invertSelection,
+                    scrollBehavior = scrollBehavior,
+                    history = true,
+                )
             }
         },
         bottomBar = {

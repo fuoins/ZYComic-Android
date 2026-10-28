@@ -85,16 +85,20 @@ object AppearanceConfig {
 
         root.optJSONObject("glass")?.let { glass ->
             if (glass.has("backdropBlur")) {
-                GlassPrefs.setBackdropBlurDp(context, glass.optDouble("backdropBlur").toFloat()); applied++
+                GlassPrefs.setBackdropBlurDp(context, glass.optDouble("backdropBlur").toFloat())
+                applied++
             }
             if (glass.has("backdropAlpha")) {
-                GlassPrefs.setBackdropAlpha(context, glass.optDouble("backdropAlpha").toFloat()); applied++
+                GlassPrefs.setBackdropAlpha(context, glass.optDouble("backdropAlpha").toFloat())
+                applied++
             }
             if (glass.has("strength")) {
-                GlassPrefs.setGlassStrength(context, glass.optDouble("strength").toFloat()); applied++
+                GlassPrefs.setGlassStrength(context, glass.optDouble("strength").toFloat())
+                applied++
             }
             AppearanceColors.parseColor(glass.optString("tint"))?.let {
-                AppearanceColors.setGlassTint(context, it); applied++
+                AppearanceColors.setGlassTint(context, it)
+                applied++
             }
             if (glass.has("uiAccent")) {
                 val parsed = AppearanceColors.parseColor(glass.optString("uiAccent"))
@@ -131,16 +135,20 @@ object AppearanceConfig {
 
         root.optJSONObject("platforms")?.let { platforms ->
             AppearanceColors.parseColor(platforms.optString("manwa"))?.let {
-                ContentPlatformAccentPrefs.set(ContentPlatform.MANWA, it); applied++
+                ContentPlatformAccentPrefs.set(ContentPlatform.MANWA, it)
+                applied++
             }
             AppearanceColors.parseColor(platforms.optString("picacg"))?.let {
-                ContentPlatformAccentPrefs.set(ContentPlatform.PICACG, it); applied++
+                ContentPlatformAccentPrefs.set(ContentPlatform.PICACG, it)
+                applied++
             }
             AppearanceColors.parseColor(platforms.optString("jm"))?.let {
-                ContentPlatformAccentPrefs.set(ContentPlatform.JM, it); applied++
+                ContentPlatformAccentPrefs.set(ContentPlatform.JM, it)
+                applied++
             }
             AppearanceColors.parseColor(platforms.optString("yuzong"))?.let {
-                AppearanceColors.setYuzong(context, it); applied++
+                AppearanceColors.setYuzong(context, it)
+                applied++
             }
         }
 

@@ -381,31 +381,31 @@ private fun JmOnlineLibraryContent(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             GlassTopBar {
-            LibraryHistoryToolbar(
-                platform = ContentPlatform.JM,
-                onSelectPlatform = onSelectPlatform,
-                searchQuery = query,
-                onChangeSearchQuery = { query = it },
-                titleContent = {
-                    Column {
-                        LibraryHistoryTitle(if (history) "历史" else "收藏")
-                        if (!history) total?.let { Text("${items.size}/$it", style = MaterialTheme.typography.bodyMedium) }
-                    }
-                },
-                searchSupported = true,
-                refreshSupported = true,
-                filterSupported = !history,
-                onRefresh = ::refresh,
-                onFilter = { showFilter = true },
-                onEnterSelection = { if (loggedIn && !busy) selectionMode = true },
-                selectionMode = selectionMode,
-                selectionCount = selected.size,
-                onExitSelection = ::exitSelection,
-                onSelectAll = { if (!busy) selected = JmLibrarySelectionPolicy.selectAll(visibleItems.map { it.id }) },
-                onInvertSelection = { if (!busy) selected = JmLibrarySelectionPolicy.invert(selected, visibleItems.map { it.id }) },
-                scrollBehavior = scrollBehavior,
-                history = history,
-            )
+                LibraryHistoryToolbar(
+                    platform = ContentPlatform.JM,
+                    onSelectPlatform = onSelectPlatform,
+                    searchQuery = query,
+                    onChangeSearchQuery = { query = it },
+                    titleContent = {
+                        Column {
+                            LibraryHistoryTitle(if (history) "历史" else "收藏")
+                            if (!history) total?.let { Text("${items.size}/$it", style = MaterialTheme.typography.bodyMedium) }
+                        }
+                    },
+                    searchSupported = true,
+                    refreshSupported = true,
+                    filterSupported = !history,
+                    onRefresh = ::refresh,
+                    onFilter = { showFilter = true },
+                    onEnterSelection = { if (loggedIn && !busy) selectionMode = true },
+                    selectionMode = selectionMode,
+                    selectionCount = selected.size,
+                    onExitSelection = ::exitSelection,
+                    onSelectAll = { if (!busy) selected = JmLibrarySelectionPolicy.selectAll(visibleItems.map { it.id }) },
+                    onInvertSelection = { if (!busy) selected = JmLibrarySelectionPolicy.invert(selected, visibleItems.map { it.id }) },
+                    scrollBehavior = scrollBehavior,
+                    history = history,
+                )
             }
         },
         bottomBar = {
@@ -826,13 +826,13 @@ private fun JmLibraryRow(
                     .padding(horizontal = 6.dp, vertical = 3.dp),
             ) {
                 Text(
-                item.name,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleSmall,
-                color = coverNameTextColor(),
-            )
+                    item.name,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = coverNameTextColor(),
+                )
             }
             if (displayMode >= 4 && item.author.isNotBlank()) Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             if (displayMode >= 5 && item.description.isNotBlank()) Text(item.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)

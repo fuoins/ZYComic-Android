@@ -60,8 +60,8 @@ import com.zycomic.app.ui.components.AppearanceUiState
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.ColorPickerDialog
 import com.zycomic.app.ui.components.GlassPart
-import com.zycomic.app.ui.components.GlassPrefs
 import com.zycomic.app.ui.components.GlassPreferenceRow
+import com.zycomic.app.ui.components.GlassPrefs
 import com.zycomic.app.ui.components.GlassSwitchRow
 import com.zycomic.app.ui.components.glassSurface
 import eu.kanade.core.preference.asState
@@ -506,7 +506,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         )
     }
 
-    /** 背景与液态玻璃参数：模糊度 + 玻璃强度 + 自定义图片 + 随机图源多选，实时生效。 */
     /** 背景与玻璃：模糊度 / 透明度 / 玻璃强度 / 各部件参数。 */
     @Composable
     private fun getGlassGroup(): Preference.PreferenceGroup {
@@ -625,7 +624,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
             val pageKey = pickingPage
             if (uri != null && pageKey != null) {
                 runCatching {
-                    val dest = java.io.File(context.filesDir, "backdrop_${pageKey}.jpg")
+                    val dest = java.io.File(context.filesDir, "backdrop_$pageKey.jpg")
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { out -> input.copyTo(out) }
                     }
@@ -1120,7 +1119,6 @@ private val DateFormats = listOf(
     "dd MMM yyyy",
     "MMM dd, yyyy",
 )
-
 
 /** 颜色选择目标：标题 + 当前值 + 应用回调。 */
 private data class AppearanceColorTarget(

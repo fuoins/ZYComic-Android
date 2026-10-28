@@ -189,7 +189,7 @@ jobs:
           "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
           grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "versionCode='14'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='15'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "package: name='com.zycomic.app'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
           test -s app/build/outputs/mapping/release/mapping.txt
@@ -208,19 +208,20 @@ jobs:
         if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 5.0.0 待审核构建
+          ZYComic 6.0.0
 
-          本次更新（相对 v4.2.0）
-          - 优化快测与完整测速的两阶段就绪判断，已就绪平台提前放行，剩余项目继续后台检测。
-          - 开屏展示实际运行模式，并补充分类、每行漫画格数、平台标签切换及标签增删改操作说明。
-          - 禁漫首页安全 GET 请求限次重试，隔离测速请求取消，避免取消其他业务请求。
-          - 优化标签筛选、默认顺序、新增后选中与管理页固定标题。
-          - 补充启动协调、两阶段测速、首页重试及标签管理回归测试。
-          - 恢复哔咔收藏页独立刷新指示器及加载中可重新刷新行为，删除操作进行时仍禁止重复刷新。
+          本次更新（相对 5.0.0）
+          - 外观系统全新：跟随系统深浅色，全局自定义背景图与随机图源，液态玻璃全站覆盖。
+          - 外观设置：界面主色、开关颜色、玻璃颜色/模糊度/不透明度/磨砂、各部件独立参数、
+            颜色代码与个性化调色板、配置导入导出，预览浮窗可边看边调。
+          - 全站网格统一为 3 列禁漫收藏风格，封面放大，收藏/分类/搜索/排行/宇总一致。
+          - 删除首次启动新手引导；开屏页展示线路与图源准备进度。
+          - 测速：首次完整测速后不再重复快测；放行后后台补测至 8 个快速成功。
+          - 应用图标、开屏、我的页与关于页头像换新。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 版本：5.0.0（versionCode 14），正式包名 com.zycomic.app。
+          - 版本：6.0.0（versionCode 15），正式包名 com.zycomic.app。
           - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
 

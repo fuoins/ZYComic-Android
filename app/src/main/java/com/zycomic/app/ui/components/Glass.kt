@@ -45,7 +45,7 @@ import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 
-/**
+/*
  * 液态玻璃组件库（全 App 统一外观语言，但**每类部件参数独立**）。
  *
  * 真 backdrop blur：主界面把背景层标记为模糊源（[LocalAppHaze]），玻璃通过 Haze 对
@@ -389,7 +389,6 @@ fun GlassChip(
         },
     )
 }
-
 
 /** 封面名字条 / 列表书名的文字颜色：外观页可配，默认跟随主题。 */
 @Composable

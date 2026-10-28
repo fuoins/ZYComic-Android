@@ -76,9 +76,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.data.dto.SignDay
-import com.zycomic.app.ui.components.GlassCard
-import com.zycomic.app.ui.components.GlassPreferenceRow
-import com.zycomic.app.ui.components.GlassSwitchRow
 import com.zycomic.app.data.dto.WelfareData
 import com.zycomic.app.data.repository.JmCheckInRepository
 import com.zycomic.app.data.repository.ManwaSessionStatus
@@ -89,6 +86,9 @@ import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.ContentPlatformSelector
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.ui.components.GlassCard
+import com.zycomic.app.ui.components.GlassPreferenceRow
+import com.zycomic.app.ui.components.GlassSwitchRow
 import com.zycomic.app.ui.login.JmAccountLogin
 import com.zycomic.app.ui.login.JmPasswordChangeDialog
 import eu.kanade.presentation.more.LogoHeader
@@ -384,43 +384,43 @@ fun ProfileScreen(
                     )
                 } else {
                     GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center,
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                "${user!!.nickname.firstOrNull() ?: "?"}",
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                        }
-                        Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
-                            Text(
-                                user!!.nickname.ifBlank { user!!.username.ifBlank { "未登录" } },
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
-                            )
-                            Text(
-                                "Lv${user!!.level}  收藏${user!!.favoriteCount}  积分${pointLimitText(user!!.level, user!!.point)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (ManwaProfileUiPolicy.showUnverifiedWarning(manwaSessionStatus, manwaRefreshing)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) {
                                 Text(
-                                    manwaRefreshUnknown,
+                                    "${user!!.nickname.firstOrNull() ?: "?"}",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                            Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
+                                Text(
+                                    user!!.nickname.ifBlank { user!!.username.ifBlank { "未登录" } },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                )
+                                Text(
+                                    "Lv${user!!.level}  收藏${user!!.favoriteCount}  积分${pointLimitText(user!!.level, user!!.point)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                if (ManwaProfileUiPolicy.showUnverifiedWarning(manwaSessionStatus, manwaRefreshing)) {
+                                    Text(
+                                        manwaRefreshUnknown,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
-                    }
                     }
                 }
             }

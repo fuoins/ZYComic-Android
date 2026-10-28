@@ -67,13 +67,13 @@ import com.zycomic.app.platform.ContentPlatformPrefs
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.ui.components.FilterChip
+import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.JmOnlineLibraryScreen
 import com.zycomic.app.ui.components.LibraryHistoryTitle
-import com.zycomic.app.ui.components.GlassTopBar
-import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.components.LibraryHistoryToolbar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
+import com.zycomic.app.ui.components.glassSurface
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
@@ -180,52 +180,52 @@ fun LibraryScreen(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             GlassTopBar {
-            val subtitle = if (platform == ContentPlatform.MANWA) {
-                user?.let { currentUser ->
-                    val max = when {
-                        currentUser.level >= 5 -> 3500
-                        currentUser.level == 4 -> 2500
-                        currentUser.level == 3 -> 1500
-                        currentUser.level == 2 -> 800
-                        currentUser.level == 1 -> 300
-                        else -> 0
-                    }
-                    "${currentUser.favoriteCount}/$max"
-                }
-            } else {
-                null
-            }
-            LibraryHistoryToolbar(
-                platform = platform,
-                onSelectPlatform = selectPlatform,
-                searchQuery = searchQuery,
-                onChangeSearchQuery = vm::updateSearchQuery,
-                titleContent = {
-                    Column {
-                        LibraryHistoryTitle("收藏")
-                        subtitle?.let {
-                            Text(
-                                text = it,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                val subtitle = if (platform == ContentPlatform.MANWA) {
+                    user?.let { currentUser ->
+                        val max = when {
+                            currentUser.level >= 5 -> 3500
+                            currentUser.level == 4 -> 2500
+                            currentUser.level == 3 -> 1500
+                            currentUser.level == 2 -> 800
+                            currentUser.level == 1 -> 300
+                            else -> 0
                         }
+                        "${currentUser.favoriteCount}/$max"
                     }
-                },
-                searchSupported = platform == ContentPlatform.MANWA,
-                refreshSupported = platform == ContentPlatform.MANWA,
-                filterSupported = platform == ContentPlatform.MANWA,
-                onRefresh = { vm.refreshFavorites() },
-                onFilter = { showFilterDialog = true },
-                onEnterSelection = vm::enterSelection,
-                selectionMode = selectionMode && platform == ContentPlatform.MANWA,
-                selectionCount = selectedIds.size,
-                onExitSelection = vm::exitSelection,
-                onSelectAll = vm::selectAll,
-                onInvertSelection = vm::invertSelection,
-                scrollBehavior = scrollBehavior,
-            )
+                } else {
+                    null
+                }
+                LibraryHistoryToolbar(
+                    platform = platform,
+                    onSelectPlatform = selectPlatform,
+                    searchQuery = searchQuery,
+                    onChangeSearchQuery = vm::updateSearchQuery,
+                    titleContent = {
+                        Column {
+                            LibraryHistoryTitle("收藏")
+                            subtitle?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    },
+                    searchSupported = platform == ContentPlatform.MANWA,
+                    refreshSupported = platform == ContentPlatform.MANWA,
+                    filterSupported = platform == ContentPlatform.MANWA,
+                    onRefresh = { vm.refreshFavorites() },
+                    onFilter = { showFilterDialog = true },
+                    onEnterSelection = vm::enterSelection,
+                    selectionMode = selectionMode && platform == ContentPlatform.MANWA,
+                    selectionCount = selectedIds.size,
+                    onExitSelection = vm::exitSelection,
+                    onSelectAll = vm::selectAll,
+                    onInvertSelection = vm::invertSelection,
+                    scrollBehavior = scrollBehavior,
+                )
             }
         },
         bottomBar = {

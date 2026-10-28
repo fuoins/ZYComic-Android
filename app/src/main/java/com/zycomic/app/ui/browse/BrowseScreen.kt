@@ -85,9 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.imageLoader
-import com.zycomic.app.ui.components.GlassChip
-import com.zycomic.app.ui.components.GlassTopBar
-import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.data.repository.JmFavoriteFolder
 import com.zycomic.app.data.repository.JmOnlineLibraryRepository
@@ -99,8 +96,11 @@ import com.zycomic.app.ui.components.BrowseScreenSessionPolicy
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.FilterChip
 import com.zycomic.app.ui.components.FilterSection
+import com.zycomic.app.ui.components.GlassChip
+import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.JmLibrarySelectionPolicy
 import com.zycomic.app.ui.components.MangaGridSkeleton
+import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.picacg.PicacgRankingMode
 import com.zycomic.app.ui.picacg.toFeedMode
 import com.zycomic.app.ui.search.SearchProvider
@@ -358,97 +358,97 @@ private fun LegacyBrowseScreen(
         containerColor = Color.Transparent,
         topBar = {
             GlassTopBar(bottomLine = false) {
-            if (activeSelectionMode) {
-                AppBar(
-                    titleContent = { Text(activeSelectionCount.toString()) },
-                    backgroundColor = Color.Transparent,
-                    actions = {
-                        AppBarActions(
-                            persistentListOf(
-                                AppBar.Action(title = "全选", icon = Icons.Outlined.SelectAll, onClick = {
-                                    if (jmCategoryActive) {
-                                        if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
-                                            jmSelectionGeneration++
-                                            jmSelectedIds = JmLibrarySelectionPolicy.selectAll(vm.mangasForTab(mainTab).value.map { it.id })
+                if (activeSelectionMode) {
+                    AppBar(
+                        titleContent = { Text(activeSelectionCount.toString()) },
+                        backgroundColor = Color.Transparent,
+                        actions = {
+                            AppBarActions(
+                                persistentListOf(
+                                    AppBar.Action(title = "全选", icon = Icons.Outlined.SelectAll, onClick = {
+                                        if (jmCategoryActive) {
+                                            if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                                                jmSelectionGeneration++
+                                                jmSelectedIds = JmLibrarySelectionPolicy.selectAll(vm.mangasForTab(mainTab).value.map { it.id })
+                                            }
+                                        } else {
+                                            vm.selectAll()
                                         }
-                                    } else {
-                                        vm.selectAll()
-                                    }
-                                }),
-                                AppBar.Action(title = "反选", icon = Icons.Outlined.FlipToBack, onClick = {
-                                    if (jmCategoryActive) {
-                                        if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
-                                            jmSelectionGeneration++
-                                            jmSelectedIds = JmLibrarySelectionPolicy.invertLoaded(jmSelectedIds, vm.mangasForTab(mainTab).value.map { it.id })
+                                    }),
+                                    AppBar.Action(title = "反选", icon = Icons.Outlined.FlipToBack, onClick = {
+                                        if (jmCategoryActive) {
+                                            if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                                                jmSelectionGeneration++
+                                                jmSelectedIds = JmLibrarySelectionPolicy.invertLoaded(jmSelectedIds, vm.mangasForTab(mainTab).value.map { it.id })
+                                            }
+                                        } else {
+                                            vm.invertSelection()
                                         }
-                                    } else {
-                                        vm.invertSelection()
-                                    }
-                                }),
-                            ),
-                        )
-                    },
-                    isActionMode = true,
-                    onCancelActionMode = { if (jmCategoryActive) exitJmSelection() else vm.exitSelection() },
-                )
-            } else {
-                SearchToolbar(
-                    backgroundColor = Color.Transparent,
-                    titleContent = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            CategoryPlatformLegend()
-                        }
-                    },
-                    searchEnabled = false,
-                    searchQuery = null,
-                    onChangeSearchQuery = {},
-                    actions = {
-                        // 禁漫号跳转：玻璃胶囊按钮，图标/文字用 JM 平台色。
-                        val jmAccent = com.zycomic.app.platform.rememberContentPlatformAccent(ContentPlatform.JM)
-                        GlassChip(
-                            selected = true,
-                            part = com.zycomic.app.ui.components.GlassPart.TAB_UNSELECTED,
-                            onClick = {
-                                if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
-                                    showJmAlbumJumpDialog = true
-                                }
-                            },
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.Tag, contentDescription = null, tint = jmAccent, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelSmall, color = jmAccent, maxLines = 1)
+                                    }),
+                                ),
+                            )
+                        },
+                        isActionMode = true,
+                        onCancelActionMode = { if (jmCategoryActive) exitJmSelection() else vm.exitSelection() },
+                    )
+                } else {
+                    SearchToolbar(
+                        backgroundColor = Color.Transparent,
+                        titleContent = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CategoryPlatformLegend()
                             }
-                        }
-                        AppBarActions(
-                            if (platform == ContentPlatform.MANWA) {
-                                persistentListOf(
-                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", null) }),
-                                    AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
-                                    AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = { vm.enterSelection() }),
-                                )
-                            } else {
-                                persistentListOf(
-                                    AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = {
-                                        onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, null)
-                                    }),
-                                    AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
-                                    AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = {
-                                        if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
-                                            jmSelectionGeneration++
-                                            jmSelectedIds = emptySet()
-                                            jmSelectionMode = true
-                                        }
-                                    }),
-                                )
-                            },
-                        )
-                    },
-                )
-            }
+                        },
+                        searchEnabled = false,
+                        searchQuery = null,
+                        onChangeSearchQuery = {},
+                        actions = {
+                            // 禁漫号跳转：玻璃胶囊按钮，图标/文字用 JM 平台色。
+                            val jmAccent = com.zycomic.app.platform.rememberContentPlatformAccent(ContentPlatform.JM)
+                            GlassChip(
+                                selected = true,
+                                part = com.zycomic.app.ui.components.GlassPart.TAB_UNSELECTED,
+                                onClick = {
+                                    if (com.zycomic.app.platform.StartupPlatformPolicy.checkSelection(context, ContentPlatform.JM)) {
+                                        showJmAlbumJumpDialog = true
+                                    }
+                                },
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.Tag, contentDescription = null, tint = jmAccent, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(stringResource(KMR.strings.jm_album_jump_button), style = MaterialTheme.typography.labelSmall, color = jmAccent, maxLines = 1)
+                                }
+                            }
+                            AppBarActions(
+                                if (platform == ContentPlatform.MANWA) {
+                                    persistentListOf(
+                                        AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = { onOpenSearch("", null) }),
+                                        AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
+                                        AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = { vm.enterSelection() }),
+                                    )
+                                } else {
+                                    persistentListOf(
+                                        AppBar.Action(title = "搜索", icon = Icons.Default.Search, onClick = {
+                                            onOpenSearch(vm.jmFiltersForTab(mainTab).value.query, null)
+                                        }),
+                                        AppBar.Action(title = "刷新", icon = Icons.Outlined.Refresh, onClick = { vm.refresh() }),
+                                        AppBar.Action(title = "多选", icon = Icons.Outlined.SelectAll, onClick = {
+                                            if (isCurrentJmContext(jmSessionRevision, jmTabKey(mainTab))) {
+                                                jmSelectionGeneration++
+                                                jmSelectedIds = emptySet()
+                                                jmSelectionMode = true
+                                            }
+                                        }),
+                                    )
+                                },
+                            )
+                        },
+                    )
+                }
             }
         },
         bottomBar = {

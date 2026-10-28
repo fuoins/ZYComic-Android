@@ -85,10 +85,10 @@ import com.zycomic.app.ui.components.GlassPart
 import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import com.zycomic.app.ui.components.glassSurface
 import com.zycomic.app.ui.picacg.PicacgThemes
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import kotlinx.collections.immutable.persistentListOf
@@ -164,277 +164,277 @@ fun SearchScreen(
     val backdropEntry by com.zycomic.app.ui.components.AppBackdropState.current.collectAsState()
     val searchHazeState = rememberHazeState()
     CompositionLocalProvider(com.zycomic.app.ui.components.LocalAppHaze provides searchHazeState) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 搜索页是独立窗口：先铺一层页面底色，保证背景图（半透明）下面是页面色而不是被压暗的主界面。
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
-        // 模糊源只包背景层（Haze：玻璃必须与 source 平级，不能是其后代）。
-        Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
-            // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/内置默认图）。
-            com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
-        }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    ) {
-        val partTextColors by AppearanceColors.partTextColors.collectAsState()
-        val searchTextColor = partTextColors[GlassPart.SEARCH.key]
-        // 顶部搜索栏（玻璃条）
-        GlassTopBar(
-            modifier = Modifier.padding(bottom = 6.dp),
-            bottomLine = false,
-        ) {
-            IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 搜索页是独立窗口：先铺一层页面底色，保证背景图（半透明）下面是页面色而不是被压暗的主界面。
+            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            // 模糊源只包背景层（Haze：玻璃必须与 source 平级，不能是其后代）。
+            Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
+                // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/内置默认图）。
+                com.zycomic.app.ui.components.AppCoverBackdrop(entry = backdropEntry, modifier = Modifier.fillMaxSize())
             }
-            Box(
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp, part = com.zycomic.app.ui.components.GlassPart.SEARCH),
+                    .fillMaxSize()
+                    .statusBarsPadding(),
             ) {
-                OutlinedTextField(
-                    value = keyword,
-                    onValueChange = { vm.updateKeyword(it) },
-                    placeholder = { Text("搜索漫画") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        // 搜索框文字色：外观页「搜索框」的字体颜色，未设置则跟随主题。
-                        focusedTextColor = searchTextColor ?: MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = searchTextColor ?: MaterialTheme.colorScheme.onSurface,
-                        cursorColor = searchTextColor ?: MaterialTheme.colorScheme.primary,
-                        focusedPlaceholderColor = (searchTextColor ?: MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.72f),
-                        unfocusedPlaceholderColor = (searchTextColor ?: MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.72f),
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = { vm.doSearch() },
-                    ),
-                )
-            }
-            // 搜索历史垃圾桶：放最右，只在关键词为空（显示历史）时出现。
-            // 点一下进删除模式，每条历史右侧露出 ❌ 逐条删；再点退出。清空走历史区的"清空"按钮。
-            if (keyword.isBlank()) {
-                IconButton(onClick = { vm.historyDeleting.value = !historyDeleting }) {
-                    Icon(
-                        Icons.Outlined.DeleteSweep,
-                        contentDescription = if (historyDeleting) "退出删除搜索记录" else "删除搜索记录",
-                        tint = if (historyDeleting) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
-            // 显示模式切换：点击弹出底部"显示"设置弹窗
-            IconButton(onClick = { showDisplaySheet = true }) {
-                Icon(
-                    when (displayMode) {
-                        0 -> Icons.Filled.ViewCompact
-                        1 -> Icons.Filled.GridView
-                        else -> Icons.Filled.ViewAgenda
-                    },
-                    contentDescription = "显示模式",
-                )
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            com.zycomic.app.platform.ContentPlatformSelector(
-                selected = com.zycomic.app.platform.ContentPlatform.fromId(provider.storageValue),
-                onSelect = {
-                    if (StartupPlatformPolicy.checkSelection(context, it)) {
-                        vm.selectProvider(SearchProvider.fromStorage(it.id))
+                val partTextColors by AppearanceColors.partTextColors.collectAsState()
+                val searchTextColor = partTextColors[GlassPart.SEARCH.key]
+                // 顶部搜索栏（玻璃条）
+                GlassTopBar(
+                    modifier = Modifier.padding(bottom = 6.dp),
+                    bottomLine = false,
+                ) {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
-                },
-                compact = true,
-            )
-            if (provider == SearchProvider.JM) {
-                Spacer(modifier = Modifier.weight(1f))
-                Box {
-                    TextButton(onClick = { showJmSortMenu = true }) {
-                        val sortLabel = JmSearchSortOptions.firstOrNull { it.second == jmSortCode }?.first ?: "最新"
-                        Text("排序：$sortLabel")
-                    }
-                    DropdownMenu(
-                        expanded = showJmSortMenu,
-                        onDismissRequest = { showJmSortMenu = false },
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .glassSurface(shape = RoundedCornerShape(16.dp), radius = 16.dp, part = com.zycomic.app.ui.components.GlassPart.SEARCH),
                     ) {
-                        JmSearchSortOptions.forEach { (label, code) ->
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    showJmSortMenu = false
-                                    vm.setJmSortCode(code)
+                        OutlinedTextField(
+                            value = keyword,
+                            onValueChange = { vm.updateKeyword(it) },
+                            placeholder = { Text("搜索漫画") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                // 搜索框文字色：外观页「搜索框」的字体颜色，未设置则跟随主题。
+                                focusedTextColor = searchTextColor ?: MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = searchTextColor ?: MaterialTheme.colorScheme.onSurface,
+                                cursorColor = searchTextColor ?: MaterialTheme.colorScheme.primary,
+                                focusedPlaceholderColor = (searchTextColor ?: MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.72f),
+                                unfocusedPlaceholderColor = (searchTextColor ?: MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.72f),
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = { vm.doSearch() },
+                            ),
+                        )
+                    }
+                    // 搜索历史垃圾桶：放最右，只在关键词为空（显示历史）时出现。
+                    // 点一下进删除模式，每条历史右侧露出 ❌ 逐条删；再点退出。清空走历史区的"清空"按钮。
+                    if (keyword.isBlank()) {
+                        IconButton(onClick = { vm.historyDeleting.value = !historyDeleting }) {
+                            Icon(
+                                Icons.Outlined.DeleteSweep,
+                                contentDescription = if (historyDeleting) "退出删除搜索记录" else "删除搜索记录",
+                                tint = if (historyDeleting) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
                         }
                     }
-                }
-            } else if (provider == SearchProvider.PICACG) {
-                Spacer(modifier = Modifier.weight(1f))
-                Box {
-                    TextButton(onClick = { showPicacgSortMenu = true }) {
-                        val label = PicacgSearchSortOptions.firstOrNull { it.second == picacgSortCode }?.first ?: "最新"
-                        Text("排序：$label")
-                    }
-                    DropdownMenu(expanded = showPicacgSortMenu, onDismissRequest = { showPicacgSortMenu = false }) {
-                        PicacgSearchSortOptions.forEach { (label, code) ->
-                            DropdownMenuItem(text = { Text(label) }, onClick = {
-                                showPicacgSortMenu = false
-                                vm.setPicacgSortCode(code)
-                            })
-                        }
-                    }
-                }
-            }
-        }
-        if (provider == SearchProvider.PICACG) {
-            TextButton(onClick = { showPicacgCategories = true }) {
-                Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_search_categories) + " · ${picacgCategories.size}")
-            }
-        }
-        HorizontalDivider()
-
-        // 搜索结果
-        Box(modifier = Modifier.fillMaxSize()) {
-            when {
-                provider == SearchProvider.PICACG && !picacgLoggedIn -> Column(
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_session_required))
-                    TextButton(onClick = { showPicacgLogin = true }) {
-                        Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_login_action))
-                    }
-                }
-                loading && mangas.isEmpty() -> LoadingFooter()
-                mangas.isEmpty() && !loading && keyword.isNotBlank() && error != null -> Column(
-                    modifier = Modifier.align(Alignment.Center).fillMaxWidth().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("搜索失败，可能是网络请求异常", style = MaterialTheme.typography.titleMedium)
-                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { vm.doSearch() }) { Text("点击重试") }
-                }
-                mangas.isEmpty() && !loading && keyword.isNotBlank() -> EmptyView("没有搜索到「$keyword」")
-                keyword.isBlank() -> SearchHistorySection(vm = vm)
-                mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")
-                displayMode >= 3 -> LazyColumn(
-                    // 与收藏页列表一致：行自带 12dp 外边距 + 3dp 行距 + 玻璃卡。
-                    state = listState,
-                    contentPadding = PaddingValues(vertical = 4.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    // key 必须带下标：搜索结果跨页可能返回同一 id，纯 id 作 key 会抛
-                    // "Key "..." was already used" 直接崩掉列表（网格档原本就是这么规避的）
-                    itemsIndexed(mangas, key = { i, m -> m.id + "_$i" }) { _, m ->
-                        SearchMangaListRow(
-                            manga = m,
-                            imageLoader = resultImageLoader,
-                            picacg = provider == SearchProvider.PICACG,
-                            onClick = { onOpenManga(searchDetailId(provider, m.id)) },
+                    // 显示模式切换：点击弹出底部"显示"设置弹窗
+                    IconButton(onClick = { showDisplaySheet = true }) {
+                        Icon(
+                            when (displayMode) {
+                                0 -> Icons.Filled.ViewCompact
+                                1 -> Icons.Filled.GridView
+                                else -> Icons.Filled.ViewAgenda
+                            },
+                            contentDescription = "显示模式",
                         )
                     }
-                    if (provider == SearchProvider.PICACG && error != null && !appending) {
-                        item {
-                            Column {
-                                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                                TextButton(onClick = vm::loadMore) { Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_retry)) }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    com.zycomic.app.platform.ContentPlatformSelector(
+                        selected = com.zycomic.app.platform.ContentPlatform.fromId(provider.storageValue),
+                        onSelect = {
+                            if (StartupPlatformPolicy.checkSelection(context, it)) {
+                                vm.selectProvider(SearchProvider.fromStorage(it.id))
+                            }
+                        },
+                        compact = true,
+                    )
+                    if (provider == SearchProvider.JM) {
+                        Spacer(modifier = Modifier.weight(1f))
+                        Box {
+                            TextButton(onClick = { showJmSortMenu = true }) {
+                                val sortLabel = JmSearchSortOptions.firstOrNull { it.second == jmSortCode }?.first ?: "最新"
+                                Text("排序：$sortLabel")
+                            }
+                            DropdownMenu(
+                                expanded = showJmSortMenu,
+                                onDismissRequest = { showJmSortMenu = false },
+                            ) {
+                                JmSearchSortOptions.forEach { (label, code) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                        onClick = {
+                                            showJmSortMenu = false
+                                            vm.setJmSortCode(code)
+                                        },
+                                    )
+                                }
                             }
                         }
-                    } else if (appending) {
-                        item { LoadingFooter() }
-                    } else if (!hasMore && mangas.isNotEmpty()) {
-                        item {
-                            Text(
-                                "没有更多了",
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    } else if (provider == SearchProvider.PICACG) {
+                        Spacer(modifier = Modifier.weight(1f))
+                        Box {
+                            TextButton(onClick = { showPicacgSortMenu = true }) {
+                                val label = PicacgSearchSortOptions.firstOrNull { it.second == picacgSortCode }?.first ?: "最新"
+                                Text("排序：$label")
+                            }
+                            DropdownMenu(expanded = showPicacgSortMenu, onDismissRequest = { showPicacgSortMenu = false }) {
+                                PicacgSearchSortOptions.forEach { (label, code) ->
+                                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                                        showPicacgSortMenu = false
+                                        vm.setPicacgSortCode(code)
+                                    })
+                                }
+                            }
                         }
                     }
                 }
-                else -> LazyVerticalGrid(
-                    // 与收藏页网格一致：8dp 页边距 + 8dp 卡片间距，默认 3 列。
-                    columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
-                    state = gridState,
-                    contentPadding = PaddingValues(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxSize(),
+                if (provider == SearchProvider.PICACG) {
+                    TextButton(onClick = { showPicacgCategories = true }) {
+                        Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_search_categories) + " · ${picacgCategories.size}")
+                    }
+                }
+                HorizontalDivider()
+
+                // 搜索结果
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when {
+                        provider == SearchProvider.PICACG && !picacgLoggedIn -> Column(
+                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_session_required))
+                            TextButton(onClick = { showPicacgLogin = true }) {
+                                Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_login_action))
+                            }
+                        }
+                        loading && mangas.isEmpty() -> LoadingFooter()
+                        mangas.isEmpty() && !loading && keyword.isNotBlank() && error != null -> Column(
+                            modifier = Modifier.align(Alignment.Center).fillMaxWidth().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text("搜索失败，可能是网络请求异常", style = MaterialTheme.typography.titleMedium)
+                            Text(error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = { vm.doSearch() }) { Text("点击重试") }
+                        }
+                        mangas.isEmpty() && !loading && keyword.isNotBlank() -> EmptyView("没有搜索到「$keyword」")
+                        keyword.isBlank() -> SearchHistorySection(vm = vm)
+                        mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")
+                        displayMode >= 3 -> LazyColumn(
+                            // 与收藏页列表一致：行自带 12dp 外边距 + 3dp 行距 + 玻璃卡。
+                            state = listState,
+                            contentPadding = PaddingValues(vertical = 4.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            // key 必须带下标：搜索结果跨页可能返回同一 id，纯 id 作 key 会抛
+                            // "Key "..." was already used" 直接崩掉列表（网格档原本就是这么规避的）
+                            itemsIndexed(mangas, key = { i, m -> m.id + "_$i" }) { _, m ->
+                                SearchMangaListRow(
+                                    manga = m,
+                                    imageLoader = resultImageLoader,
+                                    picacg = provider == SearchProvider.PICACG,
+                                    onClick = { onOpenManga(searchDetailId(provider, m.id)) },
+                                )
+                            }
+                            if (provider == SearchProvider.PICACG && error != null && !appending) {
+                                item {
+                                    Column {
+                                        Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                                        TextButton(onClick = vm::loadMore) { Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_retry)) }
+                                    }
+                                }
+                            } else if (appending) {
+                                item { LoadingFooter() }
+                            } else if (!hasMore && mangas.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        "没有更多了",
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        else -> LazyVerticalGrid(
+                            // 与收藏页网格一致：6dp 页边距 + 6dp 卡片间距，默认 3 列。
+                            columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
+                            state = gridState,
+                            contentPadding = PaddingValues(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
+                                val m = mangas[i]
+                                SearchMangaGridItem(
+                                    manga = m,
+                                    displayMode = displayMode,
+                                    imageLoader = resultImageLoader,
+                                    picacg = provider == SearchProvider.PICACG,
+                                    onClick = { onOpenManga(searchDetailId(provider, m.id)) },
+                                )
+                            }
+                            if (provider == SearchProvider.PICACG && error != null && !appending) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Column {
+                                        Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                                        TextButton(onClick = vm::loadMore) { Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_retry)) }
+                                    }
+                                }
+                            } else if (appending) {
+                                item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
+                            } else if (!hasMore && mangas.isNotEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Text(
+                                        "没有更多了",
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // "显示"设置底部弹窗（与分类页 TabbedDialog 同款）
+            if (showDisplaySheet) {
+                TabbedDialog(
+                    onDismissRequest = { showDisplaySheet = false },
+                    tabTitles = persistentListOf("显示"),
                 ) {
-                    items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
-                        val m = mangas[i]
-                        SearchMangaGridItem(
-                            manga = m,
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(TabbedDialogPaddings.Horizontal),
+                    ) {
+                        DisplaySettingsSection(
                             displayMode = displayMode,
-                            imageLoader = resultImageLoader,
-                            picacg = provider == SearchProvider.PICACG,
-                            onClick = { onOpenManga(searchDetailId(provider, m.id)) },
+                            gridColumns = gridColumns,
+                            orientation = orientation,
+                            onSetDisplayMode = vm::setDisplayMode,
+                            onSetGridColumns = { vm.setGridColumns(it, orientation) },
+                            modes = listOf(
+                                0 to "紧凑网格",
+                                1 to "舒适网格",
+                                2 to "仅封面网格",
+                                3 to "列表",
+                            ),
                         )
-                    }
-                    if (provider == SearchProvider.PICACG && error != null && !appending) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Column {
-                                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                                TextButton(onClick = vm::loadMore) { Text(tachiyomi.presentation.core.i18n.stringResource(tachiyomi.i18n.kmk.KMR.strings.picacg_retry)) }
-                            }
-                        }
-                    } else if (appending) {
-                        item(span = { GridItemSpan(maxLineSpan) }) { LoadingFooter() }
-                    } else if (!hasMore && mangas.isNotEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Text(
-                                "没有更多了",
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
                 }
             }
         }
-    }
-
-    // "显示"设置底部弹窗（与分类页 TabbedDialog 同款）
-    if (showDisplaySheet) {
-        TabbedDialog(
-            onDismissRequest = { showDisplaySheet = false },
-            tabTitles = persistentListOf("显示"),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(TabbedDialogPaddings.Horizontal),
-            ) {
-                DisplaySettingsSection(
-                    displayMode = displayMode,
-                    gridColumns = gridColumns,
-                    orientation = orientation,
-                    onSetDisplayMode = vm::setDisplayMode,
-                    onSetGridColumns = { vm.setGridColumns(it, orientation) },
-                    modes = listOf(
-                        0 to "紧凑网格",
-                        1 to "舒适网格",
-                        2 to "仅封面网格",
-                        3 to "列表",
-                    ),
-                )
-            }
-        }
-    }
-    }
     }
     if (showPicacgCategories && provider == SearchProvider.PICACG) {
         PicacgCategoryPickerDialog(

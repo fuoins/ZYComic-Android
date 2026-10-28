@@ -4,8 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Paint
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -65,7 +65,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import eu.kanade.tachiyomi.R
 import com.zycomic.app.net.PlatformStartupStatus
 import com.zycomic.app.net.StartupCheckPhase
 import com.zycomic.app.net.StartupCheckStatus
@@ -73,12 +72,13 @@ import com.zycomic.app.net.StartupTestMode
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.StartupPlatformPolicy
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import eu.kanade.tachiyomi.R
+import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.i18n.stringResource
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
-import tachiyomi.i18n.kmk.KMR
-import tachiyomi.presentation.core.i18n.stringResource
 
 private val BrandGreen = Color(0xFF0FAE79)
 private val BrandMint = Color(0xFF2FD3A0)

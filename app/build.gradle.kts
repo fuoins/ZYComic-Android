@@ -22,8 +22,8 @@ android {
     defaultConfig {
         applicationId = "com.zycomic.app"
 
-        versionCode = 14
-        versionName = "5.0.0"
+        versionCode = 15
+        versionName = "6.0.0"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")

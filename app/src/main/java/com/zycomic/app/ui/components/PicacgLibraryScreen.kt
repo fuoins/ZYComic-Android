@@ -4,10 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,7 +57,6 @@ import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.platform.ContentPlatform
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
-import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -65,6 +64,7 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
+import kotlin.math.roundToInt
 import androidx.compose.foundation.lazy.grid.items as gridItems
 
 /** Picacg's online collection is never backed by Manwa/JM account repositories. */
@@ -244,45 +244,45 @@ fun PicacgLibraryScreen(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             GlassTopBar {
-            LibraryHistoryToolbar(
-                platform = ContentPlatform.PICACG,
-                onSelectPlatform = onSelectPlatform,
-                searchQuery = query,
-                onChangeSearchQuery = { query = it },
-                titleContent = {
-                    LibraryHistoryTitle(if (history) "历史" else "收藏")
-                },
-                searchSupported = !history && loggedIn,
-                refreshSupported = !history,
-                refreshBusy = loading || removingSelected,
-                refreshEnabled = loggedIn,
-                refreshIndicatorSeparate = true,
-                refreshEnabledWhileBusy = loading && !removingSelected,
-                filterSupported = !history && loggedIn,
-                onRefresh = {
-                    page = 1
-                    refresh++
-                    exitSelection()
-                },
-                onFilter = {
-                    draftSort = sort
-                    draftDisplayMode = displayMode
-                    draftGridColumns = gridColumns
-                    showFilter = true
-                },
-                onEnterSelection = { if (!history && loggedIn && !loading && comics.isNotEmpty()) selectionMode = true },
-                selectionMode = selectionMode,
-                selectionCount = selectedIds.size,
-                onExitSelection = ::exitSelection,
-                onSelectAll = { selectedIds = filtered.mapTo(mutableSetOf()) { it.id } },
-                onInvertSelection = {
-                    val visibleIds = filtered.map { it.id }.toSet()
-                    selectedIds = visibleIds - selectedIds
-                },
-                scrollBehavior = scrollBehavior,
-                history = history,
-                selectionSupported = !history && loggedIn,
-            )
+                LibraryHistoryToolbar(
+                    platform = ContentPlatform.PICACG,
+                    onSelectPlatform = onSelectPlatform,
+                    searchQuery = query,
+                    onChangeSearchQuery = { query = it },
+                    titleContent = {
+                        LibraryHistoryTitle(if (history) "历史" else "收藏")
+                    },
+                    searchSupported = !history && loggedIn,
+                    refreshSupported = !history,
+                    refreshBusy = loading || removingSelected,
+                    refreshEnabled = loggedIn,
+                    refreshIndicatorSeparate = true,
+                    refreshEnabledWhileBusy = loading && !removingSelected,
+                    filterSupported = !history && loggedIn,
+                    onRefresh = {
+                        page = 1
+                        refresh++
+                        exitSelection()
+                    },
+                    onFilter = {
+                        draftSort = sort
+                        draftDisplayMode = displayMode
+                        draftGridColumns = gridColumns
+                        showFilter = true
+                    },
+                    onEnterSelection = { if (!history && loggedIn && !loading && comics.isNotEmpty()) selectionMode = true },
+                    selectionMode = selectionMode,
+                    selectionCount = selectedIds.size,
+                    onExitSelection = ::exitSelection,
+                    onSelectAll = { selectedIds = filtered.mapTo(mutableSetOf()) { it.id } },
+                    onInvertSelection = {
+                        val visibleIds = filtered.map { it.id }.toSet()
+                        selectedIds = visibleIds - selectedIds
+                    },
+                    scrollBehavior = scrollBehavior,
+                    history = history,
+                    selectionSupported = !history && loggedIn,
+                )
             }
         },
         bottomBar = {
@@ -461,7 +461,10 @@ fun PicacgLibraryScreen(
                                 }
                                 FilterChip(
                                     selected = draftSort == code,
-                                    onClick = { draftSort = code; applyFilter() },
+                                    onClick = {
+                                        draftSort = code
+                                        applyFilter()
+                                    },
                                     label = { Text(label) },
                                 )
                             }
@@ -469,12 +472,18 @@ fun PicacgLibraryScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             FilterChip(
                                 selected = draftSort == "ld",
-                                onClick = { draftSort = "ld"; applyFilter() },
+                                onClick = {
+                                    draftSort = "ld"
+                                    applyFilter()
+                                },
                                 label = { Text(stringResource(KMR.strings.picacg_most_likes)) },
                             )
                             FilterChip(
                                 selected = draftSort == "vd",
-                                onClick = { draftSort = "vd"; applyFilter() },
+                                onClick = {
+                                    draftSort = "vd"
+                                    applyFilter()
+                                },
                                 label = { Text(stringResource(KMR.strings.picacg_most_views)) },
                             )
                         }

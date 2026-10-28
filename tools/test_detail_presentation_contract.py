@@ -201,7 +201,7 @@ class PicacgApprovedPolishContractTest(unittest.TestCase):
 
     def test_ranking_tabs_are_outside_authentication_and_loading_branches(self):
         tabs = self.browse.index("if (pageMode == PicacgBrowsePageMode.RANKING)")
-        login = self.browse.index("if (!loggedIn) {\n            Text(stringResource(KMR.strings.picacg_session_required))")
+        login = self.browse.index("if (!loggedIn) {")
         loading = self.browse.index("if (loading && mangas.isEmpty() && !hasSnapshot)")
         self.assertLess(tabs, login)
         self.assertLess(tabs, loading)

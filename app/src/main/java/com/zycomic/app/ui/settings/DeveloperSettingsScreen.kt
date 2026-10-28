@@ -33,10 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.net.JmRouteManager
-import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RouteManager
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.ui.components.AppSwitch
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import kotlinx.coroutines.Dispatchers

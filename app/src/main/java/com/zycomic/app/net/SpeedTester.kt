@@ -50,7 +50,7 @@ object SpeedTester {
     private const val TAG = "SpeedTester"
 
 /** 快测放行后继续补测的目标个数（拿到这么多快速成功就停，不跑全量）。 */
-private const val QUICK_FILL_TARGET = 8
+    private const val QUICK_FILL_TARGET = 8
     private const val MAX = Long.MAX_VALUE
     private val probeScheduler = SpeedTestProbeBudget.scheduler
 

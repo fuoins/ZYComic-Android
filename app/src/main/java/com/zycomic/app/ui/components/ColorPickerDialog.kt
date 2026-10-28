@@ -36,20 +36,36 @@ import com.github.skydoves.colorpicker.compose.rememberColorPickerController
 /** 常用调色板：一行 6 个，浅色 → 深色。 */
 private val PALETTE: List<List<Color>> = listOf(
     listOf(
-        Color(0xFFFFFFFF), Color(0xFFE9EDF2), Color(0xFFC3CBD6), Color(0xFF7A8797),
-        Color(0xFF3B4552), Color(0xFF000000),
+        Color(0xFFFFFFFF),
+        Color(0xFFE9EDF2),
+        Color(0xFFC3CBD6),
+        Color(0xFF7A8797),
+        Color(0xFF3B4552),
+        Color(0xFF000000),
     ),
     listOf(
-        Color(0xFFFF6B6B), Color(0xFFFF9F43), Color(0xFFFFD93D), Color(0xFF6AB04C),
-        Color(0xFF22A6B3), Color(0xFF4A69BD),
+        Color(0xFFFF6B6B),
+        Color(0xFFFF9F43),
+        Color(0xFFFFD93D),
+        Color(0xFF6AB04C),
+        Color(0xFF22A6B3),
+        Color(0xFF4A69BD),
     ),
     listOf(
-        Color(0xFFEB4D4B), Color(0xFFF0932B), Color(0xFFF9CA24), Color(0xFF2ECC71),
-        Color(0xFF00CEC9), Color(0xFF3742FA),
+        Color(0xFFEB4D4B),
+        Color(0xFFF0932B),
+        Color(0xFFF9CA24),
+        Color(0xFF2ECC71),
+        Color(0xFF00CEC9),
+        Color(0xFF3742FA),
     ),
     listOf(
-        Color(0xFFE056FD), Color(0xFFBE2EDD), Color(0xFF8E44AD), Color(0xFF4834D4),
-        Color(0xFF1B9CFC), Color(0xFF6DD5FA),
+        Color(0xFFE056FD),
+        Color(0xFFBE2EDD),
+        Color(0xFF8E44AD),
+        Color(0xFF4834D4),
+        Color(0xFF1B9CFC),
+        Color(0xFF6DD5FA),
     ),
 )
 

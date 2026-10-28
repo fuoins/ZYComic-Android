@@ -149,33 +149,33 @@ fun PicacgLocalHistoryScreen(
         containerColor = Color.Transparent,
         topBar = { scrollBehavior ->
             GlassTopBar {
-            LibraryHistoryToolbar(
-                platform = com.zycomic.app.platform.ContentPlatform.PICACG,
-                onSelectPlatform = onSelectPlatform,
-                searchQuery = searchQuery,
-                onChangeSearchQuery = { searchQuery = it },
-                titleContent = { LibraryHistoryTitle("历史") },
-                searchSupported = true,
-                refreshSupported = !isRefreshing && !deleting,
-                filterSupported = false,
-                onRefresh = {
-                    isRefreshing = true
-                    refreshKey++
-                },
-                onFilter = {},
-                onEnterSelection = { selectionMode = true },
-                selectionMode = selectionMode,
-                selectionCount = selectedIds.size,
-                onExitSelection = ::exitSelection,
-                onSelectAll = { selectedIds = PicacgLocalHistoryPolicy.allVisibleIds(rows.map { it.history.id }) },
-                onInvertSelection = {
-                    selectedIds = visibleIds - selectedIds
-                },
-                scrollBehavior = scrollBehavior,
-                history = true,
-                selectionSupported = true,
-                selectionEnabled = true,
-            )
+                LibraryHistoryToolbar(
+                    platform = com.zycomic.app.platform.ContentPlatform.PICACG,
+                    onSelectPlatform = onSelectPlatform,
+                    searchQuery = searchQuery,
+                    onChangeSearchQuery = { searchQuery = it },
+                    titleContent = { LibraryHistoryTitle("历史") },
+                    searchSupported = true,
+                    refreshSupported = !isRefreshing && !deleting,
+                    filterSupported = false,
+                    onRefresh = {
+                        isRefreshing = true
+                        refreshKey++
+                    },
+                    onFilter = {},
+                    onEnterSelection = { selectionMode = true },
+                    selectionMode = selectionMode,
+                    selectionCount = selectedIds.size,
+                    onExitSelection = ::exitSelection,
+                    onSelectAll = { selectedIds = PicacgLocalHistoryPolicy.allVisibleIds(rows.map { it.history.id }) },
+                    onInvertSelection = {
+                        selectedIds = visibleIds - selectedIds
+                    },
+                    scrollBehavior = scrollBehavior,
+                    history = true,
+                    selectionSupported = true,
+                    selectionEnabled = true,
+                )
             }
         },
         bottomBar = {
