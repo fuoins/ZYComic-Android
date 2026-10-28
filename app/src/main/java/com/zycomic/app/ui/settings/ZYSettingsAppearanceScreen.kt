@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -117,9 +118,6 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     @Composable
     override fun Content() {
         val handleBack = LocalBackPress.current
-        // tab 与滚动位置保存在全局，预览返回时可回到刚才的位置。
-        var selectedTab by remember { mutableStateOf(AppearanceUiState.tab) }
-        val tabs = listOf("颜色", "背景与玻璃", "背景图", "配置备份")
 
         Scaffold(
             topBar = { scrollBehavior ->
@@ -130,7 +128,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     actions = {
                         TextButton(
                             onClick = {
-                                // 关掉设置页回到主界面，主界面上会出现「返回外观」悬浮按钮。
+                                // 关掉设置页回到主界面，主界面上会出现「调整 / 返回外观」悬浮按钮。
                                 AppearancePreviewState.enter()
                                 handleBack?.invoke()
                             },
@@ -141,43 +139,58 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                 )
             },
         ) { contentPadding ->
-            Column(modifier = Modifier.padding(contentPadding)) {
-                AppearanceTabBar(
-                    tabs = tabs,
-                    selected = selectedTab,
-                    onSelect = {
-                        selectedTab = it
-                        AppearanceUiState.tab = it
-                    },
+            AppearanceSettingsBody(
+                modifier = Modifier.padding(contentPadding).fillMaxSize(),
+            )
+        }
+    }
+
+    /**
+     * 外观设置主体：标签页 + 各分组内容。
+     * 外观页与「预览 → 调整」浮窗共用同一份实现，保证参数完全一致。
+     */
+    @Composable
+    internal fun AppearanceSettingsBody(modifier: Modifier = Modifier) {
+        // tab 与滚动位置保存在全局，预览返回 / 浮窗与完整页切换时都能回到刚才的位置。
+        var selectedTab by remember { mutableStateOf(AppearanceUiState.tab) }
+        val tabs = listOf("颜色", "背景与玻璃", "背景图", "配置备份")
+
+        Column(modifier = modifier) {
+            AppearanceTabBar(
+                tabs = tabs,
+                selected = selectedTab,
+                onSelect = {
+                    selectedTab = it
+                    AppearanceUiState.tab = it
+                },
+            )
+            key(selectedTab) {
+                val saved = AppearanceUiState.scrollFor(selectedTab)
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+                    initialFirstVisibleItemIndex = saved?.first ?: 0,
+                    initialFirstVisibleItemScrollOffset = saved?.second ?: 0,
                 )
-                key(selectedTab) {
-                    val saved = AppearanceUiState.scrollFor(selectedTab)
-                    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
-                        initialFirstVisibleItemIndex = saved?.first ?: 0,
-                        initialFirstVisibleItemScrollOffset = saved?.second ?: 0,
-                    )
-                    androidx.compose.runtime.DisposableEffect(selectedTab) {
-                        onDispose {
-                            AppearanceUiState.saveScroll(
-                                tab = selectedTab,
-                                index = listState.firstVisibleItemIndex,
-                                offset = listState.firstVisibleItemScrollOffset,
-                            )
-                        }
+                androidx.compose.runtime.DisposableEffect(selectedTab) {
+                    onDispose {
+                        AppearanceUiState.saveScroll(
+                            tab = selectedTab,
+                            index = listState.firstVisibleItemIndex,
+                            offset = listState.firstVisibleItemScrollOffset,
+                        )
                     }
-                    PreferenceScreen(
-                        items = listOf(
-                            when (selectedTab) {
-                                0 -> getColorGroup()
-                                1 -> getGlassGroup()
-                                2 -> getBackdropGroup()
-                                else -> getConfigGroup()
-                            },
-                        ),
-                        modifier = Modifier.weight(1f),
-                        state = listState,
-                    )
                 }
+                PreferenceScreen(
+                    items = listOf(
+                        when (selectedTab) {
+                            0 -> getColorGroup()
+                            1 -> getGlassGroup()
+                            2 -> getBackdropGroup()
+                            else -> getConfigGroup()
+                        },
+                    ),
+                    modifier = Modifier.weight(1f),
+                    state = listState,
+                )
             }
         }
     }

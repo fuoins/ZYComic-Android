@@ -699,10 +699,6 @@ fun AppContent(
                         .align(Alignment.BottomEnd)
                         .padding(end = 12.dp, bottom = 92.dp),
                     onMinimize = { AppearancePreviewState.setPanelExpanded(false) },
-                    onOpenFull = {
-                        AppearancePreviewState.exit()
-                        settingsDialog = SettingsDialog.Appearance
-                    },
                 )
             } else {
                 Column(
