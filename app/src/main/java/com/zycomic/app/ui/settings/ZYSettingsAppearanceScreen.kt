@@ -5,7 +5,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -83,7 +86,197 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         return listOf(
+            getColorGroup(),
             getGlassGroup(),
+            getConfigGroup(),
+        )
+    }
+
+    /** 颜色：玻璃染色 / 界面主色 / 三个平台与宇总排行的标识色。 */
+    @Composable
+    private fun getColorGroup(): Preference.PreferenceGroup {
+        val context = LocalContext.current
+        val glassTint by com.zycomic.app.ui.components.AppearanceColors.glassTint.collectAsState()
+        val uiAccent by com.zycomic.app.ui.components.AppearanceColors.uiAccent.collectAsState()
+        val yuzong by com.zycomic.app.ui.components.AppearanceColors.yuzong.collectAsState()
+        val manwa by ContentPlatformAccentPrefs.manwa.collectAsState()
+        val picacg by ContentPlatformAccentPrefs.picacg.collectAsState()
+        val jm by ContentPlatformAccentPrefs.jm.collectAsState()
+        var target by remember { mutableStateOf<AppearanceColorTarget?>(null) }
+
+        val group = Preference.PreferenceGroup(
+            title = "颜色",
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.CustomPreference(title = "玻璃颜色") {
+                    AppearanceColorRow(
+                        title = "玻璃颜色",
+                        subtitle = "所有液态玻璃的本体颜色（默认白）",
+                        color = glassTint,
+                        onClick = {
+                            target = AppearanceColorTarget("玻璃颜色", glassTint) { ctx, color ->
+                                com.zycomic.app.ui.components.AppearanceColors.setGlassTint(ctx, color)
+                            }
+                        },
+                    )
+                },
+                Preference.PreferenceItem.CustomPreference(title = "界面主色") {
+                    AppearanceColorRow(
+                        title = "界面主色",
+                        subtitle = uiAccent?.let { "弹窗按钮 / 选中文字（${com.zycomic.app.ui.components.AppearanceColors.hex(it)}）" }
+                            ?: "跟随主题；点此自定义",
+                        color = uiAccent ?: MaterialTheme.colorScheme.primary,
+                        onClick = {
+                            target = AppearanceColorTarget(
+                                "界面主色",
+                                uiAccent ?: MaterialTheme.colorScheme.primary,
+                            ) { ctx, color ->
+                                com.zycomic.app.ui.components.AppearanceColors.setUiAccent(ctx, color)
+                            }
+                        },
+                        action = {
+                            if (uiAccent != null) {
+                                TextButton(onClick = {
+                                    com.zycomic.app.ui.components.AppearanceColors.setUiAccent(context, null)
+                                }) { Text("跟随主题") }
+                            }
+                        },
+                    )
+                },
+                Preference.PreferenceItem.CustomPreference(title = "平台字体颜色") {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        AppearanceColorRow(
+                            title = "漫蛙",
+                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(manwa),
+                            color = manwa,
+                            onClick = {
+                                target = AppearanceColorTarget("漫蛙颜色", manwa) { _, color ->
+                                    ContentPlatformAccentPrefs.set(ContentPlatform.MANWA, color)
+                                }
+                            },
+                        )
+                        AppearanceColorRow(
+                            title = "哔咔",
+                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(picacg),
+                            color = picacg,
+                            onClick = {
+                                target = AppearanceColorTarget("哔咔颜色", picacg) { _, color ->
+                                    ContentPlatformAccentPrefs.set(ContentPlatform.PICACG, color)
+                                }
+                            },
+                        )
+                        AppearanceColorRow(
+                            title = "禁漫天堂",
+                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(jm),
+                            color = jm,
+                            onClick = {
+                                target = AppearanceColorTarget("禁漫颜色", jm) { _, color ->
+                                    ContentPlatformAccentPrefs.set(ContentPlatform.JM, color)
+                                }
+                            },
+                        )
+                        AppearanceColorRow(
+                            title = "宇总排行",
+                            subtitle = com.zycomic.app.ui.components.AppearanceColors.hex(yuzong),
+                            color = yuzong,
+                            onClick = {
+                                target = AppearanceColorTarget("宇总排行颜色", yuzong) { ctx, color ->
+                                    com.zycomic.app.ui.components.AppearanceColors.setYuzong(ctx, color)
+                                }
+                            },
+                        )
+                    }
+                },
+            ),
+        )
+        target?.let { picked ->
+            com.zycomic.app.ui.components.ColorPickerDialog(
+                title = picked.title,
+                initial = picked.current,
+                onDismiss = { target = null },
+                onConfirm = { color ->
+                    picked.apply(context, color)
+                    target = null
+                },
+            )
+        }
+        return group
+    }
+
+    /** 配置备份：外观参数导入 / 导出 / 恢复默认。 */
+    @Composable
+    private fun getConfigGroup(): Preference.PreferenceGroup {
+        val context = LocalContext.current
+        val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri != null) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        it.write(com.zycomic.app.ui.components.AppearanceConfig.exportJson(context).toByteArray())
+                    }
+                }.onSuccess {
+                    context.toast("外观配置已导出")
+                }.onFailure {
+                    context.toast("导出失败：${it.message}")
+                }
+            }
+        }
+        val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                runCatching {
+                    val text = context.contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { reader -> reader.readText() }.orEmpty()
+                    com.zycomic.app.ui.components.AppearanceConfig.importJson(context, text)
+                }.onSuccess { applied ->
+                    context.toast(if (applied) "外观配置已导入" else "配置文件无效")
+                }.onFailure {
+                    context.toast("导入失败：${it.message}")
+                }
+            }
+        }
+        return Preference.PreferenceGroup(
+            title = "配置备份",
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.CustomPreference(title = "导出外观配置") {
+                    com.zycomic.app.ui.components.GlassPreferenceRow(
+                        title = "导出外观配置",
+                        subtitle = "把当前外观参数保存成 JSON 文件",
+                        onPreferenceClick = { exportLauncher.launch("zycomic-appearance.json") },
+                    )
+                },
+                Preference.PreferenceItem.CustomPreference(title = "导入外观配置") {
+                    com.zycomic.app.ui.components.GlassPreferenceRow(
+                        title = "导入外观配置",
+                        subtitle = "从 JSON 文件恢复外观参数",
+                        onPreferenceClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                    )
+                },
+                Preference.PreferenceItem.CustomPreference(title = "恢复默认外观") {
+                    com.zycomic.app.ui.components.GlassPreferenceRow(
+                        title = "恢复默认外观",
+                        subtitle = "玻璃参数、颜色、图源全部回到默认值",
+                        onPreferenceClick = {
+                            com.zycomic.app.ui.components.GlassPart.entries.forEach { part ->
+                                com.zycomic.app.ui.components.GlassPrefs.setPartBlur(context, part, part.defaultBlurDp)
+                                com.zycomic.app.ui.components.GlassPrefs.setPartAlpha(context, part, part.defaultAlpha)
+                            }
+                            com.zycomic.app.ui.components.GlassPrefs.setBackdropBlurDp(context, 8f)
+                            com.zycomic.app.ui.components.GlassPrefs.setBackdropAlpha(context, 0.85f)
+                            com.zycomic.app.ui.components.GlassPrefs.setGlassStrength(context, 1f)
+                            com.zycomic.app.ui.components.AppearanceColors.setGlassTint(context, Color.White)
+                            com.zycomic.app.ui.components.AppearanceColors.setUiAccent(context, null)
+                            com.zycomic.app.ui.components.AppearanceColors.setYuzong(
+                                context,
+                                com.zycomic.app.ui.components.AppearanceColors.DEFAULT_YUZONG_LIGHT,
+                            )
+                            ContentPlatform.entries.forEach { ContentPlatformAccentPrefs.reset(it) }
+                            com.zycomic.app.ui.components.BackdropSources.ALL.forEach { source ->
+                                com.zycomic.app.ui.components.BackdropSources.setEnabled(context, source.id, false)
+                            }
+                            com.zycomic.app.ui.components.AppBackdropState.refresh("settings")
+                            context.toast("已恢复默认外观")
+                        },
+                    )
+                },
+            ),
         )
     }
 
@@ -672,3 +865,43 @@ private val DateFormats = listOf(
     "dd MMM yyyy",
     "MMM dd, yyyy",
 )
+
+
+/** 颜色选择目标：标题 + 当前值 + 应用回调。 */
+private data class AppearanceColorTarget(
+    val title: String,
+    val current: Color,
+    val apply: (android.content.Context, Color) -> Unit,
+)
+
+/** 外观页里的一行颜色设置：左侧标题/颜色代码，右侧色块（可附带额外操作）。 */
+@Composable
+private fun AppearanceColorRow(
+    title: String,
+    subtitle: String,
+    color: Color,
+    onClick: () -> Unit,
+    action: (@Composable () -> Unit)? = null,
+) {
+    com.zycomic.app.ui.components.GlassPreferenceRow(
+        title = title,
+        subtitle = subtitle,
+        onPreferenceClick = onClick,
+        widget = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                action?.invoke()
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                            shape = CircleShape,
+                        ),
+                )
+            }
+        },
+    )
+}

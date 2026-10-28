@@ -9,6 +9,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,16 +36,20 @@ fun FilterChip(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(percent = 50)
-    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val accent by AppearanceColors.uiAccent.collectAsState()
+    val contentColor = if (selected) accent ?: MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     val interaction = remember { MutableInteractionSource() }
 
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(bg)
+            .glassSurface(
+                shape = shape,
+                radius = 999.dp,
+                part = if (selected) GlassPart.SUBTAB_SELECTED else GlassPart.SUBTAB_UNSELECTED,
+                stroke = false,
+            )
             .clickable(interaction, indication = null) { onClick() }
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -66,22 +72,24 @@ fun OutlinedFilterChip(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(percent = 50)
+    val accent by AppearanceColors.uiAccent.collectAsState()
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
-            .clickable(interaction, indication = null) { onClick() }
-            .then(
-                if (!selected) Modifier.padding(1.dp) else Modifier,
+            .glassSurface(
+                shape = shape,
+                radius = 999.dp,
+                part = if (selected) GlassPart.SUBTAB_SELECTED else GlassPart.SUBTAB_UNSELECTED,
+                stroke = true,
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .clickable(interaction, indication = null) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.titleSmall,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+            color = if (selected) accent ?: MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )
     }
 }

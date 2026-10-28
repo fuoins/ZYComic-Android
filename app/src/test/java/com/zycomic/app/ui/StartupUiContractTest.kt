@@ -91,17 +91,19 @@ class StartupUiContractTest {
     }
 
     @Test
-    fun `launcher icon and system splash share the comic bubble artwork`() {
+    fun `launcher icon and system splash share the brand character artwork`() {
         val drawable = File(root, "app/src/main/res/drawable")
-        // 前景与单色层是从用户提供的原图抠出的 PNG（气泡 + 分镜 + 书签），按密度分发
+        // 前景与单色层来自用户提供的品牌角色原图，按密度分发
         for (dpi in listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")) {
             val dir = File(root, "app/src/main/res/drawable-$dpi")
             assertTrue(File(dir, "ic_launcher_foreground.png").isFile, "missing foreground for $dpi")
             assertTrue(File(dir, "ic_launcher_monochrome.png").isFile, "missing monochrome for $dpi")
         }
         val background = File(drawable, "ic_launcher_background.xml").readText()
-        assertTrue(background.contains("#FFB018ED"))
-        assertTrue(background.contains("#FFFDAB1D"))
+        // 自适应图标底色与角色图的蓝色渐变一致；不再使用旧版紫/橙品牌色
+        assertTrue(background.contains("#FF1C4FD8"))
+        assertTrue(background.contains("#FFBFE6FF"))
+        assertFalse(background.contains("#FFB018ED"))
         assertFalse(background.contains("#FF42A5F5"))
         val systemSplash = File(drawable, "ic_splash.xml").readText()
         assertTrue(systemSplash.contains("@drawable/ic_splash_icon"))
@@ -109,6 +111,7 @@ class StartupUiContractTest {
         val splashIcon = File(drawable, "ic_splash_icon.xml").readText()
         assertTrue(splashIcon.contains("ic_splash_fg"))
         assertTrue(splashIcon.contains("oval"))
+        assertTrue(splashIcon.contains("#FF1C4FD8"))
         assertTrue(File(root, "app/src/main/res/drawable-nodpi/ic_splash_fg.png").isFile)
         // 深色模式曾经走 drawable-night 的旧启动图（Komikku 的 Z），必须一起换掉
         val nightSplash = File(root, "app/src/main/res/drawable-night/ic_splash.xml").readText()

@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 系统启动帧：圆形渐变底 + 漫画气泡前景。windowSplashScreen 会把整层裁成圆。 -->
+<!-- 系统启动帧：蓝色渐变圆底 + 新品牌角色（圆形裁切前景）。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
             <gradient
                 android:angle="270"
-                android:startColor="#FFB018ED"
-                android:centerColor="#FFF32E9B"
-                android:endColor="#FFFDAB1D"
+                android:startColor="#FF1C4FD8"
+                android:centerColor="#FF4E9BEA"
+                android:endColor="#FFBFE6FF"
                 android:type="linear" />
         </shape>
     </item>

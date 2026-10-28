@@ -20,6 +20,8 @@ enum class GlassPart(
     TAB("tab", "标签栏容器", 14f, 0.30f),
     TAB_SELECTED("tab_selected", "标签选中", 16f, 0.55f),
     TAB_UNSELECTED("tab_unselected", "标签未选中", 12f, 0.12f),
+    SUBTAB_SELECTED("subtab_selected", "子标签选中", 14f, 0.50f),
+    SUBTAB_UNSELECTED("subtab_unselected", "子标签未选中", 10f, 0.10f),
     COVER_NAME("cover_name", "封面名字条", 10f, 0.42f),
     SEARCH("search", "搜索框", 14f, 0.26f),
 }

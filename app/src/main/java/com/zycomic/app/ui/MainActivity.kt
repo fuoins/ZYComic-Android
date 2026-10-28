@@ -139,11 +139,25 @@ class MainActivity : BaseActivity() {
         com.zycomic.app.net.NetworkModule.init(this)
         com.zycomic.app.ui.components.GlassPrefs.init(this)
         com.zycomic.app.ui.components.BackdropSources.init(this)
+        com.zycomic.app.ui.components.AppearanceColors.init(this)
         setContent {
             val uiPreferences = remember { Injekt.get<UiPreferences>() }
             val appTheme by uiPreferences.appTheme().collectAsState()
             val amoled by uiPreferences.themeDarkAmoled().collectAsState()
             TachiyomiTheme(appTheme = appTheme, amoled = amoled) {
+                // 外观页可自定义界面主色（弹窗按钮/选中文字/进度条等原本跟随主题 primary 的地方）。
+                val customAccent by com.zycomic.app.ui.components.AppearanceColors.uiAccent.collectAsState()
+                val baseScheme = MaterialTheme.colorScheme
+                val themedScheme = customAccent?.let { accent ->
+                    val onAccent = if (accent.luminance() > 0.55f) Color.Black else Color.White
+                    baseScheme.copy(
+                        primary = accent,
+                        onPrimary = onAccent,
+                        primaryContainer = accent.copy(alpha = 0.18f),
+                        onPrimaryContainer = accent,
+                    )
+                } ?: baseScheme
+                MaterialTheme(colorScheme = themedScheme) {
                 CompositionLocalProvider(
                     LocalTextStyle provides MaterialTheme.typography.bodySmall,
                     LocalContentColor provides MaterialTheme.colorScheme.onBackground,
@@ -179,6 +193,7 @@ class MainActivity : BaseActivity() {
                             }
                         }
                     }
+                }
                 }
             }
         }

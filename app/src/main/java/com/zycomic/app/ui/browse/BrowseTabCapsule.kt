@@ -1,6 +1,7 @@
 package com.zycomic.app.ui.browse
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -39,9 +42,11 @@ fun BrowseTabCapsule(
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
     val platformAccent = rememberContentPlatformAccent(platform)
-    // 宇总排行用品牌蓝（开屏页品牌蓝，深浅色自适应），不跟随外观主题色；其余用各自平台色。
+    // 宇总排行用可配置的标识色（外观页可改），其余用各自平台色。
     val accent = if (isYuzongRank) {
-        if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF8FB7FF) else Color(0xFF2F6FD0)
+        com.zycomic.app.ui.components.AppearanceColors.readableYuzong(
+            MaterialTheme.colorScheme.background.luminance() < 0.5f,
+        )
     } else {
         platformAccent
     }
@@ -77,17 +82,33 @@ fun BrowseTabCapsule(
     }
 }
 
-/** A compact chip without Material's invisible 48dp row gap. */
+/** 子标签胶囊（宇总排行/禁漫首页/哔咔排行等）：玻璃底 + 可配选中色，不用 Material 48dp 最小行高。 */
 @Composable
 fun CompactBrowseFilterChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit) {
-    androidx.compose.runtime.CompositionLocalProvider(
-        androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 0.dp,
+    val accent by com.zycomic.app.ui.components.AppearanceColors.uiAccent.collectAsState()
+    Box(
+        modifier = Modifier
+            .height(32.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(50),
+                radius = 999.dp,
+                part = if (selected) {
+                    com.zycomic.app.ui.components.GlassPart.SUBTAB_SELECTED
+                } else {
+                    com.zycomic.app.ui.components.GlassPart.SUBTAB_UNSELECTED
+                },
+                stroke = false,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
     ) {
-        androidx.compose.material3.FilterChip(
-            selected = selected,
-            onClick = onClick,
-            label = label,
-            modifier = Modifier.height(32.dp),
-        )
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides (
+                if (selected) accent ?: MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                ),
+        ) {
+            label()
+        }
     }
 }

@@ -87,9 +87,10 @@ fun GlassShell(
 ) {
     val hazeState = LocalAppHaze.current
     val dark = glassDark()
+    val glassTint by AppearanceColors.glassTint.collectAsState()
     val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
-    val edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f)
+    val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
     val shadowColor = Color.Black.copy(alpha = if (dark) 0.30f else 0.05f)
     // Haze 正常时白玻璃只作薄高光层；无 Haze 时它就是玻璃本体。
     val gradientTop = if (hazeState != null) alpha * 0.38f else alpha
@@ -104,11 +105,11 @@ fun GlassShell(
                         state = hazeState,
                         style = HazeStyle(
                             backgroundColor = Color.Transparent,
-                            tint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
+                            tint = HazeTint(glassTint.copy(alpha = alpha), BlendMode.SrcOver),
                             blurRadius = blur,
                             noiseFactor = 0f,
                             // 平台不支持真模糊时用 scrim 兜底，保证玻璃可见。
-                            fallbackTint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
+                            fallbackTint = HazeTint(glassTint.copy(alpha = alpha), BlendMode.SrcOver),
                         ),
                     )
                 } else {
@@ -116,7 +117,7 @@ fun GlassShell(
                 },
             )
             .drawBehind {
-                drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = gradientTop), 1f to Color.White.copy(alpha = gradientBottom)))
+                drawRect(Brush.verticalGradient(0f to glassTint.copy(alpha = gradientTop), 1f to glassTint.copy(alpha = gradientBottom)))
                 if (tintLayer.alpha > 0f) drawRect(tintLayer)
                 if (stroke) {
                     drawRoundRect(
@@ -247,8 +248,9 @@ fun GlassTopBar(
     content: @Composable RowScope.() -> Unit,
 ) {
     val dark = glassDark()
-    val highlight = Color.White.copy(alpha = if (dark) 0.22f else 0.78f)
-    val edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f)
+    val glassTint by AppearanceColors.glassTint.collectAsState()
+    val highlight = glassTint.copy(alpha = if (dark) 0.22f else 0.78f)
+    val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -334,10 +336,11 @@ fun Modifier.glassSurface(
 ): Modifier {
     val hazeState = LocalAppHaze.current
     val dark = glassDark()
+    val glassTint by AppearanceColors.glassTint.collectAsState()
     val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
-    val edge = Color.White.copy(alpha = if (dark) 0.16f else 0.55f)
+    val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
     val gradientTop = if (hazeState != null) alpha * 0.38f else alpha
     val gradientBottom = if (hazeState != null) alpha * 0.18f else alpha * 0.55f
     return this
@@ -348,10 +351,10 @@ fun Modifier.glassSurface(
                     state = hazeState,
                     style = HazeStyle(
                         backgroundColor = Color.Transparent,
-                        tint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
+                        tint = HazeTint(glassTint.copy(alpha = alpha), BlendMode.SrcOver),
                         blurRadius = blur,
                         noiseFactor = 0f,
-                        fallbackTint = HazeTint(Color.White.copy(alpha = alpha), BlendMode.SrcOver),
+                        fallbackTint = HazeTint(glassTint.copy(alpha = alpha), BlendMode.SrcOver),
                     ),
                 )
             } else {
@@ -359,7 +362,7 @@ fun Modifier.glassSurface(
             },
         )
         .drawBehind {
-            drawRect(Brush.verticalGradient(0f to Color.White.copy(alpha = gradientTop), 1f to Color.White.copy(alpha = gradientBottom)))
+            drawRect(Brush.verticalGradient(0f to glassTint.copy(alpha = gradientTop), 1f to glassTint.copy(alpha = gradientBottom)))
             if (tintLayer.alpha > 0f) drawRect(tintLayer)
             if (stroke) {
                 drawRoundRect(

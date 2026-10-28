@@ -52,6 +52,8 @@ import com.zycomic.app.picacg.PicacgLibraryCacheEntry
 import com.zycomic.app.picacg.PicacgLibraryCacheKey
 import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.platform.ContentPlatform
+import eu.kanade.presentation.components.TabbedDialog
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -432,57 +434,84 @@ fun PicacgLibraryScreen(
     }
 
     if (showFilter) {
-        AlertDialog(
+        // 与禁漫/漫蛙一致：TabbedDialog 分页「排序 / 显示」，点选立即生效。
+        TabbedDialog(
             onDismissRequest = { showFilter = false },
-            title = { Text(stringResource(KMR.strings.picacg_filter_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!history) {
-                        Text(stringResource(KMR.strings.picacg_sort))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            tabTitles = persistentListOf(
+                stringResource(KMR.strings.picacg_sort),
+                stringResource(KMR.strings.picacg_collection_display_mode),
+            ),
+        ) { tab ->
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                when (tab) {
+                    0 -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             PicacgCollectionPolicy.sortCodes.take(2).forEach { code ->
                                 val label = when (code) {
                                     "dd" -> stringResource(KMR.strings.picacg_favorites_recent)
                                     else -> stringResource(KMR.strings.picacg_favorites_oldest)
                                 }
-                                FilterChip(selected = draftSort == code, onClick = { draftSort = code }, label = { Text(label) })
+                                FilterChip(
+                                    selected = draftSort == code,
+                                    onClick = { draftSort = code; applyFilter() },
+                                    label = { Text(label) },
+                                )
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            FilterChip(selected = draftSort == "ld", onClick = { draftSort = "ld" }, label = { Text(stringResource(KMR.strings.picacg_most_likes)) })
-                            FilterChip(selected = draftSort == "vd", onClick = { draftSort = "vd" }, label = { Text(stringResource(KMR.strings.picacg_most_views)) })
-                        }
-                    }
-                    Text(stringResource(KMR.strings.picacg_collection_display_mode))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        FilterChip(
-                            selected = draftDisplayMode == PicacgCollectionPolicy.DISPLAY_GRID,
-                            onClick = { draftDisplayMode = PicacgCollectionPolicy.DISPLAY_GRID },
-                            label = { Text(stringResource(KMR.strings.picacg_collection_grid)) },
-                        )
-                        FilterChip(
-                            selected = draftDisplayMode == PicacgCollectionPolicy.DISPLAY_LIST,
-                            onClick = { draftDisplayMode = PicacgCollectionPolicy.DISPLAY_LIST },
-                            label = { Text(stringResource(KMR.strings.picacg_collection_list)) },
-                        )
-                    }
-                    Text(stringResource(KMR.strings.picacg_collection_grid_columns))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        (2..5).forEach { columns ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             FilterChip(
-                                selected = draftGridColumns == columns,
-                                onClick = { draftGridColumns = columns },
-                                label = {
-                                    Text(stringResource(KMR.strings.picacg_collection_grid_columns_option, columns))
-                                },
+                                selected = draftSort == "ld",
+                                onClick = { draftSort = "ld"; applyFilter() },
+                                label = { Text(stringResource(KMR.strings.picacg_most_likes)) },
+                            )
+                            FilterChip(
+                                selected = draftSort == "vd",
+                                onClick = { draftSort = "vd"; applyFilter() },
+                                label = { Text(stringResource(KMR.strings.picacg_most_views)) },
                             )
                         }
                     }
+                    else -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(
+                                selected = draftDisplayMode == PicacgCollectionPolicy.DISPLAY_GRID,
+                                onClick = {
+                                    draftDisplayMode = PicacgCollectionPolicy.DISPLAY_GRID
+                                    applyFilter()
+                                },
+                                label = { Text(stringResource(KMR.strings.picacg_collection_grid)) },
+                            )
+                            FilterChip(
+                                selected = draftDisplayMode == PicacgCollectionPolicy.DISPLAY_LIST,
+                                onClick = {
+                                    draftDisplayMode = PicacgCollectionPolicy.DISPLAY_LIST
+                                    applyFilter()
+                                },
+                                label = { Text(stringResource(KMR.strings.picacg_collection_list)) },
+                            )
+                        }
+                        Text(
+                            stringResource(KMR.strings.picacg_collection_grid_columns),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            (2..5).forEach { columns ->
+                                FilterChip(
+                                    selected = draftGridColumns == columns,
+                                    onClick = { draftGridColumns = columns; applyFilter() },
+                                    label = {
+                                        Text(stringResource(KMR.strings.picacg_collection_grid_columns_option, columns))
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
-            },
-            confirmButton = { TextButton(onClick = ::applyFilter) { Text(stringResource(KMR.strings.picacg_apply)) } },
-            dismissButton = { TextButton(onClick = { showFilter = false }) { Text(stringResource(KMR.strings.picacg_cancel)) } },
-        )
+            }
+        }
     }
 }
 
