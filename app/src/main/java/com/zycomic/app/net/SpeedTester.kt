@@ -48,6 +48,9 @@ import java.util.concurrent.atomic.AtomicInteger
 object SpeedTester {
 
     private const val TAG = "SpeedTester"
+
+/** 快测放行后继续补测的目标个数（拿到这么多快速成功就停，不跑全量）。 */
+private const val QUICK_FILL_TARGET = 8
     private const val MAX = Long.MAX_VALUE
     private val probeScheduler = SpeedTestProbeBudget.scheduler
 
@@ -1038,7 +1041,8 @@ object SpeedTester {
                                 }
                             }
                         },
-                        stopAfterQualified = if (quickLineRetest) 2 else Int.MAX_VALUE,
+                        // 快测：放行（进入主界面）后仍在后台继续补测，直到 8 个快速成功或预算耗尽；不做全量。
+                        stopAfterQualified = if (quickLineRetest) QUICK_FILL_TARGET else Int.MAX_VALUE,
                         onExhausted = { drained -> if (runIsCurrent()) lineDrainedAll.set(drained) },
                     ) { target ->
                         val outcome = if (runIsCurrent()) {
@@ -1158,7 +1162,7 @@ object SpeedTester {
                             }
                         }
                     },
-                    stopAfterQualified = if (quickImageRetest) 2 else Int.MAX_VALUE,
+                    stopAfterQualified = if (quickImageRetest) QUICK_FILL_TARGET else Int.MAX_VALUE,
                     onExhausted = { drained -> if (runIsCurrent()) imageDrainedAll.set(drained) },
                 ) { endpoint ->
                     val result = if (runIsCurrent()) {

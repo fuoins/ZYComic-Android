@@ -25,6 +25,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** 完整测速结束后，这段时间内的自动轮直接复用结果（避免立刻又跑一轮快测）。 */
+private const val FULL_ROUND_QUIET_MS = 90_000L
+
 /** One orchestration entry point for startup, config changes, settings and network retests. */
 object PlatformSpeedTestCoordinator {
     private val lock = Mutex()
@@ -54,6 +57,9 @@ object PlatformSpeedTestCoordinator {
     private val _completions = MutableSharedFlow<PlatformSpeedTestReport>(extraBufferCapacity = 16)
     val completions = _completions.asSharedFlow()
     private var completedKey: SpeedTestRunKey? = null
+    /** 最近一次完整（非快测）轮完成的时间/key：避免首次完整测速后立刻又自动跑一轮快测。 */
+    private var lastFullRoundKey: SpeedTestRunKey? = null
+    private var lastFullRoundCompletedAt: Long = 0L
     private var checkedConfigurationVersion: Int? = null
     private val completedPhases = CompletedSpeedTestPhases()
     private val completedReports = mutableMapOf<ContentPlatform, Pair<CompletedSpeedTestPhases.Key, PlatformSpeedTestReport>>()
@@ -230,6 +236,22 @@ object PlatformSpeedTestCoordinator {
                 _foregroundReady.value = true
                 onCompleted?.invoke(requestedKey)
                 return@withLock _reports.value
+            }
+            // 刚跑完一轮完整测速（90 秒内、网络/远程版本/平台开关都没变）时，
+            // 进入主界面触发的自动轮直接复用，不再补一轮快测。
+            // 首次安装最容易踩到：完整测速刚结束，awaitStartup 又起一轮 QUICK。
+            if (!forceFresh && onlyPlatform == null && !remoteConfigUpdated) {
+                val lastFull = lastFullRoundKey
+                val quiet = System.currentTimeMillis() - lastFullRoundCompletedAt <= FULL_ROUND_QUIET_MS
+                if (quiet && lastFull != null && _reports.value.isNotEmpty() &&
+                    lastFull.networkIdentity == requestedKey.networkIdentity &&
+                    lastFull.remoteVersion == requestedKey.remoteVersion &&
+                    lastFull.platformRevision == requestedKey.platformRevision
+                ) {
+                    _foregroundReady.value = true
+                    onCompleted?.invoke(requestedKey)
+                    return@withLock _reports.value
+                }
             }
             completedKey = null
             // 整轮开始：由宿主注册的钩子落盘本轮起点（读上一轮是否未完成用于补测）。
@@ -614,6 +636,11 @@ object PlatformSpeedTestCoordinator {
                             null
                         }
                         if (completedKey != null) roundCompletedHook?.invoke()
+                        // 记录“完整轮刚结束”，供上面的短期抑制使用；快测轮不参与。
+                        if (!reuseLines && !reuseImages) {
+                            lastFullRoundKey = completedKey ?: key
+                            lastFullRoundCompletedAt = System.currentTimeMillis()
+                        }
                     }
                     checkedConfigurationVersion = version
                     persist(result)

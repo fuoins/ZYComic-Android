@@ -37,6 +37,9 @@ import kotlin.coroutines.resume
 
 /** JM 独立测速器；只探测 JM API 线路和 sources2 图源池。 */
 object JmSpeedTester {
+    /** 快测放行后继续补测的目标个数（拿到这么多快速成功就停，不跑全量）。 */
+    private const val QUICK_FILL_TARGET = 8
+
     enum class ImgVerdict { OK, UNREACHABLE, NO_IMAGE }
 
     private data class ProbeResult(val delayMs: Long, val elapsedMs: Long, val verdict: ImgVerdict? = null)
@@ -324,7 +327,7 @@ object JmSpeedTester {
                                 log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                                 onUsable = { target, result -> applyLineRoute(target, result) },
                                 onQualified = { target, _ -> notifyQualifiedIfApplied(target.endpoint, image = false) },
-                                stopAfterQualified = if (quickLines) 2 else Int.MAX_VALUE,
+                                stopAfterQualified = if (quickLines) QUICK_FILL_TARGET else Int.MAX_VALUE,
                                 onExhausted = { drained -> if (stillCurrent()) lineDrainedAll.set(drained) },
                                 probe = probe@{ target ->
                                     if (!stillCurrent()) return@probe null
@@ -399,7 +402,7 @@ object JmSpeedTester {
                             log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                             onUsable = { endpoint, result -> applyImageRoute(endpoint, result) },
                             onQualified = { endpoint, _ -> notifyQualifiedIfApplied(endpoint, image = true) },
-                            stopAfterQualified = if (quickImages) 2 else Int.MAX_VALUE,
+                            stopAfterQualified = if (quickImages) QUICK_FILL_TARGET else Int.MAX_VALUE,
                             onExhausted = { drained -> if (stillCurrent()) imageDrainedAll.set(drained) },
                             probe = probe@{ endpoint ->
                                 if (!stillCurrent()) return@probe null
