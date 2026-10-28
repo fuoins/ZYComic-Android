@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
@@ -50,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -59,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.AppearancePreviewState
 import com.zycomic.app.ui.components.AppCoverBackdrop
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.GlassShell
@@ -676,6 +680,25 @@ fun AppContent(
             },
             fixedPlatform = loginPlatform,
         )
+    }
+
+    // ---- 外观预览：主界面右上/右下悬浮按钮，一键回到外观设置 ----
+    val appearancePreview by AppearancePreviewState.active.collectAsState()
+    if (appearancePreview && settingsDialog == null) {
+        // 透明全屏容器不拦截触摸：预览时主界面照常可点。
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+            ExtendedFloatingActionButton(
+                onClick = {
+                    AppearancePreviewState.exit()
+                    settingsDialog = SettingsDialog.Appearance
+                },
+                modifier = Modifier.padding(end = 18.dp, bottom = 104.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                icon = { Icon(Icons.Outlined.Palette, contentDescription = null) },
+                text = { Text("返回外观") },
+            )
+        }
     }
 
     // ---- 设置子页面全屏 Dialog ----

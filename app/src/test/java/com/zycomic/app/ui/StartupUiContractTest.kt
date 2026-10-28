@@ -101,8 +101,8 @@ class StartupUiContractTest {
         }
         val background = File(drawable, "ic_launcher_background.xml").readText()
         // 自适应图标底色与角色图的蓝色渐变一致；不再使用旧版紫/橙品牌色
-        assertTrue(background.contains("#FF1C4FD8"))
-        assertTrue(background.contains("#FFBFE6FF"))
+        assertTrue(background.contains("#FF2E5FA9"))
+        assertTrue(background.contains("#FFBDE0FE"))
         assertFalse(background.contains("#FFB018ED"))
         assertFalse(background.contains("#FF42A5F5"))
         val systemSplash = File(drawable, "ic_splash.xml").readText()
@@ -111,7 +111,7 @@ class StartupUiContractTest {
         val splashIcon = File(drawable, "ic_splash_icon.xml").readText()
         assertTrue(splashIcon.contains("ic_splash_fg"))
         assertTrue(splashIcon.contains("oval"))
-        assertTrue(splashIcon.contains("#FF1C4FD8"))
+        assertTrue(splashIcon.contains("#FF2E5FA9"))
         assertTrue(File(root, "app/src/main/res/drawable-nodpi/ic_splash_fg.png").isFile)
         // 深色模式曾经走 drawable-night 的旧启动图（Komikku 的 Z），必须一起换掉
         val nightSplash = File(root, "app/src/main/res/drawable-night/ic_splash.xml").readText()

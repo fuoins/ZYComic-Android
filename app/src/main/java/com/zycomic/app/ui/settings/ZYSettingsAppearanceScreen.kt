@@ -52,6 +52,7 @@ import com.zycomic.app.platform.ContentPlatformAccentPrefs
 import com.zycomic.app.platform.rememberContentPlatformAccent
 import com.zycomic.app.ui.components.AppBackdropState
 import com.zycomic.app.ui.components.AppearanceColors
+import com.zycomic.app.ui.components.AppearancePreviewState
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.ColorPickerDialog
 import com.zycomic.app.ui.components.GlassPart
@@ -122,6 +123,17 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     title = stringResource(getTitleRes()),
                     navigateUp = handleBack,
                     scrollBehavior = scrollBehavior,
+                    actions = {
+                        TextButton(
+                            onClick = {
+                                // 关掉设置页回到主界面，主界面上会出现「返回外观」悬浮按钮。
+                                AppearancePreviewState.enter()
+                                handleBack?.invoke()
+                            },
+                        ) {
+                            Text("预览")
+                        }
+                    },
                 )
             },
         ) { contentPadding ->

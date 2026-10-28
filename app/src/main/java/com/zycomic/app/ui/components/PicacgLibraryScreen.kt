@@ -4,6 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +57,7 @@ import com.zycomic.app.picacg.PicacgRepository
 import com.zycomic.app.platform.ContentPlatform
 import eu.kanade.presentation.components.TabbedDialog
 import kotlinx.collections.immutable.persistentListOf
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.kmk.KMR
@@ -64,6 +68,7 @@ import tachiyomi.presentation.core.screens.LoadingScreen
 import androidx.compose.foundation.lazy.grid.items as gridItems
 
 /** Picacg's online collection is never backed by Manwa/JM account repositories. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PicacgLibraryScreen(
     history: Boolean,
@@ -475,7 +480,16 @@ fun PicacgLibraryScreen(
                         }
                     }
                     else -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // 与禁漫收藏的「显示」页一致：小标题 + 自动换行胶囊 + 列数滑杆。
+                        Text(
+                            stringResource(KMR.strings.picacg_collection_display_mode),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             FilterChip(
                                 selected = draftDisplayMode == PicacgCollectionPolicy.DISPLAY_GRID,
                                 onClick = {
@@ -493,18 +507,30 @@ fun PicacgLibraryScreen(
                                 label = { Text(stringResource(KMR.strings.picacg_collection_list)) },
                             )
                         }
-                        Text(
-                            stringResource(KMR.strings.picacg_collection_grid_columns),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            (2..5).forEach { columns ->
-                                FilterChip(
-                                    selected = draftGridColumns == columns,
-                                    onClick = { draftGridColumns = columns; applyFilter() },
-                                    label = {
-                                        Text(stringResource(KMR.strings.picacg_collection_grid_columns_option, columns))
+                        if (draftDisplayMode == PicacgCollectionPolicy.DISPLAY_GRID) {
+                            Text(
+                                stringResource(KMR.strings.picacg_collection_grid_columns),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    draftGridColumns.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                Slider(
+                                    value = draftGridColumns.toFloat(),
+                                    onValueChange = {
+                                        val next = it.roundToInt().coerceIn(2, 5)
+                                        if (next != draftGridColumns) {
+                                            draftGridColumns = next
+                                            applyFilter()
+                                        }
                                     },
+                                    valueRange = 2f..5f,
+                                    steps = 2,
+                                    modifier = Modifier.weight(1f),
                                 )
                             }
                         }
