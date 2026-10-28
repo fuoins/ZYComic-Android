@@ -94,7 +94,7 @@ fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
 @Composable
 private fun DefaultBackdropImage(modifier: Modifier = Modifier, fallbackAlpha: Float) {
     androidx.compose.foundation.Image(
-        painter = androidx.compose.ui.res.painterResource(id = com.zycomic.app.R.drawable.backdrop_default),
+        painter = androidx.compose.ui.res.painterResource(id = eu.kanade.tachiyomi.R.drawable.backdrop_default),
         contentDescription = null,
         modifier = modifier,
         contentScale = ContentScale.Crop,
