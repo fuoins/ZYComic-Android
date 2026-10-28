@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zycomic.app.platform.ContentPlatform
 import com.zycomic.app.platform.rememberContentPlatformAccent
+import com.zycomic.app.ui.components.AppearanceColors
+import com.zycomic.app.ui.components.GlassPart
 import com.zycomic.app.ui.components.glassSurface
 
 @Composable
@@ -51,7 +53,11 @@ fun BrowseTabCapsule(
         platformAccent
     }
     // 玻璃语言与底栏一致：选中 = 更亮的白色玻璃胶囊，未选中 = 淡玻璃（外观页可单独调，调到 0 即无底）。
-    val foreground = accent
+    // 文字色默认用平台色；外观页可给「标签选中 / 标签未选中」分别指定文字颜色。
+    val partTextColors by AppearanceColors.partTextColors.collectAsState()
+    val foreground = partTextColors[
+        if (selected) GlassPart.TAB_SELECTED.key else GlassPart.TAB_UNSELECTED.key,
+    ] ?: accent
 
     Row(
         modifier = modifier
@@ -85,18 +91,16 @@ fun BrowseTabCapsule(
 /** 子标签胶囊（宇总排行/禁漫首页/哔咔排行等）：玻璃底 + 可配选中色，不用 Material 48dp 最小行高。 */
 @Composable
 fun CompactBrowseFilterChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit) {
-    val accent by com.zycomic.app.ui.components.AppearanceColors.uiAccent.collectAsState()
+    val accent by AppearanceColors.uiAccent.collectAsState()
+    val partTextColors by AppearanceColors.partTextColors.collectAsState()
+    val part = if (selected) GlassPart.SUBTAB_SELECTED else GlassPart.SUBTAB_UNSELECTED
     Box(
         modifier = Modifier
             .height(32.dp)
             .glassSurface(
                 shape = RoundedCornerShape(50),
                 radius = 999.dp,
-                part = if (selected) {
-                    com.zycomic.app.ui.components.GlassPart.SUBTAB_SELECTED
-                } else {
-                    com.zycomic.app.ui.components.GlassPart.SUBTAB_UNSELECTED
-                },
+                part = part,
                 stroke = false,
             )
             .clickable(onClick = onClick)
@@ -105,7 +109,8 @@ fun CompactBrowseFilterChip(selected: Boolean, onClick: () -> Unit, label: @Comp
     ) {
         androidx.compose.runtime.CompositionLocalProvider(
             androidx.compose.material3.LocalContentColor provides (
-                if (selected) accent ?: MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                partTextColors[part.key]
+                    ?: if (selected) accent ?: MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                 ),
         ) {
             label()

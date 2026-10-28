@@ -63,6 +63,7 @@ fun ColorPickerDialog(
     initial: Color,
     onDismiss: () -> Unit,
     onConfirm: (Color) -> Unit,
+    onReset: (() -> Unit)? = null,
 ) {
     val controller = rememberColorPickerController()
     var picked by remember(initial) { mutableStateOf(initial) }
@@ -148,6 +149,13 @@ fun ColorPickerDialog(
             }
         },
         confirmButton = { TextButton(onClick = { onConfirm(picked) }) { Text("应用") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            Row {
+                if (onReset != null) {
+                    TextButton(onClick = onReset) { Text("恢复默认") }
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
     )
 }

@@ -39,6 +39,7 @@ object GlassPrefs {
     private const val KEY_GLASS_STRENGTH = "glass_strength"
     private const val KEY_PART_BLUR_PREFIX = "part_blur_"
     private const val KEY_PART_ALPHA_PREFIX = "part_alpha_"
+    private const val KEY_PART_FROSTED_PREFIX = "part_frosted_"
 
     private val _backdropBlurDp = MutableStateFlow(8f)
     val backdropBlurDp: StateFlow<Float> = _backdropBlurDp.asStateFlow()
@@ -55,6 +56,10 @@ object GlassPrefs {
     private val _partAlpha = MutableStateFlow(GlassPart.entries.associate { it.key to it.defaultAlpha })
     val partAlpha: StateFlow<Map<String, Float>> = _partAlpha.asStateFlow()
 
+    /** 每个部件是否启用真磨砂（Haze）；关闭后退化为纯玻璃渐变。 */
+    private val _partFrosted = MutableStateFlow(GlassPart.entries.associate { it.key to true })
+    val partFrosted: StateFlow<Map<String, Boolean>> = _partFrosted.asStateFlow()
+
     private var initialized = false
 
     fun init(context: Context) {
@@ -69,6 +74,9 @@ object GlassPrefs {
         }
         _partAlpha.value = GlassPart.entries.associate { part ->
             part.key to prefs.getFloat(KEY_PART_ALPHA_PREFIX + part.key, part.defaultAlpha).coerceIn(0f, 1f)
+        }
+        _partFrosted.value = GlassPart.entries.associate { part ->
+            part.key to prefs.getBoolean(KEY_PART_FROSTED_PREFIX + part.key, true)
         }
     }
 
@@ -101,6 +109,14 @@ object GlassPrefs {
         _partAlpha.value = _partAlpha.value + (part.key to v)
         write(context, KEY_PART_ALPHA_PREFIX + part.key, v)
     }
+
+    fun setPartFrosted(context: Context, part: GlassPart, value: Boolean) {
+        _partFrosted.value = _partFrosted.value + (part.key to value)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_PART_FROSTED_PREFIX + part.key, value).apply()
+    }
+
+    fun isFrosted(part: GlassPart): Boolean = _partFrosted.value[part.key] ?: true
 
     private fun write(context: Context, key: String, value: Float) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

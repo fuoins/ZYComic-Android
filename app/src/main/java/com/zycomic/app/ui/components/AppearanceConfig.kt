@@ -26,6 +26,7 @@ object AppearanceConfig {
                 put("strength", GlassPrefs.glassStrength.value)
                 put("tint", AppearanceColors.hex(AppearanceColors.glassTint.value))
                 put("uiAccent", AppearanceColors.uiAccent.value?.let(AppearanceColors::hex) ?: "")
+                put("switchColor", AppearanceColors.switchColor.value?.let(AppearanceColors::hex) ?: "")
             },
         )
 
@@ -42,6 +43,11 @@ object AppearanceConfig {
                                 "tint",
                                 AppearanceColors.partTints.value[part.key]?.let(AppearanceColors::hex) ?: "",
                             )
+                            put(
+                                "text",
+                                AppearanceColors.partTextColors.value[part.key]?.let(AppearanceColors::hex) ?: "",
+                            )
+                            put("frosted", GlassPrefs.isFrosted(part))
                         },
                     )
                 }
@@ -95,6 +101,10 @@ object AppearanceConfig {
                 AppearanceColors.setUiAccent(context, parsed)
                 applied++
             }
+            if (glass.has("switchColor")) {
+                AppearanceColors.setSwitchColor(context, AppearanceColors.parseColor(glass.optString("switchColor")))
+                applied++
+            }
         }
 
         root.optJSONObject("parts")?.let { parts ->
@@ -108,6 +118,12 @@ object AppearanceConfig {
                 }
                 if (obj.has("tint")) {
                     AppearanceColors.setPartTint(context, part, AppearanceColors.parseColor(obj.optString("tint")))
+                }
+                if (obj.has("text")) {
+                    AppearanceColors.setPartTextColor(context, part, AppearanceColors.parseColor(obj.optString("text")))
+                }
+                if (obj.has("frosted")) {
+                    GlassPrefs.setPartFrosted(context, part, obj.optBoolean("frosted", true))
                 }
                 applied++
             }

@@ -21,6 +21,8 @@ object AppearanceColors {
     private const val KEY_UI_ACCENT = "ui_accent"
     private const val KEY_YUZONG = "yuzong_accent"
     private const val PART_TINT_PREFIX = "part_tint_"
+    private const val PART_TEXT_PREFIX = "part_text_"
+    private const val KEY_SWITCH = "switch_color"
 
     /** 界面主色默认值（用户指定的蓝色）。 */
     val DEFAULT_UI_ACCENT = Color(0xFF0054D6)
@@ -33,6 +35,14 @@ object AppearanceColors {
 
     private val _partTints = MutableStateFlow<Map<String, Color>>(emptyMap())
     val partTints: StateFlow<Map<String, Color>> = _partTints.asStateFlow()
+
+    /** 各部件内部的文字颜色（不设置则跟随主题/平台色）。 */
+    private val _partTextColors = MutableStateFlow<Map<String, Color>>(emptyMap())
+    val partTextColors: StateFlow<Map<String, Color>> = _partTextColors.asStateFlow()
+
+    /** 开关（设置项里的 Switch）开启态颜色；null = 跟随系统中性样式。 */
+    private val _switchColor = MutableStateFlow<Color?>(null)
+    val switchColor: StateFlow<Color?> = _switchColor.asStateFlow()
 
     private val _uiAccent = MutableStateFlow<Color?>(DEFAULT_UI_ACCENT)
     val uiAccent: StateFlow<Color?> = _uiAccent.asStateFlow()
@@ -52,6 +62,10 @@ object AppearanceColors {
         _partTints.value = GlassPart.entries.mapNotNull { part ->
             prefs.getString(PART_TINT_PREFIX + part.key, null)?.let(::parseColor)?.let { part.key to it }
         }.toMap()
+        _partTextColors.value = GlassPart.entries.mapNotNull { part ->
+            prefs.getString(PART_TEXT_PREFIX + part.key, null)?.let(::parseColor)?.let { part.key to it }
+        }.toMap()
+        _switchColor.value = prefs.getString(KEY_SWITCH, null)?.let(::parseColor)
     }
 
     /** 指定部件当前使用的玻璃颜色：单独设置优先，否则跟随全局。 */
@@ -62,6 +76,30 @@ object AppearanceColors {
     fun setGlassTint(context: Context, color: Color) {
         _glassTint.value = color
         write(context, KEY_GLASS_TINT, color)
+    }
+
+    /** 指定部件内部的文字颜色；null = 跟随主题。 */
+    fun textColorFor(part: GlassPart): Color? = _partTextColors.value[part.key]
+
+    fun setPartTextColor(context: Context, part: GlassPart, color: Color?) {
+        val next = _partTextColors.value.toMutableMap()
+        val edit = prefs(context).edit()
+        if (color == null) {
+            next.remove(part.key)
+            edit.remove(PART_TEXT_PREFIX + part.key)
+        } else {
+            next[part.key] = color
+            edit.putString(PART_TEXT_PREFIX + part.key, hex(color))
+        }
+        _partTextColors.value = next
+        edit.apply()
+    }
+
+    fun setSwitchColor(context: Context, color: Color?) {
+        _switchColor.value = color
+        val edit = prefs(context).edit()
+        if (color == null) edit.remove(KEY_SWITCH) else edit.putString(KEY_SWITCH, hex(color))
+        edit.apply()
     }
 
     /** 单独设置某类玻璃的颜色；[color] 为 null 时恢复跟随全局。 */

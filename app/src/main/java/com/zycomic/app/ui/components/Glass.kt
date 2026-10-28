@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -94,23 +96,28 @@ fun GlassShell(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val hazeState = LocalAppHaze.current
+    val frostMap by GlassPrefs.partFrosted.collectAsState()
+    // 部件磨砂开关关闭时，即使有模糊源也走「无 Haze」的实色玻璃分支。
+    val haze = hazeState.takeIf { frostMap[part.key] ?: true }
     val dark = glassDark()
     val glassTint = glassTintFor(part)
+    val partTextColors by AppearanceColors.partTextColors.collectAsState()
+    val contentColor = partTextColors[part.key] ?: LocalContentColor.current
     val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
     val shadowColor = Color.Black.copy(alpha = if (dark) 0.30f else 0.05f)
     // Haze 正常时白玻璃只作薄高光层；无 Haze 时它就是玻璃本体。
-    val gradientTop = if (hazeState != null) alpha * 0.38f else alpha
-    val gradientBottom = if (hazeState != null) alpha * 0.18f else alpha * 0.55f
+    val gradientTop = if (haze != null) alpha * 0.38f else alpha
+    val gradientBottom = if (haze != null) alpha * 0.18f else alpha * 0.55f
     Box(
         modifier = modifier
             .then(if (elevated) Modifier.shadow(2.dp, shape, ambientColor = shadowColor, spotColor = shadowColor) else Modifier)
             .clip(shape)
             .then(
-                if (hazeState != null) {
+                if (haze != null) {
                     Modifier.hazeEffect(
-                        state = hazeState,
+                        state = haze,
                         style = HazeStyle(
                             backgroundColor = Color.Transparent,
                             tint = HazeTint(glassTint.copy(alpha = alpha), BlendMode.SrcOver),
@@ -135,8 +142,11 @@ fun GlassShell(
                     )
                 }
             },
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            content()
+        }
+    }
 }
 
 /** 独立玻璃卡片（用户信息卡、分组容器等）。[accent] 非空时叠加平台色淡染。 */
@@ -195,15 +205,20 @@ fun GlassPreferenceRow(
                     is Painter -> Icon(painter = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
                 }
             }
+            val customText = AppearanceColors.partTextColors.collectAsState().value[GlassPart.BUTTON.key]
             Column(modifier = Modifier.weight(1f).padding(horizontal = if (icon != null) 12.dp else 0.dp)) {
                 if (!title.isNullOrBlank()) {
-                    Text(text = title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = customText ?: MaterialTheme.colorScheme.onSurface,
+                    )
                 }
                 if (!subtitle.isNullOrBlank()) {
                     Text(
                         text = subtitle.toString(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = customText?.copy(alpha = 0.72f) ?: MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 10,
                     )
                 }
@@ -231,14 +246,16 @@ fun GlassSwitchRow(
         onPreferenceClick = { onCheckedChanged(!checked) },
         widget = {
             val dark = glassDark()
+            val switchTint by AppearanceColors.switchColor.collectAsState()
             Switch(
                 checked = checked,
                 onCheckedChange = { onCheckedChanged(it) },
                 modifier = Modifier.padding(start = 8.dp),
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = if (dark) Color(0xFF20222A) else Color.White,
-                    checkedTrackColor = if (dark) Color.White.copy(alpha = 0.75f) else Color(0xFF3A3F4B),
-                    checkedBorderColor = Color.Transparent,
+                    checkedThumbColor = switchTint?.let { if (it.luminance() > 0.55f) Color.Black else Color.White }
+                        ?: if (dark) Color(0xFF20222A) else Color.White,
+                    checkedTrackColor = switchTint ?: if (dark) Color.White.copy(alpha = 0.75f) else Color(0xFF3A3F4B),
+                    checkedBorderColor = switchTint ?: Color.Transparent,
                     uncheckedThumbColor = if (dark) Color.White.copy(alpha = 0.9f) else Color.White,
                     uncheckedTrackColor = if (dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.16f),
                     uncheckedBorderColor = Color.Transparent,
@@ -257,6 +274,8 @@ fun GlassTopBar(
 ) {
     val dark = glassDark()
     val glassTint = glassTintFor(GlassPart.TOP_BAR)
+    val partTextColors by AppearanceColors.partTextColors.collectAsState()
+    val contentColor = partTextColors[GlassPart.TOP_BAR.key] ?: LocalContentColor.current
     val highlight = glassTint.copy(alpha = if (dark) 0.22f else 0.78f)
     val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
     Row(
@@ -284,8 +303,11 @@ fun GlassTopBar(
                     )
                 }
             },
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            content()
+        }
+    }
 }
 
 /** 玻璃胶囊 Chip（标签栏、平台选择器等）。[accent] 非空时叠加平台色淡染。 */
@@ -300,14 +322,19 @@ fun GlassChip(
 ) {
     val tintLayer = accent?.copy(alpha = 0.14f) ?: Color.Transparent
     if (!selected) {
+        val partTextColors by AppearanceColors.partTextColors.collectAsState()
+        val contentColor = partTextColors[part.key] ?: LocalContentColor.current
         Box(
             modifier = modifier
                 .clip(RoundedCornerShape(50))
                 .clickable(onClick = onClick)
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center,
-            content = content,
-        )
+        ) {
+            CompositionLocalProvider(LocalContentColor provides contentColor) {
+                content()
+            }
+        }
         return
     }
     GlassShell(
@@ -330,6 +357,14 @@ fun GlassChip(
     )
 }
 
+
+/** 封面名字条 / 列表书名的文字颜色：外观页可配，默认跟随主题。 */
+@Composable
+fun coverNameTextColor(): Color {
+    val colors by AppearanceColors.partTextColors.collectAsState()
+    return colors[GlassPart.COVER_NAME.key] ?: LocalContentColor.current
+}
+
 /** 玻璃背景 modifier：给任意现有组件（搜索框、操作条、标签胶囊、封面名字条）叠真磨砂玻璃。 */
 @Composable
 fun Modifier.glassSurface(
@@ -343,20 +378,22 @@ fun Modifier.glassSurface(
     blurOverride: Dp? = null,
 ): Modifier {
     val hazeState = LocalAppHaze.current
+    val frostMap by GlassPrefs.partFrosted.collectAsState()
+    val haze = hazeState.takeIf { frostMap[part.key] ?: true }
     val dark = glassDark()
     val glassTint = glassTintFor(part)
     val (blur, alpha) = resolveGlass(part, blurOverride, alphaOverride)
     val radiusPx = with(LocalDensity.current) { radius.toPx() }
     val tintLayer = accent?.copy(alpha = accentAlpha) ?: Color.Transparent
     val edge = glassTint.copy(alpha = if (dark) 0.16f else 0.55f)
-    val gradientTop = if (hazeState != null) alpha * 0.38f else alpha
-    val gradientBottom = if (hazeState != null) alpha * 0.18f else alpha * 0.55f
+    val gradientTop = if (haze != null) alpha * 0.38f else alpha
+    val gradientBottom = if (haze != null) alpha * 0.18f else alpha * 0.55f
     return this
         .clip(shape)
         .then(
-            if (hazeState != null) {
+            if (haze != null) {
                 Modifier.hazeEffect(
-                    state = hazeState,
+                    state = haze,
                     style = HazeStyle(
                         backgroundColor = Color.Transparent,
                         tint = HazeTint(glassTint.copy(alpha = alpha), BlendMode.SrcOver),

@@ -567,7 +567,13 @@ private fun PicacgMangaListRow(
             modifier = Modifier.width(56.dp).height(78.dp).clip(RoundedCornerShape(8.dp)),
         )
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(manga.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                manga.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = coverNameTextColor(),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (manga.author.isNotBlank()) {
                 Text(manga.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

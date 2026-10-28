@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import com.zycomic.app.ui.components.AppBackdropState
+import com.zycomic.app.ui.components.AppearanceColors
 import com.zycomic.app.ui.components.AppearancePreviewState
 import com.zycomic.app.ui.components.AppCoverBackdrop
 import com.zycomic.app.ui.components.BackdropSources
@@ -932,11 +933,18 @@ private fun androidx.compose.foundation.layout.RowScope.GlassNavItem(
                 ),
             contentAlignment = androidx.compose.ui.Alignment.Center,
         ) {
+            val partTextColors by AppearanceColors.partTextColors.collectAsState()
+            val part = if (selected) {
+                com.zycomic.app.ui.components.GlassPart.BOTTOM_SELECTED
+            } else {
+                com.zycomic.app.ui.components.GlassPart.BOTTOM_BAR
+            }
             Icon(
                 icon,
                 contentDescription = description,
                 modifier = Modifier.size(20.dp),
-                tint = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = partTextColors[part.key]
+                    ?: if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

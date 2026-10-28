@@ -368,6 +368,7 @@ private fun PicacgLocalHistoryItem(
                 Text(
                     text = history.title,
                     style = MaterialTheme.typography.bodyLarge,
+                    color = coverNameTextColor(),
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,

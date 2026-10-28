@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -77,8 +78,10 @@ import coil3.imageLoader
 import com.zycomic.app.data.dto.Manga
 import com.zycomic.app.picacg.PicacgAuthStore
 import com.zycomic.app.platform.StartupPlatformPolicy
+import com.zycomic.app.ui.components.AppearanceColors
 import com.zycomic.app.ui.components.DisplaySettingsSection
 import com.zycomic.app.ui.components.EmptyView
+import com.zycomic.app.ui.components.GlassPart
 import com.zycomic.app.ui.components.GlassTopBar
 import com.zycomic.app.ui.components.LoadingFooter
 import com.zycomic.app.ui.components.coverUrl
@@ -174,6 +177,8 @@ fun SearchScreen(
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
+        val partTextColors by AppearanceColors.partTextColors.collectAsState()
+        val searchTextColor = partTextColors[GlassPart.SEARCH.key]
         // 顶部搜索栏（玻璃条）
         GlassTopBar(
             modifier = Modifier.padding(bottom = 6.dp),
@@ -198,6 +203,12 @@ fun SearchScreen(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
                         disabledContainerColor = Color.Transparent,
+                        // 搜索框文字色：外观页「搜索框」的字体颜色，未设置则跟随主题。
+                        focusedTextColor = searchTextColor ?: MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = searchTextColor ?: MaterialTheme.colorScheme.onSurface,
+                        cursorColor = searchTextColor ?: MaterialTheme.colorScheme.primary,
+                        focusedPlaceholderColor = (searchTextColor ?: MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.72f),
+                        unfocusedPlaceholderColor = (searchTextColor ?: MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.72f),
                     ),
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -319,9 +330,9 @@ fun SearchScreen(
                 keyword.isBlank() -> SearchHistorySection(vm = vm)
                 mangas.isEmpty() && !loading -> EmptyView("输入关键词开始搜索")
                 displayMode >= 3 -> LazyColumn(
+                    // 与收藏页列表一致：行自带 12dp 外边距 + 3dp 行距 + 玻璃卡。
                     state = listState,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     // key 必须带下标：搜索结果跨页可能返回同一 id，纯 id 作 key 会抛
@@ -354,11 +365,12 @@ fun SearchScreen(
                     }
                 }
                 else -> LazyVerticalGrid(
+                    // 与收藏页网格一致：8dp 页边距 + 8dp 卡片间距，默认 3 列。
                     columns = GridCells.Fixed(if (gridColumns > 0) gridColumns else 3),
                     state = gridState,
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(mangas.size, key = { mangas[it].id + "_$it" }) { i ->
@@ -540,8 +552,8 @@ private fun SearchMangaGridItem(
 }
 
 /**
- * 列表档（displayMode == 3）单行：左侧封面 + 右侧书名/作者/简介，连载·完结放在最右面。
- * 结构对齐收藏页的列表项（封面 3:4、名称加粗两行、次要信息一行、行尾标记组）。
+ * 列表档（displayMode == 3）单行：与收藏页列表样式完全一致——
+ * 玻璃卡 + 84dp 封面 + 书名玻璃条 + 作者/简介 + 行尾连载标记。
  */
 @Composable
 private fun SearchMangaListRow(
@@ -553,8 +565,15 @@ private fun SearchMangaListRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(14.dp),
+                radius = 14.dp,
+                part = GlassPart.CARD,
+                stroke = false,
+            )
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SubcomposeAsyncImage(
@@ -562,7 +581,7 @@ private fun SearchMangaListRow(
             imageLoader = imageLoader,
             contentDescription = manga.name,
             modifier = Modifier
-                .width(66.dp)
+                .height(84.dp)
                 .aspectRatio(3f / 4f)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -572,15 +591,27 @@ private fun SearchMangaListRow(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(start = 10.dp, end = 6.dp),
+                .padding(start = 12.dp, end = 6.dp),
         ) {
-            Text(
-                text = manga.name,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Box(
+                modifier = Modifier
+                    .glassSurface(
+                        shape = RoundedCornerShape(8.dp),
+                        radius = 8.dp,
+                        part = GlassPart.COVER_NAME,
+                        stroke = false,
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = manga.name,
+                    fontWeight = FontWeight.SemiBold,
+                    color = com.zycomic.app.ui.components.coverNameTextColor(),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             if (manga.author.isNotBlank()) {
                 Text(
                     text = manga.author,
@@ -602,7 +633,6 @@ private fun SearchMangaListRow(
                 )
             }
         }
-        // 连载 / 完结：按需求放在最右面（收藏页列表项的标记组同位置）
         serializeLabel(manga)?.let {
             SerializeBadge(it, modifier = Modifier.padding(start = 4.dp))
         }

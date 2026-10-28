@@ -23,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -162,6 +164,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         val context = LocalContext.current
         val glassTint by AppearanceColors.glassTint.collectAsState()
         val partTints by AppearanceColors.partTints.collectAsState()
+        val partTextColors by AppearanceColors.partTextColors.collectAsState()
+        val switchColor by AppearanceColors.switchColor.collectAsState()
         val uiAccent by AppearanceColors.uiAccent.collectAsState()
         val manwa by ContentPlatformAccentPrefs.manwa.collectAsState()
         val picacg by ContentPlatformAccentPrefs.picacg.collectAsState()
@@ -203,12 +207,15 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         GlassPart.entries.forEach { part ->
                             val overridden = partTints.containsKey(part.key)
                             val current = partTints[part.key] ?: glassTint
+                            val textColor = partTextColors[part.key]
                             AppearanceColorRow(
                                 title = part.label,
-                                subtitle = if (overridden) {
-                                    "已单独设置 ${AppearanceColors.hex(current)}"
-                                } else {
-                                    "跟随全局 ${AppearanceColors.hex(glassTint)}"
+                                subtitle = buildString {
+                                    append(
+                                        if (overridden) "玻璃 ${AppearanceColors.hex(current)}" else "玻璃跟随全局",
+                                    )
+                                    append(" · ")
+                                    append(textColor?.let { "字体 ${AppearanceColors.hex(it)}" } ?: "字体跟随主题")
                                 },
                                 color = current,
                                 onClick = {
@@ -220,7 +227,41 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                     if (overridden) {
                                         TextButton(onClick = {
                                             AppearanceColors.setPartTint(context, part, null)
-                                        }) { Text("跟随全局") }
+                                        }) { Text("跟随全局", style = MaterialTheme.typography.labelSmall) }
+                                    }
+                                    // 字体颜色（"A" 色块）：点开调色板；未设置时为空心块。
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(start = 2.dp)
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(textColor ?: Color.Transparent)
+                                            .border(
+                                                width = 1.dp,
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                                                shape = RoundedCornerShape(6.dp),
+                                            )
+                                            .clickable {
+                                                target = AppearanceColorTarget(
+                                                    title = "${part.label} 字体颜色",
+                                                    current = textColor ?: MaterialTheme.colorScheme.onSurface,
+                                                    apply = { ctx, color ->
+                                                        AppearanceColors.setPartTextColor(ctx, part, color)
+                                                    },
+                                                    reset = { ctx ->
+                                                        AppearanceColors.setPartTextColor(ctx, part, null)
+                                                    },
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            "A",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = textColor?.let {
+                                                if (it.luminance() > 0.55f) Color.Black else Color.White
+                                            } ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
                                     }
                                 },
                             )
@@ -238,6 +279,28 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 uiAccent ?: themePrimary,
                             ) { ctx, color ->
                                 AppearanceColors.setUiAccent(ctx, color)
+                            }
+                        },
+                    )
+                },
+                Preference.PreferenceItem.CustomPreference(title = "开关颜色") {
+                    AppearanceColorRow(
+                        title = "开关颜色",
+                        subtitle = switchColor?.let { "开启态 ${AppearanceColors.hex(it)}" } ?: "跟随系统中性样式；点此自定义",
+                        color = switchColor ?: themePrimary,
+                        onClick = {
+                            target = AppearanceColorTarget(
+                                title = "开关颜色",
+                                current = switchColor ?: themePrimary,
+                                apply = { ctx, color -> AppearanceColors.setSwitchColor(ctx, color) },
+                                reset = { ctx -> AppearanceColors.setSwitchColor(ctx, null) },
+                            )
+                        },
+                        action = {
+                            if (switchColor != null) {
+                                TextButton(onClick = {
+                                    AppearanceColors.setSwitchColor(context, null)
+                                }) { Text("恢复默认", style = MaterialTheme.typography.labelSmall) }
                             }
                         },
                     )
@@ -287,6 +350,12 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                 onConfirm = { color ->
                     picked.apply(context, color)
                     target = null
+                },
+                onReset = picked.reset?.let { reset ->
+                    {
+                        reset(context)
+                        target = null
+                    }
                 },
             )
         }
@@ -371,13 +440,16 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             GlassPart.entries.forEach { part ->
                                 GlassPrefs.setPartBlur(context, part, part.defaultBlurDp)
                                 GlassPrefs.setPartAlpha(context, part, part.defaultAlpha)
+                                GlassPrefs.setPartFrosted(context, part, true)
                                 AppearanceColors.setPartTint(context, part, null)
+                                AppearanceColors.setPartTextColor(context, part, null)
                             }
                             GlassPrefs.setBackdropBlurDp(context, 8f)
                             GlassPrefs.setBackdropAlpha(context, 0.85f)
                             GlassPrefs.setGlassStrength(context, 1f)
                             AppearanceColors.setGlassTint(context, Color.White)
                             AppearanceColors.setUiAccent(context, AppearanceColors.DEFAULT_UI_ACCENT)
+                            AppearanceColors.setSwitchColor(context, null)
                             AppearanceColors.setYuzong(context, AppearanceColors.DEFAULT_YUZONG_LIGHT)
                             ContentPlatform.entries.forEach { ContentPlatformAccentPrefs.reset(it) }
                             BackdropSources.ALL.forEach { source ->
@@ -402,6 +474,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         val glassStrength by GlassPrefs.glassStrength.collectAsState()
         val partBlur by GlassPrefs.partBlur.collectAsState()
         val partAlpha by GlassPrefs.partAlpha.collectAsState()
+        val partFrosted by GlassPrefs.partFrosted.collectAsState()
 
         return Preference.PreferenceGroup(
             title = "背景与液态玻璃",
@@ -455,21 +528,42 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                         GlassPart.entries.forEach { part ->
                             val blurValue = partBlur[part.key] ?: part.defaultBlurDp
                             val alphaValue = partAlpha[part.key] ?: part.defaultAlpha
-                            Text(
-                                "${part.label}：模糊 ${blurValue.toInt()}dp · 不透明度 ${(alphaValue * 100).toInt()}%",
-                                style = MaterialTheme.typography.titleSmall,
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
-                            Slider(
-                                value = blurValue,
-                                onValueChange = { GlassPrefs.setPartBlur(context, part, it) },
-                                valueRange = 0f..32f,
-                            )
-                            Slider(
-                                value = alphaValue,
-                                onValueChange = { GlassPrefs.setPartAlpha(context, part, it) },
-                                valueRange = 0f..1f,
-                            )
+                            val frosted = partFrosted[part.key] ?: true
+                            Column(modifier = Modifier.padding(top = 10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(part.label, style = MaterialTheme.typography.titleSmall)
+                                        Text(
+                                            "模糊 ${blurValue.toInt()}dp · 不透明度 ${(alphaValue * 100).toInt()}%",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        if (frosted) "磨砂" else "无磨砂",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                    )
+                                    Switch(
+                                        checked = frosted,
+                                        onCheckedChange = { GlassPrefs.setPartFrosted(context, part, it) },
+                                    )
+                                }
+                                Slider(
+                                    value = blurValue,
+                                    onValueChange = { GlassPrefs.setPartBlur(context, part, it) },
+                                    valueRange = 0f..32f,
+                                )
+                                Slider(
+                                    value = alphaValue,
+                                    onValueChange = { GlassPrefs.setPartAlpha(context, part, it) },
+                                    valueRange = 0f..1f,
+                                )
+                            }
                         }
                     }
                 },
@@ -991,6 +1085,7 @@ private data class AppearanceColorTarget(
     val title: String,
     val current: Color,
     val apply: (android.content.Context, Color) -> Unit,
+    val reset: ((android.content.Context) -> Unit)? = null,
 )
 
 /** 外观页里的一行颜色设置：左侧标题/颜色代码，右侧色块（可附带额外操作）。 */

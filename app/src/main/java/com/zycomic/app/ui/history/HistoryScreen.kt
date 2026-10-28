@@ -576,6 +576,7 @@ private fun HistoryItemRow(
                 Text(
                     text = item.bookName,
                     fontWeight = FontWeight.SemiBold,
+                    color = com.zycomic.app.ui.components.coverNameTextColor(),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,

@@ -637,6 +637,7 @@ private fun FavItemRow(
                     Text(
                         text = item.bookName,
                         fontWeight = FontWeight.SemiBold,
+                        color = com.zycomic.app.ui.components.coverNameTextColor(),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyMedium,
@@ -712,23 +713,13 @@ private fun FavItemRow(
                     )
                     .padding(horizontal = 6.dp, vertical = 3.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .glassSurface(
-                            shape = RoundedCornerShape(8.dp),
-                            radius = 8.dp,
-                            part = com.zycomic.app.ui.components.GlassPart.COVER_NAME,
-                            stroke = false,
-                        )
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                ) {
-                    Text(
-                        text = item.bookName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    text = item.bookName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = com.zycomic.app.ui.components.coverNameTextColor(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     } else {
@@ -789,6 +780,7 @@ private fun FavItemRow(
                     Text(
                         text = item.bookName,
                         style = MaterialTheme.typography.bodyMedium,
+                        color = com.zycomic.app.ui.components.coverNameTextColor(),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
