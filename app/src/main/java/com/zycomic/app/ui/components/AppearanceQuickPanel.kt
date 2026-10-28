@@ -129,22 +129,25 @@ fun AppearanceQuickPanel(
                     onChange = { GlassPrefs.setGlassStrength(context, it) },
                 )
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                val accentFallback = MaterialTheme.colorScheme.primary
+                val accentColor = uiAccent ?: accentFallback
+                val switchShownColor = switchColor ?: accentFallback
                 QuickColorRow(
                     label = "界面主色",
-                    color = uiAccent ?: MaterialTheme.colorScheme.primary,
+                    color = accentColor,
                 ) {
                     colorTarget = QuickColorTarget(
                         title = "界面主色",
-                        current = uiAccent ?: MaterialTheme.colorScheme.primary,
+                        current = accentColor,
                     ) { ctx, color -> AppearanceColors.setUiAccent(ctx, color) }
                 }
                 QuickColorRow(
                     label = "开关颜色",
-                    color = switchColor ?: MaterialTheme.colorScheme.primary,
+                    color = switchShownColor,
                 ) {
                     colorTarget = QuickColorTarget(
                         title = "开关颜色",
-                        current = switchColor ?: MaterialTheme.colorScheme.primary,
+                        current = switchShownColor,
                     ) { ctx, color -> AppearanceColors.setSwitchColor(ctx, color) }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
