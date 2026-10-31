@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/banner-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/banner-light.svg" alt="ZYComic — Android 漫画阅读器" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./.github/readme-images/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./.github/readme-images/banner-light.svg">
+  <img src="./.github/readme-images/banner-light.svg" alt="ZYComic — Android 漫画阅读器" width="100%">
 </picture>
 
 <br>
@@ -57,7 +57,7 @@
 
 <!--
 补充真实截图时：把图片放进 .github/readme-images/，在下方插入
-<img src="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/screens.png" alt="界面截图">
+<img src="./.github/readme-images/screens.png" alt="界面截图">
 注意：仓库中现有的 screens.png 是上游 Komikku 的宣传图（含 Komikku 标识），不要直接引用。
 -->
 
@@ -75,9 +75,9 @@
 ## 技术架构
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/architecture-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/architecture-light.svg">
-  <img src="https://raw.githubusercontent.com/fuoins/ZYComic-Android/main/.github/readme-images/architecture-light.svg" alt="ZYComic 技术架构：界面层、领域层、数据层、网络层" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./.github/readme-images/architecture-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./.github/readme-images/architecture-light.svg">
+  <img src="./.github/readme-images/architecture-light.svg" alt="ZYComic 技术架构：界面层、领域层、数据层、网络层" width="100%">
 </picture>
 
 界面与业务编排放在 `app`，`domain` 收敛用例，`data` 用 SQLCipher 加密落库；网络层由 `RouteManager` 统一管理线路、图源与 DNS 直连，加密图片在客户端解密后交给阅读器。阅读器直接复用 komikku 的成熟实现，不重复造轮子。
