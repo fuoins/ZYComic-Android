@@ -110,11 +110,11 @@
 
 ## 下载
 
-**最新版本 v6.0.0**（2026-10-28）· 约 41.5 MB · 仅 64 位 ARM 设备
+**最新版本 v7.0.0**（2026-10-31）· 约 41.7 MB · 仅 64 位 ARM 设备
 
 | 文件 | 适用设备 | 大小 |
 | :--- | :--- | ---: |
-| [ZYComic-6.0.0-arm64-v8a.apk](https://github.com/fuoins/ZYComic-Android/releases/download/v6.0.0/ZYComic-6.0.0-arm64-v8a.apk) | Android 8.0+ · arm64-v8a | 41.5 MB |
+| [ZYComic-7.0.0-arm64-v8a.apk](https://github.com/fuoins/ZYComic-Android/releases/download/v7.0.0/ZYComic-7.0.0-arm64-v8a.apk) | Android 8.0+ · arm64-v8a | 41.7 MB |
 
 1. 下载 APK 到手机；
 2. 在浏览器或文件管理器中允许「安装未知应用」；
