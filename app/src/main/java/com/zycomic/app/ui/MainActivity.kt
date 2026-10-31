@@ -458,13 +458,26 @@ fun AppContent(
                 }
             }
         }
-        // 全局背景：分页自定义图优先，其次全局自定义图，再走随机图源；切页/切 tab/来源变化时刷新。
+        // 全局背景：分页自定义图优先，其次全局自定义图，再走随机图源；切页/切 tab/来源/亮暗变化时刷新。
         val backdropEntry by AppBackdropState.current.collectAsState()
         val browseTabIndex by browseVm.mainTab.collectAsState()
-        val backdropCustom by BackdropSources.customPath.collectAsState()
+        val backdropMode = if (isSystemInDarkTheme) {
+            com.zycomic.app.ui.components.BackdropMode.DARK
+        } else {
+            com.zycomic.app.ui.components.BackdropMode.LIGHT
+        }
+        val backdropCustom by BackdropSources.customPaths.collectAsState()
         val backdropSources by BackdropSources.enabled.collectAsState()
         val backdropPerPage by BackdropSources.perPage.collectAsState()
-        LaunchedEffect(bottomTab, browseTabIndex, backdropCustom, backdropSources, backdropPerPage, showSearch) {
+        LaunchedEffect(
+            bottomTab,
+            browseTabIndex,
+            backdropCustom,
+            backdropSources,
+            backdropPerPage,
+            showSearch,
+            backdropMode,
+        ) {
             val pageKey = when {
                 showSearch -> "search"
                 bottomTab == 0 -> "browse"
@@ -473,7 +486,7 @@ fun AppContent(
                 bottomTab == 3 -> "profile"
                 else -> "settings"
             }
-            AppBackdropState.refresh(pageKey)
+            AppBackdropState.refresh(pageKey, backdropMode)
         }
         // 真磨砂玻璃的模糊源：只标记**背景层**。Haze 1.7 的 hazeEffect 只绘制
         // “zIndex 低于最近祖先 hazeSource”的模糊区——玻璃必须与 source 平级（不能是 source 的后代），

@@ -12,7 +12,7 @@ import org.json.JSONObject
  * 自定义背景图是设备本地文件，不随配置迁移（导入后仍用本机已选图片）。
  */
 object AppearanceConfig {
-    private const val VERSION = 1
+    private const val VERSION = 2
 
     fun exportJson(context: Context): String {
         val root = JSONObject()
@@ -69,10 +69,22 @@ object AppearanceConfig {
         root.put(
             "backdrop",
             JSONObject().apply {
-                BackdropSources.PAGE_KEYS.forEach { key ->
-                    put(key, BackdropSources.pagePath(key) ?: "")
+                BackdropMode.entries.forEach { mode ->
+                    put(
+                        mode.key,
+                        JSONObject().apply {
+                            put("global", BackdropSources.customPath(mode) ?: "")
+                            put(
+                                "pages",
+                                JSONObject().apply {
+                                    BackdropSources.PAGE_KEYS.forEach { key ->
+                                        put(key, BackdropSources.pagePath(key, mode) ?: "")
+                                    }
+                                },
+                            )
+                        },
+                    )
                 }
-                put("global", BackdropSources.customPath.value ?: "")
             },
         )
         return root.toString(2)
@@ -160,7 +172,8 @@ object AppearanceConfig {
             applied++
         }
 
-        AppBackdropState.refresh()
+        // 背景图路径是本机文件，导入时保持原样，只按当前亮暗重新解析一次来源。
+        AppBackdropState.refresh(null, BackdropMode.of(context))
         applied > 0
     }.getOrDefault(false)
 }

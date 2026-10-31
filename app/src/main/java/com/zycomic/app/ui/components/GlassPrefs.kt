@@ -67,7 +67,7 @@ object GlassPrefs {
         initialized = true
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         _backdropBlurDp.value = prefs.getFloat(KEY_BACKDROP_BLUR, 8f).coerceIn(0f, 24f)
-        _backdropAlpha.value = prefs.getFloat(KEY_BACKDROP_ALPHA, 0.85f).coerceIn(0.3f, 1f)
+        _backdropAlpha.value = prefs.getFloat(KEY_BACKDROP_ALPHA, 0.85f).coerceIn(0f, 1f)
         _glassStrength.value = prefs.getFloat(KEY_GLASS_STRENGTH, 1f).coerceIn(0f, 1f)
         _partBlur.value = GlassPart.entries.associate { part ->
             part.key to prefs.getFloat(KEY_PART_BLUR_PREFIX + part.key, part.defaultBlurDp).coerceIn(0f, 32f)
@@ -87,7 +87,7 @@ object GlassPrefs {
     }
 
     fun setBackdropAlpha(context: Context, value: Float) {
-        val v = value.coerceIn(0.3f, 1f)
+        val v = value.coerceIn(0f, 1f)
         _backdropAlpha.value = v
         write(context, KEY_BACKDROP_ALPHA, v)
     }

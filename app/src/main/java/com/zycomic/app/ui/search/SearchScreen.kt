@@ -165,8 +165,13 @@ fun SearchScreen(
     val searchHazeState = rememberHazeState()
     CompositionLocalProvider(com.zycomic.app.ui.components.LocalAppHaze provides searchHazeState) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // 搜索页是独立窗口：先铺一层页面底色，保证背景图（半透明）下面是页面色而不是被压暗的主界面。
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            // 搜索页是独立窗口：先铺一层纯色底（暗黑/亮白），保证背景图（半透明）下面是
+            // 和主界面一致的底色，而不是被压暗的主界面或带色调的主题背景。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(if (androidx.compose.foundation.isSystemInDarkTheme()) Color.Black else Color.White),
+            )
             // 模糊源只包背景层（Haze：玻璃必须与 source 平级，不能是其后代）。
             Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {
                 // 搜索页背景与分类页同款（分页自定义图优先，其次全局/随机源/内置默认图）。

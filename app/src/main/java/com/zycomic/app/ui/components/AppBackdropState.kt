@@ -15,9 +15,9 @@ data class BackdropEntry(
  * 全局随机背景的当前状态。
  *
  * 背景来源（由 MainActivity 驱动，见 [BackdropSources]）：
- * 1. 自定义图片（本地文件）→ 永远优先，不走随机源；
+ * 1. 自定义图片（本地文件）→ 永远优先，不走随机源；暗色/亮色各取自己那一套；
  * 2. 随机图 API 源（多选开启）→ 从开启的源里随机取一个；
- * 3. 都没有 → current 为 null，背景层退化为中性渐变兜底。
+ * 3. 都没有 → current 为 null，背景层退化为该模式的内置默认图。
  */
 object AppBackdropState {
     private val _current = MutableStateFlow<BackdropEntry?>(null)
@@ -32,10 +32,24 @@ object AppBackdropState {
     @Volatile
     var lastRendered: BackdropEntry? = null
 
+    /** [lastRendered] 属于哪一套配置；亮暗切换后不能拿另一套的图垫背。 */
+    @Volatile
+    var lastRenderedMode: BackdropMode? = null
+
+    /** 上一次刷新用的模式：亮暗切换后上一张图属于另一套配置，不能再拿来垫背。 */
+    @Volatile
+    private var lastMode: BackdropMode? = null
+
     /** 按当前来源配置刷新背景；[pageKey] 非空时该页的自定义图优先。 */
-    fun refresh(pageKey: String? = null) {
-        val page = pageKey?.let { BackdropSources.pagePath(it) }
-        val custom = page ?: BackdropSources.customPath.value
+    fun refresh(pageKey: String?, mode: BackdropMode) {
+        if (lastMode != null && lastMode != mode) {
+            lastRendered = null
+            lastRenderedMode = null
+        }
+        lastMode = mode
+
+        val page = pageKey?.let { BackdropSources.pagePath(it, mode) }
+        val custom = page ?: BackdropSources.customPath(mode)
         if (!custom.isNullOrBlank()) {
             _current.value = BackdropEntry(platform = null, url = custom)
             return

@@ -7,6 +7,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +58,7 @@ import com.zycomic.app.ui.components.AppSwitch
 import com.zycomic.app.ui.components.AppearanceColors
 import com.zycomic.app.ui.components.AppearancePreviewState
 import com.zycomic.app.ui.components.AppearanceUiState
+import com.zycomic.app.ui.components.BackdropMode
 import com.zycomic.app.ui.components.BackdropSources
 import com.zycomic.app.ui.components.ColorPickerDialog
 import com.zycomic.app.ui.components.GlassPart
@@ -431,6 +433,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     @Composable
     private fun getConfigGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
+        val backdropMode = if (isSystemInDarkTheme()) BackdropMode.DARK else BackdropMode.LIGHT
         val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             if (uri != null) {
                 runCatching {
@@ -497,7 +500,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             BackdropSources.ALL.forEach { source ->
                                 BackdropSources.setEnabled(context, source.id, false)
                             }
-                            AppBackdropState.refresh("settings")
+                            AppBackdropState.refresh("settings", backdropMode)
                             context.toast("已恢复默认外观")
                         },
                     )
@@ -539,10 +542,15 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                             "背景图透明度：${(backdropAlpha * 100).toInt()}%",
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        Text(
+                            "低于 100% 时逐渐透出底色：暗色模式为纯黑，亮色模式为纯白。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Slider(
                             value = backdropAlpha,
                             onValueChange = { GlassPrefs.setBackdropAlpha(context, it) },
-                            valueRange = 0.3f..1f,
+                            valueRange = 0f..1f,
                         )
                     }
                 },
@@ -612,28 +620,50 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
         )
     }
 
-    /** 背景图：全局自定义 / 每页自定义 / 随机图源。 */
+    /** 背景图：暗色/亮色各一套自定义图 + 分页自定义 + 随机图源。 */
     @Composable
     private fun getBackdropGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
-        val customPath by BackdropSources.customPath.collectAsState()
+        // 默认定位到当前系统模式，避免“设了图却没生效”的困惑。
+        val systemDark = isSystemInDarkTheme()
+        var editModeKey by rememberSaveable {
+            mutableStateOf(if (systemDark) BackdropMode.DARK.key else BackdropMode.LIGHT.key)
+        }
+        val editMode = BackdropMode.entries.firstOrNull { it.key == editModeKey } ?: BackdropMode.LIGHT
+        val otherMode = if (editMode == BackdropMode.DARK) BackdropMode.LIGHT else BackdropMode.DARK
+        // 设置页当前显示的是「系统亮暗」对应的背景，刷新要用它，不能用正在编辑的另一套。
+        val currentMode = if (systemDark) BackdropMode.DARK else BackdropMode.LIGHT
+
+        val customPaths by BackdropSources.customPaths.collectAsState()
         val perPage by BackdropSources.perPage.collectAsState()
         val enabledIds by BackdropSources.enabled.collectAsState()
+
+        val customPath = customPaths[editMode]
+        val pagePaths = perPage[editMode].orEmpty()
+        val otherConfigured = !customPaths[otherMode].isNullOrBlank() ||
+            perPage[otherMode].orEmpty().values.any(String::isNotBlank)
+
         var pickingPage by remember { mutableStateOf<String?>(null) }
-        val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: android.net.Uri? ->
+        val pickImageLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.GetContent(),
+        ) { uri: android.net.Uri? ->
             val pageKey = pickingPage
             if (uri != null && pageKey != null) {
                 runCatching {
-                    val dest = java.io.File(context.filesDir, "backdrop_$pageKey.jpg")
+                    // 文件名带模式 + 时间戳：换图后路径不同，避免 Coil 命中上一张的缓存。
+                    val dest = java.io.File(
+                        context.filesDir,
+                        "backdrop_${pageKey}_${editMode.key}_${System.currentTimeMillis()}.jpg",
+                    )
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { out -> input.copyTo(out) }
                     }
                     if (pageKey == "global") {
-                        BackdropSources.setCustomPath(context, dest.absolutePath)
+                        BackdropSources.setCustomPath(context, editMode, dest.absolutePath)
                     } else {
-                        BackdropSources.setPagePath(context, pageKey, dest.absolutePath)
+                        BackdropSources.setPagePath(context, pageKey, editMode, dest.absolutePath)
                     }
-                    AppBackdropState.refresh("settings")
+                    AppBackdropState.refresh("settings", currentMode)
                 }
                 pickingPage = null
             }
@@ -656,7 +686,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     checked = source.id in enabledIds,
                     onCheckedChanged = { on ->
                         BackdropSources.setEnabled(context, source.id, on)
-                        AppBackdropState.refresh("settings")
+                        AppBackdropState.refresh("settings", currentMode)
                     },
                 )
             }
@@ -666,13 +696,30 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
             title = "背景图",
             preferenceItems = (
                 persistentListOf(
+                    Preference.PreferenceItem.CustomPreference(title = "按模式配置") {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            AppearanceTabBar(
+                                tabs = BackdropMode.entries.map { it.label },
+                                selected = BackdropMode.entries.indexOf(editMode),
+                                onSelect = { index -> editModeKey = BackdropMode.entries[index].key },
+                            )
+                            Text(
+                                "正在设置「${editMode.label}」背景，只影响${editMode.label}模式。" +
+                                    "另一套（${otherMode.label}）" +
+                                    if (otherConfigured) "已设置独立背景。" else "使用内置默认图。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    },
                     Preference.PreferenceItem.CustomPreference(title = "自定义背景图片") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                             Text(
                                 if (customPath.isNullOrBlank()) {
-                                    "选择一张本地图片作为全局背景；设置后优先于随机图源。"
+                                    "选择一张本地图片作为${editMode.label}模式的全局背景；设置后优先于随机图源。"
                                 } else {
-                                    "已设置自定义背景（优先于随机图源）。"
+                                    "已设置${editMode.label}模式的自定义背景（优先于随机图源）。"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -681,13 +728,12 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                 TextButton(onClick = {
                                     pickingPage = "global"
                                     pickImageLauncher.launch("image/*")
-                                }) { Text("自定义图片") }
+                                }) { Text(if (customPath.isNullOrBlank()) "选择图片" else "更换图片") }
                                 if (!customPath.isNullOrBlank()) {
                                     TextButton(onClick = {
-                                        runCatching { java.io.File(customPath).delete() }
-                                        BackdropSources.setCustomPath(context, null)
-                                        AppBackdropState.refresh("settings")
-                                    }) { Text("清除自定义", color = MaterialTheme.colorScheme.error) }
+                                        BackdropSources.setCustomPath(context, editMode, null)
+                                        AppBackdropState.refresh("settings", currentMode)
+                                    }) { Text("清除", color = MaterialTheme.colorScheme.error) }
                                 }
                             }
                         }
@@ -695,7 +741,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     Preference.PreferenceItem.CustomPreference(title = "分页自定义背景") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                             BackdropSources.PAGE_KEYS.forEach { key ->
-                                val path = perPage[key]
+                                val path = pagePaths[key]
                                 GlassPreferenceRow(
                                     title = pageLabel[key] ?: key,
                                     subtitle = if (path.isNullOrBlank()) "跟随全局/随机源" else "已设置本页背景",
@@ -703,12 +749,11 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                                         TextButton(onClick = {
                                             pickingPage = key
                                             pickImageLauncher.launch("image/*")
-                                        }) { Text("自定义图片") }
+                                        }) { Text("选择图片") }
                                         if (!path.isNullOrBlank()) {
                                             TextButton(onClick = {
-                                                runCatching { java.io.File(path).delete() }
-                                                BackdropSources.setPagePath(context, key, null)
-                                                AppBackdropState.refresh("settings")
+                                                BackdropSources.setPagePath(context, key, editMode, null)
+                                                AppBackdropState.refresh("settings", currentMode)
                                             }) { Text("清除", color = MaterialTheme.colorScheme.error) }
                                         }
                                     },
@@ -719,7 +764,8 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
                     Preference.PreferenceItem.CustomPreference(title = "随机图源（可多选）") {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Text(
-                                "未设置自定义图片时，从开启的随机图源里随机取图；全部关闭则使用默认渐变背景。",
+                                "未设置自定义图片时，从开启的随机图源里随机取图；" +
+                                    "全部关闭则使用内置默认背景图（暗色/亮色各一张）。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
