@@ -1,25 +1,25 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./.github/readme-images/banner-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./.github/readme-images/banner-light.svg">
-  <img src="./.github/readme-images/banner-light.svg" alt="ZYComic — Android 漫画阅读器" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./.github/readme-images/banner-dark.webp">
+  <source media="(prefers-color-scheme: light)" srcset="./.github/readme-images/banner-light.webp">
+  <img src="./.github/readme-images/banner-light.webp" alt="ZYComic — Android 漫画阅读器" width="100%">
 </picture>
 
 <br>
 <br>
 
-<a href="https://github.com/fuoins/ZYComic-Android/releases/latest"><img alt="下载最新版" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-APK-E5343F?style=for-the-badge&logo=android&logoColor=white" height="30"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/fuoins/ZYComic-Android/releases"><img alt="所有版本" src="https://img.shields.io/badge/%E6%89%80%E6%9C%89%E7%89%88%E6%9C%AC-Releases-2B1B18?style=for-the-badge&logo=github&logoColor=FFE6D5" height="30"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/fuoins/ZYComic-Android/issues"><img alt="问题反馈" src="https://img.shields.io/badge/%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88-Issues-FFE6D5?style=for-the-badge&logo=github&logoColor=1C1210" height="30"></a>
+<a href="https://github.com/fuoins/ZYComic-Android/releases/latest"><img alt="下载最新版" src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-APK-3E8ED0?style=for-the-badge&logo=android&logoColor=white" height="30"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/fuoins/ZYComic-Android/releases"><img alt="所有版本" src="https://img.shields.io/badge/%E6%89%80%E6%9C%89%E7%89%88%E6%9C%AC-Releases-1B3A57?style=for-the-badge&logo=github&logoColor=DCF0FF" height="30"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/fuoins/ZYComic-Android/issues"><img alt="问题反馈" src="https://img.shields.io/badge/%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88-Issues-5A7A96?style=for-the-badge&logo=github&logoColor=ffffff" height="30"></a>
 
 <br>
 <br>
 
-<img alt="release" src="https://img.shields.io/github/v/release/fuoins/ZYComic-Android?style=flat-square&label=release&color=E5343F">
-<img alt="downloads" src="https://img.shields.io/github/downloads/fuoins/ZYComic-Android/total?style=flat-square&label=downloads&color=E5343F">
+<img alt="release" src="https://img.shields.io/github/v/release/fuoins/ZYComic-Android?style=flat-square&label=release&color=3E8ED0">
+<img alt="downloads" src="https://img.shields.io/github/downloads/fuoins/ZYComic-Android/total?style=flat-square&label=downloads&color=3E8ED0">
 <img alt="license" src="https://img.shields.io/github/license/fuoins/ZYComic-Android?style=flat-square&color=6E7681">
-<img alt="stars" src="https://img.shields.io/github/stars/fuoins/ZYComic-Android?style=flat-square&label=stars&color=F2B441">
+<img alt="stars" src="https://img.shields.io/github/stars/fuoins/ZYComic-Android?style=flat-square&label=stars&color=3E8ED0">
 <img alt="platform" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white">
-<img alt="ABI" src="https://img.shields.io/badge/ABI-arm64--v8a-8A6F63?style=flat-square">
+<img alt="ABI" src="https://img.shields.io/badge/ABI-arm64--v8a-5B7A93?style=flat-square">
 
 <br>
 <br>
@@ -56,11 +56,15 @@
   </tr>
 </table>
 
-<!--
-补充真实截图时：把图片放进 .github/readme-images/，在下方插入
-<img src="./.github/readme-images/screens.png" alt="界面截图">
-注意：仓库中现有的 screens.png 是上游 Komikku 的宣传图（含 Komikku 标识），不要直接引用。
--->
+## 界面预览
+
+<p align="center">
+  <img src="./.github/readme-images/shot-1-start.jpg" width="300" alt="启动页：自动测速并准备线路与图源">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="./.github/readme-images/shot-2-browse.jpg" width="300" alt="浏览页：分类标签与三列封面网格">
+</p>
+
+<p align="center"><sub>左：启动时自动测速、逐平台准备线路　·　右：分类标签切换，三列封面网格</sub></p>
 
 ## 功能一览
 
