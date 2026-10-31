@@ -59,9 +59,9 @@
 ## 界面预览
 
 <p align="center">
-  <img src="./.github/readme-images/shot-1-start.jpg" width="300" alt="启动页：自动测速并准备线路与图源">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="./.github/readme-images/shot-2-browse.jpg" width="300" alt="浏览页：分类标签与三列封面网格">
+  <img src="./.github/readme-images/shot-1-start.jpg" width="46%" alt="启动页：自动测速并准备线路与图源">
+  &nbsp;&nbsp;&nbsp;
+  <img src="./.github/readme-images/shot-2-browse.jpg" width="46%" alt="浏览页：分类标签与三列封面网格">
 </p>
 
 <p align="center"><sub>左：启动时自动测速、逐平台准备线路　·　右：分类标签切换，三列封面网格</sub></p>
