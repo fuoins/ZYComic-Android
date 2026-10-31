@@ -1,0 +1,60 @@
+<svg width="1200" height="520" viewBox="0 0 1200 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="abg" x1="0" y1="0" x2="1200" y2="560" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5FAFF"/>
+      <stop offset="1" stop-color="#FBFDFF"/>
+    </linearGradient>
+    <pattern id="adots" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#2E76BC" fill-opacity="0.07"/>
+    </pattern>
+    <clipPath id="ar"><rect width="1200" height="520" rx="28"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#ar)">
+    <rect width="1200" height="520" fill="url(#abg)"/>
+    <rect width="1200" height="520" fill="url(#adots)"/>
+
+    <text x="40" y="58" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" font-weight="700" letter-spacing="3.2" fill="#4E9BE0">ARCHITECTURE</text>
+    <text x="40" y="102" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="34" font-weight="800" fill="#0D1B29">技术架构</text>
+    <text x="1160" y="102" text-anchor="end" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="16" fill="#8AA0B4">从 Compose 界面到线路与图源的四层结构</text>
+
+    
+  <g>
+    <rect x="40" y="126" width="262" height="268" rx="20" fill="#FFFFFF" stroke="#D2E4F5"/>
+    <text x="62" y="162" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" font-weight="700" letter-spacing="2" fill="#4E9BE0">01</text>
+    <text x="62" y="206" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="27" font-weight="700" fill="#0D1B29">界面层</text>
+    <text x="62" y="234" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#8AA0B4">Jetpack Compose · Material 3</text>
+    <path d="M62 254 H280" stroke="#D2E4F5"/>
+    <circle cx="65" cy="289" r="2.6" fill="#4E9BE0"/><text x="76" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">浏览</text><circle cx="181" cy="289" r="2.6" fill="#4E9BE0"/><text x="192" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">书架</text><circle cx="65" cy="325" r="2.6" fill="#4E9BE0"/><text x="76" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">历史</text><circle cx="181" cy="325" r="2.6" fill="#4E9BE0"/><text x="192" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">搜索</text><circle cx="65" cy="361" r="2.6" fill="#4E9BE0"/><text x="76" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">我的</text><circle cx="181" cy="361" r="2.6" fill="#4E9BE0"/><text x="192" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">设置</text>
+  </g><path d="M310.0 253.0 L318.0 260.0 L310.0 267.0" stroke="#4E9BE0" stroke-opacity="0.7" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>
+    <rect x="326" y="126" width="262" height="268" rx="20" fill="#FFFFFF" stroke="#D2E4F5"/>
+    <text x="348" y="162" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" font-weight="700" letter-spacing="2" fill="#4E9BE0">02</text>
+    <text x="348" y="206" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="27" font-weight="700" fill="#0D1B29">领域层</text>
+    <text x="348" y="234" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#8AA0B4">用例 · 模型 · 仓库接口</text>
+    <path d="M348 254 H566" stroke="#D2E4F5"/>
+    <circle cx="351" cy="289" r="2.6" fill="#4E9BE0"/><text x="362" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">收藏</text><circle cx="467" cy="289" r="2.6" fill="#4E9BE0"/><text x="478" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">阅读进度</text><circle cx="351" cy="325" r="2.6" fill="#4E9BE0"/><text x="362" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">图源切换</text><circle cx="467" cy="325" r="2.6" fill="#4E9BE0"/><text x="478" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">屏蔽规则</text><circle cx="351" cy="361" r="2.6" fill="#4E9BE0"/><text x="362" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">搜索历史</text><circle cx="467" cy="361" r="2.6" fill="#4E9BE0"/><text x="478" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">备份</text>
+  </g><path d="M596.0 253.0 L604.0 260.0 L596.0 267.0" stroke="#4E9BE0" stroke-opacity="0.7" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>
+    <rect x="612" y="126" width="262" height="268" rx="20" fill="#FFFFFF" stroke="#D2E4F5"/>
+    <text x="634" y="162" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" font-weight="700" letter-spacing="2" fill="#4E9BE0">03</text>
+    <text x="634" y="206" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="27" font-weight="700" fill="#0D1B29">数据层</text>
+    <text x="634" y="234" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#8AA0B4">SQLDelight · SQLCipher</text>
+    <path d="M634 254 H852" stroke="#D2E4F5"/>
+    <circle cx="637" cy="289" r="2.6" fill="#4E9BE0"/><text x="648" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">本地数据库</text><circle cx="753" cy="289" r="2.6" fill="#4E9BE0"/><text x="764" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">收藏夹</text><circle cx="637" cy="325" r="2.6" fill="#4E9BE0"/><text x="648" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">浏览历史</text><circle cx="753" cy="325" r="2.6" fill="#4E9BE0"/><text x="764" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">备份恢复</text><circle cx="637" cy="361" r="2.6" fill="#4E9BE0"/><text x="648" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">图片缓存</text><circle cx="753" cy="361" r="2.6" fill="#4E9BE0"/><text x="764" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">偏好设置</text>
+  </g><path d="M882.0 253.0 L890.0 260.0 L882.0 267.0" stroke="#4E9BE0" stroke-opacity="0.7" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>
+    <rect x="898" y="126" width="262" height="268" rx="20" fill="#FFFFFF" stroke="#D2E4F5"/>
+    <text x="920" y="162" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="12" font-weight="700" letter-spacing="2" fill="#4E9BE0">04</text>
+    <text x="920" y="206" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="27" font-weight="700" fill="#0D1B29">网络层</text>
+    <text x="920" y="234" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="13" fill="#8AA0B4">OkHttp · 线路调度</text>
+    <path d="M920 254 H1138" stroke="#D2E4F5"/>
+    <circle cx="923" cy="289" r="2.6" fill="#4E9BE0"/><text x="934" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">9 条线路</text><circle cx="1039" cy="289" r="2.6" fill="#4E9BE0"/><text x="1050" y="294" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">70+ 图源</text><circle cx="923" cy="325" r="2.6" fill="#4E9BE0"/><text x="934" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">测速探活</text><circle cx="1039" cy="325" r="2.6" fill="#4E9BE0"/><text x="1050" y="330" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">DNS 直连</text><circle cx="923" cy="361" r="2.6" fill="#4E9BE0"/><text x="934" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">SNI 派生</text><circle cx="1039" cy="361" r="2.6" fill="#4E9BE0"/><text x="1050" y="366" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">图片解密</text>
+  </g>
+
+    <rect x="40" y="418" width="1120" height="64" rx="16" fill="#EFF7FE" stroke="#D2E4F5"/>
+    <text x="72" y="457" font-family="'Noto Sans CJK SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="15" fill="#55708A">阅读内核 <tspan fill="#0D1B29" font-weight="700">Komikku</tspan>（Tachiyomi / Mihon 系）· source-api / source-local · core-metadata</text>
+  </g>
+
+  <rect x="0.5" y="0.5" width="1199" height="519" rx="27.5" stroke="#2E76BC" stroke-opacity="0.35"/>
+</svg>
