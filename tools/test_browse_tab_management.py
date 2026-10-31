@@ -73,8 +73,8 @@ class BrowseTabManagementLayoutTest(unittest.TestCase):
         main_activity = (MAIN / "com/zycomic/app/ui/MainActivity.kt").read_text()
         self.assertIn("AppCoverBackdrop(entry = backdropEntry", main_activity)
         self.assertIn("GlassBottomBar {", main_activity)
-        self.assertIn("AppBackdropState.refresh(pageKey)", main_activity)
-        self.assertIn("BackdropSources.customPath", main_activity)
+        self.assertIn("AppBackdropState.refresh(pageKey, backdropMode)", main_activity)
+        self.assertIn("BackdropSources.customPaths", main_activity)
         self.assertIn("BackdropSources.enabled", main_activity)
         # 浏览页不再把封面写进背景池
         self.assertNotIn("registerCovers", BROWSE)
