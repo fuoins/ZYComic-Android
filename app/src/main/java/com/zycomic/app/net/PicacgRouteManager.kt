@@ -129,7 +129,6 @@ object PicacgRouteManager {
                 revision = old.revision + 1,
             )
         } else {
-            val firstVisit = !targetPrefs.contains("configured_api_urls")
             // Keep the authoritative pools in this scope's file so an offline cold start uses the
             // same config; selections, pins and rankings below still come from this scope alone.
             if (routePoolsInstalled && (old.apiUrls.isNotEmpty() || old.imageHosts.isNotEmpty())) {
@@ -139,17 +138,15 @@ object PicacgRouteManager {
                     .putInt("remote_version", old.remoteVersion ?: -1)
                     .apply()
             }
-            if (firstVisit) {
-                // First visit: no stores/rankings exist here, so do not inherit the previous scope.
-                _state.value = State(
-                    apiUrls = old.apiUrls,
-                    imageHosts = old.imageHosts,
-                    apiIndex = 0,
-                    imageHost = old.imageHosts.firstOrNull(),
-                    remoteVersion = old.remoteVersion,
-                    revision = old.revision + 1,
-                )
-            }
+            // Never carry the previous scope's automatic or manual route into this one.
+            _state.value = State(
+                apiUrls = old.apiUrls,
+                imageHosts = old.imageHosts,
+                apiIndex = 0,
+                imageHost = old.imageHosts.firstOrNull(),
+                remoteVersion = old.remoteVersion,
+                revision = old.revision + 1,
+            )
             loadPreferences()
         }
         PicacgSpeedTester.refreshPersistedSnapshot()
