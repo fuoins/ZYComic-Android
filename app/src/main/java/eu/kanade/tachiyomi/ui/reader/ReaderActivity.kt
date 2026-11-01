@@ -909,8 +909,9 @@ class ReaderActivity : BaseActivity() {
             }
             if (successful.isNotEmpty()) {
                 items(successful) { probe ->
+                    // A blank IP is the VPN "domain only" choice; it stays selected while no endpoint is pinned.
                     val selected = routeState.imageHost.equals(probe.endpoint.domain, true) &&
-                        routeState.pinnedImage?.ip.equals(probe.endpoint.ip, true)
+                        probe.endpoint.ip.equals(routeState.pinnedImage?.ip.orEmpty(), true)
                     Row(
                         modifier = Modifier.fillMaxWidth()
                             .clickable { onSelect(probe.endpoint.domain, probe.endpoint.ip) }
