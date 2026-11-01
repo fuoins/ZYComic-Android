@@ -12,6 +12,9 @@ enum class NetworkScope(val storageKey: String) {
     VPN("vpn"),
     ;
 
+    /** User-facing name for dialogs and status reports. */
+    val displayName: String get() = if (this == VPN) "VPN" else "直连"
+
     companion object {
         /** The scope of the transport that is actually in use right now. */
         fun current(): NetworkScope = if (NetworkModule.shouldUseDirectStrategy()) DIRECT else VPN

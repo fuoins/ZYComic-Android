@@ -253,7 +253,7 @@ object PlatformSpeedTestCoordinator {
                     _platformStartupStatuses.value = ContentPlatform.entries.associateWith { platform ->
                         when {
                             !StartupPlatformPolicy.isEnabled(platform) -> PlatformStartupStatus("未启用，已跳过")
-                            else -> PlatformStartupStatus("已复用${NetworkScopeController.current.storageKey}网络下的上次结果")
+                            else -> PlatformStartupStatus("已复用${NetworkScopeController.current.displayName}网络下的上次结果")
                         }
                     }
                     _startupCheckStatuses.value = initialStartupCheckStatuses().map { check ->

@@ -67,6 +67,7 @@ fun SpeedTestScreen(
     val speedTesterRunning by SpeedTester.isRunningFlow.collectAsState()
     val autoSelecting by vm.autoSelecting.collectAsState()
     val testing by vm.testing.collectAsState()
+    val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
     // Keep the result, timestamp and provenance from the same published snapshot.
     val lineDelays = currentSpeedSnapshot.lineDelays
     val imgDelays = currentSpeedSnapshot.imgDelays
@@ -260,6 +261,12 @@ fun SpeedTestScreen(
             ScrollbarLazyColumn(modifier = Modifier.weight(1f)) {
                 item {
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(
+                            "当前网络：${activeScope.displayName}（直连与 VPN 的结果、选择互不共用）",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                         Text(
                             fullSnapshot.completedAtEpochMs?.let { stringResource(KMR.strings.manwa_speed_log_recently_completed, formatSpeedTestTime(it)) }
                                 ?: stringResource(KMR.strings.manwa_speed_log_no_completed_time),
