@@ -91,6 +91,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
+import eu.kanade.presentation.theme.LocalIsDarkTheme
 import kotlinx.collections.immutable.persistentListOf
 
 @Composable
@@ -170,7 +171,7 @@ fun SearchScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(if (androidx.compose.foundation.isSystemInDarkTheme()) Color.Black else Color.White),
+                    .background(if (LocalIsDarkTheme.current) Color.Black else Color.White),
             )
             // 模糊源只包背景层（Haze：玻璃必须与 source 平级，不能是其后代）。
             Box(modifier = Modifier.fillMaxSize().hazeSource(state = searchHazeState)) {

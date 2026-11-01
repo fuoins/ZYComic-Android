@@ -115,6 +115,7 @@ internal object PicacgSpeedTestHistoryStorage {
     private const val PREFS_NAME = "zycomic_picacg_speed_test_history"
     private const val API_KEY = "api_history_v1"
     private const val IMAGE_KEY = "image_history_v1"
+    private const val MIGRATED_KEY = "network_scope_storage_v1"
 
     fun loadApi(): PicacgSpeedTestHistoryPolicy.PhaseHistory = load(API_KEY, PicacgSpeedTestHistoryPolicy.API_PHASE)
 
@@ -124,9 +125,33 @@ internal object PicacgSpeedTestHistoryStorage {
 
     fun saveImages(history: PicacgSpeedTestHistoryPolicy.PhaseHistory) = save(IMAGE_KEY, history)
 
-    private fun preferences() = DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun preferences() = DevConfig.appContext?.getSharedPreferences(
+        "$PREFS_NAME.${PicacgRouteManager.networkScope.storageKey}",
+        Context.MODE_PRIVATE,
+    )
+
+    /** Move the pre-scope history into the transport that produced it. */
+    private fun migrateLegacy() {
+        val ctx = DevConfig.appContext ?: return
+        val legacy = runCatching { ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }.getOrNull() ?: return
+        if (legacy.all.isEmpty()) return
+        val scope = PicacgRouteManager.networkScope
+        val target = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${scope.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (target.getBoolean(MIGRATED_KEY, false)) return
+        val sample = legacy.getString(API_KEY, null) ?: legacy.getString(IMAGE_KEY, null)
+        val inferred = if (sample != null && sample.contains("domain-only")) NetworkScope.VPN else NetworkScope.DIRECT
+        if (inferred != scope) return
+        val editor = target.edit()
+        legacy.all.forEach { (key, value) ->
+            (value as? String)?.let { editor.putString(key, it) }
+        }
+        editor.putBoolean(MIGRATED_KEY, true).apply()
+    }
 
     private fun load(key: String, phase: String): PicacgSpeedTestHistoryPolicy.PhaseHistory {
+        migrateLegacy()
         val raw = runCatching { preferences()?.getString(key, null) }.getOrNull() ?: return PicacgSpeedTestHistoryPolicy.PhaseHistory(null)
         return runCatching {
             val root = JSONObject(raw)
@@ -198,7 +223,13 @@ internal object PicacgSpeedTestHistoryStorage {
         if (identity.platform != PicacgSpeedTestHistoryPolicy.PLATFORM || identity.phase != expectedPhase ||
             identity.domain.isBlank() || !isIpAddress(identity.ip) || identity.url.isBlank()
         ) {
-            return false
+            // System VPN measurements are hostname-only by design.
+            if (identity.ip.isNotBlank() || !identity.routeCondition.contains("domain-only") ||
+                identity.platform != PicacgSpeedTestHistoryPolicy.PLATFORM || identity.phase != expectedPhase ||
+                identity.domain.isBlank() || identity.url.isBlank()
+            ) {
+                return false
+            }
         }
         val uri = runCatching { URI(identity.url) }.getOrNull() ?: return false
         if (uri.scheme !in setOf("http", "https")) return false
@@ -225,7 +256,9 @@ internal object PicacgSpeedTestHistoryStorage {
     }
 
     private fun hasRouteSource(condition: String, base: String): Boolean =
-        condition == "$base;ip-source=configured-rules" || condition == "$base;ip-source=system-dns"
+        condition == "$base;ip-source=configured-rules" ||
+            condition == "$base;ip-source=system-dns" ||
+            condition == "$base;ip-source=system-dns;domain-only;follow-system-vpn=true"
 
     private fun isIpAddress(ip: String): Boolean = runCatching {
         if (ip.contains(':')) {

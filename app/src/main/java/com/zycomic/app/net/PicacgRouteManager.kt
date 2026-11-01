@@ -44,8 +44,17 @@ object PicacgRouteManager {
     )
 
     private const val PREFS_NAME = "zycomic_picacg_route"
+    private const val SCOPE_STORAGE_MIGRATED_KEY = "network_scope_storage_v1"
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+
+    /** Active persistence scope; direct and VPN measurements never share a file. */
+    @Volatile
+    var networkScope: NetworkScope = NetworkScope.DIRECT
+        private set
+
+    @Volatile
+    private var scopeInitialized = false
 
     @Volatile private var routeConfigRevision: Long = 0L
 
@@ -75,7 +84,93 @@ object PicacgRouteManager {
     val isApiManuallyPinned: Boolean get() = _state.value.manualApi || prefs()?.getBoolean("manual_api_selection", false) == true
     val isImageManuallyPinned: Boolean get() = _state.value.manualImage || prefs()?.getBoolean("manual_image_selection", false) == true
 
-    private fun prefs() = DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun prefs() = DevConfig.appContext?.getSharedPreferences(
+        "$PREFS_NAME.${networkScope.storageKey}",
+        Context.MODE_PRIVATE,
+    )
+
+    /** Scoped storage used by [PicacgSpeedTester] for its persisted round. */
+    internal fun snapshotPreferences() = prefs()
+
+    /** Idempotent; must run after [NetworkModule.init] so the active transport can be detected. */
+    @Synchronized
+    fun initNetworkScope() {
+        setNetworkScope(NetworkScope.current())
+    }
+
+    /**
+     * Switch Picacg to [target] and reload only that scope's pins/rankings/snapshot.
+     * Never probes the network; an unscoped scope starts with the first configured host.
+     */
+    @Synchronized
+    fun setNetworkScope(target: NetworkScope): Boolean {
+        val changed = !scopeInitialized || networkScope != target
+        if (!changed) return false
+        migrateLegacyPreferences(target)
+        networkScope = target
+        scopeInitialized = true
+        val old = _state.value
+        if (old.apiUrls.isEmpty() && old.imageHosts.isEmpty()) {
+            PicacgSpeedTester.refreshPersistedSnapshot()
+            return true
+        }
+        val targetPrefs = prefs()
+        if (targetPrefs == null || !targetPrefs.contains("configured_api_urls")) {
+            _state.value = old.copy(
+                apiIndex = 0,
+                imageHost = old.imageHosts.firstOrNull(),
+                pinnedApi = null,
+                pinnedImage = null,
+                contentRanking = emptyList(),
+                coverRanking = emptyList(),
+                revision = old.revision + 1,
+                manualApi = false,
+                manualImage = false,
+            )
+        } else {
+            loadPreferences()
+        }
+        PicacgSpeedTester.refreshPersistedSnapshot()
+        return true
+    }
+
+    /** Move the pre-scope file into the transport that produced it. */
+    private fun migrateLegacyPreferences(target: NetworkScope) {
+        val ctx = DevConfig.appContext ?: return
+        val legacy = runCatching { ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }.getOrNull() ?: return
+        if (legacy.all.isEmpty()) return
+        val targetPrefs = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${target.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (targetPrefs.getBoolean(SCOPE_STORAGE_MIGRATED_KEY, false)) return
+        if (inferLegacyScope(legacy) != target) return
+        val editor = targetPrefs.edit()
+        legacy.all.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(key, value as Set<String>)
+                }
+            }
+        }
+        editor.putBoolean(SCOPE_STORAGE_MIGRATED_KEY, true).apply()
+    }
+
+    private fun inferLegacyScope(legacy: android.content.SharedPreferences): NetworkScope {
+        val raw = legacy.getString(PicacgSpeedTester.PERSISTED_SNAPSHOT_KEY, null) ?: return NetworkScope.DIRECT
+        return runCatching {
+            val identity = JSONObject(raw).optString("networkIdentity")
+            when (NetworkScope.fromNetworkIdentity(identity)) {
+                NetworkScope.VPN -> NetworkScope.VPN
+                else -> NetworkScope.DIRECT
+            }
+        }.getOrDefault(NetworkScope.DIRECT)
+    }
 
     /** Client-owned pools are independent of optional lines3/sources3 in remote snapshots. */
     @Synchronized
@@ -364,9 +459,10 @@ object PicacgRouteManager {
         if (isApiManuallyPinned) return false
         val current = _state.value
         val index = current.apiUrls.indexOfFirst { hostOf(it).equals(hostOf(url), true) }
+        val domainOnly = endpoint.ip.isBlank() && !NetworkModule.shouldUseDirectStrategy()
         if (index < 0 || !hostOf(current.apiUrls[index]).equals(endpoint.domain, true) ||
-            !isIpv4Literal(endpoint.ip) ||
-            apiRouteRules.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true
+            (!domainOnly && (!isIpv4Literal(endpoint.ip) ||
+                apiRouteRules.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true))
         ) {
             return false
         }
@@ -419,11 +515,12 @@ object PicacgRouteManager {
     @Synchronized
     fun applyImageRankings(cover: List<DomainIp>, content: List<DomainIp>): Boolean {
         val current = _state.value
+        val domainOnly = !NetworkModule.shouldUseDirectStrategy()
         fun valid(ranking: List<DomainIp>): List<DomainIp> = ranking
             .filter { ep ->
-                isIpv4Literal(ep.ip) &&
+                (domainOnly && ep.ip.isBlank() || isIpv4Literal(ep.ip)) &&
                     current.imageHosts.any { it.equals(ep.domain, true) } &&
-                    imageRouteRules.entries.firstOrNull { it.key.equals(ep.domain, true) }?.value?.contains(ep.ip) == true
+                    (ep.ip.isBlank() || imageRouteRules.entries.firstOrNull { it.key.equals(ep.domain, true) }?.value?.contains(ep.ip) == true)
             }
             .distinctBy { it.domain.lowercase(Locale.ROOT) }
         val validCover = valid(cover)
@@ -487,7 +584,8 @@ object PicacgRouteManager {
             (0 until arr.length()).mapNotNull { i ->
                 val obj = arr.optJSONObject(i) ?: return@mapNotNull null
                 val domain = obj.optString("domain").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val ip = obj.optString("ip").takeIf { isIpv4Literal(it) } ?: return@mapNotNull null
+                val ip = obj.optString("ip")
+                if (!isIpv4Literal(ip) && !(ip.isBlank() && !NetworkModule.shouldUseDirectStrategy())) return@mapNotNull null
                 DomainIp(domain, ip)
             }
         }.getOrDefault(emptyList())
@@ -497,9 +595,11 @@ object PicacgRouteManager {
         val current = _state.value
         val allowedHosts = if (api) current.apiUrls.map(::hostOf) else current.imageHosts
         val allowedIps = if (api) apiRouteRules else imageRouteRules
+        val domainOnly = endpoint?.ip?.isBlank() == true && !NetworkModule.shouldUseDirectStrategy()
         if (endpoint != null && (
-                allowedHosts.none { it.equals(endpoint.domain, true) } || !isIpv4Literal(endpoint.ip) ||
-                    allowedIps.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true
+                allowedHosts.none { it.equals(endpoint.domain, true) } ||
+                    (!domainOnly && (!isIpv4Literal(endpoint.ip) ||
+                        allowedIps.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true))
                 )
         ) {
             return false
@@ -537,6 +637,8 @@ object PicacgRouteManager {
      */
     fun dns(): Dns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
+            // Under system VPN the tunnel chooses the address; never pin a measured IP.
+            if (!NetworkModule.shouldUseDirectStrategy()) return Dns.SYSTEM.lookup(hostname)
             // Per-root measured IP first: content bucket (storage-b.{root}) or its cover mirror (img.{root}).
             val imagePin = rankedIpFor(hostname)
             val pin = imagePin
@@ -550,8 +652,15 @@ object PicacgRouteManager {
 
     /** Create an isolated, connection-pool-free client pinned to exactly one measured endpoint. */
     fun newPinnedClient(base: OkHttpClient, endpoint: DomainIp): OkHttpClient {
-        require(isIpv4Literal(endpoint.ip)) { "Invalid Picacg endpoint address" }
         require((apiUrls.map(::hostOf) + imageHosts).any { it.equals(endpoint.domain, true) }) { "Host is not in the active Picacg route pools" }
+        if (endpoint.ip.isBlank() || !NetworkModule.shouldUseDirectStrategy()) {
+            return base.newBuilder()
+                .dns(dns())
+                .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
+                .retryOnConnectionFailure(false)
+                .build()
+        }
+        require(isIpv4Literal(endpoint.ip)) { "Invalid Picacg endpoint address" }
         return base.newBuilder()
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> = if (hostname.equals(endpoint.domain, true)) {
@@ -706,8 +815,10 @@ object PicacgRouteManager {
     private fun persistedEndpoint(domainKey: String, ipKey: String): DomainIp? {
         val p = prefs() ?: return null
         val domain = p.getString(domainKey, null)?.takeIf(String::isNotBlank) ?: return null
-        val ip = p.getString(ipKey, null)?.takeIf(String::isNotBlank) ?: return null
-        return DomainIp(domain, ip).takeIf { isIpv4Literal(ip) }
+        val ip = p.getString(ipKey, null)?.trim().orEmpty()
+        if (ip.isNotEmpty() && !isIpv4Literal(ip)) return null
+        if (ip.isEmpty() && NetworkModule.shouldUseDirectStrategy()) return null
+        return DomainIp(domain, ip)
     }
 
     private fun android.content.SharedPreferences.Editor.persistEndpoint(prefix: String, endpoint: DomainIp?) {

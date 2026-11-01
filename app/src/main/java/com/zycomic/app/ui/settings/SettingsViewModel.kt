@@ -7,6 +7,7 @@ import com.zycomic.app.data.repository.UserRepository
 import com.zycomic.app.net.DevConfig
 import com.zycomic.app.net.DomainIp
 import com.zycomic.app.net.NetworkModule
+import com.zycomic.app.net.NetworkScopeController
 import com.zycomic.app.net.PlatformSpeedTestCoordinator
 import com.zycomic.app.net.RemoteConfigFetcher
 import com.zycomic.app.net.RouteManager
@@ -368,17 +369,19 @@ class SettingsViewModel {
     }
 
     /**
-     * 「自动跟随系统 VPN」开关：持久化并立即按新生效策略重建 client，随后重测速，
-     * 保证线路/图域选择与当前策略匹配。关闭=强制直连（抓包模式）。
+     * 「自动跟随系统 VPN」开关：持久化并切换到当前实际生效的网络作用域（直连 / VPN）。
+     * 只恢复该作用域已保存的测速结果，绝不自动发起测速。关闭=强制直连（抓包模式）。
      */
     fun setFollowSystemVpn(v: Boolean) {
         DevConfig.setFollowSystemVpnEnabled(v)
         followSystemVpn.value = v
         toast.value = if (v) "已开启自动跟随系统 VPN" else "已关闭：强制直连（抓包模式）"
         scope.launch {
-            imgVerdicts.value = emptyMap()
-            NetworkModule.onVpnOrNetworkChanged("follow vpn toggled")
-            PlatformSpeedTestCoordinator.run(forceFresh = true)
+            withContext(Dispatchers.IO) {
+                NetworkScopeController.sync()
+                NetworkModule.onVpnOrNetworkChanged("follow vpn toggled")
+            }
+            imgVerdicts.value = RouteManager.lastImgIpVerdicts
             syncSelectedRoutes()
         }
     }

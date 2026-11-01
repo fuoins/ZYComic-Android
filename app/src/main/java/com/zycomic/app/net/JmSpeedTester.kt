@@ -278,7 +278,11 @@ object JmSpeedTester {
                                 linesToTest,
                                 probe = { url ->
                                     val host = URI(url).host
-                                    DomainIpProbePolicy.endpoints(host, resolveProbeIps(host)).map {
+                                    DomainIpProbePolicy.endpoints(
+                                        host,
+                                        resolveProbeIps(host),
+                                        allowDomainFallback = !NetworkModule.shouldUseDirectStrategy(),
+                                    ).map {
                                         LineTarget(it, url.trimEnd('/') + JmSpeedProbeProtocol.LINE_PATH)
                                     }
                                 },
@@ -357,7 +361,13 @@ object JmSpeedTester {
                         val resolvedImageEndpoints = adaptiveSession.prepare(quickImages) {
                             runner.run(
                                 imagesToTest,
-                                probe = { domain -> DomainIpProbePolicy.endpoints(domain, resolveProbeIps(domain, image = true)) },
+                                probe = { domain ->
+                                    DomainIpProbePolicy.endpoints(
+                                        domain,
+                                        resolveProbeIps(domain, image = true),
+                                        allowDomainFallback = !NetworkModule.shouldUseDirectStrategy(),
+                                    )
+                                },
                                 onStarted = { domain -> publish { it.copy(endpoint = domain, endpointSuccessful = null, endpointElapsedMs = null) } },
                                 onResult = { domain, endpoints ->
                                     publish {
@@ -686,6 +696,7 @@ object JmSpeedTester {
     }
 
     private suspend fun resolveProbeIps(host: String, image: Boolean = false): List<String> {
+        if (!NetworkModule.shouldUseDirectStrategy()) return emptyList()
         val configured = if (image) JmRouteManager.resolveImageIp(host) else JmRouteManager.resolveLineIp(host).map(String::trim).filter(String::isNotEmpty).distinct()
         if (configured.isNotEmpty()) {
             return configured.filter { ip -> ':' in ip || ip.all { it.isDigit() || it == '.' } }
@@ -694,9 +705,14 @@ object JmSpeedTester {
         return dnsResolver.resolve(host)
     }
 
-    /** Pin the socket address only; retain the request host for Host, TLS SNI and certificate checks. */
-    internal fun newProbeClientForIp(client: OkHttpClient, endpoint: DomainIp): OkHttpClient =
-        client.newBuilder()
+    /** Pin the socket address only; a blank IP keeps system/VPN DNS for the request host. */
+    internal fun newProbeClientForIp(client: OkHttpClient, endpoint: DomainIp): OkHttpClient {
+        if (endpoint.ip.isBlank()) {
+            return client.newBuilder()
+                .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+                .build()
+        }
+        return client.newBuilder()
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =
                     if (hostname.equals(endpoint.domain, true)) {
@@ -707,6 +723,7 @@ object JmSpeedTester {
             })
             .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
             .build()
+    }
 
     /** A diagnostic-only JM client that resolves only one configured literal and never retries addresses. */
     private fun newDiagnosticProbeClientForIp(

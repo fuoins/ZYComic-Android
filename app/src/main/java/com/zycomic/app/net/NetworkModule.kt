@@ -169,6 +169,9 @@ object NetworkModule {
 
     /** Enumerate the exact IP candidates used for per-address probing. */
     fun resolveProbeIps(hostname: String): List<String> {
+        // System VPN must be probed by hostname only: the tunnel already owns address selection,
+        // so per-IP pins and SNI removal would measure a path the runtime never uses.
+        if (!shouldUseDirectStrategy()) return emptyList()
         val configured = RouteManager.resolveIp(hostname)
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -181,9 +184,14 @@ object NetworkModule {
         }.getOrDefault(emptyList())
     }
 
-    /** Create a one-address child client while retaining all transport and interceptor policy. */
-    fun newProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient =
-        client.newBuilder()
+    /** Resume a probe target: blank [ip] means "let the active transport resolve the hostname". */
+    fun newProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient {
+        if (ip.isBlank()) {
+            return client.newBuilder()
+                .connectionPool(ConnectionPool(1, 1, TimeUnit.SECONDS))
+                .build()
+        }
+        return client.newBuilder()
             // Keep the exact TLS/SNI factory selected by applyTransportStrategy; only pin DNS.
             .dns(object : Dns {
                 override fun lookup(requestedHost: String): List<InetAddress> =
@@ -196,6 +204,7 @@ object NetworkModule {
             // Never let an existing pooled connection make a probe appear to have used another IP.
             .connectionPool(ConnectionPool(1, 1, TimeUnit.SECONDS))
             .build()
+    }
 
     /** A diagnostic-only client that cannot resolve or retry any address except the configured literal. */
     fun newDiagnosticProbeClientForIp(client: OkHttpClient, hostname: String, ip: String): OkHttpClient {
@@ -278,6 +287,7 @@ object NetworkModule {
     suspend fun validateCurrentApi(): Boolean {
         val host = RouteManager.lineHost
         if (host.isBlank()) return false
+        if (!shouldUseDirectStrategy()) return validateApiEndpoint(DomainIp(host, ""))
         val ip = RouteManager.lineIpFor(host) ?: RouteManager.resolveIp(host).firstOrNull()
             ?: runCatching { Dns.SYSTEM.lookup(host).firstOrNull()?.hostAddress }.getOrNull()
             ?: return false
@@ -294,6 +304,14 @@ object NetworkModule {
         val base = imageClient
         val builder = base.newBuilder()
         builder.interceptors().removeAll { it is ImageInterceptor }
+        if (ip.isBlank()) {
+            return builder
+                .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+                .retryOnConnectionFailure(false)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
+        }
         return builder
             .dns(object : Dns {
                 override fun lookup(requestedHost: String): List<InetAddress> =

@@ -230,6 +230,12 @@ object PlatformSpeedTestCoordinator {
             startupConfig.awaitConfigurationUpdated()
         }
         DevConfig.awaitUsableRouteConfig()
+        // Startup may reuse the persisted results of the active network scope (direct / VPN).
+        // Wait for the authoritative config generation first so a stale version is never reused.
+        val tryPersistedReuse = isStartupRun && !forceFresh && onlyPlatform == null && !remoteConfigUpdated
+        if (tryPersistedReuse) {
+            startupConfig.awaitConfigurationUpdated()
+        }
         lock.withLock {
             val requestedKey = currentKey()
             if (SpeedTestRunPolicy.canSkip(completedKey, requestedKey, forceFresh, onlyPlatform != null, remoteConfigUpdated)) {
@@ -238,6 +244,43 @@ object PlatformSpeedTestCoordinator {
                 _foregroundReady.value = true
                 onCompleted?.invoke(requestedKey)
                 return@withLock _reports.value
+            }
+            if (tryPersistedReuse) {
+                reusePersistedStartupRound()?.let { reused ->
+                    _reports.value = reused
+                    _testMode.value = StartupTestMode.QUICK
+                    _startupSummary.value = startupSummary(reused)
+                    _platformStartupStatuses.value = ContentPlatform.entries.associateWith { platform ->
+                        when {
+                            !StartupPlatformPolicy.isEnabled(platform) -> PlatformStartupStatus("未启用，已跳过")
+                            else -> PlatformStartupStatus("已复用${NetworkScopeController.current.storageKey}网络下的上次结果")
+                        }
+                    }
+                    _startupCheckStatuses.value = initialStartupCheckStatuses().map { check ->
+                        if (StartupPlatformPolicy.isEnabled(check.phase.platform())) {
+                            check.copy(result = StartupCheckResult.NOT_TESTED, detail = "复用上次有效结果，未重新探测")
+                        } else {
+                            check.copy(result = StartupCheckResult.DISABLED)
+                        }
+                    }
+                    checkedConfigurationVersion = DevConfig.remoteVersion()
+                    // Restoring routes advances their routing generation; accept the applied key
+                    // only while network / remote / platform generations are unchanged.
+                    val applied = currentKey()
+                    completedKey = if (applied.remoteVersion == requestedKey.remoteVersion &&
+                        applied.platformRevision == requestedKey.platformRevision &&
+                        applied.networkIdentity == requestedKey.networkIdentity
+                    ) {
+                        applied
+                    } else {
+                        requestedKey
+                    }
+                    persist(reused)
+                    _foregroundReady.value = true
+                    onForegroundReady?.invoke(completedKey ?: requestedKey)
+                    onCompleted?.invoke(completedKey ?: requestedKey)
+                    return@withLock reused
+                }
             }
             // 刚跑完一轮完整测速（90 秒内、网络/远程版本/平台开关都没变）时，
             // 进入主界面触发的自动轮直接复用，不再补一轮快测。
@@ -951,6 +994,43 @@ object PlatformSpeedTestCoordinator {
         )
         PicacgSpeedTester.Stage.IMAGE_BLOCKED -> "哔咔 · 图源验证受阻：无 API 返回的真实图片样本或可用图源 IP"
         PicacgSpeedTester.Stage.COMPLETE -> "哔咔测速完成：API ${progress.successful}/${progress.total} 可用；图源按真实图片样本验证"
+    }
+
+    /**
+     * Restore each enabled platform's persisted results of the active network scope without
+     * issuing a single request. Returns null when any enabled platform has no reusable result,
+     * in which case the caller falls back to the normal measured round.
+     */
+    private suspend fun reusePersistedStartupRound(): List<PlatformSpeedTestReport>? {
+        val policyRevision = StartupPlatformPolicy.state.value.revision
+        val remoteVersion = DevConfig.remoteVersion()
+        val enabled = ContentPlatform.entries.filter { StartupPlatformPolicy.isEnabled(it) }
+        if (enabled.isEmpty()) return null
+        val reused = LinkedHashMap<ContentPlatform, PlatformSpeedTestReport>()
+        for (platform in enabled) {
+            val applied = when (platform) {
+                ContentPlatform.MANWA -> SpeedTester.reuseValidResults()
+                ContentPlatform.JM -> JmSpeedTester.reuseValidResults()
+                ContentPlatform.PICACG -> PicacgSpeedTester.reusePersistedResults()
+            }
+            if (!applied) return null
+            reused[platform] = report(
+                platform = platform,
+                status = "reused",
+                reason = "已复用该网络作用域上次的有效测速结果，本轮未发起探测",
+                picacgSnapshot = PicacgSpeedTester.snapshot.value,
+            ).copy(lineStatus = "reused", imageStatus = "reused")
+        }
+        // Applying routes advances the routing revision; only a platform/remote generation change
+        // invalidates the whole attempt.
+        if (StartupPlatformPolicy.state.value.revision != policyRevision ||
+            DevConfig.remoteVersion() != remoteVersion
+        ) {
+            return null
+        }
+        return ContentPlatform.entries.map { platform ->
+            reused[platform] ?: report(platform, "skipped", "未启用，已跳过")
+        }
     }
 
     private fun report(

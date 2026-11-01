@@ -60,12 +60,14 @@ internal class JmEndpointTransportInterceptor(
             val requestPin = JmEndpointRequestContext.current(host, isImage)
             val actualEndpoint = requestPin?.endpoint ?: endpoint
             fun recordResponse() {
-                if (actualEndpoint != null && requestStillCurrent()) {
+                if (actualEndpoint != null && actualEndpoint.ip.isNotBlank() && requestStillCurrent()) {
                     runCatching { apiHttpResponse(actualEndpoint, response.code, response.header("Retry-After")) }
                     runCatching { apiResponse(actualEndpoint) }
                 }
             }
-            if (response.isSuccessful && requestPin?.bootstrapAllowed == true && actualEndpoint != null) {
+            if (response.isSuccessful && requestPin?.bootstrapAllowed == true && actualEndpoint != null &&
+                actualEndpoint.ip.isNotBlank()
+            ) {
                 runCatching { if (isImage) imageSuccess(actualEndpoint) else apiSuccess(actualEndpoint) }
             }
             val body = response.body
@@ -81,7 +83,8 @@ internal class JmEndpointTransportInterceptor(
                         if (count == -1L && reported.compareAndSet(false, true)) recordResponse()
                     }
                 } catch (error: IOException) {
-                    if (requestStillCurrent() && actualEndpoint != null && request.url.encodedPath != "/confirm" &&
+                    if (requestStillCurrent() && actualEndpoint != null && actualEndpoint.ip.isNotBlank() &&
+                        request.url.encodedPath != "/confirm" &&
                         homeScope == null && isSafeApiRead(request) && RuntimeRecoveryPolicy.isTransportFailure(error) &&
                         reported.compareAndSet(false, true)
                     ) {
@@ -99,7 +102,9 @@ internal class JmEndpointTransportInterceptor(
             // Cancellation is not evidence that the pinned IP is unhealthy (including stale pages).
             if (isCancelled()) throw error
             val actualEndpoint = JmEndpointRequestContext.current(host, isImage)?.endpoint ?: endpoint
-            if (requestStillCurrent() && actualEndpoint != null && RuntimeRecoveryPolicy.isTransportFailure(error)) {
+            if (requestStillCurrent() && actualEndpoint != null && actualEndpoint.ip.isNotBlank() &&
+                RuntimeRecoveryPolicy.isTransportFailure(error)
+            ) {
                 if (isImage) {
                     imageFailure(actualEndpoint, error.javaClass.simpleName)
                 } else if (homeScope == null && request.url.encodedPath != "/confirm" && isSafeApiRead(request) &&

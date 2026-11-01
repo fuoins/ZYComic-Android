@@ -72,6 +72,8 @@ object JmNetworkModule {
         image: Boolean,
     ) = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
+            // Under system VPN the tunnel chooses the address; never pin a measured IP.
+            if (!NetworkModule.shouldUseDirectStrategy()) return Dns.SYSTEM.lookup(hostname)
             val requestPin = JmEndpointRequestContext.current(hostname, image)
             val selected = if (requestPin != null) {
                 requestPin.endpoint?.takeIf { it.domain.equals(hostname, true) }

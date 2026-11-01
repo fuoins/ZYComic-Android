@@ -173,7 +173,7 @@ object AppearanceConfig {
         }
 
         // 背景图路径是本机文件，导入时保持原样，只按当前亮暗重新解析一次来源。
-        AppBackdropState.refresh(null, BackdropMode.of(context))
+        AppBackdropState.refresh(null, BackdropMode.ofAppTheme(context))
         applied > 0
     }.getOrDefault(false)
 }

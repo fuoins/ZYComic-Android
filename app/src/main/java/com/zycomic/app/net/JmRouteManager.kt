@@ -72,6 +72,7 @@ object JmRouteManager {
     data class EndpointSelectionState(val revision: Long, val line: DomainIp?, val image: DomainIp?)
 
     private const val PREFS_NAME = "zycomic_jm_route"
+    private const val SCOPE_STORAGE_MIGRATED_KEY = "network_scope_storage_v1"
     private const val KEY_SNAPSHOT = "speed_test_snapshot"
     private const val KEY_IMAGE_SNAPSHOT = "image_speed_test_snapshot"
     private const val KEY_LOGS = "route_logs"
@@ -389,7 +390,11 @@ object JmRouteManager {
             liveProbeLineEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedLineEndpoints) && !isStaleIp(it, resolveLineIp(domain)) }?.let { return it }
         }
         val snapshot = _speedTestSnapshot.value
-        val allowedLineIps = resolveLineIp(domain).filter(::isLiteralIp).map { it.trim().lowercase(Locale.ROOT) }.toSet()
+        val allowedLineIps = if (NetworkModule.shouldUseDirectStrategy()) {
+            resolveLineIp(domain).filter(::isLiteralIp).map { it.trim().lowercase(Locale.ROOT) }.toSet()
+        } else {
+            emptySet()
+        }
         val selected = JmEndpointSelectionPolicy.select(
             domain = domain,
             configuredDomains = lineHosts.map(::hostFromUrl),
@@ -607,7 +612,7 @@ object JmRouteManager {
         expectedPlatformRevision: Long? = null,
     ): Boolean {
         val index = _state.value.lines.indexOfFirst { hostFromUrl(it).equals(endpoint.domain, true) }
-        if (index < 0 || endpoint.ip.isBlank() ||
+        if (index < 0 || (endpoint.ip.isBlank() && NetworkModule.shouldUseDirectStrategy()) ||
             (expectedConfigRevision != null && currentSpeedTestConfigRevision() != expectedConfigRevision) ||
             (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision)
         ) {
@@ -635,7 +640,8 @@ object JmRouteManager {
         expectedConfigRevision: Long? = null,
         expectedPlatformRevision: Long? = null,
     ): Boolean {
-        if (imageDomains.none { it.equals(endpoint.domain, true) } || endpoint.ip.isBlank() ||
+        if (imageDomains.none { it.equals(endpoint.domain, true) } ||
+            (endpoint.ip.isBlank() && NetworkModule.shouldUseDirectStrategy()) ||
             (expectedConfigRevision != null && currentSpeedTestConfigRevision() != expectedConfigRevision) ||
             (expectedPlatformRevision != null && StartupPlatformPolicy.state.value.revision != expectedPlatformRevision)
         ) {
@@ -1017,7 +1023,11 @@ object JmRouteManager {
             liveProbeImageEndpoint?.takeIf { it.domain.equals(domain, true) && !isFailed(it, failedImageEndpoints) && !isStaleIp(it, resolveImageIp(domain)) }?.let { return it }
         }
         val snapshot = _speedTestSnapshot.value
-        val allowedImageIps = resolveImageIp(domain).filter(::isLiteralIp).map { it.trim().lowercase(Locale.ROOT) }.toSet()
+        val allowedImageIps = if (NetworkModule.shouldUseDirectStrategy()) {
+            resolveImageIp(domain).filter(::isLiteralIp).map { it.trim().lowercase(Locale.ROOT) }.toSet()
+        } else {
+            emptySet()
+        }
         val selected = JmEndpointSelectionPolicy.select(
             domain = domain,
             configuredDomains = imageDomains,
@@ -1177,18 +1187,114 @@ object JmRouteManager {
      * they are never treated as stale here.
      */
     private fun isStaleIp(endpoint: DomainIp, configured: List<String>): Boolean {
+        if (!NetworkModule.shouldUseDirectStrategy()) return false
         val literalIps = configured.filter(::isLiteralIp)
         return literalIps.isNotEmpty() && literalIps.none { it.equals(endpoint.ip, ignoreCase = true) }
     }
 
     private fun storedEndpoint(domain: String?, ip: String?, configured: List<String>): DomainIp? {
-        if (domain.isNullOrBlank() || ip.isNullOrBlank() || !isLiteralIp(ip.trim()) || configured.none { it.equals(domain, true) }) return null
-        return DomainIp(domain, ip.trim())
+        if (domain.isNullOrBlank() || configured.none { it.equals(domain, true) }) return null
+        val safeIp = ip?.trim().orEmpty()
+        if (safeIp.isEmpty()) {
+            // VPN scope pins the domain only; there is no per-IP endpoint to validate.
+            return if (!NetworkModule.shouldUseDirectStrategy()) DomainIp(domain, "") else null
+        }
+        if (!isLiteralIp(safeIp)) return null
+        return DomainIp(domain, safeIp)
     }
 
     private fun prefs(): SharedPreferences? = runCatching {
-        DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        DevConfig.appContext?.getSharedPreferences("$PREFS_NAME.${networkScope.storageKey}", Context.MODE_PRIVATE)
     }.getOrNull()
+
+    /** Active persistence scope; direct and VPN measurements never share a file. */
+    @Volatile
+    var networkScope: NetworkScope = NetworkScope.DIRECT
+        private set
+
+    @Volatile
+    private var scopeInitialized = false
+
+    /** Idempotent; must run after [NetworkModule.init] so the active transport can be detected. */
+    @Synchronized
+    fun initNetworkScope() {
+        setNetworkScope(NetworkScope.current())
+    }
+
+    /**
+     * Switch JM to [target] and reload only that scope's persisted results. Never probes the network.
+     * Returns true when the scope actually changed.
+     */
+    @Synchronized
+    fun setNetworkScope(target: NetworkScope): Boolean {
+        val changed = !scopeInitialized || networkScope != target
+        if (!changed) return false
+        migrateLegacyPreferences(target)
+        val carriedLogs = _logs.value
+        networkScope = target
+        scopeInitialized = true
+        loadPreferences()
+        val targetPrefs = prefs()
+        if (targetPrefs != null && !targetPrefs.contains("configured_lines")) {
+            val restored = _state.value
+            targetPrefs.edit()
+                .putString("configured_lines", JSONArray(restored.lines).toString())
+                .putString("configured_images", JSONArray(restored.imageDomains).toString())
+                .putInt("remote_version", restored.remoteVersion ?: -1)
+                .putBoolean("using_fallback", restored.usingFallbackLines)
+                .apply()
+        }
+        if (_logs.value.isEmpty() && carriedLogs.isNotEmpty()) {
+            _logs.value = carriedLogs
+            prefs()?.edit()?.putString(KEY_LOGS, encodeLogs(carriedLogs))?.apply()
+        }
+        return true
+    }
+
+    /**
+     * The pre-scope file is moved into the bucket that actually produced it. Only the matching
+     * scope claims it, so a direct snapshot can never surface while the VPN is active.
+     */
+    private fun migrateLegacyPreferences(target: NetworkScope) {
+        val ctx = DevConfig.appContext ?: return
+        val legacy = runCatching { ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }.getOrNull() ?: return
+        if (legacy.all.isEmpty()) return
+        val targetPrefs = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${target.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (targetPrefs.getBoolean(SCOPE_STORAGE_MIGRATED_KEY, false)) return
+        if (inferLegacyScope(legacy) != target) return
+        val editor = targetPrefs.edit()
+        legacy.all.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(key, value as Set<String>)
+                }
+            }
+        }
+        editor.putBoolean(SCOPE_STORAGE_MIGRATED_KEY, true).apply()
+    }
+
+    private fun inferLegacyScope(legacy: SharedPreferences): NetworkScope {
+        val raw = legacy.getString(KEY_SNAPSHOT, null) ?: return NetworkScope.DIRECT
+        return runCatching {
+            val policy = JSONObject(raw).optString("imageNetworkPolicy")
+            val parts = policy.split('|')
+            if (parts.size >= 2 && parts[0].toBooleanStrictOrNull() == true &&
+                parts[1].toBooleanStrictOrNull() == true
+            ) {
+                NetworkScope.VPN
+            } else {
+                NetworkScope.DIRECT
+            }
+        }.getOrDefault(NetworkScope.DIRECT)
+    }
 
     private fun isAvailable(map: ConcurrentHashMap<String, Health>, host: String): Boolean {
         val key = host.lowercase(Locale.ROOT)

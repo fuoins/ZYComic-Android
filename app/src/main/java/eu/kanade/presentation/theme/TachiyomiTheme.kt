@@ -7,8 +7,10 @@ import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.materialkolor.DynamicMaterialExpressiveTheme
@@ -41,6 +43,9 @@ import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
+/** Whether the app theme (not the system) is currently dark. Read this for backdrops/system bars. */
+val LocalIsDarkTheme = staticCompositionLocalOf { false }
+
 @Composable
 fun TachiyomiTheme(
     appTheme: AppTheme? = null,
@@ -70,14 +75,16 @@ fun TachiyomiTheme(
     } else {
         val uiPreferences = Injekt.get<UiPreferences>()
         val isAmoled = amoled ?: uiPreferences.themeDarkAmoled().get()
+        val isDark = appThemeIsDark(uiPreferences)
         DynamicMaterialExpressiveTheme(
             seedColor = seedColor,
             isAmoled = isAmoled,
             style = uiPreferences.themeCoverBasedStyle().get(),
             typography = typography,
             animate = true,
-            content = content,
-        )
+        ) {
+            CompositionLocalProvider(LocalIsDarkTheme provides isDark, content = content)
+        }
     }
 }
 // KMK <--
@@ -97,12 +104,7 @@ private fun BaseTachiyomiTheme(
 ) {
     val context = LocalContext.current
     val uiPreferences = remember { Injekt.get<UiPreferences>() }
-    val themeMode by uiPreferences.themeMode().collectAsState()
-    val isDark = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
+    val isDark = appThemeIsDark(uiPreferences)
     MaterialExpressiveTheme(
         colorScheme = remember(appTheme, isDark, isAmoled) {
             getThemeColorScheme(
@@ -112,8 +114,20 @@ private fun BaseTachiyomiTheme(
                 isAmoled = isAmoled,
             )
         },
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(LocalIsDarkTheme provides isDark, content = content)
+    }
+}
+
+/** Resolve the effective app theme, which only follows the system in [ThemeMode.SYSTEM]. */
+@Composable
+private fun appThemeIsDark(uiPreferences: UiPreferences): Boolean {
+    val themeMode by uiPreferences.themeMode().collectAsState()
+    return when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
 }
 
 private fun getThemeColorScheme(

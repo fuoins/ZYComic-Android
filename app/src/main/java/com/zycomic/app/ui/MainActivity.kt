@@ -9,7 +9,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,6 +105,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.settings.screen.SettingsReaderScreen
+import eu.kanade.presentation.theme.LocalIsDarkTheme
 import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
@@ -286,14 +286,14 @@ fun AppContent(
     val context = LocalContext.current
 
     // edge-to-edge 系统栏适配：根据背景亮度决定状态栏图标明暗
-    val isSystemInDarkTheme = isSystemInDarkTheme()
+    val appIsDark = LocalIsDarkTheme.current
     val statusBarBg = MaterialTheme.colorScheme.surface
-    LaunchedEffect(isSystemInDarkTheme, statusBarBg) {
+    LaunchedEffect(appIsDark, statusBarBg) {
         val lightStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.BLACK)
         val darkStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         (context as androidx.activity.ComponentActivity).enableEdgeToEdge(
             statusBarStyle = if (statusBarBg.luminance() > 0.5f) lightStyle else darkStyle,
-            navigationBarStyle = if (isSystemInDarkTheme) darkStyle else lightStyle,
+            navigationBarStyle = if (appIsDark) darkStyle else lightStyle,
         )
     }
 
@@ -461,7 +461,7 @@ fun AppContent(
         // 全局背景：分页自定义图优先，其次全局自定义图，再走随机图源；切页/切 tab/来源/亮暗变化时刷新。
         val backdropEntry by AppBackdropState.current.collectAsState()
         val browseTabIndex by browseVm.mainTab.collectAsState()
-        val backdropMode = if (isSystemInDarkTheme) {
+        val backdropMode = if (LocalIsDarkTheme.current) {
             com.zycomic.app.ui.components.BackdropMode.DARK
         } else {
             com.zycomic.app.ui.components.BackdropMode.LIGHT

@@ -2,9 +2,13 @@ package com.zycomic.app.ui.components
 
 import android.content.Context
 import android.content.SharedPreferences
+import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.domain.ui.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.io.File
 
 /** 背景图模式：暗色与亮色各存一套自定义图，互不影响。 */
@@ -16,7 +20,18 @@ enum class BackdropMode(val key: String, val label: String) {
     companion object {
         fun of(dark: Boolean): BackdropMode = if (dark) DARK else LIGHT
 
-        /** 按当前资源配置判断（非 Compose 场景用，如配置导入导出）。 */
+        /** 按当前应用主题判断；仅当主题跟随系统时才读取资源配置。 */
+        fun ofAppTheme(context: Context): BackdropMode {
+            val mode = runCatching { Injekt.get<UiPreferences>().themeMode().get() }
+                .getOrDefault(ThemeMode.SYSTEM)
+            return when (mode) {
+                ThemeMode.LIGHT -> BackdropMode.LIGHT
+                ThemeMode.DARK -> BackdropMode.DARK
+                ThemeMode.SYSTEM -> of(context)
+            }
+        }
+
+        /** 按当前资源配置判断（主题跟随系统时使用）。 */
         fun of(context: Context): BackdropMode {
             val night = (
                 context.resources.configuration.uiMode and

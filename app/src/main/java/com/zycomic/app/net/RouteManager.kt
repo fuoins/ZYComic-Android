@@ -60,8 +60,8 @@ object RouteManager {
                 imgVerdicts.keys == imgDelays.keys &&
                 lineMeasuredAtEpochMs.values.all { it > 0L && it <= (completedAtEpochMs ?: 0L) } &&
                 imageMeasuredAtEpochMs.values.all { it > 0L && it <= (completedAtEpochMs ?: 0L) } &&
-                lineDelays.keys.all { it.domain.isNotBlank() && it.ip.isNotBlank() } &&
-                imgDelays.keys.all { it.domain.isNotBlank() && it.ip.isNotBlank() } &&
+                lineDelays.keys.all(::isExportableEndpoint) &&
+                imgDelays.keys.all(::isExportableEndpoint) &&
                 lineDelays.all { (endpoint, delay) -> lineDiagnostics[endpoint]?.success == (delay < Long.MAX_VALUE) } &&
                 imgDelays.all { (endpoint, delay) ->
                     imageDiagnostics[endpoint]?.success == (delay < Long.MAX_VALUE) &&
@@ -74,6 +74,10 @@ object RouteManager {
                     diagnostic.attempts.firstOrNull()?.probe == "fixed_cover" &&
                         diagnostic.fallbackAttempted == diagnostic.attempts.any { it.probe == "fallback_sample" }
                 }
+
+        /** VPN transports measure hostnames only, so a blank IP is a valid persisted endpoint there. */
+        private fun isExportableEndpoint(endpoint: DomainIp): Boolean =
+            endpoint.domain.isNotBlank() && (endpoint.ip.isNotBlank() || networkPath?.directStrategy == false)
     }
 
     data class ReusableImageSpeedTestSnapshot(
@@ -94,6 +98,158 @@ object RouteManager {
     private const val REUSABLE_IMAGE_SNAPSHOT_KEY = "reusable_image_speed_test_snapshot"
     private const val COMPLETED_SPEED_TEST_SNAPSHOT_KEY = "completed_speed_test_snapshot_v1"
     private const val VERSION_SPEED_TEST_HISTORY_KEY = "version_speed_test_history_v1"
+    private const val ROUTE_PREFS_NAME = "zycomic_route"
+    private const val SCOPE_STORAGE_MIGRATED_KEY = "network_scope_storage_v1"
+
+    /**
+     * User/app preferences that are shared by both transports. Everything else in this file —
+     * snapshots, history, reusable image results and endpoint selections — is scoped by
+     * [NetworkScope] so direct and VPN results can never overwrite or mislead each other.
+     */
+    private val GLOBAL_PREF_KEYS = setOf(
+        "auto_select",
+        "auto_select_enabled",
+        "last_speed_test_date",
+        "use_fastest_img_for_all",
+        "probe_img_path",
+        "img_split_v1",
+        "baseline_img_domains",
+        "chapter_img_domains",
+        "img_domains",
+        "server_lines",
+        SCOPE_STORAGE_MIGRATED_KEY,
+    )
+
+    @Volatile
+    private var scopedPreferences: ScopedPreferences? = null
+
+    /** Persistence scope of the results currently loaded into memory. */
+    @Volatile
+    var networkScope: NetworkScope = NetworkScope.DIRECT
+        private set
+
+    @Volatile
+    private var scopeStateInitialized = false
+
+    private fun baseRoutePreferences(): android.content.SharedPreferences? = runCatching {
+        DevConfig.appContext?.getSharedPreferences(ROUTE_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    }.getOrNull()
+
+    private fun scopedRoutePreferences(): ScopedPreferences? {
+        val base = baseRoutePreferences() ?: return null
+        scopedPreferences?.let { return it }
+        return synchronized(this) {
+            scopedPreferences ?: ScopedPreferences(base, NetworkScope.current(), GLOBAL_PREF_KEYS).also { created ->
+                scopedPreferences = created
+                migrateLegacyScopeStorage(base, created.scope)
+            }
+        }
+    }
+
+    /** Idempotent; must run after [NetworkModule.init] so the active transport can be detected. */
+    fun initNetworkScope() {
+        scopedRoutePreferences()
+        setNetworkScope(NetworkScope.current())
+    }
+
+    /**
+     * Move pre-unscoped results into the bucket they were actually measured in. The completed
+     * snapshot carries the authoritative [SpeedTestNetworkPath]; history and the reusable image
+     * snapshot inherit that scope (falling back to the currently active one).
+     */
+    private fun migrateLegacyScopeStorage(base: android.content.SharedPreferences, current: NetworkScope) {
+        if (base.getBoolean(SCOPE_STORAGE_MIGRATED_KEY, false)) return
+        var measuredScope = current
+        val completedRaw = base.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)
+        if (completedRaw != null) {
+            measuredScope = runCatching {
+                NetworkScope.of(decodeCompletedSpeedTestSnapshot(completedRaw).networkPath)
+            }.getOrDefault(current)
+            moveLegacyValue(base, COMPLETED_SPEED_TEST_SNAPSHOT_KEY, measuredScope)
+        }
+        moveLegacyValue(base, VERSION_SPEED_TEST_HISTORY_KEY, measuredScope)
+        val reusableRaw = base.getString(REUSABLE_IMAGE_SNAPSHOT_KEY, null)
+        if (reusableRaw != null) {
+            val reusableScope = runCatching {
+                NetworkScope.fromNetworkIdentity(decodeReusableImageSpeedTestSnapshot(reusableRaw).networkIdentity)
+            }.getOrNull() ?: measuredScope
+            moveLegacyValue(base, REUSABLE_IMAGE_SNAPSHOT_KEY, reusableScope)
+        }
+        listOf(
+            "selected_line_domain",
+            "selected_line_ip",
+            "selected_img_domain",
+            "img_index",
+            "pinned_img_domain",
+            "pinned_img_ip",
+            "last_fastest_line",
+        ).forEach { moveLegacyValue(base, it, current) }
+        base.edit().putBoolean(SCOPE_STORAGE_MIGRATED_KEY, true).apply()
+    }
+
+    private fun moveLegacyValue(base: android.content.SharedPreferences, rawKey: String, target: NetworkScope) {
+        if (!base.contains(rawKey)) return
+        val targetKey = "$rawKey.${target.storageKey}"
+        val editor = base.edit()
+        if (!base.contains(targetKey)) {
+            when (val value = base.all[rawKey]) {
+                is String -> editor.putString(targetKey, value)
+                is Int -> editor.putInt(targetKey, value)
+                is Long -> editor.putLong(targetKey, value)
+                is Float -> editor.putFloat(targetKey, value)
+                is Boolean -> editor.putBoolean(targetKey, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(targetKey, value as Set<String>)
+                }
+            }
+        }
+        editor.remove(rawKey).apply()
+    }
+
+    /**
+     * Switch the in-memory route state to [target] without issuing any network probe.
+     * The caller rebuilds the HTTP stacks afterwards; results of the previous scope are never reused.
+     */
+    @Synchronized
+    fun setNetworkScope(target: NetworkScope): Boolean {
+        val prefs = scopedRoutePreferences() ?: run {
+            networkScope = target
+            return false
+        }
+        val changed = networkScope != target || prefs.scope != target
+        networkScope = target
+        prefs.scope = target
+        if (changed || !scopeStateInitialized) {
+            scopeStateInitialized = true
+            restoreScopedResults()
+            loadAutoSelectPrefs()
+            loadImgIndex()
+            loadPinnedImgDomain()
+            refreshReusableImageSpeedTestSnapshot()
+        }
+        return changed
+    }
+
+    /** Publish persisted results of the active scope without touching the network. */
+    @Synchronized
+    private fun restoreScopedResults() {
+        val prefs = scopedRoutePreferences() ?: return
+        val completed = runCatching {
+            prefs.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)?.let(::decodeCompletedSpeedTestSnapshot)
+        }.getOrNull()
+        val history = runCatching {
+            prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)?.let(::decodeVersionSpeedTestHistory)
+        }.getOrNull()
+        val snapshot = completed ?: history
+        if (snapshot == null) {
+            clearSpeedTestResults()
+            return
+        }
+        publishEndpointMaps(snapshot.lineDelays, snapshot.imgDelays, snapshot.imgVerdicts)
+        _speedTestSnapshot.value = snapshot.copy(isComplete = completed != null)
+        _completedSpeedTestSnapshot.value = if (completed != null) completed.copy(isComplete = true) else SpeedTestSnapshot()
+    }
 
     // Candidate routes and image sources are populated only from validated remote configuration.
     @Volatile var lineHosts: List<String> = emptyList()
@@ -129,10 +285,7 @@ object RouteManager {
         } else {
             baselineImgDomains.indexOfFirst { it.equals(previous, ignoreCase = true) }.takeIf { it >= 0 } ?: 0
         }
-        val savedPin = pinnedImgDomain ?: runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?.getString("pinned_img_domain", null)
-        }.getOrNull()
+        val savedPin = pinnedImgDomain ?: scopedRoutePreferences()?.getString("pinned_img_domain", null)
         if (!savedPin.isNullOrBlank() && baselineImgDomains.none { it.equals(savedPin, ignoreCase = true) }) {
             pinnedImgDomain = null
             pinnedImgIp = null
@@ -152,21 +305,19 @@ object RouteManager {
 
     private fun persistedSelectedImgDomain(): String? {
         try {
-            val ctx = DevConfig.appContext ?: return null
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .let { prefs ->
-                    prefs.getString("selected_img_domain", null)?.takeIf { it.isNotBlank() }?.let { return it }
-                    val oldDomains = LinkedHashSet<String>().apply {
-                        listOf("baseline_img_domains", "chapter_img_domains", "img_domains").forEach { key ->
-                            val raw = prefs.getString(key, null) ?: return@forEach
-                            runCatching {
-                                val arr = org.json.JSONArray(raw)
-                                for (i in 0 until arr.length()) add(arr.getString(i))
-                            }
-                        }
-                    }.toList()
-                    return oldDomains.getOrNull(prefs.getInt("img_index", -1))
+            val prefs = scopedRoutePreferences() ?: return null
+            prefs.getString("selected_img_domain", null)?.takeIf { it.isNotBlank() }?.let { return it }
+            val rawLegacy = baseRoutePreferences()
+            val oldDomains = LinkedHashSet<String>().apply {
+                listOf("baseline_img_domains", "chapter_img_domains", "img_domains").forEach { key ->
+                    val raw = rawLegacy?.getString(key, null) ?: return@forEach
+                    runCatching {
+                        val arr = org.json.JSONArray(raw)
+                        for (i in 0 until arr.length()) add(arr.getString(i))
+                    }
                 }
+            }.toList()
+            return oldDomains.getOrNull(prefs.getInt("img_index", -1))
         } catch (_: Exception) {
             return null
         }
@@ -308,18 +459,7 @@ object RouteManager {
         ) {
             return false
         }
-        lastLineIpDelays = line.toMap()
-        lastImgIpDelays = img.toMap()
-        lastImgIpVerdicts = imgVerdicts.toMap()
-        lastLineDelays = lineHosts.mapIndexedNotNull { index, url ->
-            val host = hostFromLine(url)
-            val values = line.filterKeys { it.domain.equals(host, ignoreCase = true) }.values
-            if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
-        }.toMap()
-        lastImgDelays = imgDomains.mapIndexedNotNull { index, domain ->
-            val values = img.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
-            if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
-        }.toMap()
+        publishEndpointMaps(line, img, imgVerdicts)
         val previousHistory = if (!completeSnapshot && (lineUntestedEndpoints.isNotEmpty() || imageUntestedEndpoints.isNotEmpty())) {
             speedTestHistoryForVersion(remoteVersion)
         } else {
@@ -387,12 +527,30 @@ object RouteManager {
         return true
     }
 
+    /** Publish per-endpoint maps and their legacy per-domain summaries for one measurement set. */
+    private fun publishEndpointMaps(
+        line: Map<DomainIp, Long>,
+        img: Map<DomainIp, Long>,
+        imgVerdicts: Map<DomainIp, SpeedTester.ImgVerdict>,
+    ) {
+        lastLineIpDelays = line.toMap()
+        lastImgIpDelays = img.toMap()
+        lastImgIpVerdicts = imgVerdicts.toMap()
+        lastLineDelays = lineHosts.mapIndexedNotNull { index, url ->
+            val host = hostFromLine(url)
+            val values = line.filterKeys { it.domain.equals(host, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
+        }.toMap()
+        lastImgDelays = imgDomains.mapIndexedNotNull { index, domain ->
+            val values = img.filterKeys { it.domain.equals(domain, ignoreCase = true) }.values
+            if (values.isEmpty()) null else index to (values.filter { it < Long.MAX_VALUE }.minOrNull() ?: Long.MAX_VALUE)
+        }.toMap()
+    }
+
     /** Read version-only history; migrate the legacy complete snapshot on first use. */
     @Synchronized
     fun speedTestHistoryForVersion(version: Int?): SpeedTestSnapshot? {
-        val prefs = runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-        }.getOrNull() ?: return null
+        val prefs = scopedRoutePreferences() ?: return null
         val rawHistory = prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)
         val decoded = if (rawHistory != null) {
             runCatching { decodeVersionSpeedTestHistory(rawHistory) }.getOrNull()
@@ -408,7 +566,7 @@ object RouteManager {
             }
         } ?: return null
         if (!SpeedTestHistoryPolicy.isVersionCompatible(decoded.remoteVersion, version) ||
-            decoded.lineDelays.keys.any { it.domain.isBlank() || it.ip.isBlank() } || decoded.imgDelays.keys.any { it.domain.isBlank() || it.ip.isBlank() } ||
+            decoded.lineDelays.keys.any { it.domain.isBlank() } || decoded.imgDelays.keys.any { it.domain.isBlank() } ||
             decoded.lineMeasuredAtEpochMs.values.any { it <= 0L } || decoded.imageMeasuredAtEpochMs.values.any { it <= 0L } ||
             decoded.lineDelays.values.any { it < 0L } ||
             decoded.imgDelays.values.any { it < 0L } || decoded.imgDelays.keys != decoded.imgVerdicts.keys ||
@@ -424,9 +582,7 @@ object RouteManager {
     /** History from the prior persisted version; legacy records without identities remain readable but cannot match. */
     @Synchronized
     fun latestSpeedTestHistory(): SpeedTestSnapshot? {
-        val prefs = runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-        }.getOrNull() ?: return null
+        val prefs = scopedRoutePreferences() ?: return null
         return runCatching {
             prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)?.let(::decodeVersionSpeedTestHistory)
                 ?: prefs.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)?.let(::decodeCompletedSpeedTestSnapshot)
@@ -482,9 +638,7 @@ object RouteManager {
         imageIdentities: Map<DomainIp, String>,
         sortMergedHistory: Boolean,
     ) {
-        val prefs = runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-        }.getOrNull() ?: return
+        val prefs = scopedRoutePreferences() ?: return
         val previous = runCatching {
             prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)?.let(::decodeVersionSpeedTestHistory)
         }.getOrNull()?.takeIf { it.remoteVersion == remoteVersion }
@@ -565,8 +719,7 @@ object RouteManager {
             put("images", endpoints(snapshot.imgDelays, snapshot.imageMeasuredAtEpochMs, snapshot.imageIdentities, snapshot.imgVerdicts))
         }.toString()
         runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?.edit()?.putString(VERSION_SPEED_TEST_HISTORY_KEY, json)?.apply()
+            scopedRoutePreferences()?.edit()?.putString(VERSION_SPEED_TEST_HISTORY_KEY, json)?.apply()
         }
     }
 
@@ -591,7 +744,7 @@ object RouteManager {
                 val item = array.getJSONObject(i)
                 val endpoint = DomainIp(item.getString("domain"), item.getString("ip"))
                 val delay = item.getLong("delay")
-                require(endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L && delays.put(endpoint, delay) == null)
+                require(endpoint.domain.isNotBlank() && delay >= 0L && delays.put(endpoint, delay) == null)
                 if (item.has("measuredAtEpochMs")) {
                     val timestamp = item.getLong("measuredAtEpochMs")
                     require(timestamp > 0L)
@@ -625,9 +778,7 @@ object RouteManager {
             _reusableImageSpeedTestSnapshot.value = null
             return
         }
-        val prefs = runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-        }.getOrNull() ?: run {
+        val prefs = scopedRoutePreferences() ?: run {
             _reusableImageSpeedTestSnapshot.value = null
             return
         }
@@ -731,8 +882,7 @@ object RouteManager {
             )
         }.toString()
         runCatching {
-            val prefs = DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?: return@runCatching
+            val prefs = scopedRoutePreferences() ?: return@runCatching
             val editor = prefs.edit().putString(REUSABLE_IMAGE_SNAPSHOT_KEY, json)
             if (!editor.commit()) editor.apply()
         }
@@ -772,9 +922,8 @@ object RouteManager {
         val platformRevision = StartupPlatformPolicy.state.value.revision
         if (!StartupPlatformPolicy.isEnabled(ContentPlatform.MANWA)) return@withContext false
         val cached = runCatching {
-            val prefs = DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?: return@runCatching null
-            prefs.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)?.let(::decodeCompletedSpeedTestSnapshot)
+            scopedRoutePreferences()?.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)
+                ?.let(::decodeCompletedSpeedTestSnapshot)
         }.getOrNull() ?: return@withContext false
         val currentRevision = configRevision
         val currentPath = currentNetworkPath()
@@ -843,6 +992,7 @@ object RouteManager {
         ) {
             NetworkModule.rebindImageRoute("复用有效测速结果")
         }
+        _completedSpeedTestSnapshot.value = cached.copy(isComplete = true)
         true
     }
 
@@ -906,8 +1056,7 @@ object RouteManager {
             put("images", endpoints(snapshot.imgDelays, snapshot.imageMeasuredAtEpochMs, snapshot.imgVerdicts))
         }.toString()
         runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?.edit()?.putString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, json)?.apply()
+            scopedRoutePreferences()?.edit()?.putString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, json)?.apply()
         }
     }
 
@@ -935,7 +1084,8 @@ object RouteManager {
                 val item = array.getJSONObject(i)
                 val endpoint = DomainIp(item.getString("domain"), item.getString("ip"))
                 val delay = item.getLong("delay")
-                require(endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L && delays.put(endpoint, delay) == null)
+                require(endpoint.domain.isNotBlank() && delay >= 0L && delays.put(endpoint, delay) == null)
+                require(endpoint.ip.isNotBlank() || !path.directStrategy)
                 val timestamp = if (item.has("measuredAtEpochMs")) item.getLong("measuredAtEpochMs") else completedAt
                 require(timestamp > 0L && timestamp <= completedAt)
                 measuredAt[endpoint] = timestamp
@@ -967,28 +1117,25 @@ object RouteManager {
 
     private fun invalidateCompletedSpeedTestSnapshot() {
         runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?.edit()?.remove(COMPLETED_SPEED_TEST_SNAPSHOT_KEY)?.apply()
+            scopedRoutePreferences()?.edit()?.remove(COMPLETED_SPEED_TEST_SNAPSHOT_KEY)?.apply()
         }
     }
 
     fun isSpeedTestToday(): Boolean = try {
-        val ctx = DevConfig.appContext ?: return false
+        val prefs = baseRoutePreferences() ?: return false
         val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
             .format(java.util.Date())
-        ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            .getString("last_speed_test_date", "") == today
+        prefs.getString("last_speed_test_date", "") == today
     } catch (_: Exception) {
         false
     }
 
     fun markSpeedTestToday() {
         try {
-            val ctx = DevConfig.appContext ?: return
+            val prefs = baseRoutePreferences() ?: return
             val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
                 .format(java.util.Date())
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putString("last_speed_test_date", today).apply()
+            prefs.edit().putString("last_speed_test_date", today).apply()
         } catch (_: Exception) {}
     }
 
@@ -1061,11 +1208,12 @@ object RouteManager {
     fun setLineEndpoint(domain: String, ip: String) {
         val index = lineIndexForDomain(domain)
         if (index < 0) return
+        val safeIp = ip.takeIf { it.isNotBlank() }
         lineIndex = index
-        selectedLineIp = ip
+        selectedLineIp = safeIp
         selectedLineDomain = hostFromLine(lineHosts[index])
         lineOverrideActive = autoSelectEnabled
-        persistLineEndpoint(selectedLineDomain.takeUnless { autoSelectEnabled }, ip.takeUnless { autoSelectEnabled })
+        persistLineEndpoint(selectedLineDomain.takeUnless { autoSelectEnabled }, safeIp.takeUnless { autoSelectEnabled })
         publishLineSelection()
     }
 
@@ -1086,9 +1234,10 @@ object RouteManager {
         if (!autoSelectEnabled || lineOverrideActive) return false
         val index = lineIndexForDomain(endpoint.domain)
         if (index < 0) return false
-        val changed = lineIndex != index || selectedLineIp != endpoint.ip
+        val safeIp = endpoint.ip.takeIf { it.isNotBlank() }
+        val changed = lineIndex != index || selectedLineIp != safeIp
         lineIndex = index
-        selectedLineIp = endpoint.ip
+        selectedLineIp = safeIp
         selectedLineDomain = hostFromLine(lineHosts[index])
         persistLineEndpoint(null, null)
         publishLineSelection()
@@ -1107,7 +1256,6 @@ object RouteManager {
     @Synchronized
     fun loadImgIndex() {
         try {
-            val ctx = DevConfig.appContext ?: return
             if (imgDomains.isEmpty()) {
                 imgIndex = 0
                 return
@@ -1120,7 +1268,7 @@ object RouteManager {
                 saveImgIndex()
                 return
             }
-            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            val prefs = scopedRoutePreferences() ?: return
             val savedDomain = prefs.getString("selected_img_domain", null)
             val savedIndex = savedDomain?.let { domain ->
                 imgDomains.indexOfFirst { it.equals(domain, ignoreCase = true) }.takeIf { it >= 0 }
@@ -1134,8 +1282,7 @@ object RouteManager {
     @Synchronized
     private fun saveImgIndex() {
         try {
-            val ctx = DevConfig.appContext ?: return
-            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            val editor = scopedRoutePreferences()?.edit() ?: return
             if (useFastestImgForAll) {
                 editor.remove("img_index").remove("selected_img_domain")
             } else {
@@ -1160,15 +1307,14 @@ object RouteManager {
     fun loadAutoSelectPrefs() {
         lineOverrideActive = false
         try {
-            val ctx = DevConfig.appContext ?: return
-            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            val prefs = scopedRoutePreferences() ?: return
             autoSelectEnabled = prefs.getBoolean("auto_select_enabled", prefs.getBoolean("auto_select", true))
             prefs.edit().putBoolean("auto_select_enabled", autoSelectEnabled).remove("auto_select").apply()
             lastFastestLineIndex = prefs.getInt("last_fastest_line", 0)
             routePreferencesLoaded = true
             if (lineHosts.isEmpty()) return
             val savedDomain = prefs.getString("selected_line_domain", null)
-            val savedIp = prefs.getString("selected_line_ip", null)
+            val savedIp = prefs.getString("selected_line_ip", null)?.takeIf { it.isNotBlank() }
             val savedIndex = savedDomain?.let(::lineIndexForDomain)?.takeIf { it >= 0 }
             if (autoSelectEnabled) {
                 lineIndex = lastFastestLineIndex.takeIf { it in lineHosts.indices } ?: 0
@@ -1215,27 +1361,23 @@ object RouteManager {
         }
         publishLineSelection()
         try {
-            val ctx = DevConfig.appContext ?: return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putBoolean("auto_select_enabled", v).apply()
+            scopedRoutePreferences()?.edit()?.putBoolean("auto_select_enabled", v)?.apply()
         } catch (_: Exception) {}
     }
 
     fun saveLastFastestLine(index: Int) {
         lastFastestLineIndex = index
         try {
-            val ctx = DevConfig.appContext ?: return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putInt("last_fastest_line", index).apply()
+            scopedRoutePreferences()?.edit()?.putInt("last_fastest_line", index)?.apply()
         } catch (_: Exception) {}
     }
 
     private fun persistLineEndpoint(domain: String?, ip: String?) {
         try {
-            val ctx = DevConfig.appContext ?: return
-            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            val editor = scopedRoutePreferences()?.edit() ?: return
+            val safeIp = ip?.takeIf { it.isNotBlank() }
             if (domain == null) editor.remove("selected_line_domain") else editor.putString("selected_line_domain", domain)
-            if (ip == null) editor.remove("selected_line_ip") else editor.putString("selected_line_ip", ip)
+            if (safeIp == null) editor.remove("selected_line_ip") else editor.putString("selected_line_ip", safeIp)
             editor.apply()
         } catch (_: Exception) {}
     }
@@ -1243,7 +1385,8 @@ object RouteManager {
     /** Current selected API IP, only for the active API hostname. */
     fun lineIpFor(domain: String): String? =
         selectedLineIp?.takeIf {
-            lineHost.equals(domain, ignoreCase = true) && selectedLineDomain.equals(domain, ignoreCase = true)
+            it.isNotBlank() &&
+                lineHost.equals(domain, ignoreCase = true) && selectedLineDomain.equals(domain, ignoreCase = true)
         }
 
     // ---- 封面/章节统一用测速最快图源 ----
@@ -1255,9 +1398,8 @@ object RouteManager {
     @Synchronized
     fun loadUseFastestImgForAll() {
         try {
-            val ctx = DevConfig.appContext ?: return
-            useFastestImgForAll = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .getBoolean("use_fastest_img_for_all", true)
+            useFastestImgForAll = scopedRoutePreferences()
+                ?.getBoolean("use_fastest_img_for_all", true) ?: true
         } catch (_: Exception) {}
     }
 
@@ -1275,9 +1417,7 @@ object RouteManager {
             imgOverrideActive = false
         }
         try {
-            val ctx = DevConfig.appContext ?: return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putBoolean("use_fastest_img_for_all", v).apply()
+            scopedRoutePreferences()?.edit()?.putBoolean("use_fastest_img_for_all", v)?.apply()
         } catch (_: Exception) {}
     }
 
@@ -1301,10 +1441,13 @@ object RouteManager {
     val selectedImgIp: String?
         get() {
             val target = imgRewriteTarget ?: imgHost
-            pinnedImgIp?.takeIf { pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
-            runtimeRecoveryImgEndpoint?.takeIf { pinnedImgDomain.isNullOrBlank() && it.domain.equals(target, true) }?.let { return it.ip }
+            pinnedImgIp?.takeIf { it.isNotBlank() && pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
+            runtimeRecoveryImgEndpoint?.takeIf {
+                pinnedImgDomain.isNullOrBlank() && it.domain.equals(target, true)
+            }?.ip?.takeIf { it.isNotBlank() }?.let { return it }
             if (useFastestImgForAll) {
                 return fastestImgEndpoint?.takeIf { it.domain.equals(target, ignoreCase = true) }?.ip
+                    ?.takeIf { it.isNotBlank() }
             }
             return null
         }
@@ -1374,14 +1517,15 @@ object RouteManager {
         if (imgDomains.isEmpty()) return
         val safe = index.coerceIn(0, imgDomains.lastIndex)
         val domain = imgDomains.getOrNull(safe) ?: return
+        val safeIp = ip?.takeIf { it.isNotBlank() }
         setImgHost(safe)
         pinnedImgDomain = domain
-        pinnedImgIp = ip
+        pinnedImgIp = safeIp
         imgOverrideActive = useFastestImgForAll
         if (useFastestImgForAll) {
             persistPinnedImgDomain(null, null)
         } else {
-            persistPinnedImgDomain(domain, ip)
+            persistPinnedImgDomain(domain, safeIp)
         }
         notifyImgPinDisplayChanged()
     }
@@ -1428,8 +1572,7 @@ object RouteManager {
     @Synchronized
     fun loadPinnedImgDomain() {
         try {
-            val ctx = DevConfig.appContext ?: return
-            val prefs = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
+            val prefs = scopedRoutePreferences() ?: return
             imgOverrideActive = false
             if (useFastestImgForAll) {
                 pinnedImgDomain = null
@@ -1447,10 +1590,10 @@ object RouteManager {
 
     private fun persistPinnedImgDomain(domain: String?, ip: String?) {
         try {
-            val ctx = DevConfig.appContext ?: return
-            val editor = ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE).edit()
+            val editor = scopedRoutePreferences()?.edit() ?: return
+            val safeIp = ip?.takeIf { it.isNotBlank() }
             if (domain == null) editor.remove("pinned_img_domain") else editor.putString("pinned_img_domain", domain)
-            if (ip == null) editor.remove("pinned_img_ip") else editor.putString("pinned_img_ip", ip)
+            if (safeIp == null) editor.remove("pinned_img_ip") else editor.putString("pinned_img_ip", safeIp)
             editor.apply()
         } catch (_: Exception) {}
     }
@@ -1460,10 +1603,13 @@ object RouteManager {
         lineIpFor(domain)?.let { return it }
         val target = imgRewriteTarget ?: return null
         if (!target.equals(domain, ignoreCase = true)) return null
-        pinnedImgIp?.takeIf { pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
+        pinnedImgIp?.takeIf { it.isNotBlank() && pinnedImgDomain.equals(target, ignoreCase = true) }?.let { return it }
         if (!useFastestImgForAll) return null
-        runtimeRecoveryImgEndpoint?.takeIf { pinnedImgDomain.isNullOrBlank() && it.domain.equals(target, true) }?.let { return it.ip }
+        runtimeRecoveryImgEndpoint?.takeIf {
+            pinnedImgDomain.isNullOrBlank() && it.domain.equals(target, true)
+        }?.ip?.takeIf { it.isNotBlank() }?.let { return it }
         return fastestImgEndpoint?.takeIf { it.domain.equals(target, ignoreCase = true) }?.ip
+            ?.takeIf { it.isNotBlank() }
     }
 
     /**
@@ -1483,9 +1629,8 @@ object RouteManager {
     // ---- 图域探活样本路径（真实封面相对路径，测速用）----
     /** 读取上次成功获取的探活图片相对路径（如 /static/upload/xxx.jpg）。 */
     fun loadProbeImgPath(): String? = try {
-        val ctx = DevConfig.appContext ?: return null
-        ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-            .getString("probe_img_path", null)?.takeIf { it.startsWith("/") && it.length > 1 }
+        baseRoutePreferences()
+            ?.getString("probe_img_path", null)?.takeIf { it.startsWith("/") && it.length > 1 }
     } catch (_: Exception) {
         null
     }
@@ -1493,10 +1638,9 @@ object RouteManager {
     /** 持久化探活图片相对路径。 */
     fun saveProbeImgPath(path: String) {
         try {
-            val ctx = DevConfig.appContext ?: return
             if (!path.startsWith("/") || path.length <= 1) return
-            ctx.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                .edit().putString("probe_img_path", path).apply()
+            baseRoutePreferences()
+                ?.edit()?.putString("probe_img_path", path)?.apply()
         } catch (_: Exception) {}
     }
 
@@ -1764,9 +1908,7 @@ object RouteManager {
         activeRemoteConfigVersion = remoteVersion
         val prefsLoaded = routePreferencesLoaded
         val oldLine = lineHosts.getOrNull(lineIndex)
-        val savedSelection = runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-        }.getOrNull()
+        val savedSelection = scopedRoutePreferences()
         val oldDomain = selectedLineDomain ?: oldLine?.let(::hostFromLine)
             ?: savedSelection?.getString("selected_line_domain", null)
         val oldIp = selectedLineIp ?: savedSelection?.getString("selected_line_ip", null)
@@ -1827,8 +1969,7 @@ object RouteManager {
 
     internal fun invalidateReusableImageSpeedTestSnapshot() {
         runCatching {
-            DevConfig.appContext?.getSharedPreferences("zycomic_route", android.content.Context.MODE_PRIVATE)
-                ?.edit()?.remove(REUSABLE_IMAGE_SNAPSHOT_KEY)?.apply()
+            scopedRoutePreferences()?.edit()?.remove(REUSABLE_IMAGE_SNAPSHOT_KEY)?.apply()
         }
         _reusableImageSpeedTestSnapshot.value = null
     }

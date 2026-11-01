@@ -156,8 +156,13 @@ class ImageInterceptor : Interceptor {
             .filter { it == null || it.domain.equals(requestedDomain, ignoreCase = true) }
             .ifEmpty { listOf(null) }
         for (candidate in activeDomainEndpoints) {
-            val endpoint = candidate ?: NetworkModule.resolveProbeIps(requestedDomain)
-                .firstOrNull()?.let { DomainIp(requestedDomain, it) }
+            val endpoint = candidate ?: if (!NetworkModule.shouldUseDirectStrategy()) {
+                // VPN bootstrap: keep the hostname and let the tunnel resolve it.
+                DomainIp(requestedDomain, "")
+            } else {
+                NetworkModule.resolveProbeIps(requestedDomain)
+                    .firstOrNull()?.let { DomainIp(requestedDomain, it) }
+            }
             if (endpoint != null && endpoint.normalizedForComparison() !in tried &&
                 endpoints.none { it.normalizedForComparison() == endpoint.normalizedForComparison() } &&
                 RouteManager.isImgEndpointAvailable(endpoint)

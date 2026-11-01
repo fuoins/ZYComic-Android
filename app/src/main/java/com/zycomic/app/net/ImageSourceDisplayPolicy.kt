@@ -19,14 +19,14 @@ object ImageSourceDisplayPolicy {
         val hasSuccessfulEndpoint: Boolean
             get() = successfulEndpoint != null
 
-        /** Match only an endpoint whose domain and IP are both known to be the current endpoint. */
+        /** Match the exact endpoint, or the domain alone when the scope pins no IP (VPN). */
         fun matchesEndpoint(endpoint: DomainIp): Boolean {
-            if (domain.isNullOrBlank() || ip.isNullOrBlank()) return false
-            return endpoint.domain.equals(domain, ignoreCase = true) && endpoint.ip == ip
+            if (domain.isNullOrBlank() || !endpoint.domain.equals(domain, ignoreCase = true)) return false
+            return if (ip.isNullOrBlank()) endpoint.ip.isBlank() else endpoint.ip == ip
         }
 
         fun description(): String {
-            val source = domain?.let { host -> ip?.let { "$host · $it" } ?: "$host（IP未固定）" }
+            val source = domain?.let { host -> ip?.let { "$host · $it" } ?: host }
                 ?: "暂未获取到图源域名"
             return "${kind.label}：$source"
         }
@@ -75,7 +75,7 @@ object ImageSourceDisplayPolicy {
             useFastestImgForAll && fastest != null && rewriteTarget.equals(fastest.domain, ignoreCase = true) -> {
                 kind = Kind.AUTOMATIC_FASTEST
                 domain = fastest.domain
-                ip = fastest.ip
+                ip = fastest.ip.takeIf { it.isNotBlank() }
             }
             else -> {
                 kind = Kind.SERVER_RECOMMENDED
@@ -86,9 +86,11 @@ object ImageSourceDisplayPolicy {
             }
         }
 
-        val matchingSuccess = domain?.takeIf { ip != null }?.let { currentDomain ->
+        val expectedIp = ip
+        val matchingSuccess = domain?.let { currentDomain ->
             configuredSuccessfulEndpoints.firstOrNull { endpoint ->
-                endpoint.domain.equals(currentDomain, ignoreCase = true) && endpoint.ip == ip
+                endpoint.domain.equals(currentDomain, ignoreCase = true) &&
+                    if (expectedIp == null) endpoint.ip.isBlank() else endpoint.ip == expectedIp
             }
         }
         return CurrentSource(kind, domain, ip, matchingSuccess)

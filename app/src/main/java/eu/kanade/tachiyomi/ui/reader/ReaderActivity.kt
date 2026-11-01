@@ -577,10 +577,12 @@ class ReaderActivity : BaseActivity() {
                 var imgTestCompleted by remember { mutableStateOf(0) }
                 var imgTestTotal by remember { mutableStateOf(0) }
                 val scope = rememberCoroutineScope()
+                val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
+                val scopeLabel = if (activeScope == com.zycomic.app.net.NetworkScope.VPN) "VPN" else "直连"
                 val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
-                    title = { Text("切换图源") },
+                    title = { Text("切换图源 · $scopeLabel") },
                     text = {
                         if (isPicacgSource) {
                             PicacgReaderImageSourceList(
@@ -652,7 +654,8 @@ class ReaderActivity : BaseActivity() {
                                 }
                                 item {
                                     Text(
-                                        "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
+                                        "当前网络：$scopeLabel（直连与 VPN 的结果、选择互不共用）\n" +
+                                            "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(top = 4.dp),
@@ -701,8 +704,10 @@ class ReaderActivity : BaseActivity() {
                                             .padding(vertical = 6.dp),
                                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                     ) {
+                                        val endpointLabel = endpoint.domain +
+                                            endpoint.ip.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                                         Text(
-                                            text = if (isSelected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
+                                            text = (if (isSelected) "● " else "○ ") + endpointLabel,
                                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                             modifier = Modifier.weight(1f),
                                         )
@@ -875,6 +880,8 @@ class ReaderActivity : BaseActivity() {
     ) {
         val routeState by com.zycomic.app.net.PicacgRouteManager.state.collectAsState()
         val snapshot by com.zycomic.app.net.PicacgSpeedTester.snapshot.collectAsState()
+        val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
+        val scopeLabel = if (activeScope == com.zycomic.app.net.NetworkScope.VPN) "VPN" else "直连"
         val successful = snapshot?.imageProbes.orEmpty().filter { it.success }
             .sortedBy { it.elapsedMs }
         ScrollbarLazyColumn(
@@ -891,7 +898,10 @@ class ReaderActivity : BaseActivity() {
             }
             item {
                 Text(
-                    "Picacg sources3 图源池；仅在真实图片响应验证后显示成功 IP\n当前：${routeState.imageHost ?: "未配置"} · ${routeState.pinnedImage?.ip ?: "IP 自动/未测"}",
+                    "当前网络：$scopeLabel（直连与 VPN 的结果、选择互不共用）\n" +
+                        "Picacg sources3 图源池；仅在真实图片响应验证后显示成功项\n" +
+                        "当前：${routeState.imageHost ?: "未配置"} · " +
+                        (routeState.pinnedImage?.ip?.takeIf { it.isNotBlank() } ?: "IP 未固定"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -907,8 +917,10 @@ class ReaderActivity : BaseActivity() {
                             .padding(vertical = 6.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                     ) {
+                        val endpointLabel = probe.endpoint.domain +
+                            probe.endpoint.ip.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                         Text(
-                            if (selected) "● ${probe.endpoint.domain} · ${probe.endpoint.ip}" else "○ ${probe.endpoint.domain} · ${probe.endpoint.ip}",
+                            if (selected) "● $endpointLabel" else "○ $endpointLabel",
                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
@@ -941,6 +953,8 @@ class ReaderActivity : BaseActivity() {
     ) {
         val routeState by com.zycomic.app.net.JmRouteManager.state.collectAsState()
         val snapshot by com.zycomic.app.net.JmRouteManager.speedTestSnapshot.collectAsState()
+        val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
+        val scopeLabel = if (activeScope == com.zycomic.app.net.NetworkScope.VPN) "VPN" else "直连"
         val domains = com.zycomic.app.reader.JmReaderImageSourcePolicy.rankedDomains(
             routeState.imageDomains,
             snapshot.imageDelaysMs,
@@ -963,7 +977,10 @@ class ReaderActivity : BaseActivity() {
             }
             item {
                 Text(
-                    "JM sources2 图源池；成功项按测速耗时排序\n当前：${routeState.imageDomain} · ${currentEndpoint?.ip ?: "IP 自动/未测"}",
+                    "当前网络：$scopeLabel（直连与 VPN 的结果、选择互不共用）\n" +
+                        "JM sources2 图源池；成功项按测速耗时排序\n" +
+                        "当前：${routeState.imageDomain} · " +
+                        (currentEndpoint?.ip?.takeIf { it.isNotBlank() } ?: "IP 未固定"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -990,8 +1007,10 @@ class ReaderActivity : BaseActivity() {
                             .padding(vertical = 6.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                     ) {
+                        val endpointLabel = endpoint.domain +
+                            endpoint.ip.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                         Text(
-                            text = if (selected) "● ${endpoint.domain} · ${endpoint.ip}" else "○ ${endpoint.domain} · ${endpoint.ip}",
+                            text = (if (selected) "● " else "○ ") + endpointLabel,
                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )

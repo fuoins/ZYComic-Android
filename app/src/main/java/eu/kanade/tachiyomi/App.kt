@@ -118,6 +118,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         com.zycomic.app.net.ImageCacheManager.init(this)
         // 初始化网络模块上下文（VPN 检测需要），并注册网络/VPN 变化监听
         com.zycomic.app.net.NetworkModule.init(this)
+        // 按当前实际生效的网络作用域（直连 / VPN）装载各自持久化的测速结果。
+        // 只恢复磁盘结果，不发起任何探测。
+        com.zycomic.app.net.NetworkScopeController.init()
         // 轮次状态持久化：整轮开始落盘起点，完整完成标记 completed，
         // 下次启动据此把“上轮没测过”的端点优先补测。
         com.zycomic.app.net.PlatformSpeedTestCoordinator.roundStartedHook = { network, revision, startedAt ->
@@ -367,10 +370,25 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         }
         networkScope.launch {
             try {
+                // 先对齐网络作用域：VPN 开关只切换“直连 / VPN”两套已存结果，绝不触发测速。
+                // 只有网络身份真正变化且作用域未变时，才沿用原有的自动重测速行为。
+                val scopeChanged = com.zycomic.app.net.NetworkScopeController.sync()
                 // VPN-only 关闭时仍按当前策略处理网络栈并清理旧连接，只跳过完整测速。
                 com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged(
-                    if (shouldRetest) "default network changed" else "VPN-only change",
+                    when {
+                        scopeChanged -> "network scope changed"
+                        shouldRetest -> "default network changed"
+                        else -> "VPN-only change"
+                    },
                 )
+                if (scopeChanged) {
+                    android.util.Log.i(
+                        "App",
+                        "network scope -> ${com.zycomic.app.net.NetworkScopeController.current}; " +
+                            "persisted results restored, automatic retest skipped",
+                    )
+                    return@launch
+                }
                 if (!shouldRetest) {
                     android.util.Log.i("App", "VPN-only change: network stack refreshed, automatic retest disabled")
                     return@launch

@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import eu.kanade.presentation.theme.LocalIsDarkTheme
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.size.Size
@@ -51,7 +51,7 @@ import com.zycomic.app.platform.ContentPlatform
 @Composable
 fun AppCoverBackdrop(entry: BackdropEntry?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val dark = isSystemInDarkTheme()
+    val dark = LocalIsDarkTheme.current
     val baseColor = if (dark) Color.Black else Color.White
     val backdropBlurDp by GlassPrefs.backdropBlurDp.collectAsState()
     val backdropAlpha by GlassPrefs.backdropAlpha.collectAsState()

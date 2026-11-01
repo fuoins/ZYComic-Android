@@ -94,6 +94,7 @@ internal object JmSpeedTestHistoryStorage {
     private const val PREFS_NAME = "zycomic_jm_speed_test_history"
     private const val LINE_KEY = "line_history_v1"
     private const val IMAGE_KEY = "image_history_v1"
+    private const val MIGRATED_KEY = "network_scope_storage_v1"
 
     fun loadLines(): JmSpeedTestHistoryPolicy.PhaseHistory = load(LINE_KEY, JmSpeedTestHistoryPolicy.API_PHASE)
 
@@ -103,9 +104,37 @@ internal object JmSpeedTestHistoryStorage {
 
     fun saveImages(history: JmSpeedTestHistoryPolicy.PhaseHistory) = save(IMAGE_KEY, history, JmSpeedTestHistoryPolicy.IMAGE_PHASE)
 
-    private fun preferences() = DevConfig.appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun preferences() = DevConfig.appContext?.getSharedPreferences(
+        "$PREFS_NAME.${JmRouteManager.networkScope.storageKey}",
+        Context.MODE_PRIVATE,
+    )
+
+    /** Move the pre-scope history into the transport that produced it. */
+    private fun migrateLegacy() {
+        val ctx = DevConfig.appContext ?: return
+        val legacy = runCatching { ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }.getOrNull() ?: return
+        if (legacy.all.isEmpty()) return
+        val scope = JmRouteManager.networkScope
+        val target = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${scope.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (target.getBoolean(MIGRATED_KEY, false)) return
+        val raw = legacy.getString(LINE_KEY, null) ?: legacy.getString(IMAGE_KEY, null)
+        val inferred = if (raw != null && raw.contains("follow-system-vpn=true;system-vpn-active=true")) {
+            NetworkScope.VPN
+        } else {
+            NetworkScope.DIRECT
+        }
+        if (inferred != scope) return
+        val editor = target.edit()
+        legacy.all.forEach { (key, value) ->
+            (value as? String)?.let { editor.putString(key, it) }
+        }
+        editor.putBoolean(MIGRATED_KEY, true).apply()
+    }
 
     private fun load(key: String, expectedPhase: String): JmSpeedTestHistoryPolicy.PhaseHistory {
+        migrateLegacy()
         val raw = runCatching { preferences()?.getString(key, null) }.getOrNull()
             ?: return JmSpeedTestHistoryPolicy.PhaseHistory(null)
         return runCatching {
@@ -128,7 +157,7 @@ internal object JmSpeedTestHistoryStorage {
                     val verdict = item.optString("verdict").takeIf(String::isNotEmpty)
                         ?.let { runCatching { JmSpeedTester.ImgVerdict.valueOf(it) }.getOrNull() }
                     if (identity.phase != expectedPhase || identity.request.isBlank() || identity.domain.isBlank() ||
-                        identity.ip.isBlank() || identity.routeCondition.isBlank() || identity.probeCondition.isBlank() ||
+                        identity.routeCondition.isBlank() || identity.probeCondition.isBlank() ||
                         delay < 0L || measuredAt <= 0L ||
                         (expectedPhase == JmSpeedTestHistoryPolicy.IMAGE_PHASE && verdict == null) ||
                         (expectedPhase == JmSpeedTestHistoryPolicy.API_PHASE && item.has("verdict") && !item.isNull("verdict"))

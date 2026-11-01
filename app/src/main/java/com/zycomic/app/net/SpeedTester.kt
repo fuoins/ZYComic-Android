@@ -603,12 +603,19 @@ object SpeedTester {
 
     private fun lineTargets(): List<LineTarget> = RouteManager.lineHosts.flatMap { url ->
         val domain = lineDomain(url) ?: return@flatMap emptyList()
-        DomainIpProbePolicy.endpoints(domain, NetworkModule.resolveProbeIps(domain))
-            .map { endpoint -> LineTarget(endpoint, url) }
+        DomainIpProbePolicy.endpoints(
+            domain,
+            NetworkModule.resolveProbeIps(domain),
+            allowDomainFallback = !NetworkModule.shouldUseDirectStrategy(),
+        ).map { endpoint -> LineTarget(endpoint, url) }
     }.distinctBy { it.endpoint }
 
     private fun imgTargets(domains: List<String> = RouteManager.imgDomains): List<DomainIp> = domains.flatMap { domain ->
-        DomainIpProbePolicy.endpoints(domain, NetworkModule.resolveProbeIps(domain))
+        DomainIpProbePolicy.endpoints(
+            domain,
+            NetworkModule.resolveProbeIps(domain),
+            allowDomainFallback = !NetworkModule.shouldUseDirectStrategy(),
+        )
     }.distinct()
 
     private suspend fun measureLineAtIp(client: OkHttpClient, target: LineTarget): ProbeOutcome {
@@ -791,7 +798,11 @@ object SpeedTester {
         val host = lineDomain(lineUrl) ?: return@withContext emptyMap()
         val client = NetworkModule.newLineProbeClient()
         try {
-            val targets = NetworkModule.resolveProbeIps(host).map { LineTarget(DomainIp(host, it), lineUrl) }
+            val targets = DomainIpProbePolicy.endpoints(
+                host,
+                NetworkModule.resolveProbeIps(host),
+                allowDomainFallback = !NetworkModule.shouldUseDirectStrategy(),
+            ).map { endpoint -> LineTarget(endpoint, lineUrl) }
             coroutineScope {
                 targets.map { target ->
                     async {

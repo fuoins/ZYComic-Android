@@ -7,7 +7,6 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +79,7 @@ import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.ThemeColorPickerWidget
+import eu.kanade.presentation.theme.LocalIsDarkTheme
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.system.toast
@@ -433,7 +433,7 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     @Composable
     private fun getConfigGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
-        val backdropMode = if (isSystemInDarkTheme()) BackdropMode.DARK else BackdropMode.LIGHT
+        val backdropMode = if (LocalIsDarkTheme.current) BackdropMode.DARK else BackdropMode.LIGHT
         val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             if (uri != null) {
                 runCatching {
@@ -624,15 +624,15 @@ object ZYSettingsAppearanceScreen : SearchableSettings {
     @Composable
     private fun getBackdropGroup(): Preference.PreferenceGroup {
         val context = LocalContext.current
-        // 默认定位到当前系统模式，避免“设了图却没生效”的困惑。
-        val systemDark = isSystemInDarkTheme()
+        // 默认定位到当前应用主题（暗色/亮色），避免“设了图却没生效”的困惑。
+        val appDark = LocalIsDarkTheme.current
         var editModeKey by rememberSaveable {
-            mutableStateOf(if (systemDark) BackdropMode.DARK.key else BackdropMode.LIGHT.key)
+            mutableStateOf(if (appDark) BackdropMode.DARK.key else BackdropMode.LIGHT.key)
         }
         val editMode = BackdropMode.entries.firstOrNull { it.key == editModeKey } ?: BackdropMode.LIGHT
         val otherMode = if (editMode == BackdropMode.DARK) BackdropMode.LIGHT else BackdropMode.DARK
-        // 设置页当前显示的是「系统亮暗」对应的背景，刷新要用它，不能用正在编辑的另一套。
-        val currentMode = if (systemDark) BackdropMode.DARK else BackdropMode.LIGHT
+        // 设置页当前显示的是「应用亮暗」对应的背景，刷新要用它，不能用正在编辑的另一套。
+        val currentMode = if (appDark) BackdropMode.DARK else BackdropMode.LIGHT
 
         val customPaths by BackdropSources.customPaths.collectAsState()
         val perPage by BackdropSources.perPage.collectAsState()

@@ -15,7 +15,8 @@ object JmEndpointSelectionPolicy {
     ): DomainIp? {
         if (configuredDomains.none { it.equals(domain, ignoreCase = true) }) return null
         val candidates = delays.keys.filter { endpoint ->
-            endpoint.domain.equals(domain, ignoreCase = true) && endpoint.ip.isNotBlank() &&
+            endpoint.domain.equals(domain, ignoreCase = true) &&
+                (endpoint.ip.isNotBlank() || allowedIps == null) &&
                 excluded.none { it.normalizedForComparison() == endpoint.normalizedForComparison() } && delays[endpoint]?.let { it >= 0L && it < Long.MAX_VALUE } == true &&
                 successful(endpoint) &&
                 (allowedIps == null || allowedIps.contains(endpoint.ip.trim().lowercase(Locale.ROOT)))

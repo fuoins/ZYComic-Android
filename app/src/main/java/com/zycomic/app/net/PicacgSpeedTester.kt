@@ -678,6 +678,7 @@ object PicacgSpeedTester {
                             networkIdentity = networkIdentity,
                         )
                         _snapshot.value = result
+                        persistSnapshot(result)
                         val measuredApi = apiProbes.filter(Probe::testedThisRound)
                         publishProgress(
                             Progress(
@@ -692,7 +693,18 @@ object PicacgSpeedTester {
                         return@use result
                     }
                     val finished = System.currentTimeMillis()
-                    Snapshot(started, finished, activeVersion, apiProbes, imageResults, blockedReason, revision, networkIdentity = networkIdentity)
+                    val result = Snapshot(
+                        started,
+                        finished,
+                        activeVersion,
+                        apiProbes,
+                        imageResults,
+                        blockedReason,
+                        revision,
+                        networkIdentity = networkIdentity,
+                    )
+                    persistSnapshot(result)
+                    result
                 }
             }
         }
@@ -767,10 +779,16 @@ object PicacgSpeedTester {
     private fun PicacgSpeedTestHistoryPolicy.Measurement.toImageTarget() =
         ImageTarget(identity.url, endpoint, identity, content = isContentTileUrl(identity.url))
 
-    private fun routeCondition(base: String, endpoint: DomainIp): String =
-        "$base;ip-source=${if (PicacgRouteManager.resolveIps(endpoint.domain).isNotEmpty()) "configured-rules" else "system-dns"}"
+    private fun routeCondition(base: String, endpoint: DomainIp): String {
+        if (!NetworkModule.shouldUseDirectStrategy()) {
+            return "$base;ip-source=system-dns;domain-only;follow-system-vpn=true"
+        }
+        return "$base;ip-source=${if (PicacgRouteManager.resolveIps(endpoint.domain).isNotEmpty()) "configured-rules" else "system-dns"}"
+    }
 
     private fun resolve(host: String): List<String> {
+        // System VPN measures the hostname only; the tunnel resolves the address.
+        if (!NetworkModule.shouldUseDirectStrategy()) return listOf("")
         val configured = PicacgRouteManager.resolveIps(host).distinct()
         if (configured.isNotEmpty()) return configured
         return runCatching { okhttp3.Dns.SYSTEM.lookup(host).map { it.hostAddress.substringBefore('%') }.distinct() }.getOrDefault(emptyList())
@@ -872,7 +890,7 @@ object PicacgSpeedTester {
                 ?: if (content) {
                     PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint)
                 } else {
-                    PicacgBuiltinNetwork.coverHostFor(endpoint.domain)?.let { coverHost ->
+                    PicacgBuiltinNetwork.coverHostFor(endpoint.domain)?.takeIf { endpoint.ip.isNotBlank() }?.let { coverHost ->
                         PicacgRouteManager.newPinnedClient(baseProbeClient, endpoint).newBuilder()
                             .dns(object : Dns {
                                 override fun lookup(hostname: String): List<InetAddress> =
@@ -979,4 +997,138 @@ object PicacgSpeedTester {
 
     /** Only the first 32KB of a tile/image is buffered for magic-byte validation; the rest is not downloaded. */
     private const val MAX_IMAGE_HEAD_BYTES = 32 * 1024
+
+    internal const val PERSISTED_SNAPSHOT_KEY = "speed_test_snapshot_v1"
+
+    /** Persist the round in the active scope so a VPN/direct switch can restore without probing. */
+    internal fun persistSnapshot(value: Snapshot) {
+        val prefs = PicacgRouteManager.snapshotPreferences() ?: return
+        val json = JSONObject().apply {
+            put("started", value.startedAtEpochMs)
+            put("completed", value.completedAtEpochMs)
+            put("remoteVersion", value.remoteVersion ?: JSONObject.NULL)
+            put("blockedReason", value.imageBlockedReason ?: JSONObject.NULL)
+            put("revision", value.revision)
+            put("networkIdentity", value.networkIdentity ?: JSONObject.NULL)
+            put("roundSelectedLine", value.roundSelectedLine?.toJson() ?: JSONObject.NULL)
+            put("roundSelectedImage", value.roundSelectedImage?.toJson() ?: JSONObject.NULL)
+            fun probes(values: List<Probe>) = JSONArray().apply { values.forEach { put(it.toPersistedJson()) } }
+            put("apiProbes", probes(value.apiProbes))
+            put("imageProbes", probes(value.imageProbes))
+        }.toString()
+        runCatching { prefs.edit().putString(PERSISTED_SNAPSHOT_KEY, json).apply() }
+    }
+
+    internal fun refreshPersistedSnapshot() {
+        _snapshot.value = persistedSnapshot()
+        _snapshot.value?.let(::applyPersistedRoutes)
+    }
+
+    /** Restore persisted results only when they still describe today's config and transport. */
+    internal fun reusePersistedResults(): Boolean {
+        val snapshot = persistedSnapshot() ?: return false
+        if (!isSnapshotCurrent(snapshot)) return false
+        applyPersistedRoutes(snapshot)
+        _snapshot.value = snapshot
+        return true
+    }
+
+    private fun persistedSnapshot(): Snapshot? = runCatching {
+        PicacgRouteManager.snapshotPreferences()?.getString(PERSISTED_SNAPSHOT_KEY, null)?.let(::decodePersistedSnapshot)
+    }.getOrNull()
+
+    private fun isSnapshotCurrent(value: Snapshot): Boolean {
+        if (value.apiProbes.isEmpty() || value.imageProbes.isEmpty()) return false
+        if (value.remoteVersion != PicacgRouteManager.remoteVersion) return false
+        if (value.networkIdentity != PlatformSpeedTestCoordinator.currentNetworkIdentity()) return false
+        val apiHosts = PicacgRouteManager.apiUrls.map { URI(it).host }.toSet()
+        val imageHosts = PicacgRouteManager.imageHosts.toSet()
+        return value.apiProbes.all { it.endpoint.domain in apiHosts } &&
+            value.imageProbes.all { it.endpoint.domain in imageHosts }
+    }
+
+    private fun applyPersistedRoutes(value: Snapshot) {
+        if (!PicacgRouteManager.isApiManuallyPinned) {
+            value.apiProbes.asSequence()
+                .filter { it.success }
+                .minByOrNull(Probe::elapsedMs)
+                ?.let { probe ->
+                    val url = PicacgRouteManager.apiUrls.firstOrNull {
+                        runCatching { URI(it).host.equals(probe.endpoint.domain, true) }.getOrDefault(false)
+                    }
+                    if (url != null) PicacgRouteManager.applyAutomaticApiRoute(url, probe.endpoint)
+                }
+        }
+        if (!PicacgRouteManager.isImageManuallyPinned) {
+            fun ranking(content: Boolean): List<DomainIp> = value.imageProbes.asSequence()
+                .filter { it.success && it.content == content }
+                .groupBy { it.endpoint.domain.lowercase(java.util.Locale.ROOT) }
+                .map { (_, probes) -> probes.minBy { it.elapsedMs } }
+                .sortedBy { it.elapsedMs }
+                .map { it.endpoint }
+                .toList()
+            PicacgRouteManager.applyImageRankings(ranking(false), ranking(true))
+        }
+    }
+
+    private fun DomainIp.toJson() = JSONObject().put("domain", domain).put("ip", ip)
+
+    private fun Probe.toPersistedJson() = JSONObject().apply {
+        put("domain", endpoint.domain)
+        put("ip", endpoint.ip)
+        put("success", success)
+        put("elapsedMs", elapsedMs)
+        put("httpStatus", httpStatus ?: JSONObject.NULL)
+        put("contentType", contentType ?: JSONObject.NULL)
+        put("imageDecoded", imageDecoded ?: JSONObject.NULL)
+        put("measuredAtEpochMs", measuredAtEpochMs ?: JSONObject.NULL)
+        put("testedThisRound", testedThisRound)
+        put("quickSelected", quickSelected)
+        put("content", content)
+    }
+
+    private fun decodePersistedSnapshot(raw: String): Snapshot {
+        val root = JSONObject(raw)
+        fun endpoint(value: JSONObject?): DomainIp? {
+            if (value == null) return null
+            val domain = value.optString("domain").takeIf(String::isNotBlank) ?: return null
+            return DomainIp(domain, value.optString("ip"))
+        }
+        fun probes(key: String): List<Probe> {
+            val array = root.optJSONArray(key) ?: return emptyList()
+            return (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val domain = item.optString("domain").takeIf(String::isNotBlank) ?: return@mapNotNull null
+                Probe(
+                    endpoint = DomainIp(domain, item.optString("ip")),
+                    success = item.optBoolean("success"),
+                    elapsedMs = item.optLong("elapsedMs", Long.MAX_VALUE),
+                    httpStatus = if (item.isNull("httpStatus")) null else item.optInt("httpStatus"),
+                    contentType = item.optString("contentType").takeIf(String::isNotEmpty),
+                    imageDecoded = if (item.has("imageDecoded") && !item.isNull("imageDecoded")) item.optBoolean("imageDecoded") else null,
+                    measuredAtEpochMs = if (item.isNull("measuredAtEpochMs")) null else item.optLong("measuredAtEpochMs"),
+                    testedThisRound = item.optBoolean("testedThisRound"),
+                    quickSelected = item.optBoolean("quickSelected"),
+                    content = item.optBoolean("content"),
+                )
+            }
+        }
+        val started = root.optLong("started").takeIf { it > 0L } ?: return Snapshot(0, 0, null, emptyList(), emptyList(), null, 0)
+        val completed = root.optLong("completed").takeIf { it >= started } ?: return Snapshot(0, 0, null, emptyList(), emptyList(), null, 0)
+        val api = probes("apiProbes")
+        val images = probes("imageProbes")
+        if (api.isEmpty() || images.isEmpty()) return Snapshot(0, 0, null, emptyList(), emptyList(), null, 0)
+        return Snapshot(
+            startedAtEpochMs = started,
+            completedAtEpochMs = completed,
+            remoteVersion = root.opt("remoteVersion").takeUnless { it == null || it == JSONObject.NULL }?.let { (it as Number).toInt() },
+            apiProbes = api,
+            imageProbes = images,
+            imageBlockedReason = root.optString("blockedReason").takeIf(String::isNotBlank),
+            revision = root.optLong("revision"),
+            roundSelectedLine = endpoint(root.optJSONObject("roundSelectedLine")),
+            roundSelectedImage = endpoint(root.optJSONObject("roundSelectedImage")),
+            networkIdentity = root.optString("networkIdentity").takeIf(String::isNotBlank),
+        )
+    }
 }
