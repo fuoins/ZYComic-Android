@@ -46,4 +46,18 @@ class JmReaderImageSourcePolicyTest {
             JmReaderImageSourcePolicy.rankedEndpoints(mapOf(jm to 20L, manwa to 1L), setOf(jm, manwa), listOf("jm.example")),
         )
     }
+
+    @Test
+    fun `vpn domain only endpoints stay selectable with their measured delay`() {
+        val direct = DomainIp("images.example", "203.0.113.7")
+        val vpn = DomainIp("images.example", "")
+        val delays = mapOf(vpn to 18L, direct to 40L)
+        val successful = setOf(vpn)
+
+        assertEquals(
+            listOf(vpn, direct),
+            JmReaderImageSourcePolicy.rankedEndpoints(delays, successful, listOf("images.example")),
+        )
+        assertEquals(18L, JmReaderImageSourcePolicy.delayFor(vpn, delays))
+    }
 }

@@ -9,8 +9,10 @@ internal object JmSpeedTestQuickProbePolicy {
         candidates: List<T>,
         key: (T) -> String,
         endpoint: (T) -> DomainIp,
+        allowDomainOnly: Boolean = false,
     ): List<T> = candidates.distinctBy(key).filter { candidate ->
-        endpoint(candidate).domain.isNotBlank() && endpoint(candidate).ip.isNotBlank()
+        val target = endpoint(candidate)
+        target.domain.isNotBlank() && (target.ip.isNotBlank() || allowDomainOnly)
     }
 
     fun isImageEndpointFailure(verdict: JmSpeedTester.ImgVerdict?, delayMs: Long): Boolean =

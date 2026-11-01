@@ -112,9 +112,11 @@ object JmSpeedTester {
                     )
                     val priorVersionMatches = prior.remoteVersion == JmRouteManager.state.value.remoteVersion &&
                         prior.completedAtEpochMs != null && prior.completedAtEpochMs > 0L
+                    // On the VPN transport every endpoint is domain-only, so a blank IP is a valid prior result.
+                    val domainOnlyAllowed = !NetworkModule.shouldUseDirectStrategy()
                     val priorLineDelays = if (priorVersionMatches) {
                         (prior.lineIpDelaysMs + prior.untestedLineIpDelaysMs).filter { (endpoint, delay) ->
-                            endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L
+                            endpoint.domain.isNotBlank() && (endpoint.ip.isNotBlank() || domainOnlyAllowed) && delay >= 0L
                         }
                     } else {
                         emptyMap()
@@ -123,7 +125,7 @@ object JmSpeedTester {
                     val priorImageDelays = if (priorVersionMatches) {
                         (prior.imageIpDelaysMs + prior.untestedImageIpDelaysMs).filter { (endpoint, delay) ->
                             val verdict = priorImageVerdicts[endpoint]
-                            endpoint.domain.isNotBlank() && endpoint.ip.isNotBlank() && delay >= 0L &&
+                            endpoint.domain.isNotBlank() && (endpoint.ip.isNotBlank() || domainOnlyAllowed) && delay >= 0L &&
                                 when (verdict) {
                                     ImgVerdict.OK -> delay < Long.MAX_VALUE
                                     ImgVerdict.NO_IMAGE, ImgVerdict.UNREACHABLE -> delay == Long.MAX_VALUE
@@ -309,6 +311,7 @@ object JmSpeedTester {
                             candidates = resolvedLines,
                             key = { target -> lineIdentity(target.endpoint, target.url).toString() },
                             endpoint = LineTarget::endpoint,
+                            allowDomainOnly = !NetworkModule.shouldUseDirectStrategy(),
                         )
                         phase(JmSpeedTestProgress.Phase.TESTING_LINES, lineTargetsToProbe.size)
                         val lineResultsDeferred = async {
@@ -386,6 +389,7 @@ object JmSpeedTester {
                             candidates = resolvedImageEndpoints,
                             key = { endpoint -> imageIdentity(endpoint).toString() },
                             endpoint = { it },
+                            allowDomainOnly = !NetworkModule.shouldUseDirectStrategy(),
                         )
                         imagePreparationTiming.close()
                         val activeImageIdentities = imageEndpoints.mapTo(linkedSetOf(), ::imageIdentity)

@@ -56,6 +56,28 @@ class JmSpeedTestQuickProbePolicyTest {
     }
 
     @Test
+    fun `domain only candidates are kept only when the transport forbids address pinning`() {
+        val vpnOnly = Candidate(DomainIp("api.example", ""), "vpn")
+
+        val kept = JmSpeedTestQuickProbePolicy.currentCandidates(
+            candidates = listOf(vpnOnly),
+            key = { "${it.endpoint}:${it.source}" },
+            endpoint = Candidate::endpoint,
+            allowDomainOnly = true,
+        )
+
+        assertEquals(listOf(vpnOnly), kept)
+        assertTrue(
+            JmSpeedTestQuickProbePolicy.currentCandidates(
+                candidates = listOf(vpnOnly),
+                key = { "${it.endpoint}:${it.source}" },
+                endpoint = Candidate::endpoint,
+            ).isEmpty(),
+            "direct transport still requires an exact address",
+        )
+    }
+
+    @Test
     fun `independent display history preserves fresh results and untouched prior values`() {
         val fast = DomainIp("line-fast.example", "192.0.2.1")
         val failed = DomainIp("line-failed.example", "192.0.2.2")
