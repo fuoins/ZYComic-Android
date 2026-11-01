@@ -115,7 +115,7 @@ object PicacgRouteManager {
             return true
         }
         val targetPrefs = prefs()
-        if (targetPrefs == null || !targetPrefs.contains("configured_api_urls")) {
+        if (targetPrefs == null) {
             _state.value = old.copy(
                 apiIndex = 0,
                 imageHost = old.imageHosts.firstOrNull(),
@@ -128,6 +128,23 @@ object PicacgRouteManager {
                 manualImage = false,
             )
         } else {
+            if (!targetPrefs.contains("configured_api_urls")) {
+                // Seed the target scope with the already validated pools so its own selections,
+                // pins and rankings have something to attach to on every later cold start.
+                targetPrefs.edit()
+                    .putString("configured_api_urls", JSONArray(old.apiUrls).toString())
+                    .putString("configured_image_hosts", JSONArray(old.imageHosts).toString())
+                    .putInt("remote_version", old.remoteVersion ?: -1)
+                    .apply()
+                _state.value = State(
+                    apiUrls = old.apiUrls,
+                    imageHosts = old.imageHosts,
+                    apiIndex = 0,
+                    imageHost = old.imageHosts.firstOrNull(),
+                    remoteVersion = old.remoteVersion,
+                    revision = old.revision + 1,
+                )
+            }
             loadPreferences()
         }
         PicacgSpeedTester.refreshPersistedSnapshot()

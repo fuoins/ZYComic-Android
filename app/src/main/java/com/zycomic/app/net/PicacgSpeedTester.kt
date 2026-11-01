@@ -1020,8 +1020,9 @@ object PicacgSpeedTester {
     }
 
     internal fun refreshPersistedSnapshot() {
-        _snapshot.value = persistedSnapshot()
-        _snapshot.value?.let(::applyPersistedRoutes)
+        val snapshot = persistedSnapshot()
+        _snapshot.value = snapshot
+        if (snapshot != null && isSnapshotCurrent(snapshot)) applyPersistedRoutes(snapshot)
     }
 
     /** Restore persisted results only when they still describe today's config and transport. */
@@ -1038,7 +1039,10 @@ object PicacgSpeedTester {
     }.getOrNull()
 
     private fun isSnapshotCurrent(value: Snapshot): Boolean {
-        if (value.apiProbes.isEmpty() || value.imageProbes.isEmpty()) return false
+        if (!value.complete) return false
+        if (value.startedAtEpochMs <= 0L || value.completedAtEpochMs < value.startedAtEpochMs) return false
+        if (value.imageBlockedReason != null) return false
+        if (value.apiProbes.none { it.success } || value.imageProbes.none { it.success }) return false
         if (value.remoteVersion != PicacgRouteManager.remoteVersion) return false
         if (value.networkIdentity != PlatformSpeedTestCoordinator.currentNetworkIdentity()) return false
         val apiHosts = PicacgRouteManager.apiUrls.map { URI(it).host }.toSet()

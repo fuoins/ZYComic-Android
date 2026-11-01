@@ -1033,6 +1033,9 @@ object PlatformSpeedTestCoordinator {
         }
     }
 
+    private fun DomainIp.reportLabel(): String =
+        domain + ip.takeIf { it.isNotBlank() }?.let { " [$it]" }.orEmpty()
+
     private fun report(
         platform: ContentPlatform,
         status: String,
@@ -1043,15 +1046,15 @@ object PlatformSpeedTestCoordinator {
             platform = "漫蛙",
             status = status,
             reason = reason,
-            selectedLine = RouteManager.baseUrl + (RouteManager.selectedLineIp?.let { " [$it]" } ?: ""),
-            selectedImage = RouteManager.imgRewriteTarget?.let { domain -> domain + (RouteManager.selectedImgIp?.let { " [$it]" } ?: "") }
+            selectedLine = RouteManager.baseUrl + (RouteManager.selectedLineIp?.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: ""),
+            selectedImage = RouteManager.imgRewriteTarget?.let { domain -> domain + (RouteManager.selectedImgIp?.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: "") }
                 ?: "服务端原始图源（当前无域名改写）",
             manualLine = RouteManager.hasManualLineSelection,
             manualImage = RouteManager.pinnedImgDomain != null,
             lineCandidates = RouteManager.lineHosts.toList(),
             imageCandidates = RouteManager.imgDomains.toList(),
-            lineDelays = if (status == "skipped") emptyMap() else RouteManager.lastLineIpDelays.mapKeys { "${it.key.domain} [${it.key.ip}]" },
-            imageDelays = if (status == "skipped") emptyMap() else RouteManager.lastImgIpDelays.mapKeys { "${it.key.domain} [${it.key.ip}]" },
+            lineDelays = if (status == "skipped") emptyMap() else RouteManager.lastLineIpDelays.mapKeys { it.key.reportLabel() },
+            imageDelays = if (status == "skipped") emptyMap() else RouteManager.lastImgIpDelays.mapKeys { it.key.reportLabel() },
             remoteVersion = RouteManager.activeRemoteConfigVersion,
             lineStatus = if (status == "tested" && SpeedTester.progress.value.lineQuickTest) "quick" else status,
             imageStatus = if (status == "tested" && SpeedTester.progress.value.imageQuickTest) "quick" else status,
@@ -1062,14 +1065,16 @@ object PlatformSpeedTestCoordinator {
                 platform = "哔咔",
                 status = status,
                 reason = reason,
-                selectedLine = PicacgRouteManager.currentBaseUrl() + (PicacgRouteManager.selectedApiEndpoint?.let { " [${it.ip}]" } ?: ""),
-                selectedImage = PicacgRouteManager.currentImageHost.orEmpty() + (PicacgRouteManager.selectedImageEndpoint?.let { " [${it.ip}]" } ?: ""),
+                selectedLine = PicacgRouteManager.currentBaseUrl() +
+                    (PicacgRouteManager.selectedApiEndpoint?.takeIf { it.ip.isNotBlank() }?.let { " [${it.ip}]" } ?: ""),
+                selectedImage = PicacgRouteManager.currentImageHost.orEmpty() +
+                    (PicacgRouteManager.selectedImageEndpoint?.takeIf { it.ip.isNotBlank() }?.let { " [${it.ip}]" } ?: ""),
                 manualLine = PicacgRouteManager.isApiManuallyPinned,
                 manualImage = PicacgRouteManager.isImageManuallyPinned,
                 lineCandidates = PicacgRouteManager.apiUrls.toList(),
                 imageCandidates = PicacgRouteManager.imageHosts.toList(),
-                lineDelays = if (status == "skipped") emptyMap() else snapshot?.apiProbes.orEmpty().associate { "${it.endpoint.domain} [${it.endpoint.ip}]" to if (it.success) it.elapsedMs else Long.MAX_VALUE },
-                imageDelays = if (status == "skipped") emptyMap() else snapshot?.imageProbes.orEmpty().associate { "${it.endpoint.domain} [${it.endpoint.ip}]" to if (it.success) it.elapsedMs else Long.MAX_VALUE },
+                lineDelays = if (status == "skipped") emptyMap() else snapshot?.apiProbes.orEmpty().associate { it.endpoint.reportLabel() to if (it.success) it.elapsedMs else Long.MAX_VALUE },
+                imageDelays = if (status == "skipped") emptyMap() else snapshot?.imageProbes.orEmpty().associate { it.endpoint.reportLabel() to if (it.success) it.elapsedMs else Long.MAX_VALUE },
                 remoteVersion = PicacgRouteManager.remoteVersion,
                 lineStatus = if (snapshot?.apiProbes?.any { it.testedThisRound } == true) "tested" else "incomplete",
                 imageStatus = if (snapshot?.imageProbes?.any { it.testedThisRound } == true) "tested" else "incomplete",
@@ -1085,8 +1090,8 @@ object PlatformSpeedTestCoordinator {
             manualImage = JmRouteManager.pinnedImageDomain != null,
             lineCandidates = JmRouteManager.lineHosts.toList(),
             imageCandidates = JmRouteManager.imageDomains.toList(),
-            lineDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.lineIpDelaysMs.mapKeys { "${it.key.domain} [${it.key.ip}]" },
-            imageDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.mapKeys { "${it.key.domain} [${it.key.ip}]" },
+            lineDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.lineIpDelaysMs.mapKeys { it.key.reportLabel() },
+            imageDelays = if (status == "skipped") emptyMap() else JmRouteManager.speedTestSnapshot.value.imageIpDelaysMs.mapKeys { it.key.reportLabel() },
             remoteVersion = JmRouteManager.state.value.remoteVersion,
             lineStatus = if (status == "tested" && JmRouteManager.speedTestSnapshot.value.lineQuickTest) "quick" else status,
             imageStatus = if (status == "tested" && JmRouteManager.speedTestSnapshot.value.imageQuickTest) "quick" else status,

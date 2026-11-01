@@ -235,6 +235,9 @@ object RouteManager {
     @Synchronized
     private fun restoreScopedResults() {
         val prefs = scopedRoutePreferences() ?: return
+        // Runtime recovery belongs to the previous transport; a scope switch must not reuse it.
+        runtimeRecoveryImgDomain = null
+        runtimeRecoveryImgEndpoint = null
         val completed = runCatching {
             prefs.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)?.let(::decodeCompletedSpeedTestSnapshot)
         }.getOrNull()

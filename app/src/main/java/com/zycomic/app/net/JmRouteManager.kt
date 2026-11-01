@@ -328,6 +328,9 @@ object JmRouteManager {
             usingFallbackLines = prefs.getBoolean("using_fallback", current.usingFallbackLines),
             remoteVersion = prefs.getInt("remote_version", -1).takeIf { it >= 0 },
         )
+        // Live probes belong to the transport we just left; never carry them into another scope.
+        liveProbeLineEndpoint = null
+        liveProbeImageEndpoint = null
         apiEndpointRecovery.clearFailures()
         configRevision++
         _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null))

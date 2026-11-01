@@ -49,4 +49,30 @@ class JmEndpointSelectionPolicyTest {
         assertNull(JmEndpointSelectionPolicy.select("image.example", listOf("api.example"), mapOf(otherHost to 1L), { true }))
         assertNull(JmEndpointSelectionPolicy.select("api.example", listOf("api.example"), mapOf(slow to Long.MAX_VALUE), { true }))
     }
+
+    @Test
+    fun `domain-only endpoint is selectable only without an IP allowlist`() {
+        val domainOnly = DomainIp("api.example", "")
+        val delays = mapOf(domainOnly to 12L)
+
+        assertEquals(
+            domainOnly,
+            JmEndpointSelectionPolicy.select(
+                "api.example",
+                listOf("api.example"),
+                delays,
+                { true },
+                allowedIps = null,
+            ),
+        )
+        assertNull(
+            JmEndpointSelectionPolicy.select(
+                "api.example",
+                listOf("api.example"),
+                delays,
+                { true },
+                allowedIps = emptySet(),
+            ),
+        )
+    }
 }
