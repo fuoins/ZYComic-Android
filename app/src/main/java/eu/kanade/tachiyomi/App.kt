@@ -408,24 +408,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
      * 这里负责切到另一个桶并重建连接；VPN 不分桶，因此不会被这个定时器影响。
      */
     private val timeSlotBoundaryRunnable = Runnable {
-        networkScope.launch {
-            try {
-                if (com.zycomic.app.net.NetworkScopeController.needsSync()) {
-                    com.zycomic.app.net.PlatformSpeedTestCoordinator.cancelBackgroundSweep()
-                    com.zycomic.app.net.NetworkScopeController.sync()
-                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged("speed-test time slot changed")
-                    runCatching {
-                        com.zycomic.app.net.NetworkModule.rebindImageRoute("speed-test time slot changed")
-                    }
-                    com.zycomic.app.net.PlatformSpeedTestCoordinator.scheduleBackgroundSweep()
-                    android.util.Log.i("App", "speed-test time slot -> ${com.zycomic.app.net.NetworkScopeController.bucketDisplayName}; bucket restored")
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("App", "speed-test time slot switch failed", e)
-            } finally {
-                networkHandler.post { scheduleTimeSlotBoundaryCheck() }
-            }
-        }
+        refreshActiveSpeedTestBucket("speed-test time slot changed")
     }
 
     @Volatile
@@ -441,19 +424,43 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     private fun refreshTimeSlotOnResume() {
         timeSlotWatchActive = true
         networkHandler.removeCallbacks(timeSlotBoundaryRunnable)
+        refreshActiveSpeedTestBucket("speed-test time slot resume")
+    }
+
+    /**
+     * Restore the active 06:00-18:00 / 18:00-06:00 direct bucket and rebind every HTTP stack that
+     * may still point at the previous bucket's line. Runs on resume and at the boundary; it only
+     * restores persisted state and never starts a speed test.
+     */
+    private fun refreshActiveSpeedTestBucket(reason: String) {
         networkScope.launch {
             try {
                 if (com.zycomic.app.net.NetworkScopeController.needsSync()) {
                     com.zycomic.app.net.PlatformSpeedTestCoordinator.cancelBackgroundSweep()
-                    com.zycomic.app.net.NetworkScopeController.sync()
-                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged("speed-test time slot changed")
-                    runCatching {
-                        com.zycomic.app.net.NetworkModule.rebindImageRoute("speed-test time slot changed")
+                    val transportChanged = com.zycomic.app.net.NetworkScopeController.current !=
+                        com.zycomic.app.net.NetworkScope.current()
+                    val bucketChanged = com.zycomic.app.net.NetworkScopeController.sync()
+                    if (transportChanged) {
+                        com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged(reason)
+                    }
+                    if (transportChanged || bucketChanged) {
+                        // MANWA caches RouteManager.baseUrl inside Retrofit, so the client must be
+                        // rebuilt when the bucket changes the active line. JM pins its endpoint per
+                        // request, so evicting idle pools is enough. In-flight images stay alive.
+                        com.zycomic.app.net.NetworkModule.rebuildApi(reason)
+                        runCatching { com.zycomic.app.net.NetworkModule.rebindImageRoute(reason) }
+                        runCatching { com.zycomic.app.net.JmNetworkModule.rebindApiEndpoint() }
+                        runCatching { com.zycomic.app.net.JmNetworkModule.rebindImageEndpoint() }
                     }
                     com.zycomic.app.net.PlatformSpeedTestCoordinator.scheduleBackgroundSweep()
+                    android.util.Log.i(
+                        "App",
+                        "speed-test time slot -> ${com.zycomic.app.net.NetworkScopeController.bucketDisplayName}; " +
+                            "bucket restored (transportChanged=$transportChanged, bucketChanged=$bucketChanged)",
+                    )
                 }
             } catch (e: Exception) {
-                android.util.Log.w("App", "speed-test time slot resume sync failed", e)
+                android.util.Log.w("App", "$reason failed", e)
             } finally {
                 networkHandler.post { scheduleTimeSlotBoundaryCheck() }
             }
