@@ -354,7 +354,16 @@ object JmRouteManager {
         liveProbeImageEndpoint = null
         apiEndpointRecovery.clearFailures()
         configRevision++
-        _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null))
+        _speedTestSnapshot.value = decodeSnapshot(prefs.getString(KEY_SNAPSHOT, null)).let { snapshot ->
+            // Drop the legacy VPN snapshot that only recorded host-level failures with no endpoint rows.
+            if (snapshot.lineIpDelaysMs.isEmpty() && snapshot.imageIpDelaysMs.isEmpty() &&
+                (snapshot.lineDelaysMs.isNotEmpty() || snapshot.imageDelaysMs.isNotEmpty())
+            ) {
+                SpeedTestSnapshot(remoteVersion = _state.value.remoteVersion)
+            } else {
+                snapshot
+            }
+        }
         reusableImageSnapshot = decodeSnapshot(prefs.getString(KEY_IMAGE_SNAPSHOT, null))
         failedLineEndpoints.clear()
         failedLineEndpoints.addAll(decodeFailedEndpoints(prefs.getString("failed_line_endpoints", null), restoredLines.map(::hostFromUrl)))
@@ -772,6 +781,9 @@ object JmRouteManager {
     }
 
     fun isSpeedTestSnapshotValid(snapshot: SpeedTestSnapshot): Boolean {
+        // A round that measured no endpoint at all is not authoritative; this was the historical VPN
+        // shape that left the log empty and marked every reader image source unavailable.
+        if (snapshot.lineIpDelaysMs.isEmpty() && snapshot.imageIpDelaysMs.isEmpty()) return false
         val current = _state.value
         val currentLines = current.lines.map { hostFromUrl(it).lowercase(Locale.ROOT) }.toSet()
         val currentImages = current.imageDomains.map { it.lowercase(Locale.ROOT) }.toSet()
