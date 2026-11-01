@@ -176,6 +176,7 @@ object JmRouteManager {
         rules: Map<String, List<String>>,
         version: Int?,
     ) {
+        routePoolsInstalled = true
         val normalizedLines = normalizeLines(lines)
         val normalizedSources = normalizeHosts(sources)
         val useFallback = normalizedLines.isEmpty()
@@ -296,15 +297,27 @@ object JmRouteManager {
         record("config", hostFromUrl(activeLines.first()), if (useFallback) "使用 JM 官方内置兜底线路" else "应用 JM 远程线路配置 v${version ?: "?"}")
     }
 
-    /** 恢复单独存储的 JM 线路、图源偏好和最近测速快照。 */
+    /**
+     * Restore JM lines, image sources and the newest measurement snapshot of the active scope.
+     * [restorePools] is false when an authoritative config is already installed in memory: the
+     * target scope then only contributes its selections, pins and snapshot, never stale pools.
+     */
     @Synchronized
-    fun loadPreferences() {
+    fun loadPreferences(restorePools: Boolean = true) {
         val prefs = prefs() ?: return
         val current = _state.value
-        val restoredLines = decodeStringList(prefs.getString("configured_lines", null))
-            .let(::normalizeLines).ifEmpty { current.lines }
-        val restoredImages = decodeStringList(prefs.getString("configured_images", null))
-            .let(::normalizeHosts).ifEmpty { current.imageDomains }
+        val restoredLines = if (restorePools) {
+            decodeStringList(prefs.getString("configured_lines", null))
+                .let(::normalizeLines).ifEmpty { current.lines }
+        } else {
+            current.lines
+        }
+        val restoredImages = if (restorePools) {
+            decodeStringList(prefs.getString("configured_images", null))
+                .let(::normalizeHosts).ifEmpty { current.imageDomains }
+        } else {
+            current.imageDomains
+        }
         val auto = prefs.getBoolean("auto_select", true)
         val savedLine = prefs.getString("selected_line", null)
         val savedImage = prefs.getString("selected_image", null)
@@ -325,8 +338,16 @@ object JmRouteManager {
             lineIndex = idx,
             imageDomain = img,
             autoSelect = auto,
-            usingFallbackLines = prefs.getBoolean("using_fallback", current.usingFallbackLines),
-            remoteVersion = prefs.getInt("remote_version", -1).takeIf { it >= 0 },
+            usingFallbackLines = if (restorePools) {
+                prefs.getBoolean("using_fallback", current.usingFallbackLines)
+            } else {
+                current.usingFallbackLines
+            },
+            remoteVersion = if (restorePools) {
+                prefs.getInt("remote_version", -1).takeIf { it >= 0 }
+            } else {
+                current.remoteVersion
+            },
         )
         // Live probes belong to the transport we just left; never carry them into another scope.
         liveProbeLineEndpoint = null
@@ -1218,6 +1239,10 @@ object JmRouteManager {
     @Volatile
     private var scopeInitialized = false
 
+    /** Set once an authoritative (remote or builtin) pool installation replaced the defaults. */
+    @Volatile
+    private var routePoolsInstalled = false
+
     /** Idempotent; must run after [NetworkModule.init] so the active transport can be detected. */
     @Synchronized
     fun initNetworkScope() {
@@ -1236,9 +1261,11 @@ object JmRouteManager {
         val carriedLogs = _logs.value
         networkScope = target
         scopeInitialized = true
-        loadPreferences()
+        // Keep an already installed authoritative pool set; the target scope only owns its
+        // selections, pins, failures, logs and snapshot.
+        loadPreferences(restorePools = !routePoolsInstalled)
         val targetPrefs = prefs()
-        if (targetPrefs != null && !targetPrefs.contains("configured_lines")) {
+        if (targetPrefs != null) {
             val restored = _state.value
             targetPrefs.edit()
                 .putString("configured_lines", JSONArray(restored.lines).toString())

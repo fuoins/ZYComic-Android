@@ -56,6 +56,10 @@ object PicacgRouteManager {
     @Volatile
     private var scopeInitialized = false
 
+    /** Set once an authoritative (remote or builtin) pool installation replaced the defaults. */
+    @Volatile
+    private var routePoolsInstalled = false
+
     @Volatile private var routeConfigRevision: Long = 0L
 
     /** Current configured API base URL, normalized for Retrofit and without any local domain fallback. */
@@ -116,26 +120,27 @@ object PicacgRouteManager {
         }
         val targetPrefs = prefs()
         if (targetPrefs == null) {
-            _state.value = old.copy(
+            _state.value = State(
+                apiUrls = old.apiUrls,
+                imageHosts = old.imageHosts,
                 apiIndex = 0,
                 imageHost = old.imageHosts.firstOrNull(),
-                pinnedApi = null,
-                pinnedImage = null,
-                contentRanking = emptyList(),
-                coverRanking = emptyList(),
+                remoteVersion = old.remoteVersion,
                 revision = old.revision + 1,
-                manualApi = false,
-                manualImage = false,
             )
         } else {
-            if (!targetPrefs.contains("configured_api_urls")) {
-                // Seed the target scope with the already validated pools so its own selections,
-                // pins and rankings have something to attach to on every later cold start.
+            val firstVisit = !targetPrefs.contains("configured_api_urls")
+            // Keep the authoritative pools in this scope's file so an offline cold start uses the
+            // same config; selections, pins and rankings below still come from this scope alone.
+            if (routePoolsInstalled && (old.apiUrls.isNotEmpty() || old.imageHosts.isNotEmpty())) {
                 targetPrefs.edit()
                     .putString("configured_api_urls", JSONArray(old.apiUrls).toString())
                     .putString("configured_image_hosts", JSONArray(old.imageHosts).toString())
                     .putInt("remote_version", old.remoteVersion ?: -1)
                     .apply()
+            }
+            if (firstVisit) {
+                // First visit: no stores/rankings exist here, so do not inherit the previous scope.
                 _state.value = State(
                     apiUrls = old.apiUrls,
                     imageHosts = old.imageHosts,
@@ -200,6 +205,7 @@ object PicacgRouteManager {
     /** Install only already-validated remote values; no built-in domain, IP, or fallback pool is introduced. */
     @Synchronized
     fun applyRemoteConfig(apiUrls: List<String>, imageHosts: List<String>, rules: Map<String, List<String>>, version: Int?) {
+        routePoolsInstalled = true
         val normalizedUrls = apiUrls.map(String::trim).filter(PicacgNetworkPolicy::apiBaseAllowed)
             .distinctBy { hostOf(it).lowercase(Locale.ROOT) }
         val normalizedHosts = imageHosts.map { it.trim().lowercase(Locale.ROOT) }.filter(String::isNotEmpty).distinct()
@@ -268,6 +274,9 @@ object PicacgRouteManager {
             persistEndpoint("api_pin", apiPin)
             persistEndpoint("image_pin", imagePin)
         }?.apply()
+        // Restore this scope's persisted rankings (and re-confirm selections) once the pools exist,
+        // which is also the first moment a cold start can attach them.
+        loadPreferences()
     }
 
     @Volatile private var apiRouteRules: Map<String, List<String>> = emptyMap()
