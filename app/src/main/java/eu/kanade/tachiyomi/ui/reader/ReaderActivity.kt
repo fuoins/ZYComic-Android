@@ -578,7 +578,8 @@ class ReaderActivity : BaseActivity() {
                 var imgTestTotal by remember { mutableStateOf(0) }
                 val scope = rememberCoroutineScope()
                 val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
-                val scopeLabel = if (activeScope == com.zycomic.app.net.NetworkScope.VPN) "VPN" else "直连"
+                val activeTimeSlot by com.zycomic.app.net.NetworkScopeController.timeSlot.collectAsState()
+                val scopeLabel = com.zycomic.app.net.SpeedTestStorage.displayName(activeScope, activeTimeSlot)
                 val dialogMaxHeight = with(LocalConfiguration.current) { screenHeightDp.dp * 0.68f }
                 AlertDialog(
                     onDismissRequest = { showImgSourceDialog = false },
@@ -654,7 +655,7 @@ class ReaderActivity : BaseActivity() {
                                 }
                                 item {
                                     Text(
-                                        "当前网络：$scopeLabel（直连与 VPN 的结果、选择互不共用）\n" +
+                                        "当前记录：$scopeLabel（直连按日间/夜间分开，与 VPN 的结果、选择互不共用）\n" +
                                             "测速成功项按速度排序；当前项未测速成功时会单独标出，不计作成功项",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -881,7 +882,8 @@ class ReaderActivity : BaseActivity() {
         val routeState by com.zycomic.app.net.PicacgRouteManager.state.collectAsState()
         val snapshot by com.zycomic.app.net.PicacgSpeedTester.snapshot.collectAsState()
         val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
-        val scopeLabel = if (activeScope == com.zycomic.app.net.NetworkScope.VPN) "VPN" else "直连"
+        val activeTimeSlot by com.zycomic.app.net.NetworkScopeController.timeSlot.collectAsState()
+        val scopeLabel = com.zycomic.app.net.SpeedTestStorage.displayName(activeScope, activeTimeSlot)
         val successful = snapshot?.imageProbes.orEmpty().filter { it.success }
             .sortedBy { it.elapsedMs }
         ScrollbarLazyColumn(
@@ -898,7 +900,7 @@ class ReaderActivity : BaseActivity() {
             }
             item {
                 Text(
-                    "当前网络：$scopeLabel（直连与 VPN 的结果、选择互不共用）\n" +
+                    "当前记录：$scopeLabel（直连按日间/夜间分开，与 VPN 的结果、选择互不共用）\n" +
                         "Picacg sources3 图源池；仅在真实图片响应验证后显示成功项\n" +
                         "当前：${routeState.imageHost ?: "未配置"} · " +
                         (routeState.pinnedImage?.ip?.takeIf { it.isNotBlank() } ?: "IP 未固定"),
@@ -955,7 +957,8 @@ class ReaderActivity : BaseActivity() {
         val routeState by com.zycomic.app.net.JmRouteManager.state.collectAsState()
         val snapshot by com.zycomic.app.net.JmRouteManager.speedTestSnapshot.collectAsState()
         val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
-        val scopeLabel = if (activeScope == com.zycomic.app.net.NetworkScope.VPN) "VPN" else "直连"
+        val activeTimeSlot by com.zycomic.app.net.NetworkScopeController.timeSlot.collectAsState()
+        val scopeLabel = com.zycomic.app.net.SpeedTestStorage.displayName(activeScope, activeTimeSlot)
         val domains = com.zycomic.app.reader.JmReaderImageSourcePolicy.rankedDomains(
             routeState.imageDomains,
             snapshot.imageDelaysMs,
@@ -978,7 +981,7 @@ class ReaderActivity : BaseActivity() {
             }
             item {
                 Text(
-                    "当前网络：$scopeLabel（直连与 VPN 的结果、选择互不共用）\n" +
+                    "当前记录：$scopeLabel（直连按日间/夜间分开，与 VPN 的结果、选择互不共用）\n" +
                         "JM sources2 图源池；成功项按测速耗时排序\n" +
                         "当前：${routeState.imageDomain} · " +
                         (currentEndpoint?.ip?.takeIf { it.isNotBlank() } ?: "IP 未固定"),

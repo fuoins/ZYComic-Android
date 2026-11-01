@@ -68,6 +68,7 @@ fun SpeedTestScreen(
     val autoSelecting by vm.autoSelecting.collectAsState()
     val testing by vm.testing.collectAsState()
     val activeScope by com.zycomic.app.net.NetworkScopeController.scope.collectAsState()
+    val activeTimeSlot by com.zycomic.app.net.NetworkScopeController.timeSlot.collectAsState()
     // Keep the result, timestamp and provenance from the same published snapshot.
     val lineDelays = currentSpeedSnapshot.lineDelays
     val imgDelays = currentSpeedSnapshot.imgDelays
@@ -262,7 +263,8 @@ fun SpeedTestScreen(
                 item {
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Text(
-                            "当前网络：${activeScope.displayName}（直连与 VPN 的结果、选择互不共用）",
+                            "当前记录：${com.zycomic.app.net.SpeedTestStorage.displayName(activeScope, activeTimeSlot)}" +
+                                "（直连按 06:00-18:00 / 18:00-06:00 分开存储，VPN 不分段）",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,

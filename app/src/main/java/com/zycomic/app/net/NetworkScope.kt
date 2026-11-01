@@ -5,7 +5,8 @@ package com.zycomic.app.net
  *
  * Direct transport (RuleDns + per-IP pinning) and system-VPN transport (system DNS, hostname only)
  * produce incomparable measurements, so their snapshots, history and selections must never be
- * written to or read from the same bucket.
+ * written to or read from the same bucket. Direct results are additionally split into the
+ * 06:00-18:00 and 18:00-06:00 [SpeedTestTimeSlot] buckets; VPN keeps a single bucket.
  */
 enum class NetworkScope(val storageKey: String) {
     DIRECT("direct"),

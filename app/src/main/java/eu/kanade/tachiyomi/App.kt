@@ -404,6 +404,68 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     /**
+     * 直连测速记录按 06:00-18:00 / 18:00-06:00 分桶。应用长时间停在前台跨过边界时，
+     * 这里负责切到另一个桶并重建连接；VPN 不分桶，因此不会被这个定时器影响。
+     */
+    private val timeSlotBoundaryRunnable = Runnable {
+        networkScope.launch {
+            try {
+                if (com.zycomic.app.net.NetworkScopeController.needsSync()) {
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.cancelBackgroundSweep()
+                    com.zycomic.app.net.NetworkScopeController.sync()
+                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged("speed-test time slot changed")
+                    runCatching {
+                        com.zycomic.app.net.NetworkModule.rebindImageRoute("speed-test time slot changed")
+                    }
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.scheduleBackgroundSweep()
+                    android.util.Log.i("App", "speed-test time slot -> ${com.zycomic.app.net.NetworkScopeController.bucketDisplayName}; bucket restored")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("App", "speed-test time slot switch failed", e)
+            } finally {
+                networkHandler.post { scheduleTimeSlotBoundaryCheck() }
+            }
+        }
+    }
+
+    @Volatile
+    private var timeSlotWatchActive = false
+
+    private fun scheduleTimeSlotBoundaryCheck() {
+        networkHandler.removeCallbacks(timeSlotBoundaryRunnable)
+        if (!timeSlotWatchActive) return
+        val delay = com.zycomic.app.net.SpeedTestTimeSlot.millisUntilNextBoundary() + 1_000L
+        networkHandler.postDelayed(timeSlotBoundaryRunnable, delay)
+    }
+
+    private fun refreshTimeSlotOnResume() {
+        timeSlotWatchActive = true
+        networkHandler.removeCallbacks(timeSlotBoundaryRunnable)
+        networkScope.launch {
+            try {
+                if (com.zycomic.app.net.NetworkScopeController.needsSync()) {
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.cancelBackgroundSweep()
+                    com.zycomic.app.net.NetworkScopeController.sync()
+                    com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged("speed-test time slot changed")
+                    runCatching {
+                        com.zycomic.app.net.NetworkModule.rebindImageRoute("speed-test time slot changed")
+                    }
+                    com.zycomic.app.net.PlatformSpeedTestCoordinator.scheduleBackgroundSweep()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("App", "speed-test time slot resume sync failed", e)
+            } finally {
+                networkHandler.post { scheduleTimeSlotBoundaryCheck() }
+            }
+        }
+    }
+
+    private fun stopTimeSlotBoundaryCheck() {
+        timeSlotWatchActive = false
+        networkHandler.removeCallbacks(timeSlotBoundaryRunnable)
+    }
+
+    /**
      * 注册默认网络回调：变化后 2s 防抖，先按生效策略清理/重建网络栈。
      * 真实网络变化始终自动重测速；只有能确认底层网络未变的 VPN-only 变化才受单独开关控制。
      */
@@ -610,6 +672,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     override fun onStart(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStart()
+        refreshTimeSlotOnResume()
 
         val syncPreferences: SyncPreferences = Injekt.get()
         val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
@@ -624,6 +687,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     override fun onStop(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStopped()
+        stopTimeSlotBoundaryCheck()
 
         // AM (DISCORD) -->
         DiscordRPCService.stop(applicationContext)

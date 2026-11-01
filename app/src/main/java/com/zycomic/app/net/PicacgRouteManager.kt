@@ -48,11 +48,6 @@ object PicacgRouteManager {
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
-    /** Active persistence scope; direct and VPN measurements never share a file. */
-    @Volatile
-    var networkScope: NetworkScope = NetworkScope.DIRECT
-        private set
-
     @Volatile
     private var scopeInitialized = false
 
@@ -88,8 +83,21 @@ object PicacgRouteManager {
     val isApiManuallyPinned: Boolean get() = _state.value.manualApi || prefs()?.getBoolean("manual_api_selection", false) == true
     val isImageManuallyPinned: Boolean get() = _state.value.manualImage || prefs()?.getBoolean("manual_image_selection", false) == true
 
+    /** Active persistence scope; direct day/night and VPN measurements never share a file. */
+    @Volatile
+    var networkScope: NetworkScope = NetworkScope.DIRECT
+        private set
+
+    /** Direct measurements are split into day/night buckets; VPN keeps one bucket. */
+    @Volatile
+    var timeSlot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()
+        private set
+
+    internal val storageBucketKey: String
+        get() = SpeedTestStorage.bucketKey(networkScope, timeSlot)
+
     private fun prefs() = DevConfig.appContext?.getSharedPreferences(
-        "$PREFS_NAME.${networkScope.storageKey}",
+        "$PREFS_NAME.$storageBucketKey",
         Context.MODE_PRIVATE,
     )
 
@@ -103,15 +111,19 @@ object PicacgRouteManager {
     }
 
     /**
-     * Switch Picacg to [target] and reload only that scope's pins/rankings/snapshot.
-     * Never probes the network; an unscoped scope starts with the first configured host.
+     * Switch Picacg to [target] and reload only that bucket's pins/rankings/snapshot.
+     * Never probes the network; an unscoped bucket starts with the first configured host.
      */
     @Synchronized
-    fun setNetworkScope(target: NetworkScope): Boolean {
-        val changed = !scopeInitialized || networkScope != target
+    fun setNetworkScope(target: NetworkScope, slot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()): Boolean {
+        val changed = !scopeInitialized || networkScope != target ||
+            (target == NetworkScope.DIRECT && timeSlot != slot)
         if (!changed) return false
-        migrateLegacyPreferences(target)
+        migrateLegacyPreferences(target, slot)
+        migrateLegacyDirectTimeSlot(target, slot)
+        PicacgSpeedTestHistoryStorage.migrateTimeSlot(target, slot)
         networkScope = target
+        timeSlot = slot
         scopeInitialized = true
         val old = _state.value
         if (old.apiUrls.isEmpty() && old.imageHosts.isEmpty()) {
@@ -154,12 +166,15 @@ object PicacgRouteManager {
     }
 
     /** Move the pre-scope file into the transport that produced it. */
-    private fun migrateLegacyPreferences(target: NetworkScope) {
+    private fun migrateLegacyPreferences(target: NetworkScope, slot: SpeedTestTimeSlot) {
         val ctx = DevConfig.appContext ?: return
         val legacy = runCatching { ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }.getOrNull() ?: return
         if (legacy.all.isEmpty()) return
         val targetPrefs = runCatching {
-            ctx.getSharedPreferences("$PREFS_NAME.${target.storageKey}", Context.MODE_PRIVATE)
+            ctx.getSharedPreferences(
+                "$PREFS_NAME.${SpeedTestStorage.bucketKey(target, slot)}",
+                Context.MODE_PRIVATE,
+            )
         }.getOrNull() ?: return
         if (targetPrefs.getBoolean(SCOPE_STORAGE_MIGRATED_KEY, false)) return
         if (inferLegacyScope(legacy) != target) return
@@ -178,6 +193,42 @@ object PicacgRouteManager {
             }
         }
         editor.putBoolean(SCOPE_STORAGE_MIGRATED_KEY, true).apply()
+    }
+
+    /**
+     * The previous build wrote direct state into one `.direct` file. Claim it once for the
+     * day/night bucket active at upgrade time; the other bucket starts empty.
+     */
+    private fun migrateLegacyDirectTimeSlot(target: NetworkScope, slot: SpeedTestTimeSlot) {
+        if (target != NetworkScope.DIRECT) return
+        val targetKey = SpeedTestStorage.bucketKey(target, slot)
+        if (targetKey == NetworkScope.DIRECT.storageKey) return
+        val ctx = DevConfig.appContext ?: return
+        val source = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${NetworkScope.DIRECT.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (source.all.isEmpty()) return
+        if (source.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val targetPrefs = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.$targetKey", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (targetPrefs.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val editor = targetPrefs.edit()
+        source.all.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(key, value as Set<String>)
+                }
+            }
+        }
+        editor.putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+        source.edit().putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
     }
 
     private fun inferLegacyScope(legacy: android.content.SharedPreferences): NetworkScope {

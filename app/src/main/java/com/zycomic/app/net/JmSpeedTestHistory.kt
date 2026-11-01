@@ -105,7 +105,7 @@ internal object JmSpeedTestHistoryStorage {
     fun saveImages(history: JmSpeedTestHistoryPolicy.PhaseHistory) = save(IMAGE_KEY, history, JmSpeedTestHistoryPolicy.IMAGE_PHASE)
 
     private fun preferences() = DevConfig.appContext?.getSharedPreferences(
-        "$PREFS_NAME.${JmRouteManager.networkScope.storageKey}",
+        "$PREFS_NAME.${JmRouteManager.storageBucketKey}",
         Context.MODE_PRIVATE,
     )
 
@@ -116,7 +116,7 @@ internal object JmSpeedTestHistoryStorage {
         if (legacy.all.isEmpty()) return
         val scope = JmRouteManager.networkScope
         val target = runCatching {
-            ctx.getSharedPreferences("$PREFS_NAME.${scope.storageKey}", Context.MODE_PRIVATE)
+            ctx.getSharedPreferences("$PREFS_NAME.${JmRouteManager.storageBucketKey}", Context.MODE_PRIVATE)
         }.getOrNull() ?: return
         if (target.getBoolean(MIGRATED_KEY, false)) return
         val raw = legacy.getString(LINE_KEY, null) ?: legacy.getString(IMAGE_KEY, null)
@@ -133,8 +133,35 @@ internal object JmSpeedTestHistoryStorage {
         editor.putBoolean(MIGRATED_KEY, true).apply()
     }
 
+    /** Previous build kept every direct history in one `.direct` file; claim it once. */
+    internal fun migrateTimeSlot(target: NetworkScope, slot: SpeedTestTimeSlot) {
+        if (target != NetworkScope.DIRECT) return
+        val targetKey = SpeedTestStorage.bucketKey(target, slot)
+        if (targetKey == NetworkScope.DIRECT.storageKey) return
+        val ctx = DevConfig.appContext ?: return
+        val source = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${NetworkScope.DIRECT.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (source.all.isEmpty()) return
+        if (source.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val targetPrefs = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.$targetKey", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (targetPrefs.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val editor = targetPrefs.edit()
+        source.all.forEach { (key, value) ->
+            (value as? String)?.let { editor.putString(key, it) }
+        }
+        editor.putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+        source.edit().putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+    }
+
+    private fun migrateLegacyTimeSlot() =
+        migrateTimeSlot(JmRouteManager.networkScope, JmRouteManager.timeSlot)
+
     private fun load(key: String, expectedPhase: String): JmSpeedTestHistoryPolicy.PhaseHistory {
         migrateLegacy()
+        migrateLegacyTimeSlot()
         val raw = runCatching { preferences()?.getString(key, null) }.getOrNull()
             ?: return JmSpeedTestHistoryPolicy.PhaseHistory(null)
         return runCatching {

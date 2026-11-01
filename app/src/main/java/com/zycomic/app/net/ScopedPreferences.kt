@@ -6,17 +6,17 @@ import android.content.SharedPreferences
  * A key-namespaced view over one SharedPreferences file.
  *
  * Keys listed in [globalKeys] are shared app preferences (user toggles, remote-config markers).
- * Every other key is stored as `<key>.<scope>` so direct and VPN measurements can coexist in the
- * same file without ever reading each other's values.
+ * Every other key is stored as `<key>.<bucket>` so direct day/night and VPN measurements can
+ * coexist in the same file without ever reading each other's values.
  */
 class ScopedPreferences(
     private val base: SharedPreferences,
-    @Volatile var scope: NetworkScope,
+    @Volatile var storageKey: String,
     private val globalKeys: Set<String> = emptySet(),
 ) {
-    fun keyFor(key: String): String = if (key in globalKeys) key else "$key.${scope.storageKey}"
+    fun keyFor(key: String): String = if (key in globalKeys) key else "$key.$storageKey"
 
-    fun isScopedKey(key: String): Boolean = key !in globalKeys && key.endsWith(".${scope.storageKey}")
+    fun isScopedKey(key: String): Boolean = key !in globalKeys && key.endsWith(".$storageKey")
 
     fun getString(key: String, defValue: String? = null): String? = base.getString(keyFor(key), defValue)
 

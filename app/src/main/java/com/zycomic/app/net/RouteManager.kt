@@ -118,6 +118,7 @@ object RouteManager {
         "img_domains",
         "server_lines",
         SCOPE_STORAGE_MIGRATED_KEY,
+        SpeedTestStorage.TIME_SLOT_MIGRATED_KEY,
     )
 
     @Volatile
@@ -127,6 +128,15 @@ object RouteManager {
     @Volatile
     var networkScope: NetworkScope = NetworkScope.DIRECT
         private set
+
+    /** Direct measurements are split into day/night buckets; VPN keeps one bucket. */
+    @Volatile
+    var timeSlot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()
+        private set
+
+    /** SharedPreferences suffix of the bucket currently loaded into memory. */
+    internal val storageBucketKey: String
+        get() = SpeedTestStorage.bucketKey(networkScope, timeSlot)
 
     @Volatile
     private var scopeStateInitialized = false
@@ -139,9 +149,13 @@ object RouteManager {
         val base = baseRoutePreferences() ?: return null
         scopedPreferences?.let { return it }
         return synchronized(this) {
-            scopedPreferences ?: ScopedPreferences(base, NetworkScope.current(), GLOBAL_PREF_KEYS).also { created ->
+            scopedPreferences ?: ScopedPreferences(
+                base,
+                SpeedTestStorage.bucketKey(NetworkScope.current(), SpeedTestTimeSlot.current()),
+                GLOBAL_PREF_KEYS,
+            ).also { created ->
                 scopedPreferences = created
-                migrateLegacyScopeStorage(base, created.scope)
+                migrateLegacyScopeStorage(base, NetworkScope.current(), SpeedTestTimeSlot.current())
             }
         }
     }
@@ -157,7 +171,11 @@ object RouteManager {
      * snapshot carries the authoritative [SpeedTestNetworkPath]; history and the reusable image
      * snapshot inherit that scope (falling back to the currently active one).
      */
-    private fun migrateLegacyScopeStorage(base: android.content.SharedPreferences, current: NetworkScope) {
+    private fun migrateLegacyScopeStorage(
+        base: android.content.SharedPreferences,
+        current: NetworkScope,
+        currentSlot: SpeedTestTimeSlot,
+    ) {
         if (base.getBoolean(SCOPE_STORAGE_MIGRATED_KEY, false)) return
         var measuredScope = current
         val completedRaw = base.getString(COMPLETED_SPEED_TEST_SNAPSHOT_KEY, null)
@@ -165,15 +183,15 @@ object RouteManager {
             measuredScope = runCatching {
                 NetworkScope.of(decodeCompletedSpeedTestSnapshot(completedRaw).networkPath)
             }.getOrDefault(current)
-            moveLegacyValue(base, COMPLETED_SPEED_TEST_SNAPSHOT_KEY, measuredScope)
+            moveLegacyValue(base, COMPLETED_SPEED_TEST_SNAPSHOT_KEY, measuredScope, currentSlot)
         }
-        moveLegacyValue(base, VERSION_SPEED_TEST_HISTORY_KEY, measuredScope)
+        moveLegacyValue(base, VERSION_SPEED_TEST_HISTORY_KEY, measuredScope, currentSlot)
         val reusableRaw = base.getString(REUSABLE_IMAGE_SNAPSHOT_KEY, null)
         if (reusableRaw != null) {
             val reusableScope = runCatching {
                 NetworkScope.fromNetworkIdentity(decodeReusableImageSpeedTestSnapshot(reusableRaw).networkIdentity)
             }.getOrNull() ?: measuredScope
-            moveLegacyValue(base, REUSABLE_IMAGE_SNAPSHOT_KEY, reusableScope)
+            moveLegacyValue(base, REUSABLE_IMAGE_SNAPSHOT_KEY, reusableScope, currentSlot)
         }
         listOf(
             "selected_line_domain",
@@ -183,13 +201,18 @@ object RouteManager {
             "pinned_img_domain",
             "pinned_img_ip",
             "last_fastest_line",
-        ).forEach { moveLegacyValue(base, it, current) }
+        ).forEach { moveLegacyValue(base, it, current, currentSlot) }
         base.edit().putBoolean(SCOPE_STORAGE_MIGRATED_KEY, true).apply()
     }
 
-    private fun moveLegacyValue(base: android.content.SharedPreferences, rawKey: String, target: NetworkScope) {
+    private fun moveLegacyValue(
+        base: android.content.SharedPreferences,
+        rawKey: String,
+        target: NetworkScope,
+        slot: SpeedTestTimeSlot,
+    ) {
         if (!base.contains(rawKey)) return
-        val targetKey = "$rawKey.${target.storageKey}"
+        val targetKey = "$rawKey.${SpeedTestStorage.bucketKey(target, slot)}"
         val editor = base.edit()
         if (!base.contains(targetKey)) {
             when (val value = base.all[rawKey]) {
@@ -208,20 +231,57 @@ object RouteManager {
     }
 
     /**
+     * The previous build stored every direct result under `.direct`. Claim that data once for the
+     * bucket that is active at upgrade time; the other bucket starts empty and gets measured later.
+     */
+    private fun migrateLegacyDirectTimeSlot(base: android.content.SharedPreferences) {
+        val targetKey = storageBucketKey
+        if (networkScope != NetworkScope.DIRECT || targetKey == NetworkScope.DIRECT.storageKey) return
+        if (base.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val editor = base.edit()
+        base.all.forEach { (key, value) ->
+            if (key in GLOBAL_PREF_KEYS || !key.endsWith(".${NetworkScope.DIRECT.storageKey}")) return@forEach
+            val newKey = key.removeSuffix(".${NetworkScope.DIRECT.storageKey}") + ".$targetKey"
+            if (!base.contains(newKey)) {
+                when (value) {
+                    is String -> editor.putString(newKey, value)
+                    is Int -> editor.putInt(newKey, value)
+                    is Long -> editor.putLong(newKey, value)
+                    is Float -> editor.putFloat(newKey, value)
+                    is Boolean -> editor.putBoolean(newKey, value)
+                    is Set<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        editor.putStringSet(newKey, value as Set<String>)
+                    }
+                }
+            }
+            editor.remove(key)
+        }
+        editor.putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+    }
+
+    /**
      * Switch the in-memory route state to [target] without issuing any network probe.
-     * The caller rebuilds the HTTP stacks afterwards; results of the previous scope are never reused.
+     * [slot] only splits direct measurements; VPN always uses its single bucket.
+     * The caller rebuilds the HTTP stacks afterwards; results of the previous bucket are never reused.
      */
     @Synchronized
-    fun setNetworkScope(target: NetworkScope): Boolean {
+    fun setNetworkScope(target: NetworkScope, slot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()): Boolean {
+        val targetKey = SpeedTestStorage.bucketKey(target, slot)
         val prefs = scopedRoutePreferences() ?: run {
+            val changed = networkScope != target || (target == NetworkScope.DIRECT && timeSlot != slot)
             networkScope = target
-            return false
+            timeSlot = slot
+            return changed
         }
-        val changed = networkScope != target || prefs.scope != target
+        val changed = networkScope != target || (target == NetworkScope.DIRECT && timeSlot != slot) ||
+            prefs.storageKey != targetKey
         networkScope = target
-        prefs.scope = target
+        timeSlot = slot
+        prefs.storageKey = targetKey
         if (changed || !scopeStateInitialized) {
             scopeStateInitialized = true
+            baseRoutePreferences()?.let(::migrateLegacyDirectTimeSlot)
             restoreScopedResults()
             loadAutoSelectPrefs()
             loadImgIndex()

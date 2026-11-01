@@ -1239,14 +1239,22 @@ object JmRouteManager {
         return DomainIp(domain, safeIp)
     }
 
-    private fun prefs(): SharedPreferences? = runCatching {
-        DevConfig.appContext?.getSharedPreferences("$PREFS_NAME.${networkScope.storageKey}", Context.MODE_PRIVATE)
-    }.getOrNull()
-
-    /** Active persistence scope; direct and VPN measurements never share a file. */
+    /** Active persistence scope; direct day/night and VPN measurements never share a file. */
     @Volatile
     var networkScope: NetworkScope = NetworkScope.DIRECT
         private set
+
+    /** Direct measurements are split into day/night buckets; VPN keeps one bucket. */
+    @Volatile
+    var timeSlot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()
+        private set
+
+    internal val storageBucketKey: String
+        get() = SpeedTestStorage.bucketKey(networkScope, timeSlot)
+
+    private fun prefs(): SharedPreferences? = runCatching {
+        DevConfig.appContext?.getSharedPreferences("$PREFS_NAME.$storageBucketKey", Context.MODE_PRIVATE)
+    }.getOrNull()
 
     @Volatile
     private var scopeInitialized = false
@@ -1262,16 +1270,23 @@ object JmRouteManager {
     }
 
     /**
-     * Switch JM to [target] and reload only that scope's persisted results. Never probes the network.
-     * Returns true when the scope actually changed.
+     * Switch JM to [target] and reload only that bucket's persisted results. Never probes the network.
+     * [slot] only splits direct measurements; VPN always uses its single bucket.
+     * Returns true when the bucket actually changed.
      */
     @Synchronized
-    fun setNetworkScope(target: NetworkScope): Boolean {
-        val changed = !scopeInitialized || networkScope != target
+    fun setNetworkScope(target: NetworkScope, slot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()): Boolean {
+        val changed = !scopeInitialized || networkScope != target ||
+            (target == NetworkScope.DIRECT && timeSlot != slot)
         if (!changed) return false
-        migrateLegacyPreferences(target)
-        val carriedLogs = _logs.value
+        migrateLegacyPreferences(target, slot)
+        migrateLegacyDirectTimeSlot(target, slot)
+        JmSpeedTestHistoryStorage.migrateTimeSlot(target, slot)
+        // Diagnostics from the previous time-of-day bucket are not carried over; only a transport
+        // switch within the same bucket keeps the old log list.
+        val carriedLogs = if (timeSlot == slot) _logs.value else emptyList()
         networkScope = target
+        timeSlot = slot
         scopeInitialized = true
         // Keep an already installed authoritative pool set; the target scope only owns its
         // selections, pins, failures, logs and snapshot.
@@ -1297,12 +1312,15 @@ object JmRouteManager {
      * The pre-scope file is moved into the bucket that actually produced it. Only the matching
      * scope claims it, so a direct snapshot can never surface while the VPN is active.
      */
-    private fun migrateLegacyPreferences(target: NetworkScope) {
+    private fun migrateLegacyPreferences(target: NetworkScope, slot: SpeedTestTimeSlot) {
         val ctx = DevConfig.appContext ?: return
         val legacy = runCatching { ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }.getOrNull() ?: return
         if (legacy.all.isEmpty()) return
         val targetPrefs = runCatching {
-            ctx.getSharedPreferences("$PREFS_NAME.${target.storageKey}", Context.MODE_PRIVATE)
+            ctx.getSharedPreferences(
+                "$PREFS_NAME.${SpeedTestStorage.bucketKey(target, slot)}",
+                Context.MODE_PRIVATE,
+            )
         }.getOrNull() ?: return
         if (targetPrefs.getBoolean(SCOPE_STORAGE_MIGRATED_KEY, false)) return
         if (inferLegacyScope(legacy) != target) return
@@ -1321,6 +1339,42 @@ object JmRouteManager {
             }
         }
         editor.putBoolean(SCOPE_STORAGE_MIGRATED_KEY, true).apply()
+    }
+
+    /**
+     * The previous build wrote direct state into one `.direct` file. Claim it once for the
+     * day/night bucket active at upgrade time; the other bucket starts empty.
+     */
+    private fun migrateLegacyDirectTimeSlot(target: NetworkScope, slot: SpeedTestTimeSlot) {
+        if (target != NetworkScope.DIRECT) return
+        val targetKey = SpeedTestStorage.bucketKey(target, slot)
+        if (targetKey == NetworkScope.DIRECT.storageKey) return
+        val ctx = DevConfig.appContext ?: return
+        val source = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${NetworkScope.DIRECT.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (source.all.isEmpty()) return
+        if (source.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val targetPrefs = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.$targetKey", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (targetPrefs.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val editor = targetPrefs.edit()
+        source.all.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(key, value as Set<String>)
+                }
+            }
+        }
+        editor.putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+        source.edit().putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
     }
 
     private fun inferLegacyScope(legacy: SharedPreferences): NetworkScope {

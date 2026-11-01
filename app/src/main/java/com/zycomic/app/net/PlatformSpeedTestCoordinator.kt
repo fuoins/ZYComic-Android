@@ -240,7 +240,16 @@ object PlatformSpeedTestCoordinator {
             )
             "$type@$network"
         }.sorted()
-        return "active=$activeType@$active|underlying=$underlying|${NetworkModule.shouldUseDirectStrategy()}|${DevConfig.isFollowSystemVpnEnabled()}"
+        return buildString {
+            append("active=").append(activeType).append('@').append(active)
+            append("|underlying=").append(underlying)
+            val direct = NetworkModule.shouldUseDirectStrategy()
+            append('|').append(direct)
+            append('|').append(DevConfig.isFollowSystemVpnEnabled())
+            // Direct results are split by time of day; the identity keys adaptive history and
+            // completed-phase caches, so it must break at 06:00/18:00 as well. VPN stays unchanged.
+            if (direct) append("|slot=").append(NetworkScopeController.activeTimeSlot.storageKey)
+        }
     }
 
     internal fun networkTypeLabel(isVpn: Boolean, isWifi: Boolean, isCellular: Boolean): String = buildList {
@@ -325,7 +334,9 @@ object PlatformSpeedTestCoordinator {
                     _platformStartupStatuses.value = ContentPlatform.entries.associateWith { platform ->
                         when {
                             !StartupPlatformPolicy.isEnabled(platform) -> PlatformStartupStatus("未启用，已跳过")
-                            else -> PlatformStartupStatus("已复用${NetworkScopeController.current.displayName}网络下的上次结果")
+                            else -> PlatformStartupStatus(
+                                "已复用${SpeedTestStorage.displayName(NetworkScopeController.current, NetworkScopeController.activeTimeSlot)}的上次结果",
+                            )
                         }
                     }
                     _startupCheckStatuses.value = initialStartupCheckStatuses().map { check ->

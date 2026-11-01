@@ -126,7 +126,7 @@ internal object PicacgSpeedTestHistoryStorage {
     fun saveImages(history: PicacgSpeedTestHistoryPolicy.PhaseHistory) = save(IMAGE_KEY, history)
 
     private fun preferences() = DevConfig.appContext?.getSharedPreferences(
-        "$PREFS_NAME.${PicacgRouteManager.networkScope.storageKey}",
+        "$PREFS_NAME.${PicacgRouteManager.storageBucketKey}",
         Context.MODE_PRIVATE,
     )
 
@@ -137,7 +137,10 @@ internal object PicacgSpeedTestHistoryStorage {
         if (legacy.all.isEmpty()) return
         val scope = PicacgRouteManager.networkScope
         val target = runCatching {
-            ctx.getSharedPreferences("$PREFS_NAME.${scope.storageKey}", Context.MODE_PRIVATE)
+            ctx.getSharedPreferences(
+                "$PREFS_NAME.${PicacgRouteManager.storageBucketKey}",
+                Context.MODE_PRIVATE,
+            )
         }.getOrNull() ?: return
         if (target.getBoolean(MIGRATED_KEY, false)) return
         val sample = legacy.getString(API_KEY, null) ?: legacy.getString(IMAGE_KEY, null)
@@ -150,8 +153,35 @@ internal object PicacgSpeedTestHistoryStorage {
         editor.putBoolean(MIGRATED_KEY, true).apply()
     }
 
+    /** Previous build kept every direct history in one `.direct` file; claim it once. */
+    internal fun migrateTimeSlot(target: NetworkScope, slot: SpeedTestTimeSlot) {
+        if (target != NetworkScope.DIRECT) return
+        val targetKey = SpeedTestStorage.bucketKey(target, slot)
+        if (targetKey == NetworkScope.DIRECT.storageKey) return
+        val ctx = DevConfig.appContext ?: return
+        val source = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.${NetworkScope.DIRECT.storageKey}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (source.all.isEmpty()) return
+        if (source.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val targetPrefs = runCatching {
+            ctx.getSharedPreferences("$PREFS_NAME.$targetKey", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return
+        if (targetPrefs.getBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, false)) return
+        val editor = targetPrefs.edit()
+        source.all.forEach { (key, value) ->
+            (value as? String)?.let { editor.putString(key, it) }
+        }
+        editor.putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+        source.edit().putBoolean(SpeedTestStorage.TIME_SLOT_MIGRATED_KEY, true).apply()
+    }
+
+    private fun migrateLegacyTimeSlot() =
+        migrateTimeSlot(PicacgRouteManager.networkScope, PicacgRouteManager.timeSlot)
+
     private fun load(key: String, phase: String): PicacgSpeedTestHistoryPolicy.PhaseHistory {
         migrateLegacy()
+        migrateLegacyTimeSlot()
         val raw = runCatching { preferences()?.getString(key, null) }.getOrNull() ?: return PicacgSpeedTestHistoryPolicy.PhaseHistory(null)
         return runCatching {
             val root = JSONObject(raw)
