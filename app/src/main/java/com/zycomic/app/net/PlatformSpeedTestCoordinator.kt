@@ -12,6 +12,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -262,7 +263,15 @@ object PlatformSpeedTestCoordinator {
         startupRequest.invalidate()
         _foregroundReady.value = false
         return try {
-            execute(forceFresh, remoteConfigUpdated, onlyPlatform, notifyCompletion, isStartupRun, onProgress, onStageProgress)
+            execute(
+                forceFresh = forceFresh,
+                remoteConfigUpdated = remoteConfigUpdated,
+                onlyPlatform = onlyPlatform,
+                notifyCompletion = notifyCompletion,
+                isStartupRun = isStartupRun,
+                onProgress = onProgress,
+                onStageProgress = onStageProgress,
+            )
         } finally {
             scheduleBackgroundSweep()
         }
