@@ -59,6 +59,8 @@ object JmSpeedTester {
         reuseLines: Boolean = false,
         reuseImages: Boolean = false,
         reconcileConfig: Boolean = false,
+        /** Low-priority background completion: measure only endpoints without a current-generation result. */
+        sweep: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onRouteReady: (() -> Unit)? = null,
@@ -135,8 +137,8 @@ object JmSpeedTester {
                     } else {
                         emptyMap()
                     }
-                    val quickLines = reuseLines
-                    val quickImages = reuseImages
+                    val quickLines = reuseLines || sweep
+                    val quickImages = reuseImages || sweep
                     val lineDrainedAll = java.util.concurrent.atomic.AtomicBoolean(false)
                     val imageDrainedAll = java.util.concurrent.atomic.AtomicBoolean(false)
                     val reconcileLines = !quickLines && requestedLineReconciliation
@@ -304,15 +306,37 @@ object JmSpeedTester {
                         }.orEmpty()
                         linePreparationTiming.close()
                         val lineTiming = timings.start(SpeedTestTimings.Phase.LINES)
+                        val currentLineEndpoints = resolvedLines.mapTo(linkedSetOf()) { it.endpoint }
+                        // A sweep continues a previous partial pass: those results are still current-generation
+                        // measurements, so they must not be probed again and must stay in the visible map.
+                        // Match persisted identities, not just domain/IP, so a changed rule/probe contract retests.
+                        val currentLineIdentities = resolvedLines.associate { it.endpoint to lineIdentity(it.endpoint, it.url) }
+                        val storedLineIdentities = if (storedLineHistory.remoteVersion == configVersion) {
+                            storedLineHistory.measurements.mapTo(hashSetOf(), JmSpeedTestHistoryPolicy.Measurement::identity)
+                        } else {
+                            emptySet()
+                        }
+                        val sweepLinePrior = if (sweep) {
+                            sweepLinePriorDelays(priorLineDelays, currentLineEndpoints).filterKeys { endpoint ->
+                                currentLineIdentities[endpoint]?.let { it in storedLineIdentities } == true
+                            }
+                        } else {
+                            emptyMap()
+                        }
                         val activeLineIdentities = resolvedLines.associate { target ->
                             target.endpoint to lineIdentity(target.endpoint, target.url)
                         }.values.toSet()
-                        val lineTargetsToProbe = JmSpeedTestQuickProbePolicy.currentCandidates(
+                        val lineCandidates = JmSpeedTestQuickProbePolicy.currentCandidates(
                             candidates = resolvedLines,
                             key = { target -> lineIdentity(target.endpoint, target.url).toString() },
                             endpoint = LineTarget::endpoint,
                             allowDomainOnly = !NetworkModule.shouldUseDirectStrategy(),
                         )
+                        val lineTargetsToProbe = if (sweep) {
+                            lineCandidates.filterNot { it.endpoint in sweepLinePrior }
+                        } else {
+                            lineCandidates
+                        }
                         phase(JmSpeedTestProgress.Phase.TESTING_LINES, lineTargetsToProbe.size)
                         val lineResultsDeferred = async {
                             adaptiveSession.run(
@@ -334,7 +358,8 @@ object JmSpeedTester {
                                 log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                                 onUsable = { target, result -> applyLineRoute(target, result) },
                                 onQualified = { target, _ -> notifyQualifiedIfApplied(target.endpoint, image = false) },
-                                stopAfterQualified = if (quickLines) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                                stopAfterQualified = if (quickLines && !sweep) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                                stopAfterDispatched = if (sweep) BackgroundSpeedTestSweep.CHUNK_SIZE else Int.MAX_VALUE,
                                 onExhausted = { drained -> if (stillCurrent()) lineDrainedAll.set(drained) },
                                 probe = probe@{ target ->
                                     if (!stillCurrent()) return@probe null
@@ -392,8 +417,26 @@ object JmSpeedTester {
                             allowDomainOnly = !NetworkModule.shouldUseDirectStrategy(),
                         )
                         imagePreparationTiming.close()
+                        val currentImageEndpoints = resolvedImageEndpoints.toSet()
+                        val storedImageIdentities = if (storedImageHistory.remoteVersion == configVersion) {
+                            storedImageHistory.measurements.mapTo(hashSetOf(), JmSpeedTestHistoryPolicy.Measurement::identity)
+                        } else {
+                            emptySet()
+                        }
+                        val sweepImagePrior = if (sweep) {
+                            sweepLinePriorDelays(priorImageDelays, currentImageEndpoints).filterKeys { endpoint ->
+                                imageIdentity(endpoint) in storedImageIdentities
+                            }
+                        } else {
+                            emptyMap()
+                        }
+                        val sweepImagePriorVerdicts = if (sweep) {
+                            priorImageVerdicts.filterKeys { it in sweepImagePrior }
+                        } else {
+                            emptyMap()
+                        }
                         val activeImageIdentities = imageEndpoints.mapTo(linkedSetOf(), ::imageIdentity)
-                        val imageTargetsToProbe = imageEndpoints
+                        val imageTargetsToProbe = if (sweep) imageEndpoints.filterNot { it in sweepImagePrior } else imageEndpoints
                         val imageTiming = timings.start(SpeedTestTimings.Phase.IMAGES)
                         phase(JmSpeedTestProgress.Phase.TESTING_IMAGES, imageTargetsToProbe.size)
                         val imageResults = adaptiveSession.run(
@@ -416,7 +459,8 @@ object JmSpeedTester {
                             log = { message -> if (stillCurrent()) JmRouteManager.record("speed_adaptive", "JM", message) },
                             onUsable = { endpoint, result -> applyImageRoute(endpoint, result) },
                             onQualified = { endpoint, _ -> notifyQualifiedIfApplied(endpoint, image = true) },
-                            stopAfterQualified = if (quickImages) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                            stopAfterQualified = if (quickImages && !sweep) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                            stopAfterDispatched = if (sweep) BackgroundSpeedTestSweep.CHUNK_SIZE else Int.MAX_VALUE,
                             onExhausted = { drained -> if (stillCurrent()) imageDrainedAll.set(drained) },
                             probe = probe@{ endpoint ->
                                 if (!stillCurrent()) return@probe null
@@ -445,7 +489,7 @@ object JmSpeedTester {
                                 result
                             },
                         )
-                        if (quickImages && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < Long.MAX_VALUE }) {
+                        if (!sweep && quickImages && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < Long.MAX_VALUE }) {
                             val measuredKeys = imageResults.mapTo(hashSetOf()) { (endpoint, _) -> imageIdentity(endpoint).toString() }
                             adaptiveSession.deferExploration(
                                 scope = "JM:image",
@@ -478,7 +522,7 @@ object JmSpeedTester {
                         }
                         imageTiming.close()
                         val lineResults = lineResultsDeferred.await()
-                        if (quickLines && lineResults.any { it.second.delayMs < Long.MAX_VALUE }) {
+                        if (!sweep && quickLines && lineResults.any { it.second.delayMs < Long.MAX_VALUE }) {
                             val measuredKeys = lineResults.mapTo(hashSetOf()) { (target, _) ->
                                 lineIdentity(target.endpoint, target.url).toString()
                             }
@@ -518,6 +562,8 @@ object JmSpeedTester {
                             )
                         }
                         val lineHistoryAfterRun = when {
+                            // A sweep extends the existing same-version history instead of replacing it.
+                            sweep -> JmSpeedTestHistoryPolicy.mergeQuick(storedLineHistory, configVersion, measuredLineHistory)
                             reconcileLines -> JmSpeedTestHistoryPolicy.reconcile(
                                 storedLineHistory,
                                 configVersion,
@@ -528,17 +574,34 @@ object JmSpeedTester {
                             else -> JmSpeedTestHistoryPolicy.freshOnly(configVersion, measuredLineHistory)
                         }
                         val freshLineIpDelays = lineResults.associate { it.first.endpoint to it.second.delayMs }
-                        val effectiveLineIpDelays = freshLineIpDelays
+                        val effectiveLineIpDelays = if (sweep) sweepLinePrior + freshLineIpDelays else freshLineIpDelays
                         val testedLineEndpoints = freshLineIpDelays.keys
-                        val untestedLineIpDelays = if (quickLines) priorLineDelays.filterKeys { it !in testedLineEndpoints } else emptyMap()
+                        val lineCoverageKnown = resolvedLines.isNotEmpty() || linesToTest.isEmpty()
+                        val lineCovered = lineCoverageKnown && currentLineEndpoints.all { it in effectiveLineIpDelays }
+                        val untestedLineIpDelays = when {
+                            sweep -> emptyMap()
+                            quickLines -> priorLineDelays.filterKeys { it !in testedLineEndpoints }
+                            else -> emptyMap()
+                        }
                         val lineIpDelays = JmSpeedTestQuickProbePolicy.rankPriorDelays(effectiveLineIpDelays, emptyMap())
-                        val lineIpTestedAt = lineIpDelays.keys.associateWith { System.currentTimeMillis() }
-                        val untestedLineIpTestedAt = JmSpeedTestQuickProbePolicy.mergeTestedAt(
-                            if (quickLines) prior.lineIpTestedAtEpochMs + prior.untestedLineIpTestedAtEpochMs else emptyMap(),
-                            emptyMap(),
-                            testedLineEndpoints,
-                            lineIpDelays.keys,
-                        ).filterKeys { it in untestedLineIpDelays }
+                        val priorLineTimes = prior.lineIpTestedAtEpochMs + prior.untestedLineIpTestedAtEpochMs
+                        val lineIpTestedAt = lineIpDelays.keys.associateWith { endpoint ->
+                            if (sweep && endpoint !in freshLineIpDelays) {
+                                priorLineTimes[endpoint] ?: System.currentTimeMillis()
+                            } else {
+                                System.currentTimeMillis()
+                            }
+                        }
+                        val untestedLineIpTestedAt = if (sweep) {
+                            emptyMap()
+                        } else {
+                            JmSpeedTestQuickProbePolicy.mergeTestedAt(
+                                if (quickLines) priorLineTimes else emptyMap(),
+                                emptyMap(),
+                                testedLineEndpoints,
+                                lineIpDelays.keys,
+                            ).filterKeys { it in untestedLineIpDelays }
+                        }
                         val lineDelays = linesToTest.associate { url ->
                             val host = URI(url).host.lowercase(Locale.ROOT)
                             host to (effectiveLineIpDelays.filterKeys { it.domain.equals(host, true) }.values.minOrNull() ?: Long.MAX_VALUE)
@@ -554,6 +617,7 @@ object JmSpeedTester {
                             )
                         }
                         val imageHistoryAfterRun = when {
+                            sweep -> JmSpeedTestHistoryPolicy.mergeQuick(storedImageHistory, configVersion, measuredImageHistory)
                             reconcileImages -> JmSpeedTestHistoryPolicy.reconcile(
                                 storedImageHistory,
                                 configVersion,
@@ -563,19 +627,40 @@ object JmSpeedTester {
                             quickImages -> JmSpeedTestHistoryPolicy.mergeQuick(storedImageHistory, configVersion, measuredImageHistory)
                             else -> JmSpeedTestHistoryPolicy.freshOnly(configVersion, measuredImageHistory)
                         }
-                        val effectiveImageIpDelays = freshImageIpDelays
-                        val effectiveImageIpVerdicts = freshImageIpVerdicts
+                        val effectiveImageIpDelays = if (sweep) sweepImagePrior + freshImageIpDelays else freshImageIpDelays
+                        val effectiveImageIpVerdicts = if (sweep) {
+                            sweepImagePriorVerdicts + freshImageIpVerdicts
+                        } else {
+                            freshImageIpVerdicts
+                        }
                         val testedImageEndpoints = freshImageIpDelays.keys
-                        val untestedImageIpDelays = if (quickImages) priorImageDelays.filterKeys { it !in testedImageEndpoints } else emptyMap()
-                        val untestedImageIpVerdicts = priorImageVerdicts.filterKeys { it in untestedImageIpDelays }
+                        val imageCoverageKnown = resolvedImageEndpoints.isNotEmpty() || imagesToTest.isEmpty()
+                        val imageCovered = imageCoverageKnown && currentImageEndpoints.all { it in effectiveImageIpDelays }
+                        val untestedImageIpDelays = when {
+                            sweep -> emptyMap()
+                            quickImages -> priorImageDelays.filterKeys { it !in testedImageEndpoints }
+                            else -> emptyMap()
+                        }
+                        val untestedImageIpVerdicts = if (sweep) emptyMap() else priorImageVerdicts.filterKeys { it in untestedImageIpDelays }
                         val imageIpDelays = JmSpeedTestQuickProbePolicy.rankPriorDelays(effectiveImageIpDelays, emptyMap())
                         val imageIpVerdicts = effectiveImageIpVerdicts
-                        val imageIpTestedAt = imageIpDelays.keys.associateWith { System.currentTimeMillis() }
-                        val untestedImageIpTestedAt = JmSpeedTestQuickProbePolicy.mergeTestedAt(
-                            if (quickImages) prior.imageIpTestedAtEpochMs + prior.untestedImageIpTestedAtEpochMs else emptyMap(),
-                            emptyMap(),
-                            testedImageEndpoints,
-                        ).filterKeys { it in untestedImageIpDelays }
+                        val priorImageTimes = prior.imageIpTestedAtEpochMs + prior.untestedImageIpTestedAtEpochMs
+                        val imageIpTestedAt = imageIpDelays.keys.associateWith { endpoint ->
+                            if (sweep && endpoint !in freshImageIpDelays) {
+                                priorImageTimes[endpoint] ?: System.currentTimeMillis()
+                            } else {
+                                System.currentTimeMillis()
+                            }
+                        }
+                        val untestedImageIpTestedAt = if (sweep) {
+                            emptyMap()
+                        } else {
+                            JmSpeedTestQuickProbePolicy.mergeTestedAt(
+                                if (quickImages) priorImageTimes else emptyMap(),
+                                emptyMap(),
+                                testedImageEndpoints,
+                            ).filterKeys { it in untestedImageIpDelays }
+                        }
                         val imageDelays = imagesToTest.associate { domain ->
                             domain.lowercase(Locale.ROOT) to (effectiveImageIpDelays.filterKeys { it.domain.equals(domain, true) }.values.minOrNull() ?: Long.MAX_VALUE)
                         }
@@ -589,10 +674,12 @@ object JmSpeedTester {
                             untestedLineIpTestedAtEpochMs = untestedLineIpTestedAt,
                             untestedImageIpTestedAtEpochMs = untestedImageIpTestedAt,
                             testedLineEndpoints = testedLineEndpoints, testedImageEndpoints = testedImageEndpoints,
-                            lineQuickTest = quickLines, imageQuickTest = quickImages,
-                            lineDrainedAll = lineDrainedAll.get(), imageDrainedAll = imageDrainedAll.get(),
-                            lineQuickTestAllFailed = quickLines && freshLineIpDelays.isNotEmpty() && freshLineIpDelays.values.none { it < Long.MAX_VALUE },
-                            imageQuickTestAllFailed = quickImages && freshImageIpDelays.isNotEmpty() &&
+                            lineQuickTest = quickLines && !sweep, imageQuickTest = quickImages && !sweep,
+                            lineDrainedAll = if (sweep) lineCovered else lineDrainedAll.get(),
+                            imageDrainedAll = if (sweep) imageCovered else imageDrainedAll.get(),
+                            lineQuickTestAllFailed = !sweep && quickLines && freshLineIpDelays.isNotEmpty() &&
+                                freshLineIpDelays.values.none { it < Long.MAX_VALUE },
+                            imageQuickTestAllFailed = !sweep && quickImages && freshImageIpDelays.isNotEmpty() &&
                                 freshImageIpDelays.all { (endpoint, delay) ->
                                     JmSpeedTestQuickProbePolicy.isImageEndpointFailure(freshImageIpVerdicts[endpoint], delay)
                                 },
@@ -668,8 +755,13 @@ object JmSpeedTester {
         }
     }
 
-    private fun lineIdentity(endpoint: DomainIp, request: String) = JmSpeedTestHistoryPolicy.Identity(
-        phase = JmSpeedTestHistoryPolicy.API_PHASE,
+    /** Prior measurements are reusable only while that exact endpoint is still a current candidate. */
+    private fun sweepLinePriorDelays(
+        prior: Map<DomainIp, Long>,
+        current: Set<DomainIp>,
+    ): Map<DomainIp, Long> = prior.filterKeys { it in current && it.domain.isNotBlank() }
+
+    private fun lineIdentity(endpoint: DomainIp, request: String) = JmSpeedTestHistoryPolicy.Identity(        phase = JmSpeedTestHistoryPolicy.API_PHASE,
         request = request,
         domain = endpoint.domain.lowercase(Locale.ROOT),
         ip = endpoint.ip.trim().lowercase(Locale.ROOT),

@@ -250,6 +250,11 @@ internal object AdaptiveSpeedProbe {
             explorationOnly: Boolean = false,
             /** 快测在本轮拿到多少个“快速成功”后停止派发新候选（已在飞的照常跑完）。完整测速不早停。 */
             stopAfterQualified: Int = 2,
+            /**
+             * 后台补测的单轮派发上限。到达上限后不再取新候选，已在飞的跑完即返回，
+             * 这样每轮都会把已完成的端点落盘，退出/被杀最多丢一小段进度。
+             */
+            stopAfterDispatched: Int = Int.MAX_VALUE,
             /** 本轮是否把候选全部测完（没有任何因早停/预算/冷却而剩余的候选）。 */
             onExhausted: (Boolean) -> Unit = {},
             onUsable: (suspend (T, R) -> Unit)? = null,
@@ -402,17 +407,19 @@ internal object AdaptiveSpeedProbe {
                         val candidate = synchronized(guard) {
                             // 停止派发（不再取新候选，已在飞的照常跑完）：
                             // - 候选耗尽；
+                            // - 达到后台补测的单轮派发上限（先落盘这一段，再开下一轮）；
                             // - 快测拿到 stopAfterQualified 个“快速成功”（前台/后台同一规则，快测必须快）；
                             // - 快测预算到点（剩下的留给下一轮 carry-over 补测）。
                             // 完整测速永不早停，把全部候选测完。
-                            val stopDispatching = ordered.isEmpty() ||
+                            val dispatchLimitReached = dispatched >= stopAfterDispatched
+                            val stopDispatching = ordered.isEmpty() || dispatchLimitReached ||
                                 (quick && (good >= stopAfterQualified || remaining() <= 0L))
                             if (stopDispatching) {
                                 if (inFlight > 0) {
                                     waitFor = changed
                                     null
                                 } else if (
-                                    !explorationOnly && quick && ordered.isNotEmpty() &&
+                                    !explorationOnly && !dispatchLimitReached && quick && ordered.isNotEmpty() &&
                                     remaining() > 0L && good < stopAfterQualified &&
                                     ordered.all { (it.allTimes?.cooldownUntil ?: 0L) > now() }
                                 ) {

@@ -550,10 +550,23 @@ object RouteManager {
         }.toMap()
     }
 
+    /**
+     * True only when the active scope already holds a complete, current-generation result set.
+     * The background sweep uses this to avoid restarting a finished full pass after app restarts.
+     */
+    internal fun hasCompletedSpeedTestSnapshot(): Boolean {
+        val snapshot = completedSpeedTestSnapshot.value
+        return snapshot.isComplete &&
+            snapshot.remoteVersion == activeRemoteConfigVersion &&
+            snapshot.configFingerprint == currentSpeedTestConfigFingerprint() &&
+            snapshot.networkPath == currentNetworkPath() &&
+            snapshot.lineUntestedEndpoints.isEmpty() &&
+            snapshot.imageUntestedEndpoints.isEmpty()
+    }
+
     /** Read version-only history; migrate the legacy complete snapshot on first use. */
     @Synchronized
-    fun speedTestHistoryForVersion(version: Int?): SpeedTestSnapshot? {
-        val prefs = scopedRoutePreferences() ?: return null
+    fun speedTestHistoryForVersion(version: Int?): SpeedTestSnapshot? {        val prefs = scopedRoutePreferences() ?: return null
         val rawHistory = prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)
         val decoded = if (rawHistory != null) {
             runCatching { decodeVersionSpeedTestHistory(rawHistory) }.getOrNull()

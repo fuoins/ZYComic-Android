@@ -174,6 +174,51 @@ object SpeedTester {
         }
     }
 
+    /**
+     * 后台补测把已落盘的历史测量合并进最终快照时，需要满足完整快照的诊断校验。
+     * 历史里只保留了延迟，没有原始 attempt 细节；这里用最小安全字段重建一条“已测”诊断。
+     */
+    private fun syntheticLineDiagnostic(delayMs: Long): SpeedTestEndpointDiagnostic {
+        val success = delayMs < MAX
+        return SpeedTestEndpointDiagnostic(
+            success = success,
+            latencyMs = delayMs.takeIf { success },
+            elapsedMs = delayMs,
+            failureCategory = null,
+            attempts = listOf(
+                SpeedTestProbeAttempt(
+                    probe = "line_api",
+                    success = success,
+                    elapsedMs = delayMs,
+                    httpStatus = null,
+                    contentType = null,
+                    failureCategory = null,
+                ),
+            ),
+        )
+    }
+
+    private fun syntheticImageDiagnostic(delayMs: Long, verdict: ImgVerdict): SpeedTestEndpointDiagnostic {
+        val success = delayMs < MAX
+        return SpeedTestEndpointDiagnostic(
+            success = success,
+            latencyMs = delayMs.takeIf { success },
+            elapsedMs = delayMs,
+            failureCategory = null,
+            imageVerdict = verdict.name.lowercase(java.util.Locale.ROOT),
+            attempts = listOf(
+                SpeedTestProbeAttempt(
+                    probe = "fixed_cover",
+                    success = success,
+                    elapsedMs = delayMs,
+                    httpStatus = null,
+                    contentType = null,
+                    failureCategory = null,
+                ),
+            ),
+        )
+    }
+
     /** 图域探活结论，用于把"连不上"和"连上了但拿不到图"分开——UI 上一律显示"超时"会掩盖两种完全不同的问题。 */
     enum class ImgVerdict { OK, UNREACHABLE, NO_IMAGE }
 
@@ -847,6 +892,8 @@ object SpeedTester {
         onStageProgress: ((Progress) -> Unit)? = null,
         reuseLines: Boolean = false,
         allowImageReuse: Boolean = false,
+        /** Low-priority background completion: reuse persisted results and only probe missing endpoints. */
+        sweep: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         reconcileConfig: Boolean = false,
@@ -919,17 +966,20 @@ object SpeedTester {
             val timings = SpeedTestTimingLog.start(SpeedTestTimingLog.Scope.MANWA)
             try {
                 // A new run must not expose last-run successes as currently healthy while fresh probes are pending.
-                RouteManager.clearSpeedTestResults()
+                // 后台补测相反：它就是要沿用已落盘结果，只补未测端点，不能先把可见结果清空。
+                if (!sweep) RouteManager.clearSpeedTestResults()
                 val linePreparationTiming = timings.start(SpeedTestTimings.Phase.LINE_PREPARATION)
                 // 阶段 1：逐条线路域名/IP探测，签名+解密分类接口验证。
-                val quickLineRetest = reuseLines
-                val quickImageRetest = allowImageReuse
+                val quickLineRetest = reuseLines || sweep
+                val quickImageRetest = allowImageReuse || sweep
                 val preparedLineTargets = adaptiveSession.prepareBlocking(quickLineRetest) { lineTargets() }
                 val preparedImageTargets = adaptiveSession.prepareBlocking(quickImageRetest) { imgTargets() }
                 val currentLineTargets = preparedLineTargets.orEmpty()
                 // Image preparation shares the quick-run budget, but timing out DNS preparation must not turn a full image pass into zero probes.
                 // Re-enumerate without the probe deadline; the later two-stage runner still drains every discovered candidate.
                 val currentImageTargets = preparedImageTargets ?: imgTargets()
+                val currentLineEndpoints = currentLineTargets.mapTo(linkedSetOf()) { it.endpoint }
+                val currentImageEndpointSet = currentImageTargets.toSet()
                 fun identity(endpoint: DomainIp, type: String, request: String, probe: String): String {
                     val routes = RouteManager.customRule.entries.firstOrNull { it.key.equals(endpoint.domain, true) }
                         ?.value.orEmpty()
@@ -950,6 +1000,19 @@ object SpeedTester {
                 }
                 val imageIdentities = currentImageTargets.associate { endpoint ->
                     endpoint to identity(endpoint, "image", "https://${endpoint.domain}$PROBE_COVER_PATH", "image-range-128-fallback-v2")
+                }
+                // 后台补测从持久化历史续跑：只认当前配置/网络路径/域名/IP 完全一致的端点。
+                val sweepHistory = if (sweep) RouteManager.speedTestHistoryForVersion(configVersionAtStart) else null
+                val sweepPriorLines = sweepHistory?.lineDelays.orEmpty().filterKeys { endpoint ->
+                    endpoint in currentLineEndpoints && sweepHistory?.lineIdentities?.get(endpoint) == lineIdentities[endpoint]
+                }
+                val sweepPriorImages = sweepHistory?.imgDelays.orEmpty().filterKeys { endpoint ->
+                    endpoint in currentImageEndpointSet && sweepHistory?.imageIdentities?.get(endpoint) == imageIdentities[endpoint]
+                }
+                val sweepPriorImageVerdicts = sweepHistory?.imgVerdicts.orEmpty().filterKeys { it in sweepPriorImages }
+                val sweepPriorLineDiagnostics = sweepPriorLines.mapValues { (_, delay) -> syntheticLineDiagnostic(delay) }
+                val sweepPriorImageDiagnostics = sweepPriorImages.mapValues { (endpoint, delay) ->
+                    syntheticImageDiagnostic(delay, sweepPriorImageVerdicts[endpoint] ?: ImgVerdict.UNREACHABLE)
                 }
                 fun lineKey(target: LineTarget): String =
                     "${target.endpoint.domain}|${target.endpoint.ip}|" +
@@ -993,8 +1056,13 @@ object SpeedTester {
                 val imageStageNotified = AtomicBoolean(false)
                 // The runner owns scheduling history and never synthesizes current outcomes from it.
                 // Candidate order remains configured/DNS order.
-                val lineProbeTargets = currentLineTargets
-                val retainedLineCount = 0
+                // 后台补测只派发尚未落盘的端点；已测端点作为“已复用”结果参与最终快照。
+                val lineProbeTargets = if (sweep) {
+                    currentLineTargets.filterNot { it.endpoint in sweepPriorLines }
+                } else {
+                    currentLineTargets
+                }
+                val retainedLineCount = if (sweep) sweepPriorLines.size else 0
                 linePreparationTiming.close()
                 val lineTiming = timings.start(SpeedTestTimings.Phase.LINES)
                 reportStage(Progress(Phase.TESTING_LINES, total = lineProbeTargets.size, reusedLines = retainedLineCount))
@@ -1053,7 +1121,9 @@ object SpeedTester {
                             }
                         },
                         // 快测：放行（进入主界面）后仍在后台继续补测，直到 8 个快速成功或预算耗尽；不做全量。
-                        stopAfterQualified = if (quickLineRetest) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                        // 后台补测：不早停，只受单轮派发上限约束，跑完一小段就落盘。
+                        stopAfterQualified = if (quickLineRetest && !sweep) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                        stopAfterDispatched = if (sweep) BackgroundSpeedTestSweep.CHUNK_SIZE else Int.MAX_VALUE,
                         onExhausted = { drained -> if (runIsCurrent()) lineDrainedAll.set(drained) },
                     ) { target ->
                         val outcome = if (runIsCurrent()) {
@@ -1077,7 +1147,7 @@ object SpeedTester {
                                     successful = successful,
                                     failed = freshLineAcc.size - successful,
                                     reusedLines = retainedLineCount,
-                                    lineQuickTest = quickLineRetest,
+                                    lineQuickTest = quickLineRetest && !sweep,
                                 ),
                             )
                         }
@@ -1110,10 +1180,14 @@ object SpeedTester {
                 val freshVerdictAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, ImgVerdict>()
                 val imageDiagnosticAcc = java.util.concurrent.ConcurrentHashMap<DomainIp, SpeedTestEndpointDiagnostic>()
                 val freshImageCount = AtomicInteger(0)
-                val reusedImageCount = AtomicInteger(0)
+                val reusedImageCount = AtomicInteger(if (sweep) sweepPriorImages.size else 0)
                 val imagePreparationTiming = timings.start(SpeedTestTimings.Phase.IMAGE_PREPARATION)
                 reportStage(Progress(Phase.PREPARING_IMAGES))
-                val imageProbeTargets = currentImageTargets
+                val imageProbeTargets = if (sweep) {
+                    currentImageTargets.filterNot { it in sweepPriorImages }
+                } else {
+                    currentImageTargets
+                }
                 reportStage(
                     Progress(
                         Phase.TESTING_IMAGES,
@@ -1121,8 +1195,8 @@ object SpeedTester {
                         reusedImages = reusedImageCount.get(),
                         freshImages = 0,
                         reusedLines = retainedLineCount,
-                        lineQuickTest = quickLineRetest,
-                        imageQuickTest = quickImageRetest,
+                        lineQuickTest = quickLineRetest && !sweep,
+                        imageQuickTest = quickImageRetest && !sweep,
                     ),
                 )
                 imagePreparationTiming.close()
@@ -1173,7 +1247,8 @@ object SpeedTester {
                             }
                         }
                     },
-                    stopAfterQualified = if (quickImageRetest) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                    stopAfterQualified = if (quickImageRetest && !sweep) QUICK_FILL_TARGET else Int.MAX_VALUE,
+                    stopAfterDispatched = if (sweep) BackgroundSpeedTestSweep.CHUNK_SIZE else Int.MAX_VALUE,
                     onExhausted = { drained -> if (runIsCurrent()) imageDrainedAll.set(drained) },
                 ) { endpoint ->
                     val result = if (runIsCurrent()) {
@@ -1213,8 +1288,8 @@ object SpeedTester {
                                 freshImages = freshImageCount.get(),
                                 reusedImages = reusedImageCount.get(),
                                 reusedLines = retainedLineCount,
-                                lineQuickTest = quickLineRetest,
-                                imageQuickTest = quickImageRetest,
+                                lineQuickTest = quickLineRetest && !sweep,
+                                imageQuickTest = quickImageRetest && !sweep,
                             ),
                         )
                     }
@@ -1227,10 +1302,15 @@ object SpeedTester {
                     return@coroutineScope (-1 to -1)
                 }
                 val freshLines = freshLineAcc.toMap()
-                val lines = freshLines
-                val lineDiagnostics = freshLineOutcomes.mapValues { it.value.toLineDiagnostic() }
-                val lineQuickAllFailed = quickLineRetest && freshLines.isNotEmpty() && freshLines.values.all { it >= MAX }
-                if (quickLineRetest && lineResults.any { it.second.delayMs < MAX }) {
+                val lines = if (sweep) sweepPriorLines + freshLines else freshLines
+                val lineDiagnostics = if (sweep) {
+                    sweepPriorLineDiagnostics + freshLineOutcomes.mapValues { it.value.toLineDiagnostic() }
+                } else {
+                    freshLineOutcomes.mapValues { it.value.toLineDiagnostic() }
+                }
+                val lineQuickAllFailed = !sweep && quickLineRetest && freshLines.isNotEmpty() &&
+                    freshLines.values.all { it >= MAX }
+                if (!sweep && quickLineRetest && lineResults.any { it.second.delayMs < MAX }) {
                     val measured = lineResults.mapTo(hashSetOf()) { it.first.endpoint }
                     adaptiveSession.deferExploration(
                         scope = "MANWA:line",
@@ -1253,7 +1333,7 @@ object SpeedTester {
                         }
                     }
                 }
-                val bestLine = fastestCurrentEndpoint(freshLines)
+                val bestLine = fastestCurrentEndpoint(lines)
                 val bestLineIndex = bestLine?.let { endpoint ->
                     RouteManager.lineHosts.indexOfFirst { lineDomain(it).equals(endpoint.domain, ignoreCase = true) }
                 }?.takeIf { it >= 0 }
@@ -1277,12 +1357,12 @@ object SpeedTester {
                         successful = freshLines.values.count { it < MAX },
                         failed = freshLines.size - freshLines.values.count { it < MAX },
                         reusedLines = retainedLineCount,
-                        lineQuickTest = quickLineRetest,
+                        lineQuickTest = quickLineRetest && !sweep,
                     ),
                 )
                 Log.i(TAG, "line test done, best=$bestLine")
                 if (!runIsCurrent()) return@coroutineScope (-1 to -1)
-                if (quickImageRetest && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < MAX }) {
+                if (!sweep && quickImageRetest && imageResults.any { it.second.verdict == ImgVerdict.OK && it.second.delayMs < MAX }) {
                     val measured = imageResults.mapTo(hashSetOf()) { it.first }
                     adaptiveSession.deferExploration(
                         scope = "MANWA:image",
@@ -1308,14 +1388,19 @@ object SpeedTester {
                 }
                 imageTiming.close()
                 val freshImages = imageDiagnosticAcc.keys.associateWith { imgAcc.getValue(it) }
-                val imgs = freshImages
-                val imageDiagnostics = imageDiagnosticAcc.toMap()
-                val imageQuickAllFailed = quickImageRetest && freshImages.isNotEmpty() &&
+                val imgs = if (sweep) sweepPriorImages + freshImages else freshImages
+                val imageDiagnostics = if (sweep) {
+                    sweepPriorImageDiagnostics + imageDiagnosticAcc
+                } else {
+                    imageDiagnosticAcc.toMap()
+                }
+                val effectiveVerdicts = if (sweep) sweepPriorImageVerdicts + verdictAcc else verdictAcc.toMap()
+                val imageQuickAllFailed = !sweep && quickImageRetest && freshImages.isNotEmpty() &&
                     freshImages.keys.all { verdictAcc[it] != ImgVerdict.OK }
-                val fullRetestRecommended = (lineQuickAllFailed && quickLineRetest) || imageQuickAllFailed
+                val fullRetestRecommended = !sweep && ((lineQuickAllFailed && quickLineRetest) || imageQuickAllFailed)
                 if (!runIsCurrent()) return@coroutineScope (-1 to -1)
-                lastImgIpVerdicts = verdictAcc.toMap()
-                lastImgVerdicts = aggregateImgVerdicts(verdictAcc)
+                lastImgIpVerdicts = effectiveVerdicts
+                lastImgVerdicts = aggregateImgVerdicts(effectiveVerdicts)
 
                 reportStage(
                     Progress(
@@ -1331,14 +1416,14 @@ object SpeedTester {
                         fullRetestRecommended = fullRetestRecommended,
                         lineTopFiveAllFailed = lineQuickAllFailed,
                         imageTopFiveAllFailed = imageQuickAllFailed,
-                        lineQuickTest = quickLineRetest,
-                        imageQuickTest = quickImageRetest,
+                        lineQuickTest = quickLineRetest && !sweep,
+                        imageQuickTest = quickImageRetest && !sweep,
                         lineDrainedAll = lineDrainedAll.get(),
                         imageDrainedAll = imageDrainedAll.get(),
                     ),
                 )
                 if (!runIsCurrent()) return@coroutineScope (-1 to -1)
-                val bestImg = fastestCurrentEndpoint(freshImages) { freshVerdictAcc[it] == ImgVerdict.OK }
+                val bestImg = fastestCurrentEndpoint(imgs) { effectiveVerdicts[it] == ImgVerdict.OK }
                 val imgApplied = bestImg?.let { endpoint ->
                     RouteManager.applyFastestImgEndpoint(
                         endpoint,
@@ -1353,16 +1438,22 @@ object SpeedTester {
                 RouteManager.markSpeedTestToday()
 
                 val completedAt = System.currentTimeMillis()
-                val lineUntestedEndpoints = lineProbeTargets.mapTo(linkedSetOf()) { it.endpoint } - lines.keys
-                val imageUntestedEndpoints = imageProbeTargets.toSet() - imgs.keys
-                val completeSnapshot = preparedLineTargets != null &&
+                val lineUntestedEndpoints = currentLineEndpoints - lines.keys
+                val imageUntestedEndpoints = currentImageEndpointSet - imgs.keys
+                // 后台补测只有把“当前配置的全部端点”都覆盖后才算完整，不能因准备超时/空候选误判完成。
+                val coverageKnown = if (sweep) {
+                    currentLineTargets.isNotEmpty() && currentImageTargets.isNotEmpty()
+                } else {
+                    preparedLineTargets != null
+                }
+                val completeSnapshot = coverageKnown &&
                     lineUntestedEndpoints.isEmpty() && imageUntestedEndpoints.isEmpty() &&
                     lineDiagnostics.keys == lines.keys && imageDiagnostics.keys == imgs.keys &&
-                    verdictAcc.keys == imgs.keys
+                    effectiveVerdicts.keys == imgs.keys
                 if (!RouteManager.setEndpointDelays(
                         line = lines,
                         img = imgs,
-                        imgVerdicts = verdictAcc,
+                        imgVerdicts = effectiveVerdicts,
                         remoteVersion = configVersionAtStart,
                         expectedConfigRevision = configRevisionAtStart,
                         lineDiagnostics = lineDiagnostics,
@@ -1375,6 +1466,16 @@ object SpeedTester {
                         imageCacheNetworkIdentity = networkIdentityAtStart,
                         lineUntestedEndpoints = lineUntestedEndpoints,
                         imageUntestedEndpoints = imageUntestedEndpoints,
+                        lineMeasuredAtEpochMs = if (sweep) {
+                            sweepHistory?.lineMeasuredAtEpochMs.orEmpty().filterKeys { it in lines }
+                        } else {
+                            emptyMap()
+                        },
+                        imageMeasuredAtEpochMs = if (sweep) {
+                            sweepHistory?.imageMeasuredAtEpochMs.orEmpty().filterKeys { it in imgs }
+                        } else {
+                            emptyMap()
+                        },
                         lineIdentities = lineIdentities,
                         imageIdentities = imageIdentities,
                     )
@@ -1406,12 +1507,12 @@ object SpeedTester {
                 lastConfigRunResult = result
                 val roundSelectedLine = SpeedTestLogSelectionPolicy.selectedEndpoint(
                     RouteManager.selectedLineIp?.let { ip -> lineDomain(RouteManager.baseUrl)?.let { DomainIp(it, ip) } },
-                    freshLines.keys,
-                ) { endpoint -> freshLines[endpoint]?.let { it >= 0L && it < MAX } == true }
+                    lines.keys,
+                ) { endpoint -> lines[endpoint]?.let { it >= 0L && it < MAX } == true }
                 val roundSelectedImage = SpeedTestLogSelectionPolicy.selectedEndpoint(
                     RouteManager.selectedImgIp?.let { DomainIp(RouteManager.imgRewriteTarget ?: RouteManager.imgHost, it) },
-                    freshImages.keys,
-                ) { endpoint -> freshImages[endpoint]?.let { it >= 0L && it < MAX } == true && freshVerdictAcc[endpoint] == ImgVerdict.OK }
+                    imgs.keys,
+                ) { endpoint -> imgs[endpoint]?.let { it >= 0L && it < MAX } == true && effectiveVerdicts[endpoint] == ImgVerdict.OK }
                 reportStage(
                     Progress(
                         phase = Phase.COMPLETE,
@@ -1426,13 +1527,13 @@ object SpeedTester {
                         fullRetestRecommended = fullRetestRecommended,
                         lineTopFiveAllFailed = lineQuickAllFailed,
                         imageTopFiveAllFailed = imageQuickAllFailed,
-                        lineQuickTest = quickLineRetest,
-                        imageQuickTest = quickImageRetest,
+                        lineQuickTest = quickLineRetest && !sweep,
+                        imageQuickTest = quickImageRetest && !sweep,
                         roundSelectedLine = roundSelectedLine,
                         roundSelectedImage = roundSelectedImage,
                     ),
                 )
-                if (quickLineRetest || quickImageRetest) AdaptiveSpeedHistory.launchExploration(adaptiveSession)
+                if (!sweep && (quickLineRetest || quickImageRetest)) AdaptiveSpeedHistory.launchExploration(adaptiveSession)
                 result
             } finally {
                 samplePath?.cancel()
