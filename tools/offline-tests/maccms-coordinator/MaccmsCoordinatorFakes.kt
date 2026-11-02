@@ -19,6 +19,39 @@ object NetworkModule {
     fun shouldUseDirectStrategy() = direct
 }
 
+enum class NetworkScope(val storageKey: String) {
+    DIRECT("direct"),
+    VPN("vpn"),
+    ;
+
+    val displayName: String get() = if (this == VPN) "VPN" else "直连"
+}
+
+enum class SpeedTestTimeSlot(val storageKey: String, val displayName: String) {
+    DAY("day", "06:00-18:00"),
+    NIGHT("night", "18:00-06:00"),
+}
+
+internal object SpeedTestStorage {
+    const val TIME_SLOT_MIGRATED_KEY = "speed_test_time_slot_storage_v1"
+    fun bucketKey(scope: NetworkScope, slot: SpeedTestTimeSlot = SpeedTestTimeSlot.DAY): String =
+        if (scope == NetworkScope.VPN) scope.storageKey else "${scope.storageKey}_${slot.storageKey}"
+    fun displayName(scope: NetworkScope, slot: SpeedTestTimeSlot): String =
+        if (scope == NetworkScope.VPN) scope.displayName else "${scope.displayName} · ${slot.displayName}"
+}
+
+object NetworkScopeController {
+    val current = NetworkScope.DIRECT
+    val activeTimeSlot = SpeedTestTimeSlot.DAY
+    val bucketDisplayName get() = SpeedTestStorage.displayName(current, activeTimeSlot)
+}
+
+object BackgroundSpeedTestSweep {
+    const val CHUNK_SIZE = 12
+    fun pendingPlatforms(): List<ContentPlatform> = emptyList()
+    fun progressSignature(): String = ""
+}
+
 object RouteManager {
     var configRevision = 0L
     var baseUrl = "https://manwa.test"
@@ -32,6 +65,7 @@ object RouteManager {
     var lastLineIpDelays: Map<DomainIp, Long> = emptyMap()
     var lastImgIpDelays: Map<DomainIp, Long> = emptyMap()
     var activeRemoteConfigVersion: Int? = 17
+    fun hasCompletedSpeedTestSnapshot() = true
 }
 
 object PicacgRouteManager {
@@ -117,6 +151,7 @@ object SpeedTester {
         onProgress: ((Map<DomainIp, Long>, Map<DomainIp, Long>, Map<DomainIp, ImgVerdict>) -> Unit)? = null,
         reuseLines: Boolean = false,
         allowImageReuse: Boolean = false,
+        sweep: Boolean = false,
         reconcileConfig: Boolean = true,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
@@ -155,6 +190,8 @@ object SpeedTester {
         }
         return 0 to 0
     }
+
+    fun reuseValidResults(): Boolean = false
 }
 
 object PicacgSpeedTester {
@@ -181,6 +218,7 @@ object PicacgSpeedTester {
         val apiComplete get() = apiProbes.isNotEmpty()
         val imageComplete get() = imageProbes.isNotEmpty()
         val complete get() = apiComplete && imageComplete
+        val drainedAll get() = complete
     }
     val snapshot = MutableStateFlow<Snapshot?>(null)
     val progress = MutableStateFlow<Progress?>(null)
@@ -305,6 +343,8 @@ object PicacgSpeedTester {
     }
 
     fun exportJson(snapshot: Snapshot) = "{}"
+
+    fun reusePersistedResults(): Boolean = false
 }
 
 data class JmSpeedTestProgress(
@@ -350,6 +390,7 @@ object JmSpeedTester {
     suspend fun run(
         reuseLines: Boolean = false,
         reuseImages: Boolean = false,
+        sweep: Boolean = false,
         reconcileConfig: Boolean = true,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
@@ -405,6 +446,8 @@ object JmSpeedTester {
         }
         return RunResult(result, submission)
     }
+
+    fun reuseValidResults(): Boolean = false
 }
 
 data class JmSpeedTestRunIdentity(

@@ -45,6 +45,10 @@ object PlatformSpeedTestCoordinator {
     fun currentNetworkIdentity(): String = "manwa-offline-tests"
 }
 
+object BackgroundSpeedTestSweep {
+    const val CHUNK_SIZE = 12
+}
+
 object ManwaProbeFixture {
     @Volatile var delaysByDomain: Map<String, Long> = emptyMap()
     @Volatile var invalidFixedImages = false
@@ -115,6 +119,7 @@ object NetworkModule {
     fun rebindImageRoute(reason: String) = Unit
     fun rebuild(reason: String) = Unit
     fun isSystemVpnActive(): Boolean = false
+    fun shouldUseDirectStrategy(): Boolean = true
     fun validateApiEndpoint(endpoint: DomainIp): Boolean = true
     class CookieJar { fun syncToAllLines() = Unit }
     class ProbeApi {
