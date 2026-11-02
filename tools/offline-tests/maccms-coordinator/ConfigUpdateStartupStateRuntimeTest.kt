@@ -65,6 +65,9 @@ class ConfigUpdateStartupStateRuntimeTest {
             }
         }
         val startup = async { PlatformSpeedTestCoordinator.awaitStartup() }
+        // 与 App 启动一致：已有本地路由时先放行配置门控，快测立即开始；
+        // 权威配置检查随后完成并可触发新代通知。
+        PlatformSpeedTestCoordinator.finishStartupConfigCheck(false)
         withTimeout(5_000) { entered.await() }
         DevConfig.version += 1
         PicacgRouteManager.remoteVersion = DevConfig.version
