@@ -189,7 +189,7 @@ jobs:
           "$AAPT" dump badging "$OUT" > "$RUNNER_TEMP/apk-badging.txt"
           grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "versionName='${{ steps.t.outputs.ver }}'" "$RUNNER_TEMP/apk-badging.txt"
-          grep -q "versionCode='16'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='17'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "package: name='com.zycomic.app'" "$RUNNER_TEMP/apk-badging.txt"
           grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/apk-badging.txt"
           test -s app/build/outputs/mapping/release/mapping.txt
@@ -208,25 +208,27 @@ jobs:
         if: ${{ !inputs.validate_only }}
         run: |
           cat > notes.md <<'EOF'
-          ZYComic 7.0.0
+          ZYComic 7.1.0
 
-          本次更新（相对 6.0.0）
-          - 背景图分「暗色 / 亮色」两套独立配置：全局自定义图、分页自定义图、随机图源互不干扰；
-            设置页顶部用分段控件切换，默认定位到当前系统模式。
-          - 暗色模式新增内置星空默认背景；亮色模式沿用原默认背景。
-          - 修复透明度降低时默认背景透出来的问题：背景层改为「纯色底 + 一张图」，
-            透明度低于 100% 时，暗色露出纯黑、亮色露出纯白，不再混入默认图或主题色。
-          - 透明度范围放宽到 0%–100%（原下限 30%）。
-          - 更换背景图时文件名带模式与时间戳，重选同一页不再显示上一张的缓存。
-          - 旧版自定义背景在升级后自动迁移到两套配置，不会丢失。
-          - 测速快测补测目标统一对齐 8 个快速成功；若干界面细节与稳定性修正。
+          本次更新（相对 7.0.0）
+          - 直连与 VPN 的测速结果、线路与图源选择完全分离：VPN 只按域名探测并保留 SNI，
+            不再要求单域名多 IP；切换 VPN 不再自动触发测速。
+          - 阅读器线路/图源切换会按当前网络作用域（直连 / VPN）展示各自的结果与选择，
+            修复 JM 在 VPN 下测速日志为空、阅读器图源显示全不可用的问题。
+          - 直连测速记录按 06:00-18:00 / 18:00-06:00 两个时段独立保存，跨时段自动切换记录
+            且不触发测速；VPN 仍使用单一记录，不分时段。
+          - 首次安装保留现有的快速选择，完整测速在后台分块继续；退出后再次打开会从断点
+            继续补测未完成的线路。
+          - 切换暗色/亮色主题不再触发测速。
+          - 修复哔咔切换作用域后仍沿用上一作用域的选择与排名、VPN 空 IP 展示，以及 JM 旧
+            VPN 快照残留等问题。
 
           构建与安装
           - 正式 Release 签名包，开启 R8 代码压缩与资源压缩（shrinkResources）。
-          - 版本：7.0.0（versionCode 16），正式包名 com.zycomic.app。
+          - 版本：7.1.0（versionCode 17），正式包名 com.zycomic.app。
           - 需要 Android 8.0（API 26）或更高版本，仅支持 arm64-v8a（64 位 ARM 设备）。
           - 调试版使用独立包名 com.zycomic.app.dev。
-          - 可直接覆盖安装 6.0.0 及更早的正式签名版本，数据保留。
+          - 可直接覆盖安装 7.0.0 及更早的正式签名版本，数据保留。
 
           开源许可
           - 保留上游项目及依赖项各自的版权与许可声明。

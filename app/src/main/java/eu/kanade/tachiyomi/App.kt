@@ -437,8 +437,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             try {
                 if (com.zycomic.app.net.NetworkScopeController.needsSync()) {
                     com.zycomic.app.net.PlatformSpeedTestCoordinator.cancelBackgroundSweep()
-                    val transportChanged = com.zycomic.app.net.NetworkScopeController.current !=
-                        com.zycomic.app.net.NetworkScope.current()
+                    val targetScope = com.zycomic.app.net.NetworkScope.current()
+                    val transportChanged = com.zycomic.app.net.NetworkScopeController.current != targetScope
                     val bucketChanged = com.zycomic.app.net.NetworkScopeController.sync()
                     if (transportChanged) {
                         com.zycomic.app.net.NetworkModule.onVpnOrNetworkChanged(reason)
