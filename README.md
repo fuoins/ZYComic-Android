@@ -110,17 +110,17 @@
 
 ## 下载
 
-**最新版本 v7.0.0**（2026-10-31）· 约 41.7 MB · 仅 64 位 ARM 设备
+**最新版本 v7.1.0**（2026-11-02）· 约 41.7 MB · 仅 64 位 ARM 设备
 
 | 文件 | 适用设备 | 大小 |
 | :--- | :--- | ---: |
-| [ZYComic-7.0.0-arm64-v8a.apk](https://github.com/fuoins/ZYComic-Android/releases/download/v7.0.0/ZYComic-7.0.0-arm64-v8a.apk) | Android 8.0+ · arm64-v8a | 41.7 MB |
+| [ZYComic-7.1.0-arm64-v8a.apk](https://github.com/fuoins/ZYComic-Android/releases/download/v7.1.0/ZYComic-7.1.0-arm64-v8a.apk) | Android 8.0+ · arm64-v8a | 41.7 MB |
 
 1. 下载 APK 到手机；
 2. 在浏览器或文件管理器中允许「安装未知应用」；
 3. 安装后首次启动会进行线路与图源测速，等待完成即可开始阅读。
 
-> 正式包使用 release 签名。若此前装过未签名的测试版（同包名 `com.zycomic.app`），请先卸载再安装。调试版 `com.zycomic.app.dev` 使用独立包名，可共存。
+> 正式包使用 release 签名，可直接覆盖安装 7.0.0 及更早版本，应用数据保留。若此前装过未签名的测试版（同包名 `com.zycomic.app`），请先卸载再安装。调试版 `com.zycomic.app.dev` 使用独立包名，可共存。
 
 ## 从源码构建
 
