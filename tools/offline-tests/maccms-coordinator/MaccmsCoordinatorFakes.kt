@@ -252,6 +252,7 @@ object PicacgSpeedTester {
         fastImages: Boolean = false,
         reconcileConfig: Boolean = true,
         forceFresh: Boolean = false,
+        sweep: Boolean = false,
         isCurrent: () -> Boolean = { true },
         beforeApply: suspend () -> Boolean = { true },
         onQualifiedEndpoint: (() -> Unit)? = null,
