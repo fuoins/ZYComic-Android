@@ -17,6 +17,40 @@ object DevConfig {
 object NetworkModule {
     @JvmStatic var systemVpnActive: Boolean = false
     fun isSystemVpnActive(): Boolean = systemVpnActive
+    fun shouldUseDirectStrategy(): Boolean = !systemVpnActive
+}
+
+enum class NetworkScope(val storageKey: String, val displayName: String) {
+    DIRECT("direct"),
+    VPN("vpn"),
+    ;
+
+    companion object {
+        fun current(): NetworkScope = if (NetworkModule.shouldUseDirectStrategy()) DIRECT else VPN
+    }
+}
+
+enum class SpeedTestTimeSlot(val storageKey: String, val displayName: String) {
+    DAY("day", "06:00-18:00"),
+    NIGHT("night", "18:00-06:00"),
+    ;
+
+    companion object {
+        fun current(): SpeedTestTimeSlot = DAY
+        fun millisUntilNextBoundary(): Long = 1_000L
+    }
+}
+
+internal object SpeedTestStorage {
+    const val TIME_SLOT_MIGRATED_KEY = "speed_test_time_slot_storage_v1"
+    fun bucketKey(scope: NetworkScope, slot: SpeedTestTimeSlot = SpeedTestTimeSlot.current()): String =
+        if (scope == NetworkScope.VPN) scope.storageKey else "${scope.storageKey}_${slot.storageKey}"
+    fun displayName(scope: NetworkScope, slot: SpeedTestTimeSlot): String =
+        if (scope == NetworkScope.VPN) scope.displayName else "${scope.displayName} · ${slot.displayName}"
+}
+
+object BackgroundSpeedTestSweep {
+    const val CHUNK_SIZE = 12
 }
 
 object JmNetworkModule {
