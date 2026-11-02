@@ -592,7 +592,7 @@ object PicacgRouteManager {
         val domainOnly = !NetworkModule.shouldUseDirectStrategy()
         fun valid(ranking: List<DomainIp>): List<DomainIp> = ranking
             .filter { ep ->
-                (domainOnly && ep.ip.isBlank() || isIpv4Literal(ep.ip)) &&
+                ((domainOnly && ep.ip.isBlank()) || isIpv4Literal(ep.ip)) &&
                     current.imageHosts.any { it.equals(ep.domain, true) } &&
                     (ep.ip.isBlank() || imageRouteRules.entries.firstOrNull { it.key.equals(ep.domain, true) }?.value?.contains(ep.ip) == true)
             }
