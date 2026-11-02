@@ -45,7 +45,7 @@ def source_contracts() -> None:
         for contract in ("isCurrent =", "beforeApply ="):
             if contract not in text:
                 raise AssertionError(f"Maccms coordinator call is missing {contract}")
-        if "onApiPublished = { endpoint -> publishMaccmsRoute(endpoint?.ip) }" not in text:
+        if "publishMaccmsRoute(endpoint?.ip)" not in text or "onApiPublished = if (backgroundSweep)" not in text:
             raise AssertionError("Maccms must consume the formally published current-round API selection")
         if "publishMaccmsRoute(null)" not in text or "MaccmsSpeedTester.invalidateLines3Ip()" not in text:
             raise AssertionError("Missing current-run invalidation or no-IP path")
