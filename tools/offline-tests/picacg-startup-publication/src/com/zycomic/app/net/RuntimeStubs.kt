@@ -30,3 +30,7 @@ object SpeedTestProbeBudget {
 object PlatformSpeedTestCoordinator {
     fun currentNetworkIdentity(): String = "offline-test-network"
 }
+
+object NetworkModule {
+    fun shouldUseDirectStrategy(): Boolean = true
+}

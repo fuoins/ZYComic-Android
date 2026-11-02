@@ -42,6 +42,18 @@ object PicacgRouteManager {
     @Volatile var selectedImageEndpoint: DomainIp? = null
         private set
 
+    @Volatile var networkScope: NetworkScope = NetworkScope.DIRECT
+
+    @Volatile var timeSlot: SpeedTestTimeSlot = SpeedTestTimeSlot.DAY
+
+    internal val storageBucketKey: String
+        get() = SpeedTestStorage.bucketKey(networkScope, timeSlot)
+
+    internal fun snapshotPreferences() = DevConfig.appContext?.getSharedPreferences(
+        "zycomic_picacg_route.$storageBucketKey",
+        android.content.Context.MODE_PRIVATE,
+    )
+
     val selectedApiHost: String?
         get() = selectedApiUrl?.let { URI(it).host } ?: apiUrls.firstOrNull()?.let { URI(it).host }
 
