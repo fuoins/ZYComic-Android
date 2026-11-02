@@ -105,6 +105,9 @@ class PicacgSpeedTestHistoryPolicyTest {
         ) { _, method, args ->
             when (method.name) {
                 "getString" -> valuesByFile[args!![0] as String] as? String ?: args[1] as String?
+                "getBoolean" -> valuesByFile[args!![0] as String] as? Boolean ?: args[1] as Boolean
+                "getAll" -> valuesByFile.toMap()
+                "contains" -> valuesByFile.containsKey(args!![0] as String)
                 "edit" -> Proxy.newProxyInstance(
                     SharedPreferences.Editor::class.java.classLoader,
                     arrayOf(SharedPreferences.Editor::class.java),
@@ -112,6 +115,14 @@ class PicacgSpeedTestHistoryPolicyTest {
                     when (editorMethod.name) {
                         "putString" -> {
                             valuesByFile[editorArgs!![0] as String] = editorArgs[1]
+                            editor
+                        }
+                        "putBoolean" -> {
+                            valuesByFile[editorArgs!![0] as String] = editorArgs[1]
+                            editor
+                        }
+                        "remove" -> {
+                            valuesByFile.remove(editorArgs!![0] as String)
                             editor
                         }
                         "apply" -> null

@@ -241,7 +241,8 @@ class ManwaConfigHistoryTest {
         expectedPlatformRevision = StartupPlatformPolicy.state.value.revision,
     )!!
 
-    private fun historyJson(): String = prefs.getString("version_speed_test_history_v1", null)!!
+    private fun historyJson(): String =
+        prefs.getString("version_speed_test_history_v1.${RouteManager.storageBucketKey}", null)!!
 
     private fun diagnostic(delay: Long, image: Boolean) = SpeedTestEndpointDiagnostic(
         success = true,

@@ -41,7 +41,7 @@ class ImageSourceDisplayPolicyTest {
         assertEquals(ImageSourceDisplayPolicy.Kind.SERVER_RECOMMENDED, current.kind)
         assertEquals("recommended.example", current.domain)
         assertNull(current.successfulEndpoint)
-        assertTrue(current.description().contains("IP未固定"))
+        assertTrue(current.description().contains("当前·服务端推荐：recommended.example"))
         assertFalse(current.matchesEndpoint(recommended))
     }
 
