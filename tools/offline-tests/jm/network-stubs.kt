@@ -20,10 +20,12 @@ object NetworkModule {
     fun shouldUseDirectStrategy(): Boolean = !systemVpnActive
 }
 
-enum class NetworkScope(val storageKey: String, val displayName: String) {
+enum class NetworkScope(val storageKey: String) {
     DIRECT("direct"),
     VPN("vpn"),
     ;
+
+    val displayName: String get() = if (this == VPN) "VPN" else "直连"
 
     companion object {
         fun current(): NetworkScope = if (NetworkModule.shouldUseDirectStrategy()) DIRECT else VPN
