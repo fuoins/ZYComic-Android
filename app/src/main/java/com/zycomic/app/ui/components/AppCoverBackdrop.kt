@@ -27,11 +27,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import eu.kanade.presentation.theme.LocalIsDarkTheme
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.size.Size
 import com.zycomic.app.platform.ContentPlatform
+import eu.kanade.presentation.theme.LocalIsDarkTheme
 
 /**
  * 全应用背景：按封面所属平台选择图片加载器（漫蛙走全局栈、哔咔/JM 走各自专用栈），

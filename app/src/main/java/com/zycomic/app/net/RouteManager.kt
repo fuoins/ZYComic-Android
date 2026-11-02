@@ -626,7 +626,8 @@ object RouteManager {
 
     /** Read version-only history; migrate the legacy complete snapshot on first use. */
     @Synchronized
-    fun speedTestHistoryForVersion(version: Int?): SpeedTestSnapshot? {        val prefs = scopedRoutePreferences() ?: return null
+    fun speedTestHistoryForVersion(version: Int?): SpeedTestSnapshot? {
+        val prefs = scopedRoutePreferences() ?: return null
         val rawHistory = prefs.getString(VERSION_SPEED_TEST_HISTORY_KEY, null)
         val decoded = if (rawHistory != null) {
             runCatching { decodeVersionSpeedTestHistory(rawHistory) }.getOrNull()

@@ -538,8 +538,11 @@ object PlatformSpeedTestCoordinator {
                                     ContentPlatform.PICACG -> "哔咔未开启"
                                     ContentPlatform.JM -> "禁漫天堂未开启"
                                 }
-                                val requested = if (backgroundSweep) platform in requiredPlatforms else
+                                val requested = if (backgroundSweep) {
+                                    platform in requiredPlatforms
+                                } else {
                                     onlyPlatform == null || onlyPlatform == platform
+                                }
                                 var picacgSnapshot: PicacgSpeedTester.Snapshot? = null
                                 var manwaLineProgress: SpeedTester.Progress? = null
                                 var manwaImageProgress: SpeedTester.Progress? = null
@@ -599,7 +602,9 @@ object PlatformSpeedTestCoordinator {
                                                 reconcileConfig = !forceFresh,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onStageUsable = if (backgroundSweep) null else {
+                                                onStageUsable = if (backgroundSweep) {
+                                                    null
+                                                } else {
                                                     { stage -> stageUsable(platform, stage) }
                                                 },
                                                 onStageProgress = if (backgroundSweep) {
@@ -654,7 +659,9 @@ object PlatformSpeedTestCoordinator {
                                                 sweep = backgroundSweep,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onStageUsable = if (backgroundSweep) null else {
+                                                onStageUsable = if (backgroundSweep) {
+                                                    null
+                                                } else {
                                                     { stage -> stageUsable(platform, stage) }
                                                 },
                                                 onApiPublished = if (backgroundSweep) {
@@ -720,7 +727,9 @@ object PlatformSpeedTestCoordinator {
                                                 sweep = backgroundSweep,
                                                 isCurrent = ::generationIsCurrent,
                                                 beforeApply = ::beforeApply,
-                                                onStageUsable = if (backgroundSweep) null else {
+                                                onStageUsable = if (backgroundSweep) {
+                                                    null
+                                                } else {
                                                     { stage -> stageUsable(platform, stage) }
                                                 },
                                             ) { progress ->

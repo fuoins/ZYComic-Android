@@ -535,8 +535,12 @@ object PicacgRouteManager {
         val index = current.apiUrls.indexOfFirst { hostOf(it).equals(hostOf(url), true) }
         val domainOnly = endpoint.ip.isBlank() && !NetworkModule.shouldUseDirectStrategy()
         if (index < 0 || !hostOf(current.apiUrls[index]).equals(endpoint.domain, true) ||
-            (!domainOnly && (!isIpv4Literal(endpoint.ip) ||
-                apiRouteRules.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true))
+            (
+                !domainOnly && (
+                    !isIpv4Literal(endpoint.ip) ||
+                        apiRouteRules.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true
+                    )
+                )
         ) {
             return false
         }
@@ -672,8 +676,12 @@ object PicacgRouteManager {
         val domainOnly = endpoint?.ip?.isBlank() == true && !NetworkModule.shouldUseDirectStrategy()
         if (endpoint != null && (
                 allowedHosts.none { it.equals(endpoint.domain, true) } ||
-                    (!domainOnly && (!isIpv4Literal(endpoint.ip) ||
-                        allowedIps.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true))
+                    (
+                        !domainOnly && (
+                            !isIpv4Literal(endpoint.ip) ||
+                                allowedIps.entries.firstOrNull { it.key.equals(endpoint.domain, true) }?.value?.contains(endpoint.ip) != true
+                            )
+                        )
                 )
         ) {
             return false

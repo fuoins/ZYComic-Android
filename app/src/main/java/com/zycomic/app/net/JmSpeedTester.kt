@@ -761,7 +761,8 @@ object JmSpeedTester {
         current: Set<DomainIp>,
     ): Map<DomainIp, Long> = prior.filterKeys { it in current && it.domain.isNotBlank() }
 
-    private fun lineIdentity(endpoint: DomainIp, request: String) = JmSpeedTestHistoryPolicy.Identity(        phase = JmSpeedTestHistoryPolicy.API_PHASE,
+    private fun lineIdentity(endpoint: DomainIp, request: String) = JmSpeedTestHistoryPolicy.Identity(
+        phase = JmSpeedTestHistoryPolicy.API_PHASE,
         request = request,
         domain = endpoint.domain.lowercase(Locale.ROOT),
         ip = endpoint.ip.trim().lowercase(Locale.ROOT),
