@@ -45,6 +45,9 @@ class ManwaConfigHistoryTest {
     fun resetState() {
         mockkObject(DevConfig)
         every { DevConfig.appContext } returns context
+        // The production singleton caches the scoped preferences object; each test uses a
+        // fresh in-memory context, so rebind the cache before clearing the unscoped store.
+        RouteManager::class.java.getDeclaredField("scopedPreferences").apply { isAccessible = true }.set(RouteManager, null)
         prefs.edit().clear().commit()
         RouteManager.clearConfiguration()
         RouteManager.setAutoSelectEnabled(true)
